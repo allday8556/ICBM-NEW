@@ -71,6 +71,14 @@ def _int(value: object, name: str) -> int | None:
     return value
 
 
+def _bool(value: object, name: str) -> bool | None:
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise _invalid(name)
+    return value
+
+
 def _object(value: object, name: str) -> Mapping[str, Any]:
     if value is None:
         return {}
@@ -194,6 +202,16 @@ class SmartStoreOrderSource:
             total_payment_amount=_int(product.get("totalPaymentAmount"), "totalPaymentAmount"),
             delivery_method=_text(delivery.get("deliveryMethod"), "deliveryMethod")
             or _text(product.get("expectedDeliveryMethod"), "expectedDeliveryMethod"),
+            # ADR-0025 §6: the delivery read-back.
+            delivery_company=_text(delivery.get("deliveryCompany"), "deliveryCompany"),
+            tracking_number=_text(delivery.get("trackingNumber"), "trackingNumber"),
+            delivery_status=_text(delivery.get("deliveryStatus"), "deliveryStatus"),
+            sent_at=_time(delivery.get("sendDate"), "sendDate"),
+            picked_up_at=_time(delivery.get("pickupDate"), "pickupDate"),
+            delivered_at=_time(delivery.get("deliveredDate"), "deliveredDate"),
+            wrong_tracking_number=_bool(
+                delivery.get("isWrongTrackingNumber"), "isWrongTrackingNumber"
+            ),
             shipping=ShippingRecord(
                 recipient_name=_text(address.get("name"), "name"),
                 phone1=_text(address.get("tel1"), "tel1"),

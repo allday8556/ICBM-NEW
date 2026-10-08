@@ -86,6 +86,9 @@ class Invalidation(StrEnum):
     APPLICATION_FINGERPRINT_MISMATCH = "APPLICATION_FINGERPRINT_MISMATCH"
     REQUIRED_GROUPS_CHANGED = "REQUIRED_GROUPS_CHANGED"
     MAPPING_REVISION_UNAVAILABLE = "MAPPING_REVISION_UNAVAILABLE"
+    # Retired (owner decision, Issue #219 6055670693): a mapping revision that moves without a
+    # change of the application or the required groups no longer invalidates. Kept so the name
+    # stays known.
     MAPPING_REVISION_CHANGED = "MAPPING_REVISION_CHANGED"
     EXPIRED = "EXPIRED"
     MALFORMED = "MALFORMED"
@@ -319,10 +322,12 @@ def evaluate(attestation: Attestation, context: AttestationContext) -> Attestati
         invalid.add(Invalidation.APPLICATION_FINGERPRINT_MISMATCH)
     if attestation.required_groups != context.required_groups:
         invalid.add(Invalidation.REQUIRED_GROUPS_CHANGED)
+    # The observed groups are a fact about the provider application, not about ICBM's mapping:
+    # a revision that widens a retention allow-list or adopts an endpoint of an already required
+    # group leaves them true (owner decision, Issue #219 6055670693). Each consumer still checks
+    # that the group its endpoint needs was observed, so a new group is never assumed.
     if context.endpoint_mapping_revision is None:
         invalid.add(Invalidation.MAPPING_REVISION_UNAVAILABLE)
-    elif attestation.endpoint_mapping_revision != context.endpoint_mapping_revision:
-        invalid.add(Invalidation.MAPPING_REVISION_CHANGED)
     if attestation.observed_at > context.now:
         invalid.add(Invalidation.MALFORMED)  # recorded "later" than now: validity unknowable
     bound = applicable_max_age_days(attestation, context)

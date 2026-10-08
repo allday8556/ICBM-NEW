@@ -250,6 +250,13 @@ class OrderView:
     adopted_item_id: str | None = None
     adopted_supplier_key: str | None = None
     adopted_source_product_id: str | None = None
+    # ADR-0025 §6: the latest delivery as the order read shows it.
+    delivery_company: str | None = None
+    tracking_number: str | None = None
+    delivery_status: str | None = None
+    sent_at: datetime | None = None
+    delivered_at: datetime | None = None
+    wrong_tracking_number: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -313,6 +320,12 @@ def _order_view(
         adopted_item_id=None if link is None else link.item_id,
         adopted_supplier_key=None if link is None else link.supplier_key,
         adopted_source_product_id=None if link is None else link.source_product_id,
+        delivery_company=row.delivery_company,
+        tracking_number=row.tracking_number,
+        delivery_status=row.delivery_status,
+        sent_at=row.sent_at,
+        delivered_at=row.delivered_at,
+        wrong_tracking_number=row.wrong_tracking_number,
     )
 
 
@@ -692,6 +705,14 @@ class OrderSyncService:
         row.unit_price = fact.unit_price
         row.total_payment_amount = fact.total_payment_amount
         row.delivery_method = fact.delivery_method
+        # ADR-0025 §6: the latest delivery, as this read shows it.
+        row.delivery_company = fact.delivery_company
+        row.tracking_number = fact.tracking_number
+        row.delivery_status = fact.delivery_status
+        row.sent_at = fact.sent_at
+        row.picked_up_at = fact.picked_up_at
+        row.delivered_at = fact.delivered_at
+        row.wrong_tracking_number = fact.wrong_tracking_number
         if latest is not None and (row.last_changed_at is None or latest > row.last_changed_at):
             row.last_changed_at = latest
         if fact.status in TERMINAL_STATUSES and row.terminal_at is None:
@@ -747,6 +768,10 @@ class OrderSyncService:
                         status=change.status,
                         claim_type=change.claim_type,
                         claim_status=change.claim_status,
+                        # The delivery the read showed with this change (ADR-0025 §6).
+                        delivery_company=fact.delivery_company,
+                        tracking_number=fact.tracking_number,
+                        delivery_status=fact.delivery_status,
                         changed_at=change.changed_at,
                         observed_at=now,
                     )

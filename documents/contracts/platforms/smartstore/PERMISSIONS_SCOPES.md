@@ -221,7 +221,7 @@ A bare `READY` label is forbidden in UI, audit evidence, or diagnostic output wh
 1. the complete required permission set for the target capability is known;
 2. positive evidence says the identified SmartStore application contains every required API group;
 3. the evidence is bound to the current provider application fingerprint;
-4. the endpoint/group mapping revision used by the evidence is current;
+4. the endpoint/group mapping revision used by the evidence is current *(amended, owner decision `6055670693`: the required groups and the application are current; a moved revision alone is provenance, not an invalidation — §14)*;
 5. the evidence has not crossed its configured freshness bound and no known invalidation event occurred;
 6. the evidence provenance is surfaced with the status.
 
@@ -386,7 +386,7 @@ Therefore `fresh` means only:
 
 - the observation is within the configured evidence-age policy;
 - it belongs to the current application fingerprint;
-- the endpoint/group mapping revision remains current;
+- the endpoint/group mapping revision remains current *(amended, §14: the required groups remain current)*;
 - no known invalidation event occurred.
 
 It MUST NOT be described as proof of continuous unchanged provider state.
@@ -653,6 +653,8 @@ Evidence MUST be invalidated or re-reviewed when at least one of the following o
 - runtime behavior materially contradicts the evidence.
 
 A normal bearer-token renewal does NOT by itself invalidate application-level permission evidence.
+
+*Amendment note (owner decision 2026-10-08, Issue #219 `6055670693`).* A new ICBM endpoint-mapping revision does not by itself invalidate the operator's attestation. A revision that widens a retention allow-list, or adopts an endpoint whose group is already required, leaves the observed groups true. The attestation is still invalidated immediately by the other events above: an application change, a changed required-group set, a known edit, malformed evidence, or the freshness bound. Every consumer still requires the group its own endpoint needs to be among the observed groups, so a newly needed group is never assumed. The mapping revision stays recorded with the evidence as provenance.
 
 A `client_secret` rotation for the same provider application also does not by itself prove API groups changed, but auth still must satisfy the new credential/session generation contract before operations resume.
 

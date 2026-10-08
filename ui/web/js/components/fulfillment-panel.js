@@ -20,6 +20,21 @@ export const FULFILLMENT_STATE = {
   AWAITING_SUPPLIER_ORDER: ['공급사 주문 전', 'warn'],
   SUPPLIER_ORDERED: ['공급사 주문됨', 'info'],
   TRACKING_CAPTURED: ['송장 입력됨', 'good'],
+  DISPATCHED: ['발송됨', 'info'],
+  DELIVERED: ['배송완료', 'good'],
+};
+// ADR-0025 §6: the documented deliveryStatus enumeration (packet D).
+const DELIVERY = {
+  COLLECT_REQUEST: '수거 요청',
+  COLLECT_WAIT: '수거 대기',
+  COLLECT_CARGO: '집화',
+  DELIVERING: '배송중',
+  DELIVERY_COMPLETION: '배송 완료',
+  DELIVERY_FAIL: '배송 실패',
+  WRONG_INVOICE: '오류 송장',
+  COLLECT_CARGO_FAIL: '집화 실패',
+  COLLECT_CARGO_CANCEL: '집화 취소',
+  NOT_TRACKING: '배송 추적 없음',
 };
 const REASON = {
   OPERATE_ORDER_NOT_FULFILLABLE: 'ICBM 상품에 연결되지 않은 주문입니다 (연결됨 또는 가져온 상품만 처리할 수 있습니다).',
@@ -125,6 +140,27 @@ function trackingForm(view, list, onSaved) {
   return h('div', { class: 'fulfillment-step', 'data-step': 'tracking' }, h('b', {}, '2. 송장'), field('택배사', carrier), field('송장번호', number), save);
 }
 
+// What the SmartStore order read shows of the shipment (ADR-0025 §6), and whether it is the
+// tracking captured here.
+function deliveryReadback(view) {
+  if (!view.delivery_tracking_number && !view.delivery_status) return null;
+  const parts = [
+    view.delivery_company_name ?? view.delivery_company ?? '택배사 —',
+    view.delivery_tracking_number ? `송장 ${view.delivery_tracking_number}` : null,
+    view.delivery_status ? DELIVERY[view.delivery_status] ?? view.delivery_status : null,
+    view.sent_at ? `발송 ${dotDateTime(view.sent_at)}` : null,
+    view.delivered_at ? `배송완료 ${dotDateTime(view.delivered_at)}` : null,
+  ].filter(Boolean);
+  return h(
+    'div',
+    { class: 'supplier-head-row', 'data-role': 'delivery-readback' },
+    h('b', {}, '네이버 배송 정보'),
+    h('span', { class: 'mini' }, parts.join(' · ')),
+    view.tracking_matches === false ? h('span', { class: 'chip bad', 'data-role': 'tracking-mismatch' }, '입력한 송장과 다름') : null,
+    view.wrong_tracking_number ? h('span', { class: 'chip warn', 'data-role': 'wrong-tracking' }, '오류 송장 — 확인 필요') : null,
+  );
+}
+
 function history(view) {
   if (!view.history.length) return null;
   return h(
@@ -155,7 +191,7 @@ export function fulfillmentPanel(order, onChanged) {
         current.supplier_key ? h('span', { class: 'mini' }, `공급사 ${current.supplier_key} · 상품 ${current.source_product_id}`) : null,
       );
       if (current.state === 'NOT_FULFILLABLE' || (current.state === 'NOT_PAYED' && !current.revision)) {
-        box.replaceChildren(head, h('div', { class: 'note' }, REASON[current.reason] ?? current.reason ?? ''));
+        box.replaceChildren(head, h('div', { class: 'note' }, REASON[current.reason] ?? current.reason ?? ''), deliveryReadback(current));
         return;
       }
       const copy = h('button', { type: 'button', class: 'btn', 'data-action': 'copy-shipping' }, '배송지 복사');
@@ -165,7 +201,7 @@ export function fulfillmentPanel(order, onChanged) {
         render(next ?? undefined);
         onChanged?.();
       };
-      const steps = [head, h('div', { class: 'supplier-head-row' }, copy, h('span', { class: 'mini' }, '공급사 주문서에 붙여넣을 배송지를 복사합니다 (열람 기록이 남습니다).')), supplierOrderForm(current, saved)];
+      const steps = [head, deliveryReadback(current), h('div', { class: 'supplier-head-row' }, copy, h('span', { class: 'mini' }, '공급사 주문서에 붙여넣을 배송지를 복사합니다 (열람 기록이 남습니다).')), supplierOrderForm(current, saved)];
       if (current.revision) steps.push(trackingForm(current, await carriers(), saved));
       steps.push(history(current));
       box.replaceChildren(...steps.filter(Boolean));

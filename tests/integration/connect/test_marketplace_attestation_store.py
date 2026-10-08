@@ -249,18 +249,19 @@ def test_s17_18_a0_05_a_different_application_demotes_the_evidence_to_unknown(
         assert fresh.promotion is Promotion.APPLIED
 
 
-def test_s17_18_a0_06_a_changed_mapping_revision_or_requirement_invalidates(
+def test_s17_18_a0_06_a_changed_requirement_invalidates_and_a_moved_revision_does_not(
     config: AppConfig, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     revision = FixtureRevision()
     with _process(config, clock, identity=FixtureIdentity(), revision=revision) as p:
         _current(p)
         p.permission_attestation.attest(KEY, [ApiGroup.PRODUCT], actor=ACTOR)
+        # Owner decision (Issue #219 6055670693): a moved mapping revision alone leaves the
+        # observed groups true, so the attestation stays current.
         revision.revision = "fixture-mapping-revision-2"
-        changed = p.permission_attestation.attestation(KEY)
-        assert changed.capability_write_scope.status is WriteScopeStatus.UNKNOWN
-        assert changed.evaluation is not None
-        assert changed.evaluation.invalidations == [Invalidation.MAPPING_REVISION_CHANGED]
+        moved = p.permission_attestation.attestation(KEY)
+        assert moved.evaluation is not None and moved.evaluation.invalidations == []
+        assert moved.promotion is Promotion.APPLIED
         revision.revision = REVISION
         assert p.permission_attestation.attestation(KEY).promotion is Promotion.APPLIED
         monkeypatch.setattr(

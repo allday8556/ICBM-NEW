@@ -2,7 +2,15 @@
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, LargeBinary, String
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+)
 from sqlalchemy import text as sql
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -121,6 +129,15 @@ class ProductOrder(Base):
     unit_price: Mapped[int | None] = mapped_column(Integer)
     total_payment_amount: Mapped[int | None] = mapped_column(Integer)
     delivery_method: Mapped[str | None] = mapped_column(String(40))
+    # The latest delivery as the order read shows it (ADR-0025 §6; migration 0053). Clear fields:
+    # a carrier code, a tracking number and a state are not personal data.
+    delivery_company: Mapped[str | None] = mapped_column(String(40))
+    tracking_number: Mapped[str | None] = mapped_column(String(100))
+    delivery_status: Mapped[str | None] = mapped_column(String(40))
+    sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    picked_up_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    delivered_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    wrong_tracking_number: Mapped[bool | None] = mapped_column(Boolean)
     # The resolution (ADR-0013 order-line resolution), recorded once and then immutable. It is
     # NULL — not recorded — only while the order's product is one ICBM created and has not yet
     # confirmed; it is recorded as soon as that settles (GPT audit, PR #250).
@@ -172,6 +189,10 @@ class OrderStatusChange(Base):
     status: Mapped[str | None] = mapped_column(String(40))
     claim_type: Mapped[str | None] = mapped_column(String(40))
     claim_status: Mapped[str | None] = mapped_column(String(40))
+    # The delivery the order read showed with this change (ADR-0025 §6; migration 0053).
+    delivery_company: Mapped[str | None] = mapped_column(String(40))
+    tracking_number: Mapped[str | None] = mapped_column(String(100))
+    delivery_status: Mapped[str | None] = mapped_column(String(40))
     changed_at: Mapped[datetime] = mapped_column(UTCDateTime)
     observed_at: Mapped[datetime] = mapped_column(UTCDateTime)
 

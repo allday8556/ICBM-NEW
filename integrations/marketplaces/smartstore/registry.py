@@ -483,8 +483,10 @@ _ORDER_CHANGE_FIELDS = frozenset(
 # the order and product-order ids, the status codes and their timestamps, the product and option
 # identities, quantity and amounts, the delivery method, and the shipping record (recipient
 # name, phones, address, memo) that OPERATE keeps encrypted. Never the orderer's id, name or
-# phone, a payment means, a coupon, a commission, a product name or option text, or a carrier,
-# tracking number or delivery state (fulfillment is M6.5; GPT audit, PR #250).
+# phone, a payment means, a coupon, a commission, a product name or option text. ADR-0025 §6
+# (M6.5-B) adds exactly the delivery members the read-back needs — the carrier code, tracking
+# number, delivery state, its three timestamps and the wrong-tracking flag — never the free-text
+# reason.
 _ORDER_DETAIL_FIELDS = frozenset(
     {
         # order
@@ -516,6 +518,14 @@ _ORDER_DETAIL_FIELDS = frozenset(
         "zipCode",
         # delivery
         "deliveryMethod",
+        # delivery, ADR-0025 §6 (packet Issue #219 6053086881 D)
+        "deliveryCompany",
+        "trackingNumber",
+        "deliveryStatus",
+        "sendDate",
+        "pickupDate",
+        "deliveredDate",
+        "isWrongTrackingNumber",
     }
 )
 
@@ -830,7 +840,7 @@ def wire_identity(endpoint_id: EndpointId) -> tuple[str, str, str]:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m6-orders-r1"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m65-delivery-r1"
 
 # ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
 # the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
@@ -869,6 +879,8 @@ MAPPING_FINGERPRINTS: Mapping[str, str] = {
     "settings-addressbook-r1": "e3fc720afa9b1693defd29ba16574a96d6c0671b3962c75f2df6c66c36e6a8d4",
     # M6-C adopts the two read-only order reads and the ADR-0023 §7 order allow-list.
     "m6-orders-r1": "9663d82d248cd480bb8113f7cd935d8cf91edeb9e44df0392a470fc2d383d058",
+    # M6.5-B widens the order allow-list by the delivery members of ADR-0025 §6.
+    "m65-delivery-r1": "31e823b13906eadd24c0ec018b64311954d6961d97ddd79566c1d13bafc1db05",
 }
 
 
