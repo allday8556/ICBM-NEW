@@ -1,5 +1,6 @@
 """Aggregates every ORM model so Alembic sees the complete canonical schema."""
 
+from app.capabilities.ai import profile_models as _ai_profile_models  # noqa: F401
 from app.capabilities.ai import prompt_models as _ai_prompt_models  # noqa: F401
 from app.capabilities.audit import models as _audit_models  # noqa: F401
 from app.capabilities.jobs import models as _job_models  # noqa: F401

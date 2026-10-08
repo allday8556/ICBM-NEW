@@ -7,6 +7,12 @@ previews a composed request. Nothing here calls an AI provider: no provider exis
 
 from fastapi import APIRouter, Query
 
+from app.capabilities.ai.profiles import (
+    ApproveRequest,
+    ConfigureRequest,
+    DataTransferRequest,
+    ProviderView,
+)
 from app.capabilities.ai.prompts import (
     EntryView,
     PreviewView,
@@ -60,3 +66,35 @@ def preview(
 ) -> PreviewView:
     """The request a task would compose from the current revisions, with no runtime data."""
     return container.prompt_registry.preview(role, policy, task)
+
+
+# ------------------------------------------------------------------ the provider profile (ADR-0027)
+
+
+@router.get("/provider")
+def provider(container: ContainerDep) -> ProviderView:
+    """The profile, what is actually serving its endpoint, and the ai capability."""
+    return container.ai_provider.view()
+
+
+@router.post("/provider/profile")
+def configure_provider(container: ContainerDep, request: ConfigureRequest) -> ProviderView:
+    return container.ai_provider.configure(request, cid=_cid())
+
+
+@router.post("/provider/approve-executable")
+def approve_executable(container: ContainerDep, request: ApproveRequest) -> ProviderView:
+    """A protected, audited approval of the executable actually serving now (ADR-0012 §3)."""
+    return container.ai_provider.approve_executable(request, cid=_cid())
+
+
+@router.post("/provider/approve-routing")
+def approve_routing(container: ContainerDep, request: ApproveRequest) -> ProviderView:
+    """A protected, audited approval of the routing identity actually served now (ADR-0012 §5)."""
+    return container.ai_provider.approve_routing(request, cid=_cid())
+
+
+@router.post("/provider/data-transfer")
+def data_transfer(container: ContainerDep, request: DataTransferRequest) -> ProviderView:
+    """The owner's approval that product facts may be sent through this profile (rule 07)."""
+    return container.ai_provider.set_data_transfer(request, cid=_cid())

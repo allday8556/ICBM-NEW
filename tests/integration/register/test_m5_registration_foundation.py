@@ -543,6 +543,10 @@ ADAPTIVE_TABLES = (
     "ai_platform_policy_revisions",
     "ai_platform_policy_current",
     "product_enrichment_results",
+    "ai_provider_profiles",
+    "ai_provider_profile_revisions",
+    "ai_provider_profile_current",
+    "ai_provider_calls",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

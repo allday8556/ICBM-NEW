@@ -85,6 +85,17 @@ One profile store, `ai_provider_profiles`, with append-only revisions and a curr
 - `routing_config_version` = the approved routing identity;
 - `proxy_version` = the approved binary version and SHA-256.
 
+**Amendment (2026-10-09, AIS-1): the credential source.** ICBM never stores the sidecar's
+client key: not in the database, not in the OS secret store, not in a log, audit record or
+fingerprint.
+- The profile's `credential_source` is `SIDECAR_CONFIG`. At call time, and only for the call, the key
+  is read from the `api-keys` list of the approved sidecar's own configuration file. That file is
+  found from the serving process's `-config` argument, or next to the approved executable.
+- So the key exists in exactly one place, the operator's sidecar configuration.
+- No one types it into ICBM, Track A included.
+- `credential_ref` is replaced by this source, and AIS-01 reads: the only AI endpoint is loopback, and
+  ICBM never persists the sidecar client key.
+
 ## 3. Identity is verified on every call, fail-closed
 
 Before each call the adapter reads the process that is **actually serving** the endpoint's port, and compares that process's executable path, version and SHA-256 with the approved identity (ADR-0012 §2).
@@ -194,7 +205,7 @@ Each slice is its own PR under the Track A loop.
 ## Invariants
 
 ```text
-AIS-01  the only AI endpoint is loopback; the sidecar client key lives only in the OS secret store
+AIS-01  the only AI endpoint is loopback; ICBM never persists the sidecar client key (read from the sidecar's config per call)
 AIS-02  every call verifies the serving process against the approved executable identity, fail-closed
 AIS-03  approving an executable, a routing identity or data transfer is a protected, audited action
 AIS-04  no call is made without the owner's data-transfer approval on the profile, or past the daily cap

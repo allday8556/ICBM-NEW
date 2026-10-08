@@ -258,6 +258,14 @@ export const SUBTABS = {
         },
         {
           card: {
+            title: 'AI 공급자',
+            full: true,
+            help: '내 PC에서 실행하는 CLIProxyAPI를 통해 AI를 호출합니다. 실행 파일·라우팅·상품 정보 전송을 승인해야 연결됩니다 (ADR-0027).',
+            items: [{ aiProvider: true }],
+          },
+        },
+        {
+          card: {
             title: 'AI Prompt Registry',
             full: true,
             help:

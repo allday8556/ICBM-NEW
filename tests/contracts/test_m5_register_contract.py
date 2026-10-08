@@ -252,7 +252,9 @@ M65_DELIVERY_READBACK = "0053_m65_delivery_readback"
 AI_PROMPT_REGISTRY = "0054_ai_prompt_registry"
 # ADR-0026 AIF-3: PRODUCT DB's structured enrichment results.
 AI_ENRICHMENT_RESULTS = "0055_ai_enrichment_results"
-SCHEMA_HEAD = AI_ENRICHMENT_RESULTS
+# ADR-0027 AIS-1: the AI provider profile and its call ledger.
+AI_PROVIDER_PROFILE = "0056_ai_provider_profile"
+SCHEMA_HEAD = AI_PROVIDER_PROFILE
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -289,6 +291,7 @@ AFTER_M5 = (
     M65_DELIVERY_READBACK,
     AI_PROMPT_REGISTRY,
     AI_ENRICHMENT_RESULTS,
+    AI_PROVIDER_PROFILE,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
