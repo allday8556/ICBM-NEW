@@ -174,7 +174,7 @@ Everything else stays out, including `wrongTrackingNumberType`, which is free te
 
 - **Storage:** the members are stored in clear on the order as its latest delivery state. A change is appended to the order's status history.
 - **Not personal data.** These members are not part of the shipping record, and ADR-0023 §7's retention and masking are unchanged.
-- **Mapping revision.** The allow-list change is a new mapping revision of the order reads, so the operator's permission attestation is re-recorded (ADR-0023 §5).
+- **Mapping revision.** The allow-list change is a new mapping revision of the order reads. *(Amendment note, owner decision Issue #219 `6055670693`: a moved revision alone no longer invalidates the operator's permission attestation — PERMISSIONS_SCOPES §14 — so the attestation is not re-recorded for it; the 주문 판매자 group must still be observed.)*
 - **Delivery states.** The dispatch confirmation of §5 and the screen read these members. `DELIVERY_COMPLETION` (or the order status `DELIVERED`) is the delivered state, and `isWrongTrackingNumber` true is shown as a review item for the operator.
 
 ## 7. Order data lifecycle
@@ -212,6 +212,12 @@ Each step is its own PR (batched where small), audited, with CI.
        - each order in `GET /api/v1/operate/orders` carries its `fulfillment_state`.
      - **Screen:** the 주문관리 "처리" column opens the panel.
 2. **M65-B:** the delivery read-back of §6: the widened allow-list, the order's delivery columns and the new mapping revision. The read endpoint is unchanged.
+   - **Implementation note (M65-B):**
+     - **Allow-list:** the seven §6 members join `_ORDER_DETAIL_FIELDS`, under mapping revision `m65-delivery-r1` with its own fingerprint. Every other endpoint is unchanged.
+     - **Adapter:** `SmartStoreOrderSource` reads them typed as documented (strings, aware date-times, a boolean). A member of another type refuses the answer.
+     - **Storage:** migration `0053` adds the latest delivery to `operate_orders` and the delivery each recorded change was observed with (carrier, tracking number, state) to `operate_order_status_history`. Both are clear columns.
+     - **Fulfillment:** a fulfillable order whose read shows a tracking number is `DISPATCHED`. It is `DELIVERED` once the delivery state is `DELIVERY_COMPLETION` or the order status is `DELIVERED` or `PURCHASE_DECIDED`. The view says whether the read tracking is the one captured (`tracking_matches`) and shows the wrong-tracking flag.
+     - **Screen:** 주문관리 shows the read tracking in the status column and a "네이버 배송 정보" line in the panel.
 3. **M65-C:** the dispatch adoption (§5.1) and the DISPATCH stage (§5): the grant command, the attempt owner, the send-time admission, the verification and the "발송처리" action.
 4. **M6.5 acceptance:** on the exact merged main, recorded in `documents/acceptance/milestones/M6.5.md`.
 

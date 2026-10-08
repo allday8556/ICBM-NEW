@@ -440,6 +440,13 @@ is unchanged. Evidence: `SOURCES.md` §5.6 (`NAVER-P0-ORDER-READ-2901`, Commerce
 | Retained fields | `count`, `productOrderId`, `orderId`, `lastChangedType`, `lastChangedDate`, `productOrderStatus`, `claimType`, `claimStatus`, `moreFrom`, `moreSequence` | the ADR-0023 §7 allow-list, applied after the caller narrows each entry to the scalar members of `order`, `productOrder` (and its `shippingAddress`) and `delivery` — every claim, its addresses, the seller's `takingAddress`, coupons and promotions are dropped first, and never the orderer's id, name or phone, a payment means or a commission |
 | Errors | `ERRORS.md` §8 unchanged: a `429`/`GW.RATE_LIMIT`/`GW.QUOTA_LIMIT` is `RATE_LIMITED`; every other failure is classified and proves nothing | same |
 
+**Amendment note (M6.5-B; ADR-0025 §6).** The `SMARTSTORE_ORDER_DETAILS` retained fields widen
+by exactly seven `delivery` members: `deliveryCompany`, `trackingNumber`, `deliveryStatus`,
+`sendDate`, `pickupDate`, `deliveredDate` and `isWrongTrackingNumber`. The free-text
+`wrongTrackingNumberType` stays out. The mapping revision moves to `m65-delivery-r1` with its own
+fingerprint. Method, path, request, predicates and every other row are unchanged. Evidence:
+`SOURCES.md` §5.8 (`NAVER-P0-DISPATCH-DELIVERY-2901`).
+
 **Adoption is not ingest authority.** The reads are wired only to the OPERATE order owner
 (`app/stages/operate/orders.py`) through `SmartStoreOrderSource`, with the CONNECT owner's committed
 bearer; without a proven current committed session nothing is read. Neither read writes the

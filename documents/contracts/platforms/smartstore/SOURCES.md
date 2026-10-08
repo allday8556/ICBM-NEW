@@ -412,6 +412,12 @@ such a member and never sends the string.
 | --- | --- | --- | --- | --- |
 | `SMARTSTORE-R0-ORDER-EMPTY-WINDOW` | Issue #219 comment 6048219909 (30 change windows read through ICBM's own caller on the operating data, structure only, no value recorded) | a window with no change answers HTTP 200 with exactly `timestamp` and `traceId`; unpaced consecutive calls meet `429` with `code`/`message`; the 주문 판매자 group is granted to the application | `integrations/marketplaces/smartstore/registry.py` (`empty_window_answer`, `m6-order-changes-r2`); `app/stages/operate/orders.py` (`PROVIDER_PAUSE_S`); `ENDPOINT_MATRIX.md` §4.1.4 | a change of the empty answer, or a documented rate limit |
 
+### 5.8 M6.5 dispatch and delivery evidence (`2.90.1`)
+
+| Source ID | Locator | Claims supported | Used by | Re-review trigger |
+| --- | --- | --- | --- | --- |
+| `NAVER-P0-DISPATCH-DELIVERY-2901` | Issue #219 comment 6053086881 (research packet of the 2.90.1 `발송 처리` — https://apicenter.commerce.naver.com/docs/commerce-api/current/seller-dispatch-product-orders-pay-order-seller — the `상품 주문 상세 내역 조회` `delivery` object and the `상품 주문 정보 구조체` schema, with the 제약 사항 page, read 2026-10-08) | the dispatch method and path, its body, the 30-order limit, the per-order success and fail lists and the documented error codes; the `deliveryMethod`, `deliveryCompanyCode` and `deliveryStatus` enumerations; the members of the detail read's `delivery` object and their types. NOT STATED: the API group, the dispatchable statuses, the `dispatchDate` range, re-dispatch behaviour, idempotency, a tracking-change endpoint | ADR-0025 §4–§6; `ENDPOINT_MATRIX.md` §4.1.4 (the delivery read-back, `m65-delivery-r1`); `integrations/marketplaces/smartstore/{registry,orders,delivery_companies}.py` | Commerce API version or any dispatch, delivery-object or carrier-code change |
+
 ## 6. NAVER official technical-support sources (`P1` / `SUPPORT_DISCUSSION`)
 
 These sources are point-in-time official support evidence. They may later be edited, hidden, deleted, or superseded.

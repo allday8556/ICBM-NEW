@@ -102,6 +102,8 @@ DETAIL = {
         "deliveryCompany": "CJGLS",
         "trackingNumber": "123",
         "sendDate": "2026-10-07T12:00:00.000+09:00",
+        "isWrongTrackingNumber": False,
+        "wrongTrackingNumberType": "오류사유텍스트",
     },
 }
 
@@ -212,13 +214,11 @@ def test_the_detail_read_keeps_only_the_order_allow_list() -> None:
         "37.0",
         "saleCommission",
         "generalPaymentAmount",
-        # Not in ADR-0023 §7: names, carrier, tracking and delivery state (GPT audit, PR #250).
+        # Not in ADR-0023 §7: the product name and option text (GPT audit, PR #250), nor the
+        # free-text wrong-tracking reason ADR-0025 §6 leaves out.
         "테스트 상품",
         "색상: 빨강",
-        "CJGLS",
-        "trackingNumber",
-        "DELIVERING",
-        "sendDate",
+        "오류사유텍스트",
     ):
         assert never not in kept, never
     (entry,) = response.retained["data"]
@@ -230,6 +230,15 @@ def test_the_detail_read_keeps_only_the_order_allow_list() -> None:
         "zipCode": "00000",
     }
     assert "가나다" not in repr(response)
+    # ADR-0025 §6 (M6.5-B): exactly the delivery members the read-back needs survive.
+    assert entry["delivery"] == {
+        "deliveryMethod": "DELIVERY",
+        "deliveryStatus": "DELIVERING",
+        "deliveryCompany": "CJGLS",
+        "trackingNumber": "123",
+        "sendDate": "2026-10-07T12:00:00.000+09:00",
+        "isWrongTrackingNumber": False,
+    }
 
 
 def test_the_adapter_reads_what_survived_into_typed_values() -> None:
@@ -244,6 +253,13 @@ def test_the_adapter_reads_what_survived_into_typed_values() -> None:
     assert (facts.quantity, facts.unit_price, facts.total_payment_amount) == (2, 12500, 25000)
     assert facts.delivery_method == "DELIVERY"
     assert facts.paid_at == datetime(2026, 10, 7, 0, 30, tzinfo=UTC)
+    assert (facts.delivery_company, facts.tracking_number, facts.delivery_status) == (
+        "CJGLS",
+        "123",
+        "DELIVERING",
+    )
+    assert facts.sent_at == datetime(2026, 10, 7, 3, 0, tzinfo=UTC)
+    assert (facts.delivered_at, facts.wrong_tracking_number) == (None, False)
     assert (facts.shipping.recipient_name, facts.shipping.memo) == ("가나다", "문 앞")
     assert "가나다" not in repr(facts)
     page = SmartStoreOrderSource(_caller(CHANGES), _bearer).changes(  # type: ignore[arg-type]
@@ -359,3 +375,23 @@ def test_the_proven_empty_window_answer_is_an_empty_page() -> None:
         {"timestamp": "t"},
     ):
         assert order_changes_succeeded(200, answer) is False, answer
+
+
+@pytest.mark.parametrize(
+    "delivery",
+    (
+        {"isWrongTrackingNumber": "false"},
+        {"trackingNumber": 123},
+        {"sendDate": "2026-10-07 12:00"},
+    ),
+)
+def test_a_delivery_member_of_another_type_is_refused(delivery: dict[str, object]) -> None:
+    """ADR-0025 §6: the delivery read-back is typed as documented, never coerced."""
+    entry = {**DETAIL, "delivery": {**DETAIL["delivery"], **delivery}}  # type: ignore[dict-item]
+    source = SmartStoreOrderSource(
+        _caller({"traceId": "x", "data": [entry]}),
+        _bearer,  # type: ignore[arg-type]
+    )
+    with pytest.raises(PolicyBlockedError) as refused:
+        source.details(["po-1"])
+    assert refused.value.code == "SMARTSTORE_ORDER_RESPONSE_INVALID"

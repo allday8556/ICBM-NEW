@@ -182,7 +182,7 @@ CANONICAL_TABLES = (
     "operate_supplier_orders",
     "operate_supplier_order_history",
 )
-HEAD = "0052_m65_supplier_orders"
+HEAD = "0053_m65_delivery_readback"
 
 
 def _url(path: Path) -> str:

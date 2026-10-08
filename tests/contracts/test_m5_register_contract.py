@@ -106,7 +106,7 @@ M5_UNPROVEN = frozenset(
         "SMARTSTORE_STANDARD_OPTIONS",
     }
 )
-M5_MAPPING_REVISION = "m6-orders-r1"
+M5_MAPPING_REVISION = "m65-delivery-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:
@@ -246,7 +246,9 @@ M6_ORDERS = "0050_m6_orders"
 M6_ADOPTED_LISTINGS = "0051_m6_adopted_listings"
 # M6.5-A (ADR-0025 §3, §4): supplier orders placed by hand, their tracking and history.
 M65_SUPPLIER_ORDERS = "0052_m65_supplier_orders"
-SCHEMA_HEAD = M65_SUPPLIER_ORDERS
+# M6.5-B (ADR-0025 §6): the order's delivery read-back columns.
+M65_DELIVERY_READBACK = "0053_m65_delivery_readback"
+SCHEMA_HEAD = M65_DELIVERY_READBACK
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -280,6 +282,7 @@ AFTER_M5 = (
     M6_ORDERS,
     M6_ADOPTED_LISTINGS,
     M65_SUPPLIER_ORDERS,
+    M65_DELIVERY_READBACK,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

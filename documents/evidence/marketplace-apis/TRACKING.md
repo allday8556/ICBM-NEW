@@ -19,6 +19,7 @@
 - **Captured (2026-09-28):** tracking/dispatch information belongs to the order-shipment family ([SHIPMENT](SHIPMENT.md#smartstore)); no tracking read contract captured.
 - **Missing:** every endpoint-level fact.
 - **ICBM:** `NOT_ADOPTED` (not in `ENDPOINT_MATRIX.md` §4); runtime `UNVERIFIED`.
+- **Amendment (M6.5, 2026-10-08):** the dispatch `POST /v1/pay-order/seller/product-orders/dispatch` and the detail read's `delivery` object are captured at `2.90.1` (`SOURCES.md` §5.8, `NAVER-P0-DISPATCH-DELIVERY-2901`). The delivery members (carrier, tracking number, state, timestamps, wrong-tracking flag) are read back through the adopted detail read (`ENDPOINT_MATRIX.md` §4.1.4, ADR-0025 §6). The dispatch itself stays `NOT_ADOPTED` until its own slice (ADR-0025 §5.1). No tracking-change endpoint is stated.
 
 ## Coupang
 

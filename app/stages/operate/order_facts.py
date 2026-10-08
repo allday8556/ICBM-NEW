@@ -82,6 +82,14 @@ class ProductOrderFacts:
     unit_price: int | None = None
     total_payment_amount: int | None = None
     delivery_method: str | None = None
+    # ADR-0025 §6: the delivery as the order read shows it. Not personal data.
+    delivery_company: str | None = None
+    tracking_number: str | None = None
+    delivery_status: str | None = None
+    sent_at: datetime | None = None
+    picked_up_at: datetime | None = None
+    delivered_at: datetime | None = None
+    wrong_tracking_number: bool | None = None
     shipping: ShippingRecord = field(default_factory=ShippingRecord, repr=False)
 
 
