@@ -1,7 +1,9 @@
-"""OPERATE routes (M6, ADR-0023). Read-only towards the marketplace: nothing here writes it."""
+"""OPERATE routes (M6, ADR-0023; M6.5, ADR-0025). Nothing here writes to the marketplace or a
+supplier: the supplier order is placed by hand and only recorded."""
 
 import asyncio
 from dataclasses import asdict
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter
@@ -61,6 +63,7 @@ async def recheck_stock(container: ContainerDep) -> dict[str, Any]:
 def orders(container: ContainerDep) -> dict[str, Any]:
     """The ingested product orders with their resolution and masked recipient (ADR-0023 §8)."""
     overview = container.order_sync.overview()
+    states = container.fulfillment.states(order.product_order_id for order in overview.orders)
     return {
         "capability": overview.capability,
         "attested": overview.attested,
@@ -68,7 +71,10 @@ def orders(container: ContainerDep) -> dict[str, Any]:
         "synced_until": overview.synced_until,
         "total": overview.total,
         "last_run": None if overview.last_run is None else asdict(overview.last_run),
-        "orders": [asdict(order) for order in overview.orders],
+        "orders": [
+            asdict(order) | {"fulfillment_state": states.get(order.product_order_id)}
+            for order in overview.orders
+        ],
     }
 
 
@@ -101,6 +107,69 @@ def order_shipping(product_order_id: str, container: ContainerDep) -> JSONRespon
         },
         headers={"Cache-Control": "no-store"},
     )
+
+
+class SupplierOrderRequest(BaseModel):
+    supplier_order_ref: str = Field(min_length=1, max_length=100)
+    purchase_amount: int = Field(ge=0)
+    ordered_at: datetime | None = None
+    # The revision the operator read; None only for the first record.
+    expected_revision: int | None = None
+
+
+class TrackingRequest(BaseModel):
+    carrier_code: str = Field(min_length=1, max_length=40)
+    tracking_number: str = Field(min_length=1, max_length=50)
+    expected_revision: int
+
+
+@router.get("/carriers")
+def carriers(container: ContainerDep) -> dict[str, Any]:
+    """The documented delivery-company codes a tracking number may name (ADR-0025 §4)."""
+    return {
+        "carriers": [
+            {"code": code, "name": name} for code, name in container.fulfillment.carriers().items()
+        ]
+    }
+
+
+@router.get("/orders/{product_order_id}/fulfillment")
+def order_fulfillment(product_order_id: str, container: ContainerDep) -> dict[str, Any]:
+    """One order's fulfillment: its canonical identity, supplier order, tracking and history."""
+    return asdict(container.fulfillment.view(product_order_id))
+
+
+@router.put("/orders/{product_order_id}/supplier-order")
+def record_supplier_order(
+    product_order_id: str, request: SupplierOrderRequest, container: ContainerDep
+) -> dict[str, Any]:
+    """Record, or amend, the supplier order the operator placed by hand (ADR-0025 §3)."""
+    view = container.fulfillment.record_supplier_order(
+        product_order_id,
+        supplier_order_ref=request.supplier_order_ref,
+        purchase_amount=request.purchase_amount,
+        ordered_at=request.ordered_at,
+        expected_revision=request.expected_revision,
+        actor="operator",
+        correlation_id=new_correlation_id(),
+    )
+    return asdict(view)
+
+
+@router.put("/orders/{product_order_id}/tracking")
+def capture_tracking(
+    product_order_id: str, request: TrackingRequest, container: ContainerDep
+) -> dict[str, Any]:
+    """Capture, or amend, the carrier and tracking number the operator typed in (ADR-0025 §4)."""
+    view = container.fulfillment.capture_tracking(
+        product_order_id,
+        carrier_code=request.carrier_code,
+        tracking_number=request.tracking_number,
+        expected_revision=request.expected_revision,
+        actor="operator",
+        correlation_id=new_correlation_id(),
+    )
+    return asdict(view)
 
 
 class AdoptionRunRequest(BaseModel):

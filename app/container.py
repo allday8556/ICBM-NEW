@@ -109,6 +109,7 @@ from app.stages.connect.sessions import (
 from app.stages.connect.smartstore.keeper import SmartStoreSessionKeeper
 from app.stages.connect.smartstore.service import SmartStoreConnectService
 from app.stages.operate.adoption import AdoptionService
+from app.stages.operate.fulfillment import FulfillmentService
 from app.stages.operate.listing import ListingSyncScheduler, ListingSyncService
 from app.stages.operate.orders import OrderSyncScheduler, OrderSyncService, ShippingCipher
 from app.stages.operate.service import OperateService
@@ -170,6 +171,7 @@ from integrations.marketplaces.smartstore.assets import SmartStoreAssetSender
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
 from integrations.marketplaces.smartstore.category import SmartStoreCategoryCatalogSource
 from integrations.marketplaces.smartstore.deletion import SmartStoreDeleteSender
+from integrations.marketplaces.smartstore.delivery_companies import DELIVERY_COMPANIES
 from integrations.marketplaces.smartstore.execution import MARKETPLACE_KEY as SMARTSTORE_KEY
 from integrations.marketplaces.smartstore.execution import (
     SmartStoreCreateSender,
@@ -278,6 +280,8 @@ class Container:
     # M6-C/D (ADR-0023 §5-§7): the read-only order ingest and its periodic pass.
     order_sync: OrderSyncService
     order_sync_scheduler: OrderSyncScheduler
+    # M6.5 (ADR-0025 §3, §4): the supplier order placed by hand and its tracking.
+    fulfillment: FulfillmentService
     notice_catalog: SmartStoreNoticeCatalog
     restore_drills: RestoreDrillService
     retention: RetentionProofService
@@ -1001,6 +1005,13 @@ def build_container(
             ApiGroup.ORDER_SELLER in permission_attestation.attested_groups("smartstore")
         ),
     )
+    fulfillment = FulfillmentService(
+        db=db,
+        clock=clock,
+        audit=audit,
+        # ADR-0025 §4: the documented SmartStore delivery-company codes.
+        carriers=DELIVERY_COMPANIES,
+    )
     screens = ScreenService(
         clock=clock,
         operator_name=config.operator_name,
@@ -1024,6 +1035,7 @@ def build_container(
         order_sync=order_sync,
         adoptions=adoptions,
         order_sync_scheduler=OrderSyncScheduler(order_sync),
+        fulfillment=fulfillment,
         listing_sync_scheduler=ListingSyncScheduler(listing_sync),
         auto_images=auto_images,
         common_images=common_images,
