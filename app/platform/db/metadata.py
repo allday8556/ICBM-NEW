@@ -30,6 +30,7 @@ from app.stages.products import (
     common_option_mapping_models as _common_option_mapping_models,  # noqa: F401
 )
 from app.stages.products import common_option_models as _common_option_models  # noqa: F401
+from app.stages.products import enrichment_models as _enrichment_models  # noqa: F401
 from app.stages.products import image_models as _image_models  # noqa: F401
 from app.stages.products import models as _product_models  # noqa: F401
 from app.stages.register import authoring_revisions as _authoring_revisions  # noqa: F401

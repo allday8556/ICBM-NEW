@@ -250,7 +250,9 @@ M65_SUPPLIER_ORDERS = "0052_m65_supplier_orders"
 M65_DELIVERY_READBACK = "0053_m65_delivery_readback"
 # ADR-0026 AIF-1: the PromptTemplate and PlatformPolicy stores (seeded by the application).
 AI_PROMPT_REGISTRY = "0054_ai_prompt_registry"
-SCHEMA_HEAD = AI_PROMPT_REGISTRY
+# ADR-0026 AIF-3: PRODUCT DB's structured enrichment results.
+AI_ENRICHMENT_RESULTS = "0055_ai_enrichment_results"
+SCHEMA_HEAD = AI_ENRICHMENT_RESULTS
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -286,6 +288,7 @@ AFTER_M5 = (
     M65_SUPPLIER_ORDERS,
     M65_DELIVERY_READBACK,
     AI_PROMPT_REGISTRY,
+    AI_ENRICHMENT_RESULTS,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

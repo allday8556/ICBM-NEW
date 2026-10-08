@@ -2851,6 +2851,8 @@ SOURCE_TRUTH_FORBIDDEN = (
     "app.ai",
     # ADR-0026 (AIF-02): the AI capability, its prompt registry and later its provider port.
     "app.capabilities.ai",
+    # ADR-0026 (AIF-02): PRODUCT DB's enrichment owner and its job.
+    "app.stages.products.enrichment",
     "integrations.ai",
     "integrations.marketplaces",
     "app.stages.connect.marketplace",
@@ -3771,6 +3773,8 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "ai_platform_policies",
         "ai_platform_policy_revisions",
         "ai_platform_policy_current",
+        # ADR-0026 AIF-3: PRODUCT DB's structured enrichment results.
+        "product_enrichment_results",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

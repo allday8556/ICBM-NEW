@@ -35,6 +35,12 @@ class CatalogEntry:
 GLOBAL_KEY: Final = "ICBM_GLOBAL_RULES_V2"
 # The policy of a task whose marketplace is not decided yet (the prototype's default).
 COMMON_POLICY_KEY: Final = "POLICY_COMMON_MARKET_V1"
+# The platform policy of each marketplace the registry has one for (the prototype's three).
+POLICY_BY_MARKETPLACE: Final = {
+    "smartstore": "POLICY_NAVER_V1",
+    "coupang": "POLICY_COUPANG_V1",
+    "st11": "POLICY_11ST_V1",
+}
 
 CATALOG: Final[tuple[CatalogEntry, ...]] = (
     CatalogEntry(

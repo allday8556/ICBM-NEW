@@ -252,7 +252,7 @@ Results are append-only. The current result of a key is its newest revision. A v
   ```
 
 - This is ADR-0012 §6. That later contract replaces the `model_id` of Canonical §7.2 and excludes `actual_model`.
-- `relevant_facts` is the digest of exactly the fact fields the task declares it depends on, with their ProductFacts revision identities (dependency-scoped staleness, Issue #30 refinement).
+- `relevant_facts` is the digest of exactly the fact fields the task declares it depends on, by value (dependency-scoped staleness, Issue #30 refinement). AIF-3 amendment: the ProductFacts revisions those values were read from are recorded with the result for tracing, but are not fingerprinted. A new revision whose relevant fields are unchanged leaves the result fresh.
 - No secret is ever part of a fingerprint or provenance.
 
 **Reuse and staleness.**
