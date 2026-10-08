@@ -320,6 +320,15 @@ def test_an_order_of_an_adopted_listing_stays_unmatched_and_is_linked(
         SUPPLIER,
         "287",
     )
+    # GPT audit (PR #257): an order naming only the channel product is linked by it, exactly as
+    # the order resolution falls back to the channel product id.
+    source.pages = [ChangePage((_change(container, "po-2", minutes=1),))]
+    source.facts["po-2"] = _facts(
+        "po-2", original_product_id=None, channel_product_id="c-1", seller_product_code="km287"
+    )
+    orders.sync(trigger=OPERATOR, correlation_id=CID)
+    by_id = {o.product_order_id: o for o in orders.overview().orders}
+    assert (by_id["po-2"].resolution, by_id["po-2"].adopted_item_id) == (UNMATCHED, item_id)
     with sqlite3.connect(container.config.database_path) as raw:
         with pytest.raises(sqlite3.IntegrityError):
             raw.execute("UPDATE operate_order_adoption_links SET item_id = 'other'")

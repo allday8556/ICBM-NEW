@@ -814,9 +814,10 @@ class OrderSyncService:
         return settled
 
     def link_adopted(self) -> int:
-        """Link every UNMATCHED order of an ``ACTIVE`` adopted listing to that adoption, by its
-        origin product id only (ADR-0024 §4). The order's resolution is never rewritten, and a
-        link, once recorded, never changes. Returns how many were linked."""
+        """Link every UNMATCHED order of an ``ACTIVE`` adopted listing to that adoption by the
+        same provider identities the order resolution uses — the origin product id, else the
+        channel product id (ADR-0024 §4; GPT audit, PR #257). The order's resolution is never
+        rewritten, and a link, once recorded, never changes. Returns how many were linked."""
         if self._adoptions is None:
             return 0
         now = self._clock.now()
@@ -830,13 +831,17 @@ class OrderSyncService:
                 )
                 .where(
                     ProductOrder.resolution == UNMATCHED,
-                    ProductOrder.original_product_id.is_not(None),
                     OrderAdoptionLink.product_order_id.is_(None),
                 )
             ).all()
             for row in rows:
-                assert row.original_product_id is not None
-                adoption = self._adoptions.active_by_product(row.original_product_id)
+                adoption = (
+                    self._adoptions.active_by_product(row.original_product_id)
+                    if row.original_product_id
+                    else None
+                )
+                if adoption is None and not row.original_product_id and row.channel_product_id:
+                    adoption = self._adoptions.active_by_channel(row.channel_product_id)
                 if adoption is None:
                     continue
                 session.add(

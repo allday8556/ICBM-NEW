@@ -170,6 +170,17 @@ class AdoptionService:
             ).first()
             return None if row is None else _record(row)
 
+    def active_by_channel(self, marketplace_channel_product_id: str) -> AdoptedRecord | None:
+        with self._db.read() as session:
+            row = session.scalars(
+                select(AdoptedListing).where(
+                    AdoptedListing.marketplace_key == self._marketplace_key,
+                    AdoptedListing.marketplace_channel_product_id == marketplace_channel_product_id,
+                    AdoptedListing.state == ACTIVE,
+                )
+            ).first()
+            return None if row is None else _record(row)
+
     def adopted_items(self, marketplace_key: str, item_ids: Iterable[str]) -> tuple[str, ...]:
         """The ``ACTIVE`` adoptions of ``marketplace_key`` whose Item is one of ``item_ids``
         (REGISTER's duplicate source; ADR-0024 §5)."""
