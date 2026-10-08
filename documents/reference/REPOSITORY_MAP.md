@@ -106,7 +106,7 @@ payload or external call and leaves legacy Item economics unchanged.
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 168 | all canonical and historical documents |
+| `documents/` | 169 | all canonical and historical documents |
 | `documents/acceptance/` | 67 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
