@@ -642,17 +642,6 @@ def build_container(
     # The canonical marketplace-account identity that scopes registration state (M5 PR-B,
     # ACCOUNT_IDENTITY §2): established only from a committed M2 binding, with no provider call.
     accounts = MarketplaceAccountStore(db, clock, audit)
-    enrichment = EnrichmentService(
-        db=db,
-        clock=clock,
-        audit=audit,
-        jobs=jobs,
-        products=product_store,
-        accounts=accounts,
-        composer=ai_composer,
-        execution=ai_execution,
-    )
-    registry.register(enrichment.job_definition())
     registrations = RegistrationStore(db, clock, audit)
     # The only bearer source for provider metadata reads as well as REGISTER execution. Reading it
     # never renews or commits a token and authorizes no mutation.
@@ -758,12 +747,25 @@ def build_container(
     # owns inputs only; the preflight still derives every verdict, and the builder still freezes.
     # The durable ASSET upload-attempt owner (ADR-0018 §3.4) is read by the application freeze:
     # the provider assets prepared for the exact candidate being frozen (5919917893 §3).
+    enrichment = EnrichmentService(
+        db=db,
+        clock=clock,
+        audit=audit,
+        jobs=jobs,
+        products=product_store,
+        accounts=accounts,
+        composer=ai_composer,
+        execution=ai_execution,
+    )
+    registry.register(enrichment.job_definition())
     registration_preparations = RegistrationPreparationService(
         registrations=registrations,
         preflight=registration_preflight,
         builder=registration_builder,
         duplicate_lookup=SmartStoreDuplicateLookup(),
         prepared_assets=PreparedUploadAssets(live_store),
+        # ADR-0026 AIF-4: the current enrichment results an apply reads.
+        enrichment=enrichment,
     )
     # M5 PR-E (ADR-0014 §9-§11): the execution owner over the M0 job system. Its CREATE seam is
     # the production SmartStore one, which is unavailable while the endpoint is NOT_ADOPTED, so

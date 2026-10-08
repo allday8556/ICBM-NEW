@@ -21,12 +21,13 @@ copy of a preparation revision, never the authoring truth, and nothing here need
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Final, Protocol
 
 from sqlalchemy.exc import IntegrityError
 
 from app.platform.core.correlation import get_correlation_id, new_correlation_id
 from app.platform.core.errors import InputValidationError, NotFoundError
+from app.stages.products.enrichment import ResultView, Target
 from app.stages.products.image_model import ImageAssetKind
 from app.stages.products.model import ReadinessStatus
 from app.stages.register.builder import RegistrationSnapshotBuilder
@@ -45,7 +46,7 @@ from app.stages.register.model import (
     sanitized_digest,
 )
 from app.stages.register.payload import build_payload
-from app.stages.register.policy import Provenance
+from app.stages.register.policy import SATISFYING, Provenance
 from app.stages.register.preflight import RegistrationPreflightService
 from app.stages.register.preparation import (
     CategoryConfirmation,
@@ -252,6 +253,63 @@ def preflight_request(
     )
 
 
+class EnrichmentResultSource(Protocol):
+    def current_result(
+        self, product_group_id: str, task_key: str, result_key: str, target: Target | None
+    ) -> ResultView | None: ...
+
+
+AI_APPLY_FIELD_INVALID: Final = "AI_APPLY_FIELD_INVALID"
+AI_APPLY_FIELD_LOCKED: Final = "AI_APPLY_FIELD_LOCKED"
+AI_APPLY_REVISION_CHANGED: Final = "AI_APPLY_REVISION_CHANGED"
+AI_APPLY_RESULT_FOREIGN: Final = "AI_APPLY_RESULT_FOREIGN"
+AI_APPLY_RESULT_UNUSABLE: Final = "AI_APPLY_RESULT_UNUSABLE"
+AI_APPLY_VALUE_INVALID: Final = "AI_APPLY_VALUE_INVALID"
+
+
+@dataclass(frozen=True)
+class EnrichmentApply:
+    """One enrichment result applied to one Preparation field (ADR-0026 §7; AIF-4).
+
+    ``field`` is ``name``, ``attribute.<key>`` or ``notice.<key>``: a field whose value carries a
+    provenance. ``value_field`` names the scalar of the result's value that becomes the field's
+    value. ``expected_revision_no`` is the Preparation revision the operator read."""
+
+    field: str
+    product_group_id: str
+    task_key: str
+    result_key: str
+    value_field: str
+    expected_revision_no: int
+
+
+def _with_field(inputs: AuthoredInputs, field: str, value: FieldValue) -> AuthoredInputs:
+    listing = inputs.listing
+    if field == "name":
+        return replace(inputs, listing=replace(listing, name=value))
+    kind, _, key = field.partition(".")
+    if kind == "attribute":
+        return replace(
+            inputs, listing=replace(listing, attributes={**listing.attributes, key: value})
+        )
+    return replace(inputs, listing=replace(listing, notices={**listing.notices, key: value}))
+
+
+def _field_of(inputs: AuthoredInputs, field: str) -> FieldValue | None:
+    listing = inputs.listing
+    if field == "name":
+        return listing.name
+    kind, _, key = field.partition(".")
+    return (listing.attributes if kind == "attribute" else listing.notices).get(key)
+
+
+def _valid_field(field: str) -> bool:
+    if field == "name":
+        return True
+    kind, dot, key = field.partition(".")
+    return kind in ("attribute", "notice") and dot == "." and bool(key.strip())
+
+
 class RegistrationPreparationService:
     """Create, revise, read and evaluate a preparation, and freeze the unit it prepares."""
 
@@ -263,7 +321,9 @@ class RegistrationPreparationService:
         builder: RegistrationSnapshotBuilder,
         duplicate_lookup: DuplicateLookupSource | None = None,
         prepared_assets: PreparedAssetSource | None = None,
+        enrichment: EnrichmentResultSource | None = None,
     ) -> None:
+        self._enrichment = enrichment
         self._registrations = registrations
         self._preflight = preflight
         self._builder = builder
@@ -341,6 +401,120 @@ class RegistrationPreparationService:
                 authored_by=actor,
                 correlation_id=self._correlation(correlation_id),
             )
+
+    def apply_enrichment(
+        self,
+        preparation_id: str,
+        apply: EnrichmentApply,
+        *,
+        actor: str,
+        correlation_id: str | None = None,
+    ) -> PreparationRecord:
+        """ADR-0026 §7 (AIF-4): append one revision whose ``apply.field`` is the enrichment
+        result's value with provenance ``AI_SUGGESTION``, or change nothing.
+
+        It is refused when:
+        - the field is locked: its value is ``OPERATOR_CONFIRMED`` or ``SOURCE_FACT``, and an AI
+          value never overwrites it;
+        - the Preparation moved past the revision the operator read: it is skipped, never
+          overwritten;
+        - the result is not this unit's product's, not this target's, not current, not ``OK`` or
+          stale.
+
+        The value never satisfies a required field: ``AI_SUGGESTION`` stays
+        ``FIELD_AI_SUGGESTION_UNCONFIRMED`` until the operator confirms it (ADR-0014 §18)."""
+        if not _valid_field(apply.field):
+            raise InputValidationError(
+                AI_APPLY_FIELD_INVALID,
+                "an enrichment result is applied to name, attribute.<key> or notice.<key>",
+                details={"field": apply.field},
+            )
+        current = self.preparation(preparation_id)
+        draft = self._registrations.draft(current.draft_id)
+        products = {
+            item.product_group_id
+            for item in (draft.items if draft is not None else ())
+            if item.item_id in current.current.item_ids
+        }
+        if apply.product_group_id not in products:
+            raise InputValidationError(
+                AI_APPLY_RESULT_FOREIGN, "the result is not of a product this unit prepares"
+            )
+        target = Target(current.marketplace_key, current.marketplace_account_id)
+        result = (
+            None
+            if self._enrichment is None
+            else self._enrichment.current_result(
+                apply.product_group_id, apply.task_key, apply.result_key, target
+            )
+        )
+        if result is None or result.status != "OK" or result.stale or result.value is None:
+            raise RegistrationConflictError(
+                AI_APPLY_RESULT_UNUSABLE,
+                "only a current, fresh OK result of this target is applied",
+                details={
+                    "status": None if result is None else result.status,
+                    "stale_reasons": [] if result is None else result.stale_reasons,
+                },
+            )
+        value = result.value.get(apply.value_field)
+        if not isinstance(value, str | bool | int) or (isinstance(value, str) and not value):
+            raise InputValidationError(
+                AI_APPLY_VALUE_INVALID,
+                "the result names no text, boolean or integer under that value field",
+                details={"value_field": apply.value_field},
+            )
+        cid = self._correlation(correlation_id)
+        with self._registrations.transaction() as unit:
+            # Read again in the unit of work that writes: the lock and the revision check are both
+            # decided on what is current now (Canonical §7.7: lock and optimistic concurrency).
+            now = unit.preparation(preparation_id)
+            if now is None:
+                raise NotFoundError(
+                    "REGISTER_PREPARATION_NOT_FOUND", "the preparation does not exist"
+                )
+            if now.current.revision_no != apply.expected_revision_no:
+                raise RegistrationConflictError(
+                    AI_APPLY_REVISION_CHANGED,
+                    "the preparation changed since it was read; it was skipped, not overwritten",
+                    details={"current_revision_no": now.current.revision_no},
+                )
+            inputs = decode_inputs(now.current)
+            existing = _field_of(inputs, apply.field)
+            if existing is not None and existing.provenance in SATISFYING:
+                raise RegistrationConflictError(
+                    AI_APPLY_FIELD_LOCKED,
+                    "the field holds a confirmed value; an AI value never overwrites it",
+                    details={"provenance": existing.provenance.value},
+                )
+            revised = unit.revise_preparation(
+                preparation_id,
+                item_ids=now.current.item_ids,
+                inputs=encode_inputs(
+                    _with_field(
+                        inputs,
+                        apply.field,
+                        FieldValue(value=value, provenance=Provenance.AI_SUGGESTION),
+                    )
+                ),
+                authored_by=actor,
+                correlation_id=cid,
+            )
+            unit.note_enrichment_applied(
+                preparation_id,
+                revision_no=revised.current.revision_no,
+                field=apply.field,
+                enrichment={
+                    "product_group_id": apply.product_group_id,
+                    "task_key": apply.task_key,
+                    "result_key": apply.result_key,
+                    "result_sequence": result.sequence,
+                    "input_fingerprint": result.input_fingerprint,
+                },
+                actor=actor,
+                correlation_id=cid,
+            )
+            return revised
 
     def preparation(self, preparation_id: str) -> PreparationRecord:
         found = self._registrations.preparation(preparation_id)

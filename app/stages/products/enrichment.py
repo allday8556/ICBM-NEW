@@ -487,6 +487,19 @@ class EnrichmentService:
             product_group_id=product_group_id, ai_configured=identity is not None, results=views
         )
 
+    def current_result(
+        self, product_group_id: str, task_key: str, result_key: str, target: Target | None
+    ) -> ResultView | None:
+        """The current result of one subject with its derived staleness, or ``None``. A
+        target-free result serves any target; a targeted one serves only its own (ADR-0026 §7)."""
+        for view in self.results(product_group_id).results:
+            if (view.task_key, view.result_key) != (task_key, result_key):
+                continue
+            own = None if view.target is None else Target(**view.target.model_dump())
+            if own is None or own == target:
+                return view
+        return None
+
     # -------------------------------------------------------------- inputs
 
     def _inputs(
