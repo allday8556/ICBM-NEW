@@ -70,6 +70,10 @@ AI_ENRICHMENT_REQUEST_INVALID: Final = "AI_ENRICHMENT_REQUEST_INVALID"
 AI_TARGET_UNKNOWN: Final = "AI_TARGET_UNKNOWN"
 AI_TARGET_HAS_NO_POLICY: Final = "AI_TARGET_HAS_NO_POLICY"
 AI_OUTPUT_FIELD_MISSING: Final = "AI_OUTPUT_FIELD_MISSING"
+AI_OUTPUT_SCHEMA_INVALID: Final = "AI_OUTPUT_SCHEMA_INVALID"
+# The structured envelope every result object carries (ADR-0026 §5, Issue #30 refinement):
+# its evidence, its confidence in 0..1 and whether it requires review.
+ENVELOPE: Final = ("evidence", "confidence", "requires_review")
 PRODUCTS_PRODUCT_UNKNOWN: Final = "PRODUCTS_PRODUCT_UNKNOWN"
 
 # The parts of a fingerprint's inputs, in the order a stale reason names them.
@@ -77,19 +81,29 @@ REASONS: Final = ("facts", "prompt", "policy", "provider", "schema")
 
 
 @dataclass(frozen=True)
+class ResultSchema:
+    """The output schema of one result object: the value fields it must carry, besides the
+    envelope every result carries (``ENVELOPE``)."""
+
+    required: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class TaskDefinition:
-    """One runnable task: its registry task, the objects of its output recorded as their own
-    states (``()``: the whole output is one result), the fact fields it depends on, and the
-    version of its output schema."""
+    """One runnable task: its registry task, its output schema by result key, the fact fields it
+    depends on, and the version of its output schema.
+
+    Each result key names one object of the output, recorded as its own state. The single key
+    ``result`` means the whole output is the one result object."""
 
     task_key: str
-    result_keys: tuple[str, ...]
+    results: Mapping[str, ResultSchema]
     fact_fields: tuple[str, ...]
     schema_version: str
 
     @property
     def keys(self) -> tuple[str, ...]:
-        return self.result_keys or (SINGLE_RESULT,)
+        return tuple(self.results)
 
 
 @dataclass(frozen=True)
@@ -600,31 +614,42 @@ def _status_fields(
             "error_class": (outcome.error_class or ErrorClass.UNKNOWN).value,
             "error_code": outcome.error_code or "AI_PROVIDER_FAILED",
         }
-    part = value if not task.result_keys else value.get(key)
+    part = value if task.keys == (SINGLE_RESULT,) else value.get(key)
     if not isinstance(part, dict):
         return {
             **failed,
             "error_class": ErrorClass.VALIDATION.value,
             "error_code": AI_OUTPUT_FIELD_MISSING,
         }
-    confidence = part.get("confidence")
-    review = part.get("requires_review")
-    evidence = part.get("evidence")
+    if not _conforms(part, task.results[key]):
+        return {
+            **failed,
+            "error_class": ErrorClass.VALIDATION.value,
+            "error_code": AI_OUTPUT_SCHEMA_INVALID,
+        }
     return {
         "status": "OK",
-        "value_json": _canonical(part),
-        "evidence_json": None if evidence is None else _canonical(evidence),
-        "confidence": (
-            float(confidence)
-            if isinstance(confidence, int | float)
-            and not isinstance(confidence, bool)
-            and 0 <= confidence <= 1
-            else None
-        ),
-        "requires_review": review if isinstance(review, bool) else None,
+        "value_json": _canonical({k: v for k, v in part.items() if k not in ENVELOPE}),
+        "evidence_json": _canonical(part["evidence"]),
+        "confidence": float(part["confidence"]),
+        "requires_review": part["requires_review"],
         "error_class": None,
         "error_code": None,
     }
+
+
+def _conforms(part: Mapping[str, Any], schema: ResultSchema) -> bool:
+    """The object carries the structured envelope and every value field its schema requires: an
+    object that does not is a failed result, never an OK one."""
+    confidence = part.get("confidence")
+    return (
+        isinstance(part.get("evidence"), list)
+        and isinstance(confidence, int | float)
+        and not isinstance(confidence, bool)
+        and 0 <= confidence <= 1
+        and isinstance(part.get("requires_review"), bool)
+        and all(part.get(field) is not None for field in schema.required)
+    )
 
 
 def _stale_reasons(stored: Mapping[str, Any], now: _Inputs | None, task_gone: bool) -> list[str]:

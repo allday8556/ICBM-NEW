@@ -32,6 +32,7 @@ from app.stages.products.enrichment import (
     ENRICH_JOB,
     EnrichmentRequest,
     EnrichmentService,
+    ResultSchema,
     TargetView,
     TaskDefinition,
 )
@@ -45,19 +46,32 @@ pytestmark = pytest.mark.integration
 BUNDLE = "TASK_PRODUCT_RECOMMEND_BUNDLE_V1"
 TASK = TaskDefinition(
     task_key=BUNDLE,
-    result_keys=("product_name", "tags", "category", "options"),
+    results={
+        "product_name": ResultSchema(required=("recommended",)),
+        "tags": ResultSchema(required=("recommended",)),
+        "category": ResultSchema(required=("category_id",)),
+        "options": ResultSchema(required=("normalized",)),
+    },
     fact_fields=("original_name", "brand"),
     schema_version="test-bundle-1",
 )
+ENVELOPE = {"evidence": ["original_name"], "requires_review": False}
 ANSWER = {
     "product_name": {
         "current": "생들기름",
         "recommended": "국산 생들기름 350ml",
         "confidence": 0.82,
+    }
+    | ENVELOPE,
+    "tags": {"recommended": ["생들기름", "들기름"], "confidence": 0.7} | ENVELOPE,
+    "category": {
+        "category_id": "50000803",
+        "confidence": 0.55,
+        "evidence": ["original_name"],
+        "requires_review": True,
     },
-    "tags": {"recommended": ["생들기름", "들기름"], "confidence": 0.7},
-    "category": {"category_id": "50000803", "confidence": 0.55, "requires_review": True},
-    "options": {"normalized": [], "source_sku_count": 1, "result_sku_count": 1},
+    "options": {"normalized": [], "source_sku_count": 1, "result_sku_count": 1, "confidence": 1}
+    | ENVELOPE,
 }
 
 
@@ -166,7 +180,12 @@ def test_a_run_records_each_result_key_as_its_own_state_and_an_unchanged_input_i
     _run(container, service, queued.job_id)
     results = _results(service, group)
     assert sorted(results) == ["category", "options", "product_name", "tags"]
-    assert results["product_name"].value == ANSWER["product_name"]
+    # The value is the object without its envelope; the envelope is kept in its own columns.
+    assert results["product_name"].value == {
+        "current": "생들기름",
+        "recommended": "국산 생들기름 350ml",
+    }
+    assert results["product_name"].evidence == ["original_name"]
     assert results["product_name"].confidence == 0.82
     assert results["category"].requires_review is True
     assert {r.status for r in results.values()} == {"OK"}
@@ -345,3 +364,27 @@ def test_the_routes_read_results_and_refuse_a_request_with_no_provider(config: A
             "/api/v1/products/00000000-0000-0000-0000-000000000000/enrichment", headers=headers
         )
         assert unknown.status_code == 404
+
+
+def test_an_object_without_the_structured_envelope_or_a_required_field_is_never_ok(
+    container: Container, group: str
+) -> None:
+    broken = {
+        **ANSWER,
+        # No confidence: the envelope is incomplete.
+        "product_name": {"recommended": "이름", "evidence": [], "requires_review": False},
+        # A confidence outside 0..1.
+        "tags": {"recommended": ["a"], "confidence": 1.5, "evidence": [], "requires_review": False},
+        # The required value field is missing.
+        "category": {"confidence": 0.5, "evidence": [], "requires_review": True},
+    }
+    service = _service(container, _ok(broken))
+    _run(container, service, _request(service, group).job_id)
+    results = _results(service, group)
+    for key in ("product_name", "tags", "category"):
+        assert (results[key].status, results[key].error_code) == (
+            "FAILED",
+            "AI_OUTPUT_SCHEMA_INVALID",
+        ), key
+        assert results[key].value is None
+    assert results["options"].status == "OK"
