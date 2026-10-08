@@ -179,8 +179,10 @@ CANONICAL_TABLES = (
     "operate_adopted_listings",
     "operate_adopted_observations",
     "operate_order_adoption_links",
+    "operate_supplier_orders",
+    "operate_supplier_order_history",
 )
-HEAD = "0051_m6_adopted_listings"
+HEAD = "0052_m65_supplier_orders"
 
 
 def _url(path: Path) -> str:

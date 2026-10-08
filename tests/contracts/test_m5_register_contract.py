@@ -244,7 +244,9 @@ M6_STOCK_RECHECK = "0049_m6_stock_recheck"
 M6_ORDERS = "0050_m6_orders"
 # M6-E (ADR-0024): adopted listings, their observations and the order adoption links.
 M6_ADOPTED_LISTINGS = "0051_m6_adopted_listings"
-SCHEMA_HEAD = M6_ADOPTED_LISTINGS
+# M6.5-A (ADR-0025 §3, §4): supplier orders placed by hand, their tracking and history.
+M65_SUPPLIER_ORDERS = "0052_m65_supplier_orders"
+SCHEMA_HEAD = M65_SUPPLIER_ORDERS
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -277,6 +279,7 @@ AFTER_M5 = (
     M6_STOCK_RECHECK,
     M6_ORDERS,
     M6_ADOPTED_LISTINGS,
+    M65_SUPPLIER_ORDERS,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

@@ -1877,3 +1877,35 @@ td.no-data {
 .traffic-mini-grid b.no-data {
   font-size: var(--fs-lg);
 }
+
+/* M6.5 (ADR-0025 §8): one order's fulfillment panel, opened under its 주문관리 row. */
+.fulfillment-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: var(--color-panel-subtle);
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+}
+
+.fulfillment-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.fulfillment-panel .field {
+  display: grid;
+  gap: 4px;
+}
+
+.fulfillment-panel .field input,
+.fulfillment-panel .field select {
+  min-width: 160px;
+  padding: 6px 8px;
+  background: var(--color-input);
+  border: 1px solid var(--color-line-strong);
+  border-radius: 6px;
+  color: var(--color-text-body);
+}

@@ -1,13 +1,15 @@
 // M6-D (ADR-0023 §5, §7, §8): the ingested SmartStore product orders, each with how it resolved to
 // ICBM's product (never by name), its status and the masked recipient. 지금 동기화 runs the same
 // read-only pass the schedule runs; 배송정보 opens one order's encrypted shipping record for this
-// view only (the server audits it by id and never lets it be cached). Nothing here writes the
+// view only (the server audits it by id and never lets it be cached). 처리 opens the order's M6.5
+// fulfillment (ADR-0025): the supplier order placed by hand and its tracking. Nothing here writes the
 // marketplace.
 
 import { ApiError, getJson, sendJson } from '../core/api.js';
 import { h } from '../core/dom.js';
 import { dotDateTime } from '../core/format.js';
 import { toast } from '../core/toast.js';
+import { FULFILLMENT_STATE, fulfillmentPanel } from './fulfillment-panel.js';
 
 const ORDERS = '/api/v1/operate/orders';
 const SYNC = '/api/v1/operate/orders/sync';
@@ -70,7 +72,31 @@ function shippingButton(order) {
   return box;
 }
 
-function row(order) {
+const COLUMNS = ['결제일', '상품', 'ICBM 연결', '수량', '결제금액', '상태', '수령인', '배송', '처리'];
+
+function panelRow(order, reload) {
+  return h('tr', { 'data-role': 'fulfillment-row', 'data-order': order.product_order_id }, h('td', { colspan: String(COLUMNS.length) }, fulfillmentPanel(order, reload)));
+}
+
+// ``opened`` keeps which panels are open, so a save that reloads the list leaves them open.
+function fulfillmentCell(order, reload, opened) {
+  const [label, tone] = FULFILLMENT_STATE[order.fulfillment_state] ?? [order.fulfillment_state ?? '—', ''];
+  const open = h('button', { type: 'button', class: 'btn', 'data-action': 'open-fulfillment' }, '처리');
+  open.addEventListener('click', () => {
+    const tr = open.closest('tr');
+    const next = tr.nextElementSibling;
+    if (next?.getAttribute('data-role') === 'fulfillment-row') {
+      next.remove();
+      opened.delete(order.product_order_id);
+      return;
+    }
+    opened.add(order.product_order_id);
+    tr.after(panelRow(order, reload));
+  });
+  return h('td', { 'data-fulfillment-state': order.fulfillment_state ?? 'UNKNOWN' }, h('span', { class: `chip ${tone}`.trim() }, label), open);
+}
+
+function row(order, reload, opened) {
   // No resolution yet: the product is one ICBM created and has not confirmed.
   const [label, tone] = order.resolution == null ? ['등록 확정 대기', 'warn'] : RESOLUTION[order.resolution] ?? [order.resolution, ''];
   return h(
@@ -94,6 +120,7 @@ function row(order) {
     h('td', { 'data-status': order.status ?? 'UNKNOWN' }, STATUS[order.status] ?? order.status ?? '—', order.claim_status ? h('span', { class: 'mini' }, order.claim_status) : null),
     h('td', {}, order.recipient_masked ?? '—', order.phone_masked ? h('span', { class: 'mini' }, order.phone_masked) : null),
     h('td', {}, shippingButton(order)),
+    fulfillmentCell(order, reload, opened),
   );
 }
 
@@ -101,6 +128,7 @@ export function orderListPanel() {
   const panel = h('section', { class: 'panel order-list', 'data-role': 'order-list' }, h('h2', { class: 'panel-title' }, '스마트스토어 주문'));
   const content = h('div', { 'data-order-list': 'LOADING' }, h('span', { class: 'mini' }, '불러오는 중…'));
   panel.append(content);
+  const opened = new Set();
   const reload = async () => {
     try {
       const found = await getJson(ORDERS);
@@ -140,8 +168,8 @@ export function orderListPanel() {
           ? h(
               'table',
               { class: 'table' },
-              h('thead', {}, h('tr', {}, ...['결제일', '상품', 'ICBM 연결', '수량', '결제금액', '상태', '수령인', '배송'].map((label) => h('th', {}, label)))),
-              h('tbody', {}, ...found.orders.map(row)),
+              h('thead', {}, h('tr', {}, ...COLUMNS.map((label) => h('th', {}, label)))),
+              h('tbody', {}, ...found.orders.flatMap((order) => (opened.has(order.product_order_id) ? [row(order, reload, opened), panelRow(order, reload)] : [row(order, reload, opened)]))),
             )
           : h('div', { class: 'note' }, found.capability === 'CONNECTED' ? '동기화된 주문이 없습니다.' : '주문 동기화를 실행하면 주문이 표시됩니다.'),
       );
