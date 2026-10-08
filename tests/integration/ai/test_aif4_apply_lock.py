@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from app.capabilities.ai.execution import AIExecution
+from app.capabilities.ai.prompts import ReviseRequest
 from app.capabilities.audit.models import AuditEventType
 from app.config import AppConfig, database_path
 from app.container import Container
@@ -98,6 +99,7 @@ def _apply(
         "product_group_id": world["group"],
         "task_key": BUNDLE,
         "result_key": "product_name",
+        "result_sequence": 1,
         "value_field": "recommended",
         "expected_revision_no": revision,
     }
@@ -213,13 +215,40 @@ def test_only_a_current_fresh_ok_result_of_this_unit_and_a_known_field_is_applie
     assert world["preparations"].preparation(world["preparation_id"]).current.revision_no == 1
 
 
+def test_only_the_named_result_revision_is_applied(
+    world: dict[str, Any], container: Container
+) -> None:
+    # The operator saw sequence 1. A prompt change makes it stale and a new run records
+    # sequence 2: the older revision is never applied unseen, and the newer one only when named.
+    newer = _fake_enrichment(container)
+    entry = next(e for e in container.prompt_registry.registry().entries if e.key == BUNDLE)
+    container.prompt_registry.revise(
+        BUNDLE,
+        "template",
+        ReviseRequest(
+            actor="operator",
+            expected_current_revision=entry.current.revision_id,
+            field="prompt",
+            text="GOAL\n새 작업 지시",
+        ),
+        cid="c-new",
+    )
+    _run(container, newer, _request(newer, world["group"]).job_id)
+    with pytest.raises(AppError) as changed:
+        _apply(world)
+    assert changed.value.code == "AI_APPLY_RESULT_CHANGED"
+    assert changed.value.details["result_sequence"] == 2
+    # Naming the current one applies it.
+    assert _apply(world, result_sequence=2).current.revision_no == 2
+
+
 def test_production_has_no_result_to_apply(container: Container) -> None:
     # The production preparation owner reads the production enrichment owner: no provider, so no
     # current result exists and an apply ends there.
     with pytest.raises(AppError) as missing:
         container.registration_preparations.apply_enrichment(
             "no-such-preparation",
-            EnrichmentApply("name", "g", BUNDLE, "product_name", "recommended", 1),
+            EnrichmentApply("name", "g", BUNDLE, "product_name", 1, "recommended", 1),
             actor="operator",
         )
     assert missing.value.code == "REGISTER_PREPARATION_NOT_FOUND"

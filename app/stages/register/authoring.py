@@ -289,6 +289,7 @@ AI_APPLY_FIELD_LOCKED: Final = "AI_APPLY_FIELD_LOCKED"
 AI_APPLY_REVISION_CHANGED: Final = "AI_APPLY_REVISION_CHANGED"
 AI_APPLY_RESULT_FOREIGN: Final = "AI_APPLY_RESULT_FOREIGN"
 AI_APPLY_RESULT_UNUSABLE: Final = "AI_APPLY_RESULT_UNUSABLE"
+AI_APPLY_RESULT_CHANGED: Final = "AI_APPLY_RESULT_CHANGED"
 AI_APPLY_VALUE_INVALID: Final = "AI_APPLY_VALUE_INVALID"
 
 
@@ -297,13 +298,15 @@ class EnrichmentApply:
     """One enrichment result applied to one Preparation field (ADR-0026 §7; AIF-4).
 
     ``field`` is ``name``, ``attribute.<key>`` or ``notice.<key>``: a field whose value carries a
-    provenance. ``value_field`` names the scalar of the result's value that becomes the field's
-    value. ``expected_revision_no`` is the Preparation revision the operator read."""
+    provenance. ``result_sequence`` names the exact result revision the operator saw, and
+    ``value_field`` the scalar of its value that becomes the field's value.
+    ``expected_revision_no`` is the Preparation revision the operator read."""
 
     field: str
     product_group_id: str
     task_key: str
     result_key: str
+    result_sequence: int
     value_field: str
     expected_revision_no: int
 
@@ -465,27 +468,8 @@ class RegistrationPreparationService:
             raise InputValidationError(
                 AI_APPLY_RESULT_FOREIGN, "the result is not of a product this unit prepares"
             )
-        result = (
-            None
-            if self._enrichment is None
-            else self._enrichment.current_result(
-                apply.product_group_id,
-                apply.task_key,
-                apply.result_key,
-                current.marketplace_key,
-                current.marketplace_account_id,
-            )
-        )
-        if result is None or result.status != "OK" or result.stale or result.value is None:
-            raise RegistrationConflictError(
-                AI_APPLY_RESULT_UNUSABLE,
-                "only a current, fresh OK result of this target is applied",
-                details={
-                    "status": None if result is None else result.status,
-                    "stale_reasons": [] if result is None else result.stale_reasons,
-                },
-            )
-        value = result.value.get(apply.value_field)
+        result = self._named_result(apply, current.marketplace_key, current.marketplace_account_id)
+        value = (result.value or {}).get(apply.value_field)
         if not isinstance(value, str | bool | int) or (isinstance(value, str) and not value):
             raise InputValidationError(
                 AI_APPLY_VALUE_INVALID,
@@ -528,6 +512,16 @@ class RegistrationPreparationService:
                 authored_by=actor,
                 correlation_id=cid,
             )
+            # The revision above holds the database's write lock, so no result can be recorded
+            # until this unit of work ends: the named result is checked again under it, and any
+            # change since the first check refuses the whole apply (nothing is written).
+            again = self._named_result(apply, now.marketplace_key, now.marketplace_account_id)
+            if again.value != result.value:
+                raise RegistrationConflictError(
+                    AI_APPLY_RESULT_CHANGED,
+                    "the named result changed while it was applied",
+                    details={"result_sequence": again.sequence},
+                )
             unit.note_enrichment_applied(
                 preparation_id,
                 revision_no=revised.current.revision_no,
@@ -543,6 +537,39 @@ class RegistrationPreparationService:
                 correlation_id=cid,
             )
             return revised
+
+    def _named_result(
+        self, apply: EnrichmentApply, marketplace_key: str, marketplace_account_id: str
+    ) -> AppliedResult:
+        """The exact result revision the operator named, if it is still the current, fresh OK
+        result of this subject and target; refused otherwise."""
+        result = (
+            None
+            if self._enrichment is None
+            else self._enrichment.current_result(
+                apply.product_group_id,
+                apply.task_key,
+                apply.result_key,
+                marketplace_key,
+                marketplace_account_id,
+            )
+        )
+        if result is None or result.status != "OK" or result.stale or result.value is None:
+            raise RegistrationConflictError(
+                AI_APPLY_RESULT_UNUSABLE,
+                "only a current, fresh OK result of this target is applied",
+                details={
+                    "status": None if result is None else result.status,
+                    "stale_reasons": [] if result is None else result.stale_reasons,
+                },
+            )
+        if result.sequence != apply.result_sequence:
+            raise RegistrationConflictError(
+                AI_APPLY_RESULT_CHANGED,
+                "the named result is no longer the current one; review the newer result first",
+                details={"result_sequence": result.sequence},
+            )
+        return result
 
     def preparation(self, preparation_id: str) -> PreparationRecord:
         found = self._registrations.preparation(preparation_id)
