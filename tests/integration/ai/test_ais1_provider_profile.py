@@ -6,6 +6,8 @@ sidecar configuration, and a fake completion. No sidecar runs and nothing leaves
 
 import json
 import sqlite3
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -349,3 +351,60 @@ def test_an_unreadable_profile_store_degrades_the_capability_and_never_raises(
         raw.execute("ALTER TABLE ai_provider_profile_current RENAME TO moved_away")
     report = world["provider"].capability_report()
     assert (report.status, report.detail) == (CapabilityStatus.DEGRADED, "AI_PROFILE_UNREADABLE")
+
+
+def test_concurrent_calls_never_pass_the_cap_together(
+    world: dict[str, Any], config: AppConfig
+) -> None:
+    """GPT audit of #273: the place under the cap is taken before the call, in one serialized write
+    unit, so concurrent calls cannot both take the last place."""
+    _approve_all(world["service"])
+    provider: ProfiledProvider = world["provider"]
+    gate = threading.Barrier(6)
+    outcomes: list[str] = []
+
+    def slow(endpoint: str, key: str, model: str, text: str) -> cliproxyapi.SidecarAnswer:
+        time.sleep(0.2)
+        return world["complete"](endpoint, key, model, text)
+
+    provider._complete = slow
+
+    def one() -> None:
+        gate.wait()
+        try:
+            provider.execute(TaskRequest("TASK_X", "t", "c"))
+            outcomes.append("sent")
+        except AppError as refused:
+            outcomes.append(refused.code)
+
+    threads = [threading.Thread(target=one) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert sorted(outcomes) == ["AI_DAILY_CAP_REACHED"] * 3 + ["sent"] * 3
+    assert len(world["complete"].calls) == 3
+    with sqlite3.connect(database_path(config.data_dir)) as raw:
+        assert raw.execute("SELECT outcome FROM ai_provider_calls").fetchall() == [("OK",)] * 3
+        # A settled call never changes again.
+        with pytest.raises(sqlite3.IntegrityError):
+            raw.execute("UPDATE ai_provider_calls SET outcome = 'FAILED'")
+
+
+def test_a_call_that_raises_is_settled_failed_and_still_counts(
+    world: dict[str, Any], config: AppConfig
+) -> None:
+    _approve_all(world["service"])
+    provider: ProfiledProvider = world["provider"]
+
+    def broken(endpoint: str, key: str, model: str, text: str) -> cliproxyapi.SidecarAnswer:
+        raise RuntimeError("adapter fault")
+
+    provider._complete = broken
+    with pytest.raises(RuntimeError):
+        provider.execute(TaskRequest("TASK_X", "t", "c"))
+    with sqlite3.connect(database_path(config.data_dir)) as raw:
+        assert raw.execute("SELECT outcome, error_code FROM ai_provider_calls").fetchall() == [
+            ("FAILED", "AI_PROVIDER_CALL_FAILED")
+        ]
+    assert world["service"].view().calls_today == 1

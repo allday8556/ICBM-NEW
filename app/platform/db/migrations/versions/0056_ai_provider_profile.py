@@ -12,9 +12,11 @@ touches no existing table, row, trigger or index.
   newest revision. A revision's content is one JSON object (provider type, loopback endpoint,
   requested model, credential source, approved executable and routing identity, billing mode, the
   owner's data-transfer approval and the daily call cap). No secret is ever in it.
-- `ai_provider_calls`: one append-only row per provider call the profile made, counted per UTC day
-  for the daily cap. A row names the profile revision, the task, the outcome and the correlation;
-  never a prompt, a value or a key.
+- `ai_provider_calls`: one row per provider call the profile made, counted per UTC day for the
+  daily cap. The row is written `SENT` before the call, in the same serialized write unit that
+  counts the day's calls, so concurrent calls can never pass the cap together; after the call it is
+  settled once to `OK` or `FAILED`, and nothing else of it ever changes. A row names the profile
+  revision, the task, the outcome and the correlation; never a prompt, a value or a key.
 
 Every table starts empty (M0 acceptance). Downgrade fails closed while any row exists.
 """
@@ -127,7 +129,7 @@ def upgrade() -> None:
         sa.Column("error_code", sa.String(length=64), nullable=True),
         sa.Column("correlation_id", sa.String(length=64), nullable=False),
         sa.Column("called_at", sa.DateTime(), nullable=False),
-        _check(CALLS, "outcome IN ('OK', 'FAILED')", "outcome_known"),
+        _check(CALLS, "outcome IN ('SENT', 'OK', 'FAILED')", "outcome_known"),
         _check(CALLS, "call_day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'", "call_day_iso"),
         _check(CALLS, "correlation_id <> ''", "correlation_present"),
         sa.ForeignKeyConstraint(
@@ -174,7 +176,19 @@ def upgrade() -> None:
         _raise(f"{CURRENT}: a pointer never changes profile", "NEW.profile_key <> OLD.profile_key"),
     )
     _trigger(CURRENT, "no_delete", "DELETE", _raise(f"a {CURRENT} row is never deleted", "1"))
-    _trigger(CALLS, "no_update", "UPDATE", _raise(f"a {CALLS} row is never updated", "1"))
+    _trigger(
+        CALLS,
+        "settles_once",
+        "UPDATE",
+        _raise(
+            f"a {CALLS} row is only settled once, from SENT to OK or FAILED",
+            "OLD.outcome <> 'SENT' OR NEW.outcome NOT IN ('OK', 'FAILED')"
+            " OR NEW.call_id IS NOT OLD.call_id OR NEW.profile_key IS NOT OLD.profile_key"
+            " OR NEW.revision_id IS NOT OLD.revision_id OR NEW.call_day IS NOT OLD.call_day"
+            " OR NEW.task_key IS NOT OLD.task_key OR NEW.correlation_id IS NOT OLD.correlation_id"
+            " OR NEW.called_at IS NOT OLD.called_at",
+        ),
+    )
     _trigger(CALLS, "no_delete", "DELETE", _raise(f"a {CALLS} row is never deleted", "1"))
 
 

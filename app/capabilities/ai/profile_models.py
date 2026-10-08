@@ -78,7 +78,7 @@ class AIProviderCall(Base):
     __tablename__ = "ai_provider_calls"
     __table_args__ = (
         Index("ix_ai_provider_calls_profile_key_call_day", "profile_key", "call_day"),
-        CheckConstraint("outcome IN ('OK', 'FAILED')", name="outcome_known"),
+        CheckConstraint("outcome IN ('SENT', 'OK', 'FAILED')", name="outcome_known"),
         CheckConstraint(
             "call_day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'", name="call_day_iso"
         ),

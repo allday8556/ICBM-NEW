@@ -1,7 +1,12 @@
 """ADR-0027 §3–§5: what the probe derives from the served sidecar, and how the adapter reads an
 answer. The configuration's secrets never reach the routing fingerprint."""
 
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+import pytest
 
 from integrations.ai import cliproxyapi, sidecar
 
@@ -82,3 +87,39 @@ def test_an_unreachable_sidecar_is_a_transient_failure() -> None:
         "AI_SIDECAR_UNREACHABLE",
         None,
     )
+
+
+def test_the_call_never_goes_through_an_environment_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0027 §3: the request reaches the verified loopback port directly, whatever proxy the
+    environment names; a proxy here would receive the key and the facts."""
+
+    class Answer(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            self.rfile.read(int(self.headers["Content-Length"]))
+            body = json.dumps(
+                {"model": "m-1", "choices": [{"message": {"content": '{"ok": true}'}}]}
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args: object) -> None:
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), Answer)
+    threading.Thread(target=server.handle_request, daemon=True).start()
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "all_proxy"):
+        monkeypatch.setenv(name, "http://127.0.0.1:9")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    try:
+        answer = cliproxyapi.complete(
+            f"http://127.0.0.1:{server.server_port}", "k", "m", "x", timeout_s=10
+        )
+    finally:
+        server.server_close()
+    assert (answer.value, answer.error_code, answer.actual_model) == ({"ok": True}, None, "m-1")

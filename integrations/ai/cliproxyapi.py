@@ -79,19 +79,22 @@ def complete(
         return SidecarAnswer(latency_ms=int((time.monotonic() - started) * 1000), **values)
 
     try:
-        response = httpx.post(
-            "/".join((endpoint.rstrip("/"), CHAT_COMPLETIONS)),
-            headers={"Authorization": f"Bearer {client_key}"},
-            json={
-                "model": model,
-                "temperature": 0,
-                "messages": [
-                    {"role": "system", "content": _INSTRUCTION},
-                    {"role": "user", "content": text},
-                ],
-            },
-            timeout=timeout_s,
-        )
+        # Never through an environment proxy (HTTP_PROXY, ALL_PROXY, .netrc …): the request goes
+        # straight to the loopback port whose serving process was just verified, so the key and
+        # the product facts reach only that process (ADR-0027 §3, AIS-01). No redirect is followed.
+        with httpx.Client(trust_env=False, follow_redirects=False, timeout=timeout_s) as client:
+            response = client.post(
+                "/".join((endpoint.rstrip("/"), CHAT_COMPLETIONS)),
+                headers={"Authorization": f"Bearer {client_key}"},
+                json={
+                    "model": model,
+                    "temperature": 0,
+                    "messages": [
+                        {"role": "system", "content": _INSTRUCTION},
+                        {"role": "user", "content": text},
+                    ],
+                },
+            )
     except (httpx.ConnectError, httpx.TimeoutException):
         return answer(error_kind="TRANSIENT", error_code=AI_SIDECAR_UNREACHABLE)
     except httpx.HTTPError:

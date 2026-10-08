@@ -87,6 +87,7 @@ AI_DATA_TRANSFER_NOT_APPROVED: Final = "AI_DATA_TRANSFER_NOT_APPROVED"
 AI_DAILY_CAP_REACHED: Final = "AI_DAILY_CAP_REACHED"
 AI_SIDECAR_KEY_UNREADABLE: Final = "AI_SIDECAR_KEY_UNREADABLE"
 AI_PROFILE_UNREADABLE: Final = "AI_PROFILE_UNREADABLE"
+AI_PROVIDER_CALL_FAILED: Final = "AI_PROVIDER_CALL_FAILED"
 
 Action = Literal["CONFIGURE", "APPROVE_EXECUTABLE", "APPROVE_ROUTING", "DATA_TRANSFER"]
 
@@ -234,24 +235,44 @@ class ProfileStore:
                 or 0
             )
 
-    def record_call(
-        self, revision_id: str, task_key: str, ok: bool, error_code: str | None, correlation_id: str
-    ) -> None:
+    def reserve_call(
+        self, revision_id: str, task_key: str, cap: int, correlation_id: str
+    ) -> str | None:
+        """Count today's calls and, below ``cap``, write this one as ``SENT``, in one serialized
+        write unit: two calls can never both take the last place (AIS-04). ``None`` at the cap."""
         now = self._clock.now()
+        day = now.date().isoformat()
         with self._db.write() as session:
+            made = session.scalar(
+                select(func.count()).where(
+                    AIProviderCall.profile_key == PROFILE_KEY, AIProviderCall.call_day == day
+                )
+            )
+            if int(made or 0) >= cap:
+                return None
+            call_id = str(uuid.uuid4())
             session.add(
                 AIProviderCall(
-                    call_id=str(uuid.uuid4()),
+                    call_id=call_id,
                     profile_key=PROFILE_KEY,
                     revision_id=revision_id,
-                    call_day=now.date().isoformat(),
+                    call_day=day,
                     task_key=task_key,
-                    outcome="OK" if ok else "FAILED",
-                    error_code=error_code,
+                    outcome="SENT",
+                    error_code=None,
                     correlation_id=correlation_id,
                     called_at=now,
                 )
             )
+            return call_id
+
+    def settle_call(self, call_id: str, ok: bool, error_code: str | None) -> None:
+        """Settle a ``SENT`` call once, to ``OK`` or ``FAILED``."""
+        with self._db.write() as session:
+            row = session.get(AIProviderCall, call_id)
+            assert row is not None and row.outcome == "SENT"
+            row.outcome = "OK" if ok else "FAILED"
+            row.error_code = error_code
 
 
 def _record(row: AIProviderProfileRevision) -> ProfileRevision:
@@ -389,19 +410,30 @@ class ProfiledProvider:
             raise PolicyBlockedError(
                 problem, "the served sidecar is not the approved one; nothing was sent"
             )
-        if self._store.calls_on(self._today()) >= int(content["daily_call_cap"]):
-            raise PolicyBlockedError(
-                AI_DAILY_CAP_REACHED, "the profile's daily call cap is reached"
-            )
         assert observed.process is not None and observed.routing is not None
         key = sidecar.client_key(observed.process)
         if key is None:
             raise PolicyBlockedError(
                 AI_SIDECAR_KEY_UNREADABLE, "the sidecar's client key cannot be read"
             )
-        answer = self._complete(
-            str(content["endpoint"]), key, str(content["requested_model"]), request.text
+        # The place under the cap is taken before anything is sent, atomically (AIS-04).
+        call_id = self._store.reserve_call(
+            current.revision_id,
+            request.task_key,
+            int(content["daily_call_cap"]),
+            request.correlation_id,
         )
+        if call_id is None:
+            raise PolicyBlockedError(
+                AI_DAILY_CAP_REACHED, "the profile's daily call cap is reached"
+            )
+        try:
+            answer = self._complete(
+                str(content["endpoint"]), key, str(content["requested_model"]), request.text
+            )
+        except BaseException:
+            self._store.settle_call(call_id, False, AI_PROVIDER_CALL_FAILED)
+            raise
         provenance = AIExecutionProvenance(
             requested_provider=REQUESTED_PROVIDER,
             requested_model=str(content["requested_model"]),
@@ -422,9 +454,7 @@ class ProfiledProvider:
             latency_ms=answer.latency_ms,
         )
         ok = answer.value is not None
-        self._store.record_call(
-            current.revision_id, request.task_key, ok, answer.error_code, request.correlation_id
-        )
+        self._store.settle_call(call_id, ok, answer.error_code)
         if ok:
             return ProviderOutcome(ok=True, provenance=provenance, value=answer.value)
         return ProviderOutcome(
