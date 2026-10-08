@@ -51,6 +51,11 @@ class ServingProcessProbe(Protocol):
         """The process listening on this loopback port, or ``None`` when it cannot be read."""
         ...
 
+    def peer(self, port: int, client_port: int) -> ServingProcess | None:
+        """The process at the server end of the established loopback connection from
+        ``client_port`` to ``port``, or ``None`` when it cannot be read."""
+        ...
+
 
 def file_sha256(path: str) -> str | None:
     """The SHA-256 of the file's bytes, read now. Never cached: a replaced binary that keeps the
@@ -65,12 +70,22 @@ def file_sha256(path: str) -> str | None:
     return digest.hexdigest()
 
 
-_PROBE_SCRIPT: Final = (
-    "$c = Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue"
-    " | Where-Object {{ $_.LocalAddress -eq '127.0.0.1' }} | Select-Object -First 1;"
+_PROCESS_SCRIPT: Final = (
     ' if ($c) {{ $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($c.OwningProcess)";'
     " @{{pid=$p.ProcessId; path=$p.ExecutablePath; cmd=$p.CommandLine}}"
     " | ConvertTo-Json -Compress }}"
+)
+_LISTENER_SCRIPT: Final = (
+    "$c = Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue"
+    " | Where-Object {{ $_.LocalAddress -eq '127.0.0.1' }} | Select-Object -First 1;"
+    + _PROCESS_SCRIPT
+)
+# The server side of one established loopback connection: its local port is the endpoint's, its
+# remote port is the client's own.
+_PEER_SCRIPT: Final = (
+    "$c = Get-NetTCPConnection -LocalPort {port} -RemotePort {client} -State Established"
+    " -ErrorAction SilentlyContinue | Where-Object {{ $_.LocalAddress -eq '127.0.0.1' -and"
+    " $_.RemoteAddress -eq '127.0.0.1' }} | Select-Object -First 1;" + _PROCESS_SCRIPT
 )
 
 
@@ -82,17 +97,17 @@ class WindowsProcessProbe:
         self._timeout_s = timeout_s
 
     def serving(self, port: int) -> ServingProcess | None:
+        return self._process(_LISTENER_SCRIPT.format(port=int(port)))
+
+    def peer(self, port: int, client_port: int) -> ServingProcess | None:
+        return self._process(_PEER_SCRIPT.format(port=int(port), client=int(client_port)))
+
+    def _process(self, script: str) -> ServingProcess | None:
         if sys.platform != "win32":
             return None
         try:
             completed = subprocess.run(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    _PROBE_SCRIPT.format(port=int(port)),
-                ],
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
                 capture_output=True,
                 text=True,
                 timeout=self._timeout_s,

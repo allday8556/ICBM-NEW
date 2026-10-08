@@ -1,24 +1,27 @@
 """The CLIProxyAPI adapter (ADR-0027 §4): one OpenAI-compatible chat completion on loopback.
 
-It is the only AI module that opens an HTTP client (a repository rule pins it). The request is the
+It is the only AI module that opens a connection (a repository rule pins it). The request is the
 composed task text as one user message at temperature 0, asking for one JSON object. The answer's
 first JSON object is the value; the provenance is copied from the response (the model it names,
 the usage it reports) and nothing is invented: an unreported value stays ``None``, and cost is
 never reported as 0 (ADR-0012 §6, §7).
 """
 
+import http.client
 import json
+import socket
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final
-
-import httpx
+from urllib.parse import urlsplit
 
 AI_SIDECAR_UNREACHABLE: Final = "AI_SIDECAR_UNREACHABLE"
 AI_SIDECAR_RATE_LIMITED: Final = "AI_SIDECAR_RATE_LIMITED"
 AI_SIDECAR_AUTH: Final = "AI_SIDECAR_AUTH"
 AI_SIDECAR_HTTP_ERROR: Final = "AI_SIDECAR_HTTP_ERROR"
 AI_OUTPUT_NOT_JSON: Final = "AI_OUTPUT_NOT_JSON"
+AI_PEER_NOT_APPROVED: Final = "AI_PEER_NOT_APPROVED"
 
 # The sidecar's OpenAI-compatible chat route, relative to the profile's loopback endpoint.
 CHAT_COMPLETIONS: Final = "v1/chat/completions"
@@ -31,7 +34,9 @@ class SidecarAnswer:
     itself reported."""
 
     value: dict[str, Any] | None
-    error_kind: str | None  # TRANSIENT | RATE_LIMITED | AUTH | UNKNOWN | VALIDATION
+    error_kind: (
+        str | None
+    )  # TRANSIENT | RATE_LIMITED | AUTH | UNKNOWN | VALIDATION | POLICY_BLOCKED
     error_code: str | None
     actual_model: str | None
     sidecar_version: str | None
@@ -59,9 +64,21 @@ def _usage(body: dict[str, Any], key: str) -> int | None:
 
 
 def complete(
-    endpoint: str, client_key: str, model: str, text: str, *, timeout_s: float = 120.0
+    endpoint: str,
+    client_key: str,
+    model: str,
+    text: str,
+    verify: Callable[[int], bool],
+    *,
+    timeout_s: float = 120.0,
 ) -> SidecarAnswer:
-    """One call. ``endpoint`` is already proven loopback by the profile; the key never leaves this
+    """One call on one connection that is proven before anything is sent.
+
+    The connection is opened first; ``verify`` is then asked, with the connection's own local port,
+    whether the process at the other end of exactly this connection is the approved one. Only then
+    is the request written, on that same connection: a listener swapped after the probe can never
+    receive the key or the facts (ADR-0012 §2, ADR-0027 §3). No proxy, no redirect, no second
+    connection. ``endpoint`` is already proven loopback by the profile; the key never leaves this
     function except as the request's bearer."""
     started = time.monotonic()
 
@@ -78,42 +95,62 @@ def complete(
         values.update(fields)
         return SidecarAnswer(latency_ms=int((time.monotonic() - started) * 1000), **values)
 
+    parts = urlsplit(endpoint)
+    host = "127.0.0.1" if parts.hostname in (None, "localhost") else parts.hostname
+    port = parts.port or 80
     try:
-        # Never through an environment proxy (HTTP_PROXY, ALL_PROXY, .netrc …): the request goes
-        # straight to the loopback port whose serving process was just verified, so the key and
-        # the product facts reach only that process (ADR-0027 §3, AIS-01). No redirect is followed.
-        with httpx.Client(trust_env=False, follow_redirects=False, timeout=timeout_s) as client:
-            response = client.post(
-                "/".join((endpoint.rstrip("/"), CHAT_COMPLETIONS)),
-                headers={"Authorization": f"Bearer {client_key}"},
-                json={
-                    "model": model,
-                    "temperature": 0,
-                    "messages": [
-                        {"role": "system", "content": _INSTRUCTION},
-                        {"role": "user", "content": text},
-                    ],
+        sock = socket.create_connection((host, port), timeout=timeout_s)
+    except OSError:
+        return answer(error_kind="TRANSIENT", error_code=AI_SIDECAR_UNREACHABLE)
+    try:
+        if not verify(sock.getsockname()[1]):
+            return answer(error_kind="POLICY_BLOCKED", error_code=AI_PEER_NOT_APPROVED)
+        connection = http.client.HTTPConnection(host, port, timeout=timeout_s)
+        connection.sock = sock  # this very connection, never a new one
+        payload = json.dumps(
+            {
+                "model": model,
+                "temperature": 0,
+                "messages": [
+                    {"role": "system", "content": _INSTRUCTION},
+                    {"role": "user", "content": text},
+                ],
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        try:
+            connection.request(
+                "POST",
+                "/" + CHAT_COMPLETIONS,
+                body=payload,
+                headers={
+                    "Authorization": f"Bearer {client_key}",
+                    "Content-Type": "application/json",
                 },
             )
-    except (httpx.ConnectError, httpx.TimeoutException):
-        return answer(error_kind="TRANSIENT", error_code=AI_SIDECAR_UNREACHABLE)
-    except httpx.HTTPError:
-        return answer(error_kind="UNKNOWN", error_code=AI_SIDECAR_HTTP_ERROR)
-    version = response.headers.get("X-CPA-VERSION")
-    if response.status_code == 429:
+            response = connection.getresponse()
+            raw = response.read()
+        except TimeoutError:
+            return answer(error_kind="TRANSIENT", error_code=AI_SIDECAR_UNREACHABLE)
+        except (OSError, http.client.HTTPException):
+            return answer(error_kind="UNKNOWN", error_code=AI_SIDECAR_HTTP_ERROR)
+    finally:
+        sock.close()
+    version = response.getheader("X-CPA-VERSION")
+    if response.status == 429:
         return answer(
             error_kind="RATE_LIMITED", error_code=AI_SIDECAR_RATE_LIMITED, sidecar_version=version
         )
-    if response.status_code in (401, 403):
+    if response.status in (401, 403):
         return answer(error_kind="AUTH", error_code=AI_SIDECAR_AUTH, sidecar_version=version)
-    if response.status_code >= 400:
-        # Any other HTTP error, 5xx included, is UNKNOWN (ADR-0027 §4): the sidecar may have sent
-        # the request on, so it is never retried automatically into a second transmission.
+    if response.status >= 300:
+        # Any other answer, 3xx and 5xx included, is UNKNOWN (ADR-0027 §4): nothing is followed,
+        # and the sidecar may have sent the request on, so it is never retried automatically.
         return answer(
             error_kind="UNKNOWN", error_code=AI_SIDECAR_HTTP_ERROR, sidecar_version=version
         )
     try:
-        body = response.json()
+        body = json.loads(raw)
         content = body["choices"][0]["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError):
         return answer(

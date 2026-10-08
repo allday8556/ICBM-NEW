@@ -3,6 +3,7 @@ answer. The configuration's secrets never reach the routing fingerprint."""
 
 import json
 import os
+import socket
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -81,7 +82,9 @@ def test_the_adapter_reads_the_first_json_object_of_an_answer() -> None:
 
 
 def test_an_unreachable_sidecar_is_a_transient_failure() -> None:
-    answer = cliproxyapi.complete("http://127.0.0.1:9", "k", "m", "x", timeout_s=2)
+    answer = cliproxyapi.complete(
+        "http://127.0.0.1:9", "k", "m", "x", lambda port: True, timeout_s=2
+    )
     assert (answer.error_kind, answer.error_code, answer.value) == (
         "TRANSIENT",
         "AI_SIDECAR_UNREACHABLE",
@@ -118,7 +121,7 @@ def test_the_call_never_goes_through_an_environment_proxy(
     monkeypatch.delenv("no_proxy", raising=False)
     try:
         answer = cliproxyapi.complete(
-            f"http://127.0.0.1:{server.server_port}", "k", "m", "x", timeout_s=10
+            f"http://127.0.0.1:{server.server_port}", "k", "m", "x", lambda port: True, timeout_s=10
         )
     finally:
         server.server_close()
@@ -203,7 +206,9 @@ def test_an_http_error_from_the_sidecar_is_never_retried_automatically(
     server = HTTPServer(("127.0.0.1", 0), Failing)
     threading.Thread(target=server.handle_request, daemon=True).start()
     try:
-        answer = cliproxyapi.complete(f"http://127.0.0.1:{server.server_port}", "k", "m", "x")
+        answer = cliproxyapi.complete(
+            f"http://127.0.0.1:{server.server_port}", "k", "m", "x", lambda port: True
+        )
     finally:
         server.server_close()
     assert (answer.error_kind, answer.error_code) == ("UNKNOWN", "AI_SIDECAR_HTTP_ERROR")
@@ -258,3 +263,40 @@ def test_only_an_explicit_absolute_config_is_read(tmp_path: Path) -> None:
     # The last -config wins, as Go flags take it.
     last = served(f' -config "{tmp_path / "config.yaml"}" -config other.yaml')
     assert sidecar.config_path(last) is None
+
+
+def test_nothing_is_written_on_a_connection_whose_peer_is_not_proven() -> None:
+    """The adapter asks about its own connection (by its local port) before writing anything."""
+    received: list[bytes] = []
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+
+    def accept() -> None:
+        conn, _ = listener.accept()
+        conn.settimeout(2)
+        try:
+            received.append(conn.recv(65536))
+        except OSError:
+            received.append(b"")
+        finally:
+            conn.close()
+
+    thread = threading.Thread(target=accept, daemon=True)
+    thread.start()
+    asked: list[int] = []
+
+    def refuse(port: int) -> bool:
+        asked.append(port)
+        return False
+
+    try:
+        answer = cliproxyapi.complete(
+            f"http://127.0.0.1:{listener.getsockname()[1]}", "k", "m", "x", refuse, timeout_s=5
+        )
+        thread.join(5)
+    finally:
+        listener.close()
+    assert (answer.error_kind, answer.error_code) == ("POLICY_BLOCKED", "AI_PEER_NOT_APPROVED")
+    assert len(asked) == 1 and asked[0] > 0
+    assert received == [b""]

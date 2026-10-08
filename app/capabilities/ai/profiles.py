@@ -317,11 +317,14 @@ def _record(row: AIProviderProfileRevision) -> ProfileRevision:
 
 # ------------------------------------------------------------------ the provider binding
 
-Complete = Callable[[str, str, str, str], cliproxyapi.SidecarAnswer]
+# endpoint, key, model, text, and the check of the call's own connection (its local port).
+Complete = Callable[[str, str, str, str, Callable[[int], bool]], cliproxyapi.SidecarAnswer]
 
 
-def _complete(endpoint: str, key: str, model: str, text: str) -> cliproxyapi.SidecarAnswer:
-    return cliproxyapi.complete(endpoint, key, model, text)
+def _complete(
+    endpoint: str, key: str, model: str, text: str, verify: Callable[[int], bool]
+) -> cliproxyapi.SidecarAnswer:
+    return cliproxyapi.complete(endpoint, key, model, text, verify)
 
 
 @dataclass(frozen=True)
@@ -482,9 +485,28 @@ class ProfiledProvider:
             raise PolicyBlockedError(
                 AI_DAILY_CAP_REACHED, "the profile's daily call cap is reached"
             )
+        approved = content["approved_executable"]
+        serving = observed.process
+        port = _port(content["endpoint"])
+
+        def verified(client_port: int) -> bool:
+            # The process at the other end of exactly the call's connection: the same process
+            # the probe proved, still the approved path and bytes (ADR-0012 §2).
+            peer = self._probe.peer(port, client_port)
+            return (
+                peer is not None
+                and peer.pid == serving.pid
+                and peer.path.lower() == str(approved["path"]).lower()
+                and peer.sha256 == approved["sha256"]
+            )
+
         try:
             answer = self._complete(
-                str(content["endpoint"]), key, str(content["requested_model"]), request.text
+                str(content["endpoint"]),
+                key,
+                str(content["requested_model"]),
+                request.text,
+                verified,
             )
         except BaseException:
             self._store.settle_call(call_id, False, AI_PROVIDER_CALL_FAILED)

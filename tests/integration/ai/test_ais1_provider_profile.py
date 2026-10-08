@@ -49,9 +49,14 @@ remote-management:
 @dataclass
 class FakeProbe:
     process: sidecar.ServingProcess | None
+    # The process at the other end of the call's own connection; the listener unless set.
+    peer_process: sidecar.ServingProcess | None = None
 
     def serving(self, port: int) -> sidecar.ServingProcess | None:
         return self.process
+
+    def peer(self, port: int, client_port: int) -> sidecar.ServingProcess | None:
+        return self.peer_process if self.peer_process is not None else self.process
 
 
 @dataclass
@@ -59,7 +64,21 @@ class FakeComplete:
     value: dict[str, Any] | None = field(default_factory=lambda: {"ok": True})
     calls: list[tuple[str, str, str]] = field(default_factory=list)
 
-    def __call__(self, endpoint: str, key: str, model: str, text: str) -> cliproxyapi.SidecarAnswer:
+    def __call__(
+        self, endpoint: str, key: str, model: str, text: str, verify: Any = None
+    ) -> cliproxyapi.SidecarAnswer:
+        # Like the adapter: the connection is proven before anything is sent.
+        if verify is not None and not verify(50000):
+            return cliproxyapi.SidecarAnswer(
+                value=None,
+                error_kind="POLICY_BLOCKED",
+                error_code="AI_PEER_NOT_APPROVED",
+                actual_model=None,
+                sidecar_version=None,
+                tokens_in=None,
+                tokens_out=None,
+                latency_ms=1,
+            )
         self.calls.append((endpoint, key, model))
         return cliproxyapi.SidecarAnswer(
             value=self.value,
@@ -412,9 +431,11 @@ def test_concurrent_calls_never_pass_the_cap_together(
     gate = threading.Barrier(6)
     outcomes: list[str] = []
 
-    def slow(endpoint: str, key: str, model: str, text: str) -> cliproxyapi.SidecarAnswer:
+    def slow(
+        endpoint: str, key: str, model: str, text: str, verify: Any
+    ) -> cliproxyapi.SidecarAnswer:
         time.sleep(0.2)
-        return world["complete"](endpoint, key, model, text)
+        return world["complete"](endpoint, key, model, text, verify)
 
     provider._complete = slow
 
@@ -446,7 +467,9 @@ def test_a_call_that_raises_is_settled_failed_and_still_counts(
     _approve_all(world["service"])
     provider: ProfiledProvider = world["provider"]
 
-    def broken(endpoint: str, key: str, model: str, text: str) -> cliproxyapi.SidecarAnswer:
+    def broken(
+        endpoint: str, key: str, model: str, text: str, verify: Any
+    ) -> cliproxyapi.SidecarAnswer:
         raise RuntimeError("adapter fault")
 
     provider._complete = broken
@@ -613,3 +636,20 @@ def test_each_key_is_written_before_the_revision_that_names_it(world: dict[str, 
         )
     assert moved.value.code == "AI_PROFILE_CURRENT_MOVED"
     assert secrets._values == before
+
+
+def test_a_listener_swapped_after_the_probe_never_receives_the_request(
+    world: dict[str, Any], config: AppConfig
+) -> None:
+    """GPT audit of #273: the call's own connection is proven before anything is written on it;
+    another process at its other end gets nothing."""
+    _approve_all(world["service"])
+    world["probe"].peer_process = _serving(world["tmp"], body=b"impostor binary")
+    outcome = world["provider"].execute(TaskRequest("TASK_X", "t", "c"))
+    assert (outcome.ok, outcome.error_code) == (False, "AI_PEER_NOT_APPROVED")
+    assert outcome.error_class is not None and outcome.error_class.value == "POLICY_BLOCKED"
+    assert world["complete"].calls == []
+    with sqlite3.connect(database_path(config.data_dir)) as raw:
+        assert raw.execute("SELECT outcome, error_code FROM ai_provider_calls").fetchall() == [
+            ("FAILED", "AI_PEER_NOT_APPROVED")
+        ]
