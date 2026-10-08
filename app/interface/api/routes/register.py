@@ -89,6 +89,8 @@ class ApplyEnrichmentRequest(BaseModel):
     product_group_id: str = Field(min_length=1, max_length=36)
     task_key: str = Field(min_length=1, max_length=64)
     result_key: str = Field(min_length=1, max_length=64)
+    # The result subject: this Preparation's own target, or the target-free one.
+    result_targeted: bool
     # The exact enrichment result revision the operator saw.
     result_sequence: int = Field(ge=1)
     value_field: str = Field(min_length=1, max_length=64)
@@ -217,6 +219,7 @@ def apply_enrichment(
             product_group_id=request.product_group_id,
             task_key=request.task_key,
             result_key=request.result_key,
+            result_targeted=request.result_targeted,
             result_sequence=request.result_sequence,
             value_field=request.value_field,
             expected_revision_no=request.expected_revision_no,

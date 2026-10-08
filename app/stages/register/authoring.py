@@ -279,8 +279,8 @@ class EnrichmentResultSource(Protocol):
         product_group_id: str,
         task_key: str,
         result_key: str,
-        marketplace_key: str,
-        marketplace_account_id: str,
+        marketplace_key: str | None,
+        marketplace_account_id: str | None,
     ) -> AppliedResult | None: ...
 
 
@@ -298,14 +298,17 @@ class EnrichmentApply:
     """One enrichment result applied to one Preparation field (ADR-0026 §7; AIF-4).
 
     ``field`` is ``name``, ``attribute.<key>`` or ``notice.<key>``: a field whose value carries a
-    provenance. ``result_sequence`` names the exact result revision the operator saw, and
-    ``value_field`` the scalar of its value that becomes the field's value.
+    provenance. The result subject is named whole: its product, task and result key, and
+    ``result_targeted`` (the result of this Preparation's own target, or the target-free one).
+    ``result_sequence`` names the exact revision the operator saw, and ``value_field`` the scalar
+    of its value that becomes the field's value.
     ``expected_revision_no`` is the Preparation revision the operator read."""
 
     field: str
     product_group_id: str
     task_key: str
     result_key: str
+    result_targeted: bool
     result_sequence: int
     value_field: str
     expected_revision_no: int
@@ -542,7 +545,7 @@ class RegistrationPreparationService:
         self, apply: EnrichmentApply, marketplace_key: str, marketplace_account_id: str
     ) -> AppliedResult:
         """The exact result revision the operator named, if it is still the current, fresh OK
-        result of this subject and target; refused otherwise."""
+        result of exactly that subject; refused otherwise."""
         result = (
             None
             if self._enrichment is None
@@ -550,8 +553,8 @@ class RegistrationPreparationService:
                 apply.product_group_id,
                 apply.task_key,
                 apply.result_key,
-                marketplace_key,
-                marketplace_account_id,
+                marketplace_key if apply.result_targeted else None,
+                marketplace_account_id if apply.result_targeted else None,
             )
         )
         if result is None or result.status != "OK" or result.stale or result.value is None:

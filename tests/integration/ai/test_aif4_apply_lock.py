@@ -99,6 +99,7 @@ def _apply(
         "product_group_id": world["group"],
         "task_key": BUNDLE,
         "result_key": "product_name",
+        "result_targeted": False,
         "result_sequence": 1,
         "value_field": "recommended",
         "expected_revision_no": revision,
@@ -242,13 +243,23 @@ def test_only_the_named_result_revision_is_applied(
     assert _apply(world, result_sequence=2).current.revision_no == 2
 
 
+def test_a_targeted_and_a_target_free_result_are_two_subjects(world: dict[str, Any]) -> None:
+    # Only the target-free result exists: naming this Preparation's target finds nothing, and the
+    # target-free one is never taken in its place.
+    with pytest.raises(AppError) as missing:
+        _apply(world, result_targeted=True)
+    assert missing.value.code == "AI_APPLY_RESULT_UNUSABLE"
+    assert missing.value.details["status"] is None
+    assert _apply(world, result_targeted=False).current.revision_no == 2
+
+
 def test_production_has_no_result_to_apply(container: Container) -> None:
     # The production preparation owner reads the production enrichment owner: no provider, so no
     # current result exists and an apply ends there.
     with pytest.raises(AppError) as missing:
         container.registration_preparations.apply_enrichment(
             "no-such-preparation",
-            EnrichmentApply("name", "g", BUNDLE, "product_name", 1, "recommended", 1),
+            EnrichmentApply("name", "g", BUNDLE, "product_name", False, 1, "recommended", 1),
             actor="operator",
         )
     assert missing.value.code == "REGISTER_PREPARATION_NOT_FOUND"

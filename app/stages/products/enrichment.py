@@ -492,18 +492,20 @@ class EnrichmentService:
         product_group_id: str,
         task_key: str,
         result_key: str,
-        marketplace_key: str,
-        marketplace_account_id: str,
+        marketplace_key: str | None,
+        marketplace_account_id: str | None,
     ) -> ResultView | None:
-        """The current result of one subject for one target, with its derived staleness, or
-        ``None``. A target-free result serves any target; a targeted one serves only its own
-        (ADR-0026 §7)."""
-        target = Target(marketplace_key, marketplace_account_id)
+        """The current result of exactly one subject, with its derived staleness, or ``None``.
+        The subject is the whole key, its target included: a target-free subject and a targeted
+        one are two subjects, and neither ever stands in for the other (ADR-0026 §5)."""
+        target = (
+            None
+            if marketplace_key is None or marketplace_account_id is None
+            else Target(marketplace_key, marketplace_account_id)
+        )
         for view in self.results(product_group_id).results:
-            if (view.task_key, view.result_key) != (task_key, result_key):
-                continue
             own = None if view.target is None else Target(**view.target.model_dump())
-            if own is None or own == target:
+            if (view.task_key, view.result_key, own) == (task_key, result_key, target):
                 return view
         return None
 
