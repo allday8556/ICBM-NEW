@@ -948,6 +948,22 @@ class ProductFoundationUnit:
         ).first()
         return None if row is None else (str(row[0]), str(row[1]))
 
+    def bound_items_of_supplier(self, supplier_key: str) -> dict[str, tuple[str, ...]]:
+        """Each source product of ``supplier_key`` with the Items its open bindings name, sorted.
+
+        Read-only. M6-E (ADR-0024 §3) adopts a listing for a source product with exactly one
+        open-bound Item.
+        """
+        found: dict[str, set[str]] = {}
+        for source_product_id, item_id in self.session.execute(
+            select(SourceProduct.source_product_id, SourceBinding.item_id)
+            .join(GroupMember, GroupMember.source_product_uid == SourceProduct.source_product_uid)
+            .join(SourceBinding, SourceBinding.group_member_id == GroupMember.member_id)
+            .where(SourceProduct.supplier_key == supplier_key, SourceBinding.valid_to.is_(None))
+        ):
+            found.setdefault(str(source_product_id), set()).add(str(item_id))
+        return {key: tuple(sorted(found[key])) for key in sorted(found)}
+
     def close_binding(self, binding_id: str) -> None:
         """Close one open binding's validity window. A binding is closed, never edited."""
         row = self.session.get(SourceBinding, binding_id)

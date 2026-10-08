@@ -23,6 +23,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from functools import partial
 from typing import Any, Final, Protocol
 
 from sqlalchemy import select
@@ -112,7 +113,8 @@ class SyncRunView:
 
 @dataclass(frozen=True)
 class ListingStateView:
-    registration_id: str
+    # ``None`` for an adopted listing, which is no REGISTER registration (ADR-0024).
+    registration_id: str | None
     marketplace_product_id: str
     seller_product_code: str
     product_name: str | None
@@ -127,6 +129,9 @@ class ListingStateView:
     error_code: str | None = None
     observed_at: datetime | None = None
     drift: tuple[str, ...] = field(default_factory=tuple)
+    # REGISTRATION (ICBM created it) or ADOPTED (ADR-0024), and the adoption it is.
+    kind: str = "REGISTRATION"
+    adoption_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -164,7 +169,7 @@ def snapshot_sale_price(payload: Mapping[str, Any] | None) -> int | None:
 
 
 def drift_of(
-    observation: ListingObservation | None, registration: RegistrationRecord, frozen: int | None
+    observation: Any, registration: RegistrationRecord | None, frozen: int | None
 ) -> tuple[str, ...]:
     if observation is None or observation.result != OBSERVED:
         return ()
@@ -195,6 +200,8 @@ class ListingSyncService:
         normalize: Normalize,
         interval_s: float,
         marketplace_key: str = "smartstore",
+        seller_code: Callable[[str], str] | None = None,
+        adoptions: Any = None,
     ) -> None:
         self._db = db
         self._clock = clock
@@ -202,6 +209,12 @@ class ListingSyncService:
         self._reader = reader
         self._normalize = normalize
         self._interval_s = interval_s
+        # The provider seller code of an ICBM listing identity (the marketplace's own projection;
+        # SmartStore: ``seller_management_code``). The read-back carries the projection, never the
+        # internal identity, so the comparison is made on it.
+        self._seller_code = seller_code or (lambda identity: identity)
+        # M6-E (ADR-0024 §4): the adopted listings, read back in the same pass.
+        self._adoptions = adoptions
         # The marketplace whose read-back this reader is (only SmartStore is wired).
         self._marketplace_key = marketplace_key
         self._lock = threading.Lock()
@@ -214,6 +227,8 @@ class ListingSyncService:
 
     def overview(self) -> ListingSyncOverview:
         listings = [self._state(record) for record in self._targets(include_inactive=True)]
+        if self._adoptions is not None:
+            listings += [self._adopted_state(adoption) for adoption in self._adoptions.all()]
         with self._db.read() as session:
             last = session.scalars(
                 select(ListingSyncRun).order_by(ListingSyncRun.started_at.desc()).limit(1)
@@ -260,13 +275,21 @@ class ListingSyncService:
             )
         try:
             targets = self._targets(include_inactive=False)
-            run_id = self._start(trigger, len(targets), correlation_id)
+            adopted = () if self._adoptions is None else self._adoptions.active()
+            run_id = self._start(trigger, len(targets) + len(adopted), correlation_id)
             observed = failed = 0
             try:
                 if not self._reader.available():
                     return self._finish(run_id, SESSION_UNAVAILABLE, 0, 0)
-                for record in targets:
-                    result = self._visit(run_id, record, correlation_id)
+                visits = [
+                    partial(self._visit, run_id, record, correlation_id) for record in targets
+                ]
+                visits += [
+                    partial(self._visit_adopted, run_id, adoption, correlation_id)
+                    for adoption in adopted
+                ]
+                for visit in visits:
+                    result = visit()
                     if result == RATE_LIMITED:
                         return self._finish(run_id, RATE_LIMITED, observed, failed)
                     if result == READ_FAILED:
@@ -319,6 +342,95 @@ class ListingSyncService:
             if not written:
                 self._observe(run_id, record, READ_FAILED, error_code=UNREADABLE)
             return READ_FAILED
+
+    def _visit_adopted(self, run_id: str, adoption: Any, correlation_id: str) -> str:
+        """Read one adopted listing back (ADR-0024 §4): OBSERVED, NOT_FOUND, READ_FAILED or
+        RATE_LIMITED. Provider evidence of removal ends the adoption; nothing is ever written to
+        the marketplace."""
+        assert self._adoptions is not None
+        written = False
+        try:
+            try:
+                retained = self._reader.read(marketplace_product_id=adoption.marketplace_product_id)
+            except AppError as exc:
+                if exc.error_class is ErrorClass.RATE_LIMITED:
+                    return RATE_LIMITED
+                if exc.details.get("http_status") != NOT_FOUND_STATUS:
+                    self._adoptions.observe(
+                        run_id, adoption.adoption_id, READ_FAILED, error_code=exc.code
+                    )
+                    return READ_FAILED
+                written = True
+                self._adoptions.observe(run_id, adoption.adoption_id, NOT_FOUND)
+                self._adoptions.record_removed(
+                    adoption.adoption_id, "HTTP_404", correlation_id=correlation_id
+                )
+                return NOT_FOUND
+            fields = self._normalize(retained)
+            if fields.sale_status == DELETED_SALE_STATUS:
+                written = True
+                self._adoptions.observe(run_id, adoption.adoption_id, NOT_FOUND)
+                self._adoptions.record_removed(
+                    adoption.adoption_id, "STATUS_DELETE", correlation_id=correlation_id
+                )
+                return NOT_FOUND
+            written = True
+            self._adoptions.observe(
+                run_id,
+                adoption.adoption_id,
+                OBSERVED,
+                sale_status=fields.sale_status,
+                display_status=fields.display_status,
+                sale_price=fields.sale_price,
+                stock_quantity=fields.stock_quantity,
+                seller_code_matches=(
+                    None
+                    if fields.seller_management_code is None
+                    else fields.seller_management_code == adoption.seller_code
+                ),
+            )
+            return OBSERVED
+        except Exception:
+            logger.warning(
+                "operate.adopted_visit_failed",
+                extra={"adoption_id": adoption.adoption_id},
+                exc_info=True,
+            )
+            if not written:
+                self._adoptions.observe(
+                    run_id, adoption.adoption_id, READ_FAILED, error_code=UNREADABLE
+                )
+            return READ_FAILED
+
+    def _adopted_state(self, adoption: Any) -> ListingStateView:
+        assert self._adoptions is not None
+        last = self._adoptions.last_observation(adoption.adoption_id)
+        base = ListingStateView(
+            registration_id=None,
+            marketplace_product_id=adoption.marketplace_product_id,
+            seller_product_code=adoption.seller_code,
+            product_name=None,
+            lifecycle_state=adoption.state,
+            deleted_by_icbm=False,
+            snapshot_sale_price=None,
+            kind="ADOPTED",
+            adoption_id=adoption.adoption_id,
+        )
+        if last is None:
+            return base
+        return ListingStateView(
+            **{
+                **base.__dict__,
+                "last_result": last.result,
+                "sale_status": last.sale_status,
+                "display_status": last.display_status,
+                "sale_price": last.sale_price,
+                "stock_quantity": last.stock_quantity,
+                "error_code": last.error_code,
+                "observed_at": last.observed_at,
+                "drift": drift_of(last, None, None),
+            }
+        )
 
     # ------------------------------------------------------------------ internals
 
@@ -394,7 +506,8 @@ class ListingSyncService:
                     seller_code_matches=(
                         None
                         if fields is None or fields.seller_management_code is None
-                        else fields.seller_management_code == record.seller_product_code
+                        else fields.seller_management_code
+                        == self._seller_code(record.seller_product_code)
                     ),
                     error_code=error_code,
                     observed_at=self._clock.now(),

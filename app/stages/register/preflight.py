@@ -22,7 +22,7 @@ No provider is called: no duplicate lookup, no upload, no marketplace read. Prov
 evidence and prepared provider assets are inputs a later adapter supplies.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, Protocol
 
 from app.platform.core.errors import AppError, NotFoundError, PolicyBlockedError
@@ -98,6 +98,7 @@ class RegistrationPreflightService:
         metadata: RegistrationMetadataSource,
         policies: RegistrationPolicySource,
         detail_profiles: DetailProfileSource | None = None,
+        adopted_items: Callable[[str, Sequence[str]], tuple[str, ...]] | None = None,
     ) -> None:
         self._registrations = registrations
         self._detail_profiles = detail_profiles
@@ -107,6 +108,9 @@ class RegistrationPreflightService:
         self._capability = capability
         self._metadata = metadata
         self._policies = policies
+        # M6-E (ADR-0024 §5): the ACTIVE adopted listings of a marketplace whose Item is one of
+        # the given ones — a listing ICBM did not create but operates. None when not wired.
+        self._adopted_items = adopted_items
 
     def candidate(
         self, request: PreflightRequest, *, identity_generation: int | None = None
@@ -241,6 +245,11 @@ class RegistrationPreflightService:
             identity_generation=generation,
             conflicts=tuple(ConflictState(c.intent_id, c.state.value) for c in conflicts),
             live_registrations=tuple(LiveRegistration(r) for r in live),
+            adopted_listings=(
+                ()
+                if self._adopted_items is None
+                else tuple(self._adopted_items(draft.marketplace_key, unit_ids))
+            ),
             metadata=metadata,
             target=target,
             detail_profile=self.detail_profile(target.detail_composition_revision),

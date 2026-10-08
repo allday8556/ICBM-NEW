@@ -34,7 +34,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import partial
-from typing import Final, TypeVar
+from typing import Any, Final, TypeVar
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -54,7 +54,12 @@ from app.stages.operate.order_facts import (
     ProductOrderFacts,
     ShippingRecord,
 )
-from app.stages.operate.order_models import OrderStatusChange, OrderSyncRun, ProductOrder
+from app.stages.operate.order_models import (
+    OrderAdoptionLink,
+    OrderStatusChange,
+    OrderSyncRun,
+    ProductOrder,
+)
 from app.stages.register.store import RegistrationRecord, RegistrationStore
 
 logger = logging.getLogger("icbm.operate.orders")
@@ -240,6 +245,11 @@ class OrderView:
     phone_masked: str | None
     shipping_state: str
     last_changed_at: datetime | None
+    # An order of an adopted listing (ADR-0024 §4): the adoption and its source, by link.
+    adoption_id: str | None = None
+    adopted_item_id: str | None = None
+    adopted_supplier_key: str | None = None
+    adopted_source_product_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -271,7 +281,9 @@ def _run_view(row: OrderSyncRun) -> OrderRunView:
     )
 
 
-def _order_view(row: ProductOrder, product_label: str | None) -> OrderView:
+def _order_view(
+    row: ProductOrder, product_label: str | None, link: OrderAdoptionLink | None = None
+) -> OrderView:
     return OrderView(
         product_order_id=row.product_order_id,
         order_id=row.order_id,
@@ -297,6 +309,10 @@ def _order_view(row: ProductOrder, product_label: str | None) -> OrderView:
         phone_masked=row.phone_masked,
         shipping_state=row.shipping_state,
         last_changed_at=row.last_changed_at,
+        adoption_id=None if link is None else link.adoption_id,
+        adopted_item_id=None if link is None else link.item_id,
+        adopted_supplier_key=None if link is None else link.supplier_key,
+        adopted_source_product_id=None if link is None else link.source_product_id,
     )
 
 
@@ -341,6 +357,7 @@ class OrderSyncService:
         marketplace_key: str = "smartstore",
         pause_s: float = PROVIDER_PAUSE_S,
         sleep: Callable[[float], None] = time.sleep,
+        adoptions: Any = None,
     ) -> None:
         self._db = db
         self._clock = clock
@@ -354,6 +371,8 @@ class OrderSyncService:
         self._retention = timedelta(days=retention_days)
         self._marketplace_key = marketplace_key
         self._attested = order_read_attested
+        # M6-E (ADR-0024 §4): the adopted listings an UNMATCHED order may be linked to.
+        self._adoptions = adoptions
         self._pause_s = pause_s
         self._sleep = sleep
         self._last_call: float | None = None
@@ -398,6 +417,14 @@ class OrderSyncService:
                 .limit(LIST_LIMIT)
             ).all()
             total = int(session.scalar(select(func.count()).select_from(ProductOrder)) or 0)
+            links = {
+                link.product_order_id: link
+                for link in session.scalars(
+                    select(OrderAdoptionLink).where(
+                        OrderAdoptionLink.product_order_id.in_([r.product_order_id for r in rows])
+                    )
+                )
+            }
             return OrdersOverview(
                 capability=capability,
                 attested=self.attested(),
@@ -405,7 +432,12 @@ class OrderSyncService:
                 last_run=None if last is None else _run_view(last),
                 synced_until=self._cursor(session),
                 total=total if capability == CONNECTED else None,
-                orders=tuple(_order_view(row, self._label(row.registration_id)) for row in rows),
+                orders=tuple(
+                    _order_view(
+                        row, self._label(row.registration_id), links.get(row.product_order_id)
+                    )
+                    for row in rows
+                ),
             )
 
     def shipping(self, product_order_id: str, *, actor: str, correlation_id: str) -> ShippingRecord:
@@ -529,8 +561,10 @@ class OrderSyncService:
                     # change reported late is never missed (ADR-0023 §5; GPT audit, PR #250).
                     window_from = window_to - OVERLAP
                 # Orders kept without a resolution are settled against the registrations
-                # as they are now, whether or not they changed again.
+                # as they are now, whether or not they changed again; then each UNMATCHED order
+                # of an adopted listing is linked to it (ADR-0024 §4).
                 self.settle_pending()
+                self.link_adopted()
             except _Stop as stop:
                 return self._finish(run_id, stop.outcome, synced, totals, stop.error_code)
             except BaseException:
@@ -778,6 +812,45 @@ class OrderSyncService:
                 self._settle_resolution(row, identity, registrations, now)
                 settled += row.resolution is not None
         return settled
+
+    def link_adopted(self) -> int:
+        """Link every UNMATCHED order of an ``ACTIVE`` adopted listing to that adoption, by its
+        origin product id only (ADR-0024 §4). The order's resolution is never rewritten, and a
+        link, once recorded, never changes. Returns how many were linked."""
+        if self._adoptions is None:
+            return 0
+        now = self._clock.now()
+        linked = 0
+        with self._db.write() as session:
+            rows = session.scalars(
+                select(ProductOrder)
+                .outerjoin(
+                    OrderAdoptionLink,
+                    OrderAdoptionLink.product_order_id == ProductOrder.product_order_id,
+                )
+                .where(
+                    ProductOrder.resolution == UNMATCHED,
+                    ProductOrder.original_product_id.is_not(None),
+                    OrderAdoptionLink.product_order_id.is_(None),
+                )
+            ).all()
+            for row in rows:
+                assert row.original_product_id is not None
+                adoption = self._adoptions.active_by_product(row.original_product_id)
+                if adoption is None:
+                    continue
+                session.add(
+                    OrderAdoptionLink(
+                        product_order_id=row.product_order_id,
+                        adoption_id=adoption.adoption_id,
+                        item_id=adoption.item_id,
+                        supplier_key=adoption.supplier_key,
+                        source_product_id=adoption.source_product_id,
+                        linked_at=now,
+                    )
+                )
+                linked += 1
+        return linked
 
     def _resolve(
         self, fact: ProductOrderFacts, registrations: Sequence[RegistrationRecord]

@@ -85,6 +85,8 @@ class ListedSource:
     source_product_id: str
     registration_ids: tuple[str, ...]
     product_names: tuple[str, ...]
+    # M6-E (ADR-0024 §4): the ACTIVE adopted listings that sell this source product.
+    adoption_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -137,6 +139,7 @@ class StockRecheckService:
         interval_s: float,
         cap: int,
         marketplace_key: str = "smartstore",
+        adoptions: Any = None,
     ) -> None:
         self._db = db
         self._clock = clock
@@ -147,6 +150,8 @@ class StockRecheckService:
         self._interval_s = interval_s
         self._cap = cap
         self._marketplace_key = marketplace_key
+        # M6-E (ADR-0024 §4): adopted listings are listed sources too.
+        self._adoptions = adoptions
         self._lock = threading.Lock()
 
     @property
@@ -177,8 +182,13 @@ class StockRecheckService:
                     ids.append(record.registration_id)
                 if label and label not in names:
                     names.append(label)
+        adopted: dict[tuple[str, str], list[str]] = {}
+        for adoption in () if self._adoptions is None else self._adoptions.active():
+            key = (adoption.supplier_key, adoption.source_product_id)
+            adopted.setdefault(key, []).append(adoption.adoption_id)
+            found.setdefault(key, ([], []))
         return tuple(
-            ListedSource(key[0], key[1], tuple(ids), tuple(names))
+            ListedSource(key[0], key[1], tuple(ids), tuple(names), tuple(adopted.get(key, ())))
             for key, (ids, names) in sorted(found.items())
         )
 
