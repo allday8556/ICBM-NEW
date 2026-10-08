@@ -178,7 +178,7 @@ The owner decided to store what shipping needs. This is the lifecycle contract A
 - **Evidence:** what is stored, decrypted and deleted is audited by id, never by content.
 - **Fixtures:** tests never use real order data (rule 07 §7.3).
 - **Implementation (M6-D):**
-  - **Clear fields:** exactly the list above. The provider's product name and option text, the carrier, the tracking number and the delivery state are not retained (tracking is M6.5). 주문관리 names an order by ICBM's own registration (its frozen Snapshot name) or by its origin product id.
+  - **Clear fields:** exactly the list above. The provider's product name and option text, the carrier, the tracking number and the delivery state are not retained (tracking is M6.5). *(Amendment note: ADR-0025 §6 widens this allow-list by the delivery members the M6.5 read-back needs; the shipping record and its lifecycle are unchanged.)* 주문관리 names an order by ICBM's own registration (its frozen Snapshot name) or by its origin product id.
   - **Encryption:** the shipping record is AES-256-GCM sealed under `operate:orders:shipping_key`, held by the OS secret store. The product-order id is bound into the authenticated data.
   - **Masks:** stored in clear beside the ciphertext so lists never decrypt: the name keeps its first and last letters, and a phone keeps its first group and last four digits.
   - **Resealing:** a record is sealed when first seen, and resealed only on a `DELIVERY_ADDRESS_CHANGED`. A deleted record is never kept again.
