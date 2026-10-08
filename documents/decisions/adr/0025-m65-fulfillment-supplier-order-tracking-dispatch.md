@@ -198,6 +198,19 @@ Unchanged from ADR-0023 §7, with three additions:
 Each step is its own PR (batched where small), audited, with CI.
 
 1. **M65-A:** the Fulfillment owner (migration, supplier order, tracking capture, history), the carrier list, the routes and the 주문관리 fulfillment panel. Provider-zero.
+   - **Implementation note (M65-A):**
+     - **Storage:** migration `0052` holds two tables.
+       - `operate_supplier_orders`: one row per product order. The identity columns are immutable, and every update must be the next revision (trigger). Rows are never deleted.
+       - `operate_supplier_order_history`: append-only, unique by order and revision.
+     - **Service:** `FulfillmentService` (`app/stages/operate/fulfillment.py`).
+     - **Carriers:** `integrations/marketplaces/smartstore/delivery_companies.py` (§4), injected by the composition root.
+     - **Routes:**
+       - `GET /api/v1/operate/carriers`;
+       - `GET /api/v1/operate/orders/{id}/fulfillment`;
+       - `PUT /api/v1/operate/orders/{id}/supplier-order`, with `expected_revision` (`null` only for the first record);
+       - `PUT /api/v1/operate/orders/{id}/tracking`;
+       - each order in `GET /api/v1/operate/orders` carries its `fulfillment_state`.
+     - **Screen:** the 주문관리 "처리" column opens the panel.
 2. **M65-B:** the delivery read-back of §6: the widened allow-list, the order's delivery columns and the new mapping revision. The read endpoint is unchanged.
 3. **M65-C:** the dispatch adoption (§5.1) and the DISPATCH stage (§5): the grant command, the attempt owner, the send-time admission, the verification and the "발송처리" action.
 4. **M6.5 acceptance:** on the exact merged main, recorded in `documents/acceptance/milestones/M6.5.md`.

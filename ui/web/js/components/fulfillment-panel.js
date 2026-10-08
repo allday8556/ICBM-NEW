@@ -1,0 +1,178 @@
+// M6.5 (ADR-0025 §3, §4, §8): one order's fulfillment. The operator orders from the supplier by
+// hand — 배송지 복사 opens the shipping record through the audited route and copies it — then
+// records the supplier's order number and the purchase amount, and types the carrier and tracking
+// number in. Every save sends the revision it read; a stale one is refused and the panel reloads.
+// Nothing here writes to the marketplace or to a supplier.
+
+import { ApiError, getJson, sendJson } from '../core/api.js';
+import { h } from '../core/dom.js';
+import { dotDateTime } from '../core/format.js';
+import { toast } from '../core/toast.js';
+
+const ORDERS = '/api/v1/operate/orders';
+const CARRIERS = '/api/v1/operate/carriers';
+// The carriers most first-vertical suppliers ship with, offered first (the rest follow).
+const COMMON = ['CJGLS', 'HANJIN', 'HYUNDAI', 'KGB', 'EPOST'];
+
+export const FULFILLMENT_STATE = {
+  NOT_FULFILLABLE: ['처리 불가', 'bad'],
+  NOT_PAYED: ['처리 대상 아님', ''],
+  AWAITING_SUPPLIER_ORDER: ['공급사 주문 전', 'warn'],
+  SUPPLIER_ORDERED: ['공급사 주문됨', 'info'],
+  TRACKING_CAPTURED: ['송장 입력됨', 'good'],
+};
+const REASON = {
+  OPERATE_ORDER_NOT_FULFILLABLE: 'ICBM 상품에 연결되지 않은 주문입니다 (연결됨 또는 가져온 상품만 처리할 수 있습니다).',
+  OPERATE_ORDER_NOT_PAYED: '결제 완료 상태의 주문만 공급사 주문과 송장을 기록할 수 있습니다.',
+};
+const ACTION = {
+  RECORDED: '공급사 주문 기록',
+  AMENDED: '공급사 주문 수정',
+  TRACKING_CAPTURED: '송장 입력',
+  TRACKING_AMENDED: '송장 수정',
+};
+
+let carrierList = null;
+
+async function carriers() {
+  if (carrierList === null) carrierList = (await getJson(CARRIERS)).carriers;
+  return carrierList;
+}
+
+function message(error) {
+  return error instanceof ApiError ? error.message : String(error?.message ?? error);
+}
+
+function won(value) {
+  return typeof value === 'number' ? `${value.toLocaleString('ko-KR')}원` : '—';
+}
+
+function field(label, input) {
+  return h('label', { class: 'field' }, h('span', { class: 'mini' }, label), input);
+}
+
+async function copyShipping(productOrderId, button) {
+  button.disabled = true;
+  try {
+    const record = await getJson(`${ORDERS}/${encodeURIComponent(productOrderId)}/shipping`);
+    const text = [
+      record.recipient_name ?? '',
+      [record.phone1, record.phone2].filter(Boolean).join(' / '),
+      `(${record.zip_code ?? ''}) ${record.base_address ?? ''} ${record.detail_address ?? ''}`.trim(),
+      record.memo ? `메모: ${record.memo}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    await navigator.clipboard.writeText(text);
+    toast('배송지 복사', '수령인·연락처·주소를 복사했습니다. 공급사 주문서에 붙여넣으세요.');
+  } catch (error) {
+    toast('배송지 복사', message(error));
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function supplierOrderForm(view, onSaved) {
+  const reference = h('input', { type: 'text', maxlength: '100', value: view.supplier_order_ref ?? '', 'data-field': 'supplier-order-ref' });
+  const amount = h('input', { type: 'number', min: '0', step: '1', value: view.purchase_amount ?? '', 'data-field': 'purchase-amount' });
+  const save = h('button', { type: 'button', class: 'btn blue', 'data-action': 'save-supplier-order' }, view.revision ? '공급사 주문 수정' : '공급사 주문 기록');
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    try {
+      const saved = await sendJson('PUT', `${ORDERS}/${encodeURIComponent(view.product_order_id)}/supplier-order`, {
+        supplier_order_ref: reference.value.trim(),
+        purchase_amount: Number.parseInt(amount.value, 10),
+        expected_revision: view.revision ?? null,
+      });
+      toast('공급사 주문', '기록했습니다.');
+      onSaved(saved);
+    } catch (error) {
+      toast('공급사 주문', message(error));
+      save.disabled = false;
+      if (error instanceof ApiError && error.status === 409) onSaved(null);
+    }
+  });
+  return h('div', { class: 'fulfillment-step', 'data-step': 'supplier-order' }, h('b', {}, '1. 공급사 주문'), field('공급사 주문번호', reference), field('구매가 (원)', amount), save);
+}
+
+function trackingForm(view, list, onSaved) {
+  const ordered = [...COMMON.map((code) => list.find((c) => c.code === code)).filter(Boolean), ...list.filter((c) => !COMMON.includes(c.code))];
+  const carrier = h(
+    'select',
+    { 'data-field': 'carrier-code' },
+    h('option', { value: '' }, '택배사 선택'),
+    ...ordered.map((c) => h('option', { value: c.code }, c.name)),
+  );
+  if (view.carrier_code) carrier.value = view.carrier_code;
+  const number = h('input', { type: 'text', maxlength: '50', value: view.tracking_number ?? '', 'data-field': 'tracking-number' });
+  const save = h('button', { type: 'button', class: 'btn blue', 'data-action': 'save-tracking' }, view.tracking_number ? '송장 수정' : '송장 입력');
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    try {
+      const saved = await sendJson('PUT', `${ORDERS}/${encodeURIComponent(view.product_order_id)}/tracking`, {
+        carrier_code: carrier.value,
+        tracking_number: number.value.trim(),
+        expected_revision: view.revision,
+      });
+      toast('송장', '입력했습니다.');
+      onSaved(saved);
+    } catch (error) {
+      toast('송장', message(error));
+      save.disabled = false;
+      if (error instanceof ApiError && error.status === 409) onSaved(null);
+    }
+  });
+  return h('div', { class: 'fulfillment-step', 'data-step': 'tracking' }, h('b', {}, '2. 송장'), field('택배사', carrier), field('송장번호', number), save);
+}
+
+function history(view) {
+  if (!view.history.length) return null;
+  return h(
+    'ul',
+    { class: 'mini', 'data-role': 'fulfillment-history' },
+    ...view.history.map((entry) =>
+      h(
+        'li',
+        {},
+        `${dotDateTime(entry.recorded_at)} · ${ACTION[entry.action] ?? entry.action} · 주문번호 ${entry.supplier_order_ref} · ${won(entry.purchase_amount)}${entry.tracking_number ? ` · 송장 ${entry.tracking_number}` : ''}`,
+      ),
+    ),
+  );
+}
+
+// The panel for one order, opened from its row. ``onChanged`` reloads the list after a save.
+export function fulfillmentPanel(order, onChanged) {
+  const box = h('div', { class: 'fulfillment-panel', 'data-role': 'fulfillment', 'data-order': order.product_order_id }, h('span', { class: 'mini' }, '불러오는 중…'));
+  const render = async (view) => {
+    try {
+      const current = view ?? (await getJson(`${ORDERS}/${encodeURIComponent(order.product_order_id)}/fulfillment`));
+      const [label, tone] = FULFILLMENT_STATE[current.state] ?? [current.state, ''];
+      box.setAttribute('data-fulfillment', current.state);
+      const head = h(
+        'div',
+        { class: 'supplier-head-row' },
+        h('span', { class: `chip ${tone}`.trim() }, label),
+        current.supplier_key ? h('span', { class: 'mini' }, `공급사 ${current.supplier_key} · 상품 ${current.source_product_id}`) : null,
+      );
+      if (current.state === 'NOT_FULFILLABLE' || (current.state === 'NOT_PAYED' && !current.revision)) {
+        box.replaceChildren(head, h('div', { class: 'note' }, REASON[current.reason] ?? current.reason ?? ''));
+        return;
+      }
+      const copy = h('button', { type: 'button', class: 'btn', 'data-action': 'copy-shipping' }, '배송지 복사');
+      copy.disabled = order.shipping_state !== 'STORED';
+      copy.addEventListener('click', () => copyShipping(order.product_order_id, copy));
+      const saved = (next) => {
+        render(next ?? undefined);
+        onChanged?.();
+      };
+      const steps = [head, h('div', { class: 'supplier-head-row' }, copy, h('span', { class: 'mini' }, '공급사 주문서에 붙여넣을 배송지를 복사합니다 (열람 기록이 남습니다).')), supplierOrderForm(current, saved)];
+      if (current.revision) steps.push(trackingForm(current, await carriers(), saved));
+      steps.push(history(current));
+      box.replaceChildren(...steps.filter(Boolean));
+    } catch (error) {
+      box.replaceChildren(h('span', { class: 'chip warn' }, `처리 정보를 불러오지 못했습니다 · ${message(error)}`));
+    }
+  };
+  render();
+  return box;
+}
