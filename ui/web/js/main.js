@@ -58,6 +58,8 @@ async function show(route) {
   hideHelp();
   closeModal();
   setActiveNav(page.key);
+  // A page opened in its own tab (the product editor) is drawn without the application chrome.
+  document.body.classList.toggle('bare-page', Boolean(page.bare));
   document.title = `${page.title} · ICBM`;
   content.setAttribute('aria-busy', 'true');
   let node;

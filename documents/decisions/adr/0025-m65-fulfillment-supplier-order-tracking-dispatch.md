@@ -1,6 +1,6 @@
 # ADR-0025 — M6.5 fulfillment contract: the supplier order record, tracking capture, the SmartStore dispatch stage and the delivery read-back
 
-Status: **ACCEPTED** 2026-10-08. It is the M6.5 kickoff contract and lands with its own PR.
+Status: **ACCEPTED** 2026-10-08. It is the M6.5 kickoff contract and lands by itself, before any M6.5 code (each implementation slice cites it as canon).
 
 Decision owners:
 - **Product directions:** the owner, in Issue #219.
@@ -92,7 +92,7 @@ The shipping record is decrypted only through the Orders owner's audited open (A
 ## 4. Tracking capture
 
 - The operator enters a **carrier code** and a **tracking number**. Neither is read from the supplier (`6053008136`).
-- **Carrier codes** are the documented `deliveryCompanyCode` enumeration (packet `6053086881` B-2). They are pinned in the SmartStore adapter (`integrations/marketplaces/smartstore/delivery_companies.py`) and served to the screen, and any other code is refused before anything is stored. The reference's one row whose code column holds Korean text (`GS더프레시` / `GSTHEFRESH`) is left out, because which of the two is the code is not stated.
+- **Carrier codes** are the documented `deliveryCompanyCode` enumeration (packet `6053086881` B-2). They are pinned in the SmartStore adapter and served to the screen, and any other code is refused before anything is stored. The reference's one row whose code column holds Korean text (`GS더프레시` / `GSTHEFRESH`) is left out, because which of the two is the code is not stated.
 - **The tracking number** is 1–50 characters of digits, Latin letters and hyphens. This is an ICBM policy: the reference states only a size, about 100 bytes.
 - **Capture needs a supplier order.** A tracking number exists only on a recorded supplier order, and only while the order is `PAYED` without a claim.
 - **Amending:** allowed until a dispatch attempt for the order opens (§5). From then on, the carrier and tracking number are frozen.
@@ -197,12 +197,13 @@ Unchanged from ADR-0023 §7, with three additions:
 
 Each step is its own PR (batched where small), audited, with CI.
 
-1. **M65-A:** this contract, the Fulfillment owner (migration, supplier order, tracking capture, history), the carrier list, the routes and the 주문관리 fulfillment panel. Provider-zero.
-   - **Implementation:**
+1. **M65-A:** the Fulfillment owner (migration, supplier order, tracking capture, history), the carrier list, the routes and the 주문관리 fulfillment panel. Provider-zero.
+   - **Implementation note (M65-A):**
      - **Storage:** migration `0052` holds two tables.
        - `operate_supplier_orders`: one row per product order. The identity columns are immutable, and every update must be the next revision (trigger). Rows are never deleted.
        - `operate_supplier_order_history`: append-only, unique by order and revision.
-     - **Service:** `FulfillmentService`.
+     - **Service:** `FulfillmentService` (`app/stages/operate/fulfillment.py`).
+     - **Carriers:** `integrations/marketplaces/smartstore/delivery_companies.py` (§4), injected by the composition root.
      - **Routes:**
        - `GET /api/v1/operate/carriers`;
        - `GET /api/v1/operate/orders/{id}/fulfillment`;

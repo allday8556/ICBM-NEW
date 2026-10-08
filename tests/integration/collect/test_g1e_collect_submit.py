@@ -391,7 +391,8 @@ def test_the_filtered_list_pages_in_the_same_total_order(
 def test_a_bad_filter_or_cursor_is_refused_and_writes_nothing(
     api: TestClient, config: AppConfig
 ) -> None:
-    settled(api, submit(api, "41").json()["collection_run_id"])
+    # The baseline waits for the job to materialize its Product too: nothing may change after it.
+    settled_and_job_terminal(api, submit(api, "41").json()["collection_run_id"])
     before = everything(config)
     for params in ({"outcome": "DONE"}, {"facts_status": "ABSENT"}):
         assert api.get(RUNS, params=params, headers=CLIENT).status_code == 422
