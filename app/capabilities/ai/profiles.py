@@ -30,6 +30,7 @@ from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.capabilities.ai.profile_models import (
     AIProviderCall,
@@ -85,6 +86,7 @@ AI_ROUTING_UPDATES_ON: Final = "AI_ROUTING_UPDATES_ON"
 AI_DATA_TRANSFER_NOT_APPROVED: Final = "AI_DATA_TRANSFER_NOT_APPROVED"
 AI_DAILY_CAP_REACHED: Final = "AI_DAILY_CAP_REACHED"
 AI_SIDECAR_KEY_UNREADABLE: Final = "AI_SIDECAR_KEY_UNREADABLE"
+AI_PROFILE_UNREADABLE: Final = "AI_PROFILE_UNREADABLE"
 
 Action = Literal["CONFIGURE", "APPROVE_EXECUTABLE", "APPROVE_ROUTING", "DATA_TRANSFER"]
 
@@ -323,6 +325,14 @@ class ProfiledProvider:
         )
 
     def capability_report(self) -> CapabilityReport:
+        """The ``ai`` capability. A capability never fails core readiness (ADR-0012 §9): a profile
+        store that cannot be read, as before the schema is migrated, is a degraded capability."""
+        try:
+            return self._capability_report()
+        except SQLAlchemyError:
+            return _report(CapabilityStatus.DEGRADED, AI_PROFILE_UNREADABLE)
+
+    def _capability_report(self) -> CapabilityReport:
         current = self._store.current()
         if current is None:
             return _report(CapabilityStatus.NOT_CONFIGURED, "no AI provider is configured")

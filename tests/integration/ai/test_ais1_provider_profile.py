@@ -340,3 +340,12 @@ def test_the_routes_configure_and_read_the_profile(config: AppConfig) -> None:
         # Nothing serves that port: nothing can be approved, and nothing is ready.
         assert body["observed"]["serving"] is False
         assert body["capability"]["status"] == "NOT_CONFIGURED"
+
+
+def test_an_unreadable_profile_store_degrades_the_capability_and_never_raises(
+    world: dict[str, Any], config: AppConfig
+) -> None:
+    with sqlite3.connect(database_path(config.data_dir)) as raw:
+        raw.execute("ALTER TABLE ai_provider_profile_current RENAME TO moved_away")
+    report = world["provider"].capability_report()
+    assert (report.status, report.detail) == (CapabilityStatus.DEGRADED, "AI_PROFILE_UNREADABLE")
