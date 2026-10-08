@@ -1461,6 +1461,27 @@ class RegistrationUnit:
         )
         return self._preparation_record(row)
 
+    def note_enrichment_applied(
+        self,
+        preparation_id: str,
+        *,
+        revision_no: int,
+        field: str,
+        enrichment: Mapping[str, Any],
+        actor: str,
+        correlation_id: str,
+    ) -> None:
+        """ADR-0026 AIF-4: which enrichment result one revision applied to one field, by ids and
+        fingerprint only, in the unit of work that appended the revision."""
+        self._event(
+            AuditEventType.AI_ENRICHMENT_APPLIED,
+            "apply_enrichment",
+            actor,
+            correlation_id,
+            preparation_id,
+            {"revision_no": revision_no, "field": field, **enrichment},
+        )
+
     def _append_revision(
         self,
         preparation: RegistrationPreparation,

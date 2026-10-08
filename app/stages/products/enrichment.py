@@ -487,6 +487,28 @@ class EnrichmentService:
             product_group_id=product_group_id, ai_configured=identity is not None, results=views
         )
 
+    def current_result(
+        self,
+        product_group_id: str,
+        task_key: str,
+        result_key: str,
+        marketplace_key: str | None,
+        marketplace_account_id: str | None,
+    ) -> ResultView | None:
+        """The current result of exactly one subject, with its derived staleness, or ``None``.
+        The subject is the whole key, its target included: a target-free subject and a targeted
+        one are two subjects, and neither ever stands in for the other (ADR-0026 §5)."""
+        target = (
+            None
+            if marketplace_key is None or marketplace_account_id is None
+            else Target(marketplace_key, marketplace_account_id)
+        )
+        for view in self.results(product_group_id).results:
+            own = None if view.target is None else Target(**view.target.model_dump())
+            if (view.task_key, view.result_key, own) == (task_key, result_key, target):
+                return view
+        return None
+
     # -------------------------------------------------------------- inputs
 
     def _inputs(

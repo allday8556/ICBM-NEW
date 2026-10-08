@@ -76,6 +76,7 @@ AIF-2 added the provider port `provider.py`, the request `composer.py` and `exec
 `app/capabilities/ai/`, and one integration suite.
 AIF-3 added PRODUCT DB's enrichment owner `app/stages/products/enrichment.py` and its model, the
 routes `app/interface/api/routes/enrichment.py`, migration `0055` and one integration suite.
+AIF-4 added the Preparation's AI apply command (in the register owner) and one integration suite.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -129,11 +130,11 @@ payload or external call and leaves legacy Item economics unchanged.
 | `integrations/` | 47 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 26 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 296 | tests |
+| `tests/` | 297 | tests |
 | `tests/contracts/` | 10 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 124 | integration tests by runtime owner |
+| `tests/integration/` | 125 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 105 | unit tests by runtime owner |
 | `ui/` | 63 | operator clients: the served web client and the capture extension |
