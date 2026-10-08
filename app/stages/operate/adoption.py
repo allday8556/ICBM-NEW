@@ -6,7 +6,7 @@ behind
 :class:`~app.stages.operate.adoption_facts.ListingFinder`; nothing here writes the marketplace.
 
 **Identity** (M6E-02, M6E-03). The convention gives the one code a source product's listing would
-carry (``kmretail`` 287 → ``km287``). Only an exact ``STOREFARM`` candidate whose origin read-back
+carry (``kmretail`` 287 → ``KM287``). Only an exact ``STOREFARM`` candidate whose origin read-back
 carries the same code and is not ``DELETE`` is adopted, for a source product with exactly one
 open-bound Item. Never by name. At most one ``ACTIVE`` adoption per source and per listing; an
 adoption is never rewritten, it ends only as ``EXTERNALLY_REMOVED`` on provider evidence and stays
@@ -46,9 +46,10 @@ NOT_SINGLE_ITEM: Final = "NOT_SINGLE_ITEM"
 LISTING_TAKEN: Final = "LISTING_TAKEN"
 NOT_REACHED: Final = "NOT_REACHED"
 
-# ADR-0024 §2: owner-declared seller-code conventions (Issue #219 ``6049563563``). A supplier not
-# here has no convention, and none of its source products is ever adopted.
-CONVENTIONS: Final[Mapping[str, str]] = {"kmretail": "km{source_product_id}"}
+# ADR-0024 §2: owner-declared seller-code conventions (Issue #219 ``6049563563``; the KM code is
+# upper-case ``KM``, as the provider's listings carry it — correction ``6051294742``). A supplier
+# not here has no convention, and none of its source products is ever adopted.
+CONVENTIONS: Final[Mapping[str, str]] = {"kmretail": "KM{source_product_id}"}
 
 # ICBM policy: the pause between two provider calls of one pass (as order ingest; ADR-0024 §3).
 PROVIDER_PAUSE_S: Final = 1.0

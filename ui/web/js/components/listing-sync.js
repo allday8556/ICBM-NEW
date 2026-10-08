@@ -3,7 +3,7 @@
 // drift it sees, and its one action — 지금 동기화 — runs the same read-only pass the periodic job
 // runs. Nothing here repairs a listing.
 // M6-E (ADR-0024): listings ICBM did not create but adopted by the owner-declared seller-code
-// convention (KM: km + KM상품번호) are listed beside ICBM's own, marked 가져온 상품. KM 상품
+// convention (KM: KM + KM상품번호) are listed beside ICBM's own, marked 가져온 상품. KM 상품
 // 가져오기 runs one read-only adoption pass; nothing is attached by name.
 
 import { ApiError, getJson, sendJson } from '../core/api.js';

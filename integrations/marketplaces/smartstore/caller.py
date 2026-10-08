@@ -106,9 +106,9 @@ _NOTICE_TYPE_CODE = re.compile(r"^[A-Z][A-Z_]{1,39}$")
 # of an ICBM listing identity (ruling R1), 30 lowercase hexadecimal characters. A search is never
 # made with an operator's text, a product name or the 37-character internal identity.
 _SEARCH_CODE = re.compile(r"^[0-9a-f]{30}$")
-# ADR-0024 §2: the shape of an owner-declared adoption code (e.g. ``km287``), the only other code a
+# ADR-0024 §2: the shape of an owner-declared adoption code (e.g. ``KM287``), the only other code a
 # seller-code search may carry. Which code a source product has is the adoption owner's convention.
-_ADOPTION_CODE = re.compile(r"^[a-z]{2,8}[0-9]{1,15}$")
+_ADOPTION_CODE = re.compile(r"^[A-Za-z]{2,8}[0-9]{1,15}$")
 _IMAGE_MEDIA_TYPES = frozenset({"image/jpeg", "image/gif", "image/png", "image/bmp"})
 _FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
