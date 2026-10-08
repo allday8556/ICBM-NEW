@@ -174,3 +174,22 @@ class OrderStatusChange(Base):
     claim_status: Mapped[str | None] = mapped_column(String(40))
     changed_at: Mapped[datetime] = mapped_column(UTCDateTime)
     observed_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class OrderAdoptionLink(Base):
+    """An order of an adopted listing, linked to that adoption and its canonical Item (ADR-0024
+    §4; migration 0051). The order's ADR-0023 resolution stays UNMATCHED — ICBM did not register
+    the product — and this row is the separate, immutable link (triggers). One per order."""
+
+    __tablename__ = "operate_order_adoption_links"
+
+    product_order_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("operate_orders.product_order_id"), primary_key=True
+    )
+    adoption_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("operate_adopted_listings.adoption_id")
+    )
+    item_id: Mapped[str] = mapped_column(String(36))
+    supplier_key: Mapped[str] = mapped_column(String(40))
+    source_product_id: Mapped[str] = mapped_column(String(200))
+    linked_at: Mapped[datetime] = mapped_column(UTCDateTime)

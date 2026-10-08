@@ -704,6 +704,12 @@ def test_duplicate_evidence_without_a_covering_override_is_duplicate() -> None:
     assert candidate(strong, resolved(items=covered)).status is ReadinessStatus.READY
     live = resolved(live_registrations=(LiveRegistration("reg-1"),))
     assert codes(candidate(unit=live)) == {"LIVE_REGISTRATION_EXISTS"}
+    # M6-E (ADR-0024 §5): an adopted listing already sells an Item of the unit.
+    adopted = resolved(adopted_listings=("adoption-1",))
+    assert codes(candidate(unit=adopted)) == {"ADOPTED_LISTING_EXISTS"}
+    assert candidate(strong, resolved(items=covered, adopted_listings=("adoption-1",))).status is (
+        ReadinessStatus.READY
+    )
     weak = request(
         duplicate_evidence=evidence(
             verdict=DuplicateVerdict.MATCH,

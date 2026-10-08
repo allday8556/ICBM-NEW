@@ -242,7 +242,9 @@ M6_LISTING_SYNC = "0048_m6_listing_sync"
 M6_STOCK_RECHECK = "0049_m6_stock_recheck"
 # M6-D (ADR-0023 §5, §7): the order ingest runs, product orders and their status history.
 M6_ORDERS = "0050_m6_orders"
-SCHEMA_HEAD = M6_ORDERS
+# M6-E (ADR-0024): adopted listings, their observations and the order adoption links.
+M6_ADOPTED_LISTINGS = "0051_m6_adopted_listings"
+SCHEMA_HEAD = M6_ADOPTED_LISTINGS
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -274,6 +276,7 @@ AFTER_M5 = (
     M6_LISTING_SYNC,
     M6_STOCK_RECHECK,
     M6_ORDERS,
+    M6_ADOPTED_LISTINGS,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

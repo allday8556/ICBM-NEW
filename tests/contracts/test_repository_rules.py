@@ -3715,6 +3715,9 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "operate_order_sync_runs",
         "operate_orders",
         "operate_order_status_history",
+        "operate_adopted_listings",
+        "operate_adopted_observations",
+        "operate_order_adoption_links",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.
