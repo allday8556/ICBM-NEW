@@ -25,8 +25,7 @@ is never written into a source fact or a product field (AIF-01).
 from its own, with the reason naming what changed.
 
 A task's definition (its result keys, fact dependencies and schema version) is code that lands
-with its own stage. No production task is defined here, so every production request ends at the
-provider check (no provider) or at ``AI_TASK_NOT_RUNNABLE``.
+with its own stage (``tasks.py``); a task without one ends at ``AI_TASK_NOT_RUNNABLE``.
 """
 
 import hashlib
@@ -59,6 +58,7 @@ from app.platform.core.errors import (
 )
 from app.platform.db.database import Database
 from app.stages.connect.accounts import MarketplaceAccountStore
+from app.stages.connect.contracts import CapabilityReport
 from app.stages.products.enrichment_models import ProductEnrichmentResult
 from app.stages.products.store import ProductFoundationStore
 
@@ -188,6 +188,8 @@ class ResultView(BaseModel):
 class ResultsView(BaseModel):
     product_group_id: str
     ai_configured: bool
+    # The ``ai`` capability now: a request is live only when it is READY (ADR-0027 §7).
+    ai_capability: CapabilityReport
     results: list[ResultView]
 
 
@@ -484,7 +486,10 @@ class EnrichmentService:
                 )
             )
         return ResultsView(
-            product_group_id=product_group_id, ai_configured=identity is not None, results=views
+            product_group_id=product_group_id,
+            ai_configured=identity is not None,
+            ai_capability=self._execution.capability(),
+            results=views,
         )
 
     def current_result(

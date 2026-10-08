@@ -80,6 +80,8 @@ AIF-4 added the Preparation's AI apply command (in the register owner) and one i
 ADR-0027 AIS-1 added the provider profile `profiles.py` and its model, the adapters
 `integrations/ai/` (the CLIProxyAPI call and the serving-process probe), the Settings component
 `ui/web/js/components/ai-provider.js`, migration `0056`, one unit and one integration suite.
+ADR-0027 AIS-2 added the product-name task `app/stages/products/tasks.py`, the seed upgrade
+`v29-ai1`, the recommendation component `ui/web/js/components/ai-name.js` and two integration suites.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -107,11 +109,11 @@ payload or external call and leaves legacy Item economics unchanged.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 331 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 332 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 54 | supporting capabilities: audit, jobs, review, live_safety, ai |
 | `app/interface/` | 27 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 86 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 159 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/stages/` | 160 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -133,13 +135,13 @@ payload or external call and leaves legacy Item economics unchanged.
 | `integrations/` | 50 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 26 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 300 | tests |
+| `tests/` | 302 | tests |
 | `tests/contracts/` | 10 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 126 | integration tests by runtime owner |
+| `tests/integration/` | 128 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 107 | unit tests by runtime owner |
-| `ui/` | 64 | operator clients: the served web client and the capture extension |
+| `ui/` | 65 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 55 | the served web client |
+| `ui/web/` | 56 | the served web client |

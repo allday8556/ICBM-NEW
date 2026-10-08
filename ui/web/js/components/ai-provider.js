@@ -19,6 +19,7 @@ const DETAIL_COPY = {
   AI_ROUTING_MISMATCH: '지금 라우팅 설정이 승인한 설정과 다릅니다',
   AI_ROUTING_UNREADABLE: 'CLIProxyAPI를 -config <설정 파일의 절대 경로>로 실행해야 설정을 확인할 수 있습니다',
   AI_DAILY_CAP_REACHED: '오늘 호출 상한에 도달했습니다',
+  AI_PROFILE_UNREADABLE: 'AI 공급자 설정을 읽을 수 없습니다',
 };
 const MISSING_COPY = { model: '모델', executable: '실행 파일', routing: '라우팅', data_transfer: '상품 정보 전송', credential: '접속 키' };
 const ERROR_COPY = {
@@ -32,7 +33,7 @@ const ERROR_COPY = {
   AI_CREDENTIAL_INVALID: '접속 키는 공백 없는 영문·숫자·기호 16~200자입니다.',
 };
 
-function stateText(capability) {
+export function stateText(capability) {
   if (capability.status === 'READY') return '연결됨';
   const detail = capability.detail ?? '';
   if (detail.startsWith('not approved: ')) {
