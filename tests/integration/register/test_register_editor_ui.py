@@ -101,6 +101,15 @@ def test_a_queue_row_opens_the_editor_and_the_editor_saves_through_the_preparati
         page.fill("input[name='attribute.brand']", "브랜드")
         page.fill("input[name='notice.manufacturer']", "제조사")
         page.locator("input[data-detail-reference='notice'][data-field-key='origin']").check()
+        # Every control placed in a step is still the authoring form's own.
+        unowned = page.evaluate(
+            "() => [...document.querySelectorAll('.editor-pane input, .editor-pane textarea,"
+            " .editor-pane select')].filter(c => c.closest('.register-authoring-fields,"
+            " .register-option-fields') || ['category_id', 'name', 'detail_body'].includes(c.name))"
+            ".filter(c => !c.form || !c.form.classList.contains('register-authoring'))"
+            ".map(c => c.name)"
+        )
+        assert unowned == []
         page.locator(".stepper .step[data-step='detail']").click()
         page.fill("textarea[name='detail_body']", "상세 본문")
         page.locator(".editor-foot button[data-action='SAVE_PREPARATION']").click()
@@ -114,6 +123,11 @@ def test_a_queue_row_opens_the_editor_and_the_editor_saves_through_the_preparati
         assert editor.get_attribute("data-unit") == stored[0].preparation_id
         assert f"unit={stored[0].preparation_id}" in page.url
         assert stored[0].current.listing["name"]["value"] == "편집기가 저장한 상품명"
+        # The category, the category fields and the reference placed in other steps were all saved.
+        assert stored[0].current.category["category_id"] == CATEGORY
+        assert stored[0].current.listing["attributes"]["brand"]["value"] == "브랜드"
+        assert stored[0].current.listing["notices"]["manufacturer"]["value"] == "제조사"
+        assert stored[0].current.listing["notices"]["origin"]["detail_page_reference"] is True
         assert "상세 본문" in str(stored[0].current.detail)
         # The editor came back on the step it saved from.
         assert page.locator(".editor-pane:not([hidden])").get_attribute("data-pane") == "5"

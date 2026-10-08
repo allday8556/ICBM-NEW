@@ -164,13 +164,23 @@ function editor(unit, ctx, labels, mode, step) {
   let current = Math.min(Math.max(Number(step) || 1, 1), STEPS.length);
   const states = stepStates(unit);
   const editable = !unit.snapshot && !unit.intent;
-  // One authoring form for the whole unit: its parts sit in their steps and stay bound to it.
+  // One authoring form for the whole unit: its parts sit in their steps and stay bound to it. The
+  // save reads the name and the body through the form's FormData, and the category, the category
+  // fields and the options through the form's own references to those controls, wherever they are
+  // placed. Every control of every part is still associated with the form (the `form` attribute),
+  // including the fields the category's requirements add later, so the form owns all of them.
   const form = editable ? authoringForm(unit, reload) : null;
   if (form) {
     form.id = `authoring-${unit.unit_ref}`;
     form.classList.add('editor-form');
-    for (const control of [form.parts.name, form.parts.detail].flatMap((part) => [...part.querySelectorAll('input, textarea, select')])) {
-      control.setAttribute('form', form.id);
+    const associate = (root) => {
+      for (const control of root.querySelectorAll('input, textarea, select, button[type="submit"]')) {
+        control.setAttribute('form', form.id);
+      }
+    };
+    for (const part of [form.parts.category, form.parts.name, form.parts.fields, form.parts.options, form.parts.detail]) {
+      associate(part);
+      new MutationObserver(() => associate(part)).observe(part, { childList: true, subtree: true });
     }
     form.parts.submit.setAttribute('form', form.id);
   }
