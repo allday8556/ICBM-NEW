@@ -138,6 +138,12 @@ def create_app(
                 services.shadow_evidence.on_startup()
             except Exception:
                 logger.exception("app.shadow_startup_failed")
+            # ADR-0026 AIF-1: the v29 prompt registry seed of every entry the stores lack. A
+            # failure is logged and never keeps the application from serving.
+            try:
+                services.prompt_registry.seed_on_startup()
+            except Exception:
+                logger.exception("app.ai_prompt_seed_failed")
             await services.worker.start()
             # Gate 2 (ADR-0016 §4): every review producer's startup full reconciliation, before
             # the application serves, then its bounded periodic pass.

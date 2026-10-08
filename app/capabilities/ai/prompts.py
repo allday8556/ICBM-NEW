@@ -1,8 +1,9 @@
 """The PromptTemplate and PlatformPolicy stores and the Settings registry over them (ADR-0026 §3).
 
 The registry is the v29 prototype's (``registry.CATALOG``). Each entry's text lives only in its
-store: revision 1 is the prototype's text, and every later revision is an operator's save of one
-field, or a reset of one field to the seed. A save names the revision it was read from
+store: revision 1 is the prototype's text (``seed_v29.json``), which the application writes when it
+starts on a database that lacks it, and every later revision is an operator's save of one field, or
+a reset of one field to the seed. A save names the revision it was read from
 (``expected_current_revision``); a save that would change nothing is refused; every save is audited
 by identity and fingerprint, never by its text (AIF-04).
 
@@ -17,6 +18,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
@@ -53,6 +55,10 @@ AI_PROMPT_UNCHANGED: Final = "AI_PROMPT_UNCHANGED"
 AI_PROMPT_PREVIEW_INVALID: Final = "AI_PROMPT_PREVIEW_INVALID"
 
 MAX_TEXT: Final = 20_000
+# The v29 prototype's texts, verbatim: the seed of every registry entry (ADR-0026 §3.1). It is only
+# ever written into the stores, as revision 1; runtime reads the stores, never this file.
+SEED_FILE: Final = Path(__file__).with_name("seed_v29.json")
+SEED_ACTOR: Final = "system:seed"
 RUNTIME_PLACEHOLDER: Final = "{실행 시 ICBM 실제 데이터가 여기에 주입됩니다.}"
 _RULE: Final = "----------------------------------------"
 
@@ -131,6 +137,11 @@ class EntryRecord:
     history: tuple[RevisionRecord, ...]
 
 
+def load_seed() -> dict[str, Any]:
+    seed: dict[str, Any] = json.loads(SEED_FILE.read_text(encoding="utf-8"))
+    return seed
+
+
 class PromptRegistryStore:
     """The only production writer of the six registry tables."""
 
@@ -138,6 +149,68 @@ class PromptRegistryStore:
         self._db = db
         self._clock = clock
         self._audit = audit
+
+    def seed_missing(self, *, correlation_id: str) -> int:
+        """Write the v29 seed of every catalog entry the stores lack, as its revision 1, in one
+        unit of work, and return how many were written. An entry that exists is never touched, so
+        a restart writes nothing."""
+        seed = load_seed()
+        now = self._clock.now()
+        written = 0
+        with self._db.write() as session:
+            for entry in CATALOG:
+                family = _family(entry)
+                if session.get(family.identity, entry.key) is not None:
+                    continue
+                if family is POLICIES:
+                    content = seed["policies"][entry.key]["content"]
+                    session.add(family.identity(created_at=now, **{family.key: entry.key}))
+                else:
+                    content = seed["templates"][entry.key]["content"]
+                    session.add(
+                        family.identity(
+                            layer=entry.layer.value, created_at=now, **{family.key: entry.key}
+                        )
+                    )
+                session.flush()
+                row = family.revisions(
+                    revision_id=str(uuid.uuid4()),
+                    revision_no=1,
+                    content_json=canonical_json(content),
+                    content_fingerprint=fingerprint(content),
+                    origin=Origin.SEED.value,
+                    seed_version=seed["seed_version"],
+                    authored_by=SEED_ACTOR,
+                    correlation_id=correlation_id,
+                    authored_at=now,
+                    **{family.key: entry.key},
+                )
+                session.add(row)
+                session.flush()
+                session.add(
+                    family.current(
+                        revision_id=row.revision_id,
+                        moved_by=SEED_ACTOR,
+                        correlation_id=correlation_id,
+                        moved_at=now,
+                        **{family.key: entry.key},
+                    )
+                )
+                written += 1
+            if written:
+                session.flush()
+                self._audit.append(
+                    AuditEntry(
+                        event_type=AuditEventType.AI_PROMPT_REGISTRY_SEEDED,
+                        action="AI_PROMPT_REGISTRY_SEEDED",
+                        actor=SEED_ACTOR,
+                        outcome=AuditOutcome.RECORDED,
+                        details={"seed_version": seed["seed_version"], "entries": written},
+                        correlation_id=correlation_id,
+                    ),
+                    session=session,
+                )
+        return written
 
     def entry(self, key: str) -> EntryRecord:
         catalog = _catalog(key)
@@ -374,6 +447,10 @@ class PromptRegistryService:
 
     def __init__(self, store: PromptRegistryStore) -> None:
         self._store = store
+
+    def seed_on_startup(self) -> int:
+        """The application's startup pass: the v29 seed of every entry the stores lack."""
+        return self._store.seed_missing(correlation_id="startup-ai-prompt-seed")
 
     def registry(self) -> RegistryView:
         return RegistryView(entries=[_view(record) for record in self._store.entries()])

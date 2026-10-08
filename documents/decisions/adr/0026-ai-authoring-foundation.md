@@ -172,9 +172,14 @@ object as its own task state, so the four tasks share one request and keep indep
 Each tab saves or resets only its own field, as a new revision against the revision it was read
 from. A reset appends a revision whose field equals the seed's. History is never deleted.
 
-**Seeds.** Seeds are the prototype's texts, verbatim, as revision 1 with `origin = SEED` and
-`seed_version = v29` (migration 0053). A seed is the schema's starting data, so it writes no audit
-event. Every operator save (`OPERATOR`) and reset (`RESET`) is audited without its text.
+**Seeds.** Seeds are the prototype's texts, verbatim (`app/capabilities/ai/seed_v29.json`), as
+revision 1 with `origin = SEED` and `seed_version = v29`.
+- Migration 0053 only creates the stores, because every canonical table starts empty (M0
+  acceptance).
+- The application writes the seed when it starts on a database that lacks it, in one unit of work
+  with one `AI_PROMPT_REGISTRY_SEEDED` audit record. A restart writes nothing.
+- Runtime reads the stores, never the seed file.
+- Every operator save (`OPERATOR`) and reset (`RESET`) is audited without its text.
 
 **Composition.** The composition is the prototype's preview layout. The global rules come first,
 then these sections in order:

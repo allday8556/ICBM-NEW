@@ -41,6 +41,11 @@ ORM_PACKAGES = {
         "app.stages.connect.smartstore.service",
         "app.stages.connect.smartstore.credentials",
     ),
+    # ADR-0026: the AI capability's prompt models load with the schema aggregate.
+    "app.capabilities.ai": (
+        "app.capabilities.ai.prompts",
+        "app.capabilities.ai.registry",
+    ),
 }
 _SQL_WRITE = re.compile(r"\b(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)\s+[A-Z(]")
 

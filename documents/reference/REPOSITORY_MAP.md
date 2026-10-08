@@ -68,7 +68,8 @@ The supplier common-image screen (A-NEXT2a, Issue #231) added the 수집관리 c
 The registration editor (owner decision 2026-10-08, phase 1) added the 등록관리 page
 `ui/web/js/pages/register-editor.js` and one integration suite.
 The AI authoring foundation's AIF-1 (ADR-0026) added the AI capability `app/capabilities/ai/` (the v29 prompt
-registry catalog, the PromptTemplate and PlatformPolicy stores and their models), the routes
+registry catalog and its seed `seed_v29.json`, the PromptTemplate and PlatformPolicy stores and their
+models), the routes
 `app/interface/api/routes/ai.py`, migration `0053`, the Settings component
 `ui/web/js/components/prompt-registry.js` and two integration suites under `tests/integration/ai/`.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
@@ -98,8 +99,8 @@ payload or external call and leaves legacy Item economics unchanged.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 319 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 48 | supporting capabilities: audit, jobs, review, live_safety, ai |
+| `app/` | 320 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 49 | supporting capabilities: audit, jobs, review, live_safety, ai |
 | `app/interface/` | 26 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 83 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 157 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |

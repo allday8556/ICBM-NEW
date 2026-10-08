@@ -16,10 +16,12 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from app.capabilities.ai.prompts import RUNTIME_PLACEHOLDER
+from app.capabilities.ai.prompts import RUNTIME_PLACEHOLDER, load_seed
 from app.capabilities.ai.registry import CATALOG, Layer
 from app.capabilities.audit.models import AuditEventType
 from app.config import AppConfig, database_path
+from app.main import create_app
+from tests.conftest import LOCAL
 
 pytestmark = pytest.mark.integration
 
@@ -299,3 +301,39 @@ def test_every_layer_of_the_catalog_is_seeded_with_its_own_fields(client: TestCl
         else:
             assert fields == ["prompt"], entry["key"]
         assert all(value.strip() for value in entry["content"].values()), entry["key"]
+
+
+def test_a_migrated_database_starts_empty_and_the_application_seeds_it_once(
+    config: AppConfig,
+) -> None:
+    # Every canonical table starts empty (M0): the migration creates the stores, nothing more.
+    tables = ("ai_prompt_templates", "ai_prompt_template_revisions", "ai_platform_policy_revisions")
+    with sqlite3.connect(database_path(config.data_dir)) as raw:
+        assert [raw.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables] == [0, 0, 0]
+    # The application's startup pass writes the v29 seed, one audit record for it, and a restart
+    # writes nothing more.
+    for _ in range(2):
+        with TestClient(create_app(config), base_url=LOCAL) as client:
+            assert len(_registry(client)) == len(CATALOG)
+    with sqlite3.connect(database_path(config.data_dir)) as raw:
+        assert [raw.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables] == [
+            22,
+            22,
+            4,
+        ]
+        seeded = raw.execute(
+            "SELECT details_json FROM audit_events WHERE event_type = ?",
+            (AuditEventType.AI_PROMPT_REGISTRY_SEEDED,),
+        ).fetchall()
+    assert [json.loads(row[0]) for row in seeded] == [{"seed_version": "v29", "entries": 26}]
+
+
+def test_the_seed_file_is_the_catalog(client: TestClient) -> None:
+    seed = load_seed()
+    assert seed["seed_version"] == "v29"
+    assert {**seed["templates"], **seed["policies"]}.keys() == {entry.key for entry in CATALOG}
+    for entry in CATALOG:
+        if entry.layer is Layer.POLICY:
+            assert entry.key in seed["policies"]
+        else:
+            assert seed["templates"][entry.key]["layer"] == entry.layer.value

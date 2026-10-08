@@ -41,7 +41,7 @@ icbm = "app.interface.cli:main"
 include = ["app*", "integrations*"]
 
 [tool.setuptools.package-data]
-app = ["db/migrations/script.py.mako"]
+app = ["db/migrations/script.py.mako", "capabilities/ai/seed_v29.json"]
 integrations = ["marketplaces/smartstore/notice_schema.json"]
 
 [tool.ruff]

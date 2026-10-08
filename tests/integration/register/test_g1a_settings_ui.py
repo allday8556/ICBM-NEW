@@ -237,7 +237,7 @@ def test_the_save_bar_is_server_owned_and_general_settings_stay_read_only(
     with _served(config) as client, _page(browser, client, COMMON_TAB, ".savebar", writes) as page:
         chip = page.locator(".savebar .chip")
         assert chip.get_attribute("data-save-scope") == (
-            "REGISTRATION_TARGET_POLICY REGISTRATION_CATEGORY_METADATA"
+            "REGISTRATION_TARGET_POLICY REGISTRATION_CATEGORY_METADATA AI_PROMPT_REGISTRY"
         )
         text = chip.inner_text()
         assert "M0" not in text

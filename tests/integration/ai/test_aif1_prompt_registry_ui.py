@@ -130,15 +130,9 @@ def test_a_marketplace_policy_button_and_the_insight_agent_open_their_own_layer(
     client: TestClient,  # noqa: F811
 ) -> None:
     writes: list[tuple[str, str]] = []
-    with _page(browser, client, writes, f"{LOCAL}/#/settings?tab=coupang") as page:
-        button = page.locator("button[data-prompt-key='POLICY_COUPANG_V1']")
-        if not button.count():
-            # The policy button lives on one of the Coupang sub-tabs; find the one that holds it.
-            for sub in page.locator(".subtabs [role='tab']").all():
-                sub.click()
-                if button.count():
-                    break
-        button.first.click()
+    # The Coupang 상품 / 카테고리 sub-tab holds its policy button, as v29 places it.
+    with _page(browser, client, writes, f"{LOCAL}/#/settings?tab=coupang&sub=product") as page:
+        page.locator("button[data-prompt-key='POLICY_COUPANG_V1']").click()
         editor = page.locator("[data-role='prompt-editor']")
         editor.wait_for()
         assert editor.get_attribute("data-policy") == "POLICY_COUPANG_V1"
