@@ -15,7 +15,15 @@ from fastapi.testclient import TestClient
 from playwright.sync_api import Browser
 
 from app.container import Container
+from app.platform.core.errors import AppError
+from app.stages.connect.marketplace.capability import RemoteOutcome
 from tests.conftest import LOCAL
+from tests.integration.register.test_m5_register_execution import (
+    FakeSender,
+    context,
+    execution,
+    prepare,
+)
 from tests.integration.register.test_m5_register_ui import (  # noqa: F401 - fixtures
     _page,
     account,
@@ -77,8 +85,12 @@ def test_a_queue_row_opens_the_editor_and_the_editor_saves_through_the_preparati
         assert page.locator(".editor-pane:not([hidden])").get_attribute("data-pane") == "4"
         # A slot without an owner keeps its place and is inert.
         bulk = page.locator("[data-role='image-bulk'] .btn")
-        assert bulk.count() == 4
+        assert bulk.count() == 2
         assert all(b.get_attribute("aria-disabled") == "true" for b in bulk.all())
+        # An AI control is not rendered at all until a server owner exists (Issue #127).
+        assert page.locator("[data-role='register-editor'] .btn.ai").count() == 0
+        text = editor.text_content() or ""
+        assert "자동번역" not in text and "배경 이미지 제거" not in text
         assert writes == []
 
         # The operator authors the unit across the steps; the save is the register page's own.
@@ -117,4 +129,43 @@ def test_the_editor_without_a_unit_says_so_and_reads_nothing_else(
         page.goto(f"{LOCAL}/#/register-editor")
         page.get_by_text("편집할 상품이 없습니다").wait_for(timeout=15_000)
         assert page.locator("[data-role='register-editor']").count() == 0
+        assert writes == []
+
+
+def test_a_unit_with_an_intent_opens_read_only_and_the_edit_mode_sends_nothing(
+    browser: Browser,  # noqa: F811
+    client: TestClient,  # noqa: F811
+    container: Container,  # noqa: F811
+    sources: Collections,  # noqa: F811
+    account: str,  # noqa: F811
+    prep: Preparation,  # noqa: F811
+) -> None:
+    """상품수정 is read-only in phase 1. A unit with a Snapshot and an Intent is never authored
+    in the editor, the edit banner says so, and only the server's own actions stay offered."""
+    ready = prepare(container, sources, container.registrations, account, prep)
+    run = execution(
+        container, prep, sender=FakeSender(outcome=RemoteOutcome.UNKNOWN, product_id=None)
+    )
+    with pytest.raises(AppError):
+        run.service.run(context(ready))
+    units = client.get(f"/api/v1/register/units/{ready.draft_id}").json()
+    assert len(units) == 1 and units[0]["intent"] is not None
+    writes: list[tuple[str, str]] = []
+    with _page(browser, client, writes) as page:
+        page.goto(
+            f"{LOCAL}/#/register-editor?draft={ready.draft_id}&unit={units[0]['unit_ref']}&mode=edit"
+        )
+        editor = page.locator("[data-role='register-editor']")
+        editor.wait_for(timeout=15_000)
+        assert editor.get_attribute("data-mode") == "edit"
+        assert page.locator("[data-role='edit-banner']").is_visible()
+        assert page.locator("[data-role='editor-mode']").inner_text().strip() == "상품수정"
+        # No authoring form and no save: the unit is frozen and sent.
+        assert page.locator("form.register-authoring").count() == 0
+        assert page.locator("button[data-action='SAVE_PREPARATION']").count() == 0
+        # The step colours still come from the server's preflight only.
+        strip = page.locator("[data-role='ready-strip'] .ready-item")
+        assert [s.get_attribute("data-step") for s in strip.all()] == STEPS
+        # The server's own action verdicts are what the editor offers.
+        assert page.locator("button[data-action='CREATE_ENQUEUE']").first.is_disabled()
         assert writes == []
