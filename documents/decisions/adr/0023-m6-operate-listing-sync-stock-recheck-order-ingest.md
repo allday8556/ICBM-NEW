@@ -82,6 +82,7 @@ REGISTER keeps the registration and its lifecycle. M6 calls `record_readback` an
   - "지금 동기화" runs the same job now.
   - One job runs at a time.
   - Reads are bounded per run, and a provider rate limit pauses the run without failing registrations.
+  - **Implementation note (2026-10-08):** each provider read after the first waits 1 s (ICBM policy, as order ingest). Unpaced reads of 24 listings met `429` after 16 in the first real pass.
 
 ### 3.1 Automatic token renewal (owner decision `6034380699`)
 

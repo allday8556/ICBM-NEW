@@ -235,6 +235,7 @@ def _listing_sync(container: Container, reader: Reader, adoptions: AdoptionServi
         normalize=smartstore_readback.normalize,
         interval_s=1800,
         marketplace_key=MARKET,
+        pause_s=0.0,
         adoptions=adoptions,
     )
 

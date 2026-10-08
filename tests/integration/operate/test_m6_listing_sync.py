@@ -101,6 +101,7 @@ def _service(container: Container, reader: FakeReader) -> ListingSyncService:
         normalize=smartstore_readback.normalize,
         interval_s=1800,
         marketplace_key=MARKET,
+        pause_s=0.0,
     )
 
 
@@ -260,6 +261,7 @@ def test_an_unreadable_answer_fails_only_that_registration_and_never_holds_the_r
         normalize=broken,
         interval_s=1800,
         marketplace_key=MARKET,
+        pause_s=0.0,
     )
     run = _sync(service)
     assert (run.state, run.outcome, run.failed) == ("FINISHED", COMPLETED_WITH_FAILURES, 1)
@@ -315,6 +317,7 @@ def test_the_seller_code_is_compared_as_the_provider_carries_it(
         normalize=smartstore_readback.normalize,
         interval_s=1800,
         marketplace_key=MARKET,
+        pause_s=0.0,
         seller_code=seller_management_code,
     )
     _sync(service)
@@ -324,3 +327,25 @@ def test_the_seller_code_is_compared_as_the_provider_carries_it(
     _sync(service)
     (state,) = service.overview().listings
     assert "SELLER_CODE_MISMATCH" in state.drift
+
+
+def test_provider_reads_of_a_pass_are_paced(container: Container, registration: str) -> None:
+    """Unpaced reads met 429 after 16 listings on 2026-10-08: each read after the first waits
+    out the pause."""
+    waits: list[float] = []
+    reader = FakeReader()
+    reader.answer = _listing()
+    service = ListingSyncService(
+        db=container.db,
+        clock=container.clock,
+        registrations=container.registrations,
+        reader=reader,
+        normalize=smartstore_readback.normalize,
+        interval_s=1800,
+        marketplace_key=MARKET,
+        pause_s=1.0,
+        sleep=waits.append,
+    )
+    _sync(service)
+    _sync(service)
+    assert len(reader.reads) == 2 and len(waits) == 1 and 0 < waits[0] <= 1.0
