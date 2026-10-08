@@ -130,6 +130,7 @@ def _approve_all(service: ProviderProfileService, view: Any = None) -> Any:
             actor="owner",
             expected_current_revision=view.current_revision,
             observed=view.observed.sha256,
+            observed_path=view.observed.path,
         ),
         cid="c-2",
     )
@@ -200,6 +201,18 @@ def test_only_a_loopback_endpoint_and_what_is_served_now_can_be_approved(
             cid="c",
         )
     assert wrong.value.code == "AI_EXECUTABLE_MISMATCH"
+    # The same bytes at another path than the one shown are not what was approved.
+    with pytest.raises(AppError) as elsewhere:
+        service.approve_executable(
+            ApproveRequest(
+                actor="owner",
+                expected_current_revision=view.current_revision,
+                observed=view.observed.sha256,
+                observed_path="C:\\other\\cli-proxy-api.exe",
+            ),
+            cid="c",
+        )
+    assert elsewhere.value.code == "AI_EXECUTABLE_MISMATCH"
     # A sidecar that still fetches its model catalog is never approved (ADR-0027 §5).
     world["probe"].process = _serving(world["tmp"], args="")
     plain = service.view()

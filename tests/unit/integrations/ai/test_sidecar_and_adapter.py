@@ -228,3 +228,12 @@ def test_the_update_switches_are_read_as_they_take_effect() -> None:
     assert sidecar._local_model(["-local-model", "-local-model=false"]) is False
     assert sidecar._local_model(["--local-model=true"]) is True
     assert sidecar._local_model([]) is False
+
+
+def test_the_order_of_the_launch_arguments_is_part_of_the_routing(tmp_path: Path) -> None:
+    """A Go flag's last occurrence wins: reordering one flag's occurrences is a new routing."""
+    on = sidecar.routing(_process(tmp_path, args=" -local-model=false -local-model"))
+    off = sidecar.routing(_process(tmp_path, args=" -local-model -local-model=false"))
+    assert on is not None and off is not None
+    assert (on.local_model, off.local_model) == (True, False)
+    assert on.fingerprint != off.fingerprint

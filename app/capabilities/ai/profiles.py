@@ -558,6 +558,9 @@ class ApproveRequest(BaseModel):
     expected_current_revision: StrictStr = Field(min_length=1, max_length=36)
     # What the operator saw and approves; it must still be what is served.
     observed: StrictStr = Field(min_length=64, max_length=64)
+    # For an executable: the path the operator saw. The approved identity is the path and the hash
+    # together, so both must still be what is served (ADR-0012 §3).
+    observed_path: StrictStr | None = Field(default=None, min_length=1, max_length=1024)
 
 
 class DataTransferRequest(BaseModel):
@@ -692,9 +695,15 @@ class ProviderProfileService:
     def approve_executable(self, request: ApproveRequest, *, cid: str) -> ProviderView:
         current = self._require_current()
         seen = self._provider.observe(_port(current.content["endpoint"]), fresh=True)
-        if seen.process is None or seen.process.sha256 != request.observed:
+        if (
+            seen.process is None
+            or seen.process.sha256 != request.observed
+            or request.observed_path is None
+            or seen.process.path.lower() != request.observed_path.lower()
+        ):
             raise PolicyBlockedError(
-                AI_EXECUTABLE_MISMATCH, "only the executable actually serving now can be approved"
+                AI_EXECUTABLE_MISMATCH,
+                "only the executable actually serving now, at the path shown, can be approved",
             )
         approved = {"path": seen.process.path, "sha256": seen.process.sha256}
         self._store.append(

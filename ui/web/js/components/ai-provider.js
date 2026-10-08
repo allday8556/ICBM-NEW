@@ -162,7 +162,7 @@ export function aiProviderPanel() {
           class: 'btn',
           'data-action': 'ai-approve-executable',
           disabled: !revision || !observed?.serving || exeMatches,
-          onclick: () => send(`${ENDPOINT}/approve-executable`, { actor: 'operator', expected_current_revision: revision, observed: observed.sha256 }, '실행 파일을 승인했습니다'),
+          onclick: () => send(`${ENDPOINT}/approve-executable`, { actor: 'operator', expected_current_revision: revision, observed: observed.sha256, observed_path: observed.path }, '실행 파일을 승인했습니다'),
         },
         exeMatches ? '승인한 파일이 실행 중' : '지금 실행 중인 파일 승인',
       ),

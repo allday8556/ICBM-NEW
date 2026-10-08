@@ -262,10 +262,10 @@ def routing(process: ServingProcess) -> RoutingObservation | None:
         text = config_path(process).read_text(encoding="utf-8")
     except OSError:
         return None
-    # Redacted in their own order (a flag's value follows it), then sorted.
     args = _arguments(process.command_line)
     payload = json.dumps(
-        {"config": _without_secrets(text), "args": sorted(_redacted_args(args))},
+        # In their own order: a Go flag's last occurrence wins, so order is part of the routing.
+        {"config": _without_secrets(text), "args": _redacted_args(args)},
         ensure_ascii=False,
         sort_keys=True,
     )
