@@ -247,6 +247,7 @@ export const SUBTABS = {
             {
               title: 'AI 기본 설정',
               items: [
+                { aiCapability: true },
                 toggle('AI 상품명 추천', 'ai.product_name'),
                 toggle('AI 태그 추천', 'ai.tags'),
                 toggle('AI 카테고리 검증', 'ai.category'),

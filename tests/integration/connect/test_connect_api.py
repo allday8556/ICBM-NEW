@@ -74,10 +74,13 @@ def test_an_unconfigured_supplier_degrades_a_capability_never_core_readiness(
     assert response.status_code == 200
     body = response.json()
     assert (body["status"], body["overall"]) == ("PASS", "READY")
+    # ADR-0012 §9, ADR-0026 AIF-2: with no AI provider the ai capability is NOT_CONFIGURED too,
+    # and neither ever fails core readiness.
     assert body["capabilities"] == [
-        {"key": "supplier:kmretail", "status": "NOT_CONFIGURED", "detail": "state=DISCONNECTED"}
+        {"key": "supplier:kmretail", "status": "NOT_CONFIGURED", "detail": "state=DISCONNECTED"},
+        {"key": "ai", "status": "NOT_CONFIGURED", "detail": "no AI provider is configured"},
     ]
-    assert body["degraded_capabilities"] == ["supplier:kmretail"]
+    assert body["degraded_capabilities"] == ["supplier:kmretail", "ai"]
 
 
 def test_a_connection_test_proves_the_protected_read_and_makes_the_capability_ready(
@@ -95,7 +98,8 @@ def test_a_connection_test_proves_the_protected_read_and_makes_the_capability_re
     )
     ready = api.get("/api/ready").json()
     assert ready["capabilities"][0]["status"] == "READY"
-    assert ready["degraded_capabilities"] == []
+    # Only the ai capability stays degraded: no AI provider is configured (ADR-0026 AIF-2).
+    assert ready["degraded_capabilities"] == ["ai"]
     assert gateway.logins == 1
     assert gateway.requests == [RequestKind.CONTROL_READ, RequestKind.PROTECTED_READ]
 
@@ -149,7 +153,7 @@ def test_repeated_rejections_pause_until_the_operator_resumes(
         assert _supplier(api)["consecutive_auth_failures"] == attempt
     supplier = _supplier(api)
     assert (supplier["state"], supplier["capability_status"]) == ("PAUSED", "PAUSED")
-    assert api.get("/api/ready").json()["degraded_capabilities"] == ["supplier:kmretail"]
+    assert api.get("/api/ready").json()["degraded_capabilities"] == ["supplier:kmretail", "ai"]
 
     refused = api.post(f"{BASE}/test", headers=CLIENT)
     assert refused.status_code == 403

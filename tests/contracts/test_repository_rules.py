@@ -2869,6 +2869,48 @@ def test_collect_source_truth_path_imports_no_ai_ocr_or_marketplace_code() -> No
             assert not forbidden, f"{path}: {name}"
 
 
+# ADR-0026 AIF-11 (ADR-0012 consequences): no AI vendor SDK is imported anywhere in production code
+# until the owner decides the provider, model, key, cost cap and data transfer. The port's only
+# binding is NoAIProvider.
+AI_VENDOR_SDKS = (
+    "anthropic",
+    "openai",
+    "google.generativeai",
+    "google.genai",
+    "vertexai",
+    "cohere",
+    "mistralai",
+    "groq",
+    "ollama",
+    "litellm",
+    "langchain",
+    "llama_index",
+)
+
+
+def test_no_production_module_imports_an_ai_vendor_sdk() -> None:
+    modules = _production_modules()
+    assert "app/capabilities/ai/provider.py" in modules
+    for path, tree in modules.items():
+        for name in _imported_modules(tree):
+            vendor = [f for f in AI_VENDOR_SDKS if name == f or name.startswith(f"{f}.")]
+            assert not vendor, f"{path}: {name}"
+
+
+def test_the_container_binds_no_ai_provider() -> None:
+    source = (REPO_ROOT / "app" / "container.py").read_text("utf-8")
+    assert "AIExecution(NoAIProvider())" in source
+    providers = [
+        node.name
+        for path, tree in _production_modules().items()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef)
+        and node.name.endswith("Provider")
+        and path.startswith("app/capabilities/ai/")
+    ]
+    assert providers == ["AIProvider", "NoAIProvider"]
+
+
 # ADR-0017 P1 (Issue #110 5821999699): no dynamic-import or code-evaluation escape in the source
 # truth path, so an import rule can never be walked around at run time.
 DYNAMIC_ESCAPES = frozenset({"__import__", "exec", "eval", "compile", "__builtins__"})
