@@ -192,7 +192,7 @@ def test_a_source_icbm_registered_is_never_adopted(
 
 def test_a_source_with_more_than_one_bound_item_is_not_adopted(
     container: Container,
-    sources: Collections,
+    sources: Collections,  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _collected(container, sources, "287")
