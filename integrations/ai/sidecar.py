@@ -122,14 +122,21 @@ def _arguments(command_line: str) -> list[str]:
     return [part.strip('"') for part in parts[1:]]
 
 
-def config_path(process: ServingProcess) -> Path:
+def config_path(process: ServingProcess) -> Path | None:
+    """The configuration the serving process actually reads, or ``None`` when that cannot be
+    known. Only an explicit, absolute ``-config`` names it: the last occurrence, as Go flags take
+    it. A relative path or the default resolves against the sidecar's own working directory, which
+    the probe cannot read, so it is never guessed (fail-closed)."""
     args = _arguments(process.command_line)
+    named: str | None = None
     for index, arg in enumerate(args):
         if arg in ("-config", "--config") and index + 1 < len(args):
-            return Path(args[index + 1])
-        if arg.startswith(("-config=", "--config=")):
-            return Path(arg.split("=", 1)[1])
-    return Path(process.path).parent / "config.yaml"
+            named = args[index + 1]
+        elif arg.startswith(("-config=", "--config=")):
+            named = arg.split("=", 1)[1]
+    if not named or not Path(named).is_absolute():
+        return None
+    return Path(named)
 
 
 def _indent(line: str) -> int:
@@ -258,8 +265,11 @@ def _panel_off(text: str) -> bool:
 
 
 def routing(process: ServingProcess) -> RoutingObservation | None:
+    path = config_path(process)
+    if path is None:
+        return None
     try:
-        text = config_path(process).read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")
     except OSError:
         return None
     args = _arguments(process.command_line)

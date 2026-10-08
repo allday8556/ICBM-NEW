@@ -34,7 +34,7 @@ def _process(
         pid=1,
         path=str(exe),
         sha256=sidecar.file_sha256(str(exe)) or "",
-        command_line=f'"{exe}"{args}',
+        command_line=f'"{exe}" -config "{exe.parent / "config.yaml"}"{args}',
     )
 
 
@@ -237,3 +237,24 @@ def test_the_order_of_the_launch_arguments_is_part_of_the_routing(tmp_path: Path
     assert on is not None and off is not None
     assert (on.local_model, off.local_model) == (True, False)
     assert on.fingerprint != off.fingerprint
+
+
+def test_only_an_explicit_absolute_config_is_read(tmp_path: Path) -> None:
+    """GPT audit of #273: a relative or default configuration resolves against the sidecar's own
+    working directory, which cannot be read, so nothing is fingerprinted from a guess."""
+    exe = tmp_path / "cli-proxy-api.exe"
+    exe.write_bytes(b"binary")
+    (tmp_path / "config.yaml").write_text(CONFIG, encoding="utf-8")
+
+    def served(args: str) -> sidecar.ServingProcess:
+        return sidecar.ServingProcess(
+            pid=1, path=str(exe), sha256="", command_line=f'"{exe}"{args}'
+        )
+
+    assert sidecar.routing(served(" -local-model")) is None
+    assert sidecar.routing(served(" -local-model -config config.yaml")) is None
+    absolute = served(f' -local-model -config "{tmp_path / "config.yaml"}"')
+    assert sidecar.routing(absolute) is not None
+    # The last -config wins, as Go flags take it.
+    last = served(f' -config "{tmp_path / "config.yaml"}" -config other.yaml')
+    assert sidecar.config_path(last) is None

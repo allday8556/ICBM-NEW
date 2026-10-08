@@ -17,7 +17,7 @@ const DETAIL_COPY = {
   AI_EXECUTABLE_NOT_SERVING: '승인한 실행 파일이 지금 실행 중이 아닙니다',
   AI_EXECUTABLE_MISMATCH: '지금 실행 중인 파일이 승인한 파일과 다릅니다',
   AI_ROUTING_MISMATCH: '지금 라우팅 설정이 승인한 설정과 다릅니다',
-  AI_ROUTING_UNREADABLE: '실행 중인 CLIProxyAPI의 설정 파일을 읽을 수 없습니다',
+  AI_ROUTING_UNREADABLE: 'CLIProxyAPI를 -config <설정 파일의 절대 경로>로 실행해야 설정을 확인할 수 있습니다',
   AI_DAILY_CAP_REACHED: '오늘 호출 상한에 도달했습니다',
 };
 const MISSING_COPY = { model: '모델', executable: '실행 파일', routing: '라우팅', data_transfer: '상품 정보 전송', credential: '접속 키' };
@@ -26,7 +26,7 @@ const ERROR_COPY = {
   AI_PROFILE_CURRENT_MOVED: '다른 곳에서 먼저 바뀌었습니다. 다시 불러온 뒤 저장하세요.',
   AI_EXECUTABLE_MISMATCH: '지금 실행 중인 파일만 승인할 수 있습니다. 새로고침 후 다시 확인하세요.',
   AI_ROUTING_MISMATCH: '지금 라우팅 설정만 승인할 수 있습니다. 새로고침 후 다시 확인하세요.',
-  AI_ROUTING_UPDATES_ON: 'CLIProxyAPI를 -local-model 옵션과 disable-auto-update-panel: true 설정으로 실행해야 승인할 수 있습니다.',
+  AI_ROUTING_UPDATES_ON: 'CLIProxyAPI를 -config <절대 경로>와 -local-model 옵션, disable-auto-update-panel: true 설정으로 실행해야 승인할 수 있습니다.',
   AI_PROFILE_MISSING: '먼저 공급자 설정을 저장하세요.',
   AI_MODEL_NOT_APPROVED: '모델은 소유자가 정한 gpt-5.6-sol만 쓸 수 있습니다.',
   AI_CREDENTIAL_INVALID: '접속 키는 공백 없는 영문·숫자·기호 16~200자입니다.',

@@ -83,7 +83,7 @@ def _serving(
         pid=7,
         path=str(exe),
         sha256=sidecar.file_sha256(str(exe)) or "",
-        command_line=f'"{exe}"{args}',
+        command_line=f'"{exe}" -config "{exe.parent / "config.yaml"}"{args}',
     )
 
 

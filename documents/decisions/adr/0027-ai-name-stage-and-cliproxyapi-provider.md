@@ -131,6 +131,8 @@ The operator's CLIProxyAPI fetches model catalogs and its management panel from 
 - it also records `disable-auto-update-panel: true`;
 - the Settings card shows whether the observed configuration matches.
 
+**Implementation note (2026-10-09, AIS-1).** The probe reads the sidecar's configuration only from an explicit, absolute `-config` (the last occurrence, as Go flags take it). A relative or default path resolves against the sidecar's own working directory, which cannot be read, so such a sidecar's routing is unreadable (`UNAVAILABLE`) and never approved. The routing fingerprint keeps the launch arguments in their order and hides only secret values.
+
 ICBM never edits the sidecar's files. The operator, or Track A in the live test with the owner's approval of `6067968983`, sets them.
 
 ## 6. The product-name task and the seed upgrade
