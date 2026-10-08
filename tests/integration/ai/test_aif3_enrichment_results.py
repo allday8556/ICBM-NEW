@@ -388,3 +388,68 @@ def test_an_object_without_the_structured_envelope_or_a_required_field_is_never_
         ), key
         assert results[key].value is None
     assert results["options"].status == "OK"
+
+
+REMATCH = TaskDefinition(
+    task_key="TASK_CATEGORY_REMATCH_V1",
+    results={"result": ResultSchema(required=("selected_category_id",))},
+    fact_fields=("original_name",),
+    schema_version="test-rematch-1",
+)
+
+
+class ScriptedProvider(FakeProvider):
+    """Answers per task: the bundle fails for good (not retryable), the rematch is rate limited
+    once and then answers."""
+
+    def execute(self, request: Any) -> ProviderOutcome:
+        self.requests.append(request)
+        if request.task_key == BUNDLE:
+            raise InputValidationError("AI_REQUEST_REFUSED", "refused for good")
+        if sum(1 for r in self.requests if r.task_key == REMATCH.task_key) == 1:
+            raise RateLimitedError("AI_RATE_LIMITED", "slow down")
+        return ProviderOutcome(
+            ok=True,
+            provenance=_provenance(),
+            value={
+                "selected_category_id": "50000803",
+                "confidence": 0.6,
+                "evidence": ["original_name"],
+                "requires_review": False,
+            },
+        )
+
+
+def test_a_job_retried_for_one_task_never_calls_a_task_it_already_settled(
+    container: Container, group: str
+) -> None:
+    fake = ScriptedProvider()
+    service = EnrichmentService(
+        db=container.db,
+        clock=container.clock,
+        audit=container.audit,
+        jobs=container.jobs,
+        products=container.product_store,
+        accounts=container.accounts,
+        composer=container.ai_composer,
+        execution=AIExecution(fake),
+        tasks=(TASK, REMATCH),
+    )
+    job_id = service.request(
+        group,
+        EnrichmentRequest(actor="operator", tasks=[BUNDLE, REMATCH.task_key]),
+        correlation_id="c-9",
+    ).job_id
+    assert job_id
+    # Attempt 1: the bundle fails for good and is recorded; the rematch asks to retry the job.
+    with pytest.raises(RateLimitedError):
+        _run(container, service, job_id, attempt=1)
+    bundle_calls = sum(1 for r in fake.requests if r.task_key == BUNDLE)
+    assert bundle_calls == 1
+    # Attempt 2: only the rate-limited task is called again; the settled bundle is not.
+    _run(container, service, job_id, attempt=2)
+    assert sum(1 for r in fake.requests if r.task_key == BUNDLE) == bundle_calls
+    results = {(r.task_key, r.result_key): r for r in service.results(group).results}
+    assert {results[(BUNDLE, k)].status for k in TASK.keys} == {"FAILED"}
+    assert {results[(BUNDLE, k)].sequence for k in TASK.keys} == {1}
+    assert results[(REMATCH.task_key, "result")].status == "OK"

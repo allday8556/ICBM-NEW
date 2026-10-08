@@ -352,12 +352,16 @@ class EnrichmentService:
             task = self._task(str(task_key))
             inputs = self._inputs(task, product_group_id, target, identity)
             with self._db.read() as session:
+                # A key this job already recorded, OK or FAILED, is settled: a retry of the job
+                # (only ever caused by a TRANSIENT or RATE_LIMITED task) never calls it again
+                # (ADR-0012 §8).
                 needed = [
                     key
                     for key in task.keys
                     if not self._fresh(
                         session, product_group_id, task, key, target, inputs.fingerprint
                     )
+                    and not self._settled_by(session, product_group_id, task, key, target, ctx)
                 ]
             if not needed:
                 continue
@@ -557,6 +561,20 @@ class EnrichmentService:
             and current.status == "OK"
             and current.input_fingerprint == fingerprint
         )
+
+    def _settled_by(
+        self,
+        session: Session,
+        product_group_id: str,
+        task: TaskDefinition,
+        key: str,
+        target: Target | None,
+        ctx: JobContext,
+    ) -> bool:
+        current = self._store.current(
+            session, subject_key(product_group_id, task.task_key, key, target)
+        )
+        return current is not None and current.job_id == ctx.job_id
 
     def _task(self, key: str) -> TaskDefinition:
         task = self._tasks.get(key)
