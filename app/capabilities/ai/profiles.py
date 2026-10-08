@@ -8,11 +8,14 @@ One profile (``default``) names the operator's CLIProxyAPI sidecar:
   the routing identity (configuration fingerprint with the remote catalog and the panel
   auto-update off), and the owner's data-transfer approval.
 
-The client key is never stored by ICBM: it is read from the approved sidecar's own configuration
-at call time (ADR-0027 §2, as amended by AIS-1).
+The client key is ICBM-dedicated and lives only in the OS secret store (ADR-0012 §2, ADR-0027 §2,
+AIS-01): the operator writes it once through Settings, and it is never shown again, stored in the
+database, logged, audited or fingerprinted. The profile names it by ``credential_ref``.
 
 ``ProfiledProvider`` is the ADR-0012 port over that profile.
-- Its requested identity exists only when every approval is recorded.
+- Its requested identity exists only when every approval and the credential are recorded. Its
+  routing version names the endpoint as well as the approved routing fingerprint, so moving the
+  endpoint makes every earlier result stale (ADR-0027 §2).
 - Every call first proves the serving process against the approved executable and routing identity
   (fail-closed), then checks the data-transfer approval and the daily cap, then calls, and records
   the call in the ledger.
@@ -28,7 +31,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictBool, StrictInt, StrictStr
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -56,6 +59,7 @@ from app.platform.core.errors import (
     InputValidationError,
     PolicyBlockedError,
 )
+from app.platform.core.secrets import SecretStore
 from app.platform.db.database import Database
 from app.stages.connect.contracts import CapabilityReport
 from app.stages.connect.state import CapabilityStatus
@@ -74,6 +78,9 @@ REQUESTED_PROVIDER: Final = "cliproxyapi"
 DEFAULT_MODEL: Final = "gpt-5.6-sol"
 # The owner's model, Issue #219 comment 6068160917 (ADR-0027 AIS-09). Nothing else is requested.
 OWNER_APPROVED_MODELS: Final = (DEFAULT_MODEL,)
+# The OS secret-store name of the ICBM-dedicated sidecar client key (ADR-0007 §3).
+CREDENTIAL_REF: Final = "ai.cliproxyapi.client-key"
+_CREDENTIAL: Final = re.compile(r"^[\x21-\x7e]{16,200}$")
 _LOOPBACK: Final = re.compile(r"^http://(127\.0\.0\.1|localhost):(\d{2,5})$")
 _PROBE_TTL_S: Final = 10.0
 
@@ -88,11 +95,14 @@ AI_ROUTING_UNREADABLE: Final = "AI_ROUTING_UNREADABLE"
 AI_ROUTING_UPDATES_ON: Final = "AI_ROUTING_UPDATES_ON"
 AI_DATA_TRANSFER_NOT_APPROVED: Final = "AI_DATA_TRANSFER_NOT_APPROVED"
 AI_DAILY_CAP_REACHED: Final = "AI_DAILY_CAP_REACHED"
-AI_SIDECAR_KEY_UNREADABLE: Final = "AI_SIDECAR_KEY_UNREADABLE"
+AI_CREDENTIAL_MISSING: Final = "AI_CREDENTIAL_MISSING"
+AI_CREDENTIAL_INVALID: Final = "AI_CREDENTIAL_INVALID"
 AI_PROFILE_UNREADABLE: Final = "AI_PROFILE_UNREADABLE"
 AI_PROVIDER_CALL_FAILED: Final = "AI_PROVIDER_CALL_FAILED"
 
-Action = Literal["CONFIGURE", "APPROVE_EXECUTABLE", "APPROVE_ROUTING", "DATA_TRANSFER"]
+Action = Literal[
+    "CONFIGURE", "APPROVE_EXECUTABLE", "APPROVE_ROUTING", "DATA_TRANSFER", "SET_CREDENTIAL"
+]
 
 # The ADR-0012 §8 runtime state of a fully approved profile, by the reason a call is refused.
 # A reached daily cap is the profile's policy, not the sidecar's state: the runtime stays
@@ -107,6 +117,12 @@ _RUNTIME_STATE: Final = {
 
 def _canonical(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def routing_version(endpoint: str, fingerprint: str) -> str:
+    """The requested identity's routing version: the endpoint and the approved routing
+    fingerprint together, so a moved endpoint is a new identity (ADR-0027 §2, ADR-0012 §6)."""
+    return hashlib.sha256(f"{endpoint}\n{fingerprint}".encode()).hexdigest()
 
 
 def _port(endpoint: str) -> int:
@@ -312,11 +328,13 @@ class ProfiledProvider:
         store: ProfileStore,
         probe: sidecar.ServingProcessProbe,
         clock: Clock,
+        secrets: SecretStore,
         complete: Complete = _complete,
     ) -> None:
         self._store = store
         self._probe = probe
         self._clock = clock
+        self._secrets = secrets
         self._complete = complete
         self._observed: tuple[float, int, Observation] | None = None
 
@@ -336,15 +354,36 @@ class ProfiledProvider:
         self._observed = (time.monotonic(), port, observation)
         return observation
 
+    def _key(self, content: Mapping[str, Any]) -> str | None:
+        """The client key from the OS secret store, or ``None`` when it is not there."""
+        if not content.get("credential_set_at"):
+            return None
+        try:
+            return self._secrets.get(str(content.get("credential_ref") or CREDENTIAL_REF))
+        except Exception:  # an unreadable secret store is a missing credential, never a crash
+            return None
+
+    def store_credential(self, ref: str, key: str) -> None:
+        """Write the client key to the OS secret store, the only place it lives (AIS-01)."""
+        self._secrets.set(ref, key)
+
+    def missing(self, content: Mapping[str, Any]) -> list[str]:
+        missing = _missing(content)
+        if self._key(content) is None:
+            missing.append("credential")
+        return missing
+
     def requested_identity(self) -> RequestedIdentity | None:
         current = self._store.current()
         content = None if current is None else current.content
-        if not content or _missing(content):
+        if not content or self.missing(content):
             return None
         return RequestedIdentity(
             requested_provider=REQUESTED_PROVIDER,
             requested_model=str(content["requested_model"]),
-            routing_config_version=str(content["approved_routing"]["fingerprint"]),
+            routing_config_version=routing_version(
+                str(content["endpoint"]), str(content["approved_routing"]["fingerprint"])
+            ),
             proxy_version=str(content["approved_executable"]["sha256"]),
         )
 
@@ -360,7 +399,7 @@ class ProfiledProvider:
         current = self._store.current()
         if current is None:
             return _report(CapabilityStatus.NOT_CONFIGURED, "no AI provider is configured")
-        missing = _missing(current.content)
+        missing = self.missing(current.content)
         if missing:
             return _report(CapabilityStatus.NOT_CONFIGURED, "not approved: " + ", ".join(missing))
         problem = self._problem(current.content, self.observe(_port(current.content["endpoint"])))
@@ -392,7 +431,7 @@ class ProfiledProvider:
     def runtime_state(self) -> str:
         """``NOT_CONFIGURED`` until every approval exists, then ADR-0012 §8's runtime state."""
         current = self._store.current()
-        if current is None or _missing(current.content):
+        if current is None or self.missing(current.content):
             return "NOT_CONFIGURED"
         problem = self._problem(current.content, self.observe(_port(current.content["endpoint"])))
         return "AVAILABLE" if problem is None else _RUNTIME_STATE[problem]
@@ -404,7 +443,7 @@ class ProfiledProvider:
 
     def execute(self, request: TaskRequest) -> ProviderOutcome:
         current = self._store.current()
-        if current is None or _missing(current.content):
+        if current is None or self.missing(current.content):
             raise not_configured()
         content = current.content
         observed = self.observe(_port(content["endpoint"]), fresh=True)
@@ -414,10 +453,10 @@ class ProfiledProvider:
                 problem, "the served sidecar is not the approved one; nothing was sent"
             )
         assert observed.process is not None and observed.routing is not None
-        key = sidecar.client_key(observed.process)
+        key = self._key(content)
         if key is None:
             raise PolicyBlockedError(
-                AI_SIDECAR_KEY_UNREADABLE, "the sidecar's client key cannot be read"
+                AI_CREDENTIAL_MISSING, "the client key is not in the OS secret store"
             )
         # The place under the cap is taken before anything is sent, atomically (AIS-04).
         call_id = self._store.reserve_call(
@@ -445,7 +484,9 @@ class ProfiledProvider:
             proxy_name="CLIProxyAPI",
             proxy_version=str(content["approved_executable"]["sha256"]),
             proxy_binary_sha256=observed.process.sha256,
-            routing_config_version=observed.routing.fingerprint,
+            routing_config_version=routing_version(
+                str(content["endpoint"]), observed.routing.fingerprint
+            ),
             alias_applied=None,
             fallback_applied=None,
             billing_mode=BillingMode(content["billing_mode"]),
@@ -515,6 +556,15 @@ class DataTransferRequest(BaseModel):
     actor: StrictStr = Field(min_length=1, max_length=64)
     expected_current_revision: StrictStr = Field(min_length=1, max_length=36)
     approved: StrictBool
+
+
+class CredentialRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    actor: StrictStr = Field(min_length=1, max_length=64)
+    expected_current_revision: StrictStr = Field(min_length=1, max_length=36)
+    # Never echoed: a malformed key is refused by the service with a code, not by validation.
+    key: SecretStr
 
 
 class ObservedView(BaseModel):
@@ -594,7 +644,8 @@ class ProviderProfileService:
             if current
             else {
                 "provider_type": PROVIDER_TYPE,
-                "credential_source": "SIDECAR_CONFIG",
+                "credential_ref": CREDENTIAL_REF,
+                "credential_set_at": None,
                 "approved_executable": None,
                 "approved_routing": None,
                 "data_transfer_approved": False,
@@ -676,6 +727,31 @@ class ProviderProfileService:
             correlation_id=cid,
             audit_details=approved,
         )
+        return self.view()
+
+    def set_credential(self, request: CredentialRequest, *, cid: str) -> ProviderView:
+        """Write the ICBM-dedicated client key to the OS secret store, as an audited revision that
+        names only its reference and time. The key is never returned, stored, logged or audited."""
+        current = self._require_current()
+        key = request.key.get_secret_value()
+        if not _CREDENTIAL.match(key):
+            raise InputValidationError(
+                AI_CREDENTIAL_INVALID, "the client key is 16 to 200 visible ASCII characters"
+            )
+        ref = str(current.content.get("credential_ref") or CREDENTIAL_REF)
+        self._store.append(
+            {
+                **current.content,
+                "credential_ref": ref,
+                "credential_set_at": self._clock.now().isoformat(),
+            },
+            action="SET_CREDENTIAL",
+            expected_current_revision=request.expected_current_revision,
+            actor=request.actor,
+            correlation_id=cid,
+            audit_details={"credential_ref": ref},
+        )
+        self._provider.store_credential(ref, key)
         return self.view()
 
     def set_data_transfer(self, request: DataTransferRequest, *, cid: str) -> ProviderView:

@@ -18,22 +18,25 @@ from app.capabilities.ai.execution import AIExecution
 from app.capabilities.ai.profiles import (
     ApproveRequest,
     ConfigureRequest,
+    CredentialRequest,
     DataTransferRequest,
     ProfiledProvider,
     ProfileStore,
     ProviderProfileService,
+    routing_version,
 )
 from app.capabilities.ai.provider import TaskRequest
 from app.capabilities.audit.models import AuditEventType
 from app.config import AppConfig, database_path
 from app.container import Container
 from app.platform.core.errors import AppError
+from app.platform.core.secrets import MemorySecretStore
 from app.stages.connect.state import CapabilityStatus
 from integrations.ai import cliproxyapi, sidecar
 
 pytestmark = pytest.mark.integration
 
-KEY = "client-key-never-stored"
+KEY = "icbm-dedicated-client-key-0001"
 CONFIG = f"""host: "127.0.0.1"
 port: 18317
 api-keys:
@@ -89,9 +92,11 @@ def world(container: Container, tmp_path: Path) -> dict[str, Any]:
     probe = FakeProbe(_serving(tmp_path))
     complete = FakeComplete()
     store = ProfileStore(container.db, container.clock, container.audit)
-    provider = ProfiledProvider(store, probe, container.clock, complete=complete)
+    secrets = MemorySecretStore()
+    provider = ProfiledProvider(store, probe, container.clock, secrets, complete=complete)
     service = ProviderProfileService(store, provider, container.clock)
     return {
+        "secrets": secrets,
         "probe": probe,
         "complete": complete,
         "provider": provider,
@@ -116,6 +121,10 @@ def _configure(service: ProviderProfileService, expected: str | None = None, cap
 
 def _approve_all(service: ProviderProfileService, view: Any = None) -> Any:
     view = view or _configure(service)
+    view = service.set_credential(
+        CredentialRequest(actor="owner", expected_current_revision=view.current_revision, key=KEY),
+        cid="c-k",
+    )
     view = service.approve_executable(
         ApproveRequest(
             actor="owner",
@@ -145,7 +154,7 @@ def test_a_profile_is_ready_only_after_every_approval(world: dict[str, Any]) -> 
     assert service.view().capability.detail == "no AI provider is configured"
     view = _configure(service)
     assert view.capability.status is CapabilityStatus.NOT_CONFIGURED
-    assert view.capability.detail == "not approved: executable, routing, data_transfer"
+    assert view.capability.detail == "not approved: executable, routing, data_transfer, credential"
     assert world["provider"].requested_identity() is None
     assert view.runtime_state == "NOT_CONFIGURED"
     ready = _approve_all(service, view)
@@ -154,11 +163,14 @@ def test_a_profile_is_ready_only_after_every_approval(world: dict[str, Any]) -> 
     assert identity is not None
     assert (identity.requested_provider, identity.requested_model) == ("cliproxyapi", "gpt-5.6-sol")
     assert identity.proxy_version == ready.observed.sha256
-    assert identity.routing_config_version == ready.observed.routing_fingerprint
+    assert identity.routing_config_version == routing_version(
+        "http://127.0.0.1:18317", ready.observed.routing_fingerprint
+    )
     assert [h["action"] for h in ready.history] == [
         "DATA_TRANSFER",
         "APPROVE_ROUTING",
         "APPROVE_EXECUTABLE",
+        "SET_CREDENTIAL",
         "CONFIGURE",
     ]
 
@@ -226,7 +238,7 @@ def test_a_call_proves_the_served_sidecar_first_and_records_what_answered(
         300,
         "CLIProxyAPI",
     )
-    # The key was read from the sidecar's own configuration and handed to the call only.
+    # The key came from the OS secret store and was handed to the call only.
     assert world["complete"].calls == [("http://127.0.0.1:18317", KEY, "gpt-5.6-sol")]
     # Through the execution owner the outcome is trusted: its identity is the requested one.
     execution = AIExecution(provider)
@@ -250,7 +262,7 @@ def test_a_call_proves_the_served_sidecar_first_and_records_what_answered(
         ]
         calls = raw.execute("SELECT COUNT(*) FROM ai_provider_calls").fetchone()[0]
     assert KEY not in dump
-    assert len(approvals) == 4 and calls == 2
+    assert len(approvals) == 5 and calls == 2
 
 
 def test_a_mismatch_unserved_sidecar_or_reached_cap_refuses_before_anything_is_sent(
@@ -337,7 +349,32 @@ def test_the_routes_configure_and_read_the_profile(config: AppConfig) -> None:
         assert saved.status_code == 200, saved.text
         body = saved.json()
         assert body["content"]["requested_model"] == "gpt-5.6-sol"
-        assert body["content"]["credential_source"] == "SIDECAR_CONFIG"
+        assert body["content"]["credential_ref"] == "ai.cliproxyapi.client-key"
+        assert body["content"]["credential_set_at"] is None
+        # The key is written to the secret store and never returned.
+        keyed = client.post(
+            "/api/v1/ai/provider/credential",
+            headers=headers,
+            json={
+                "actor": "owner",
+                "expected_current_revision": body["current_revision"],
+                "key": KEY,
+            },
+        )
+        assert keyed.status_code == 200, keyed.text
+        assert KEY not in keyed.text
+        body = keyed.json()
+        bad = client.post(
+            "/api/v1/ai/provider/credential",
+            headers=headers,
+            json={
+                "actor": "owner",
+                "expected_current_revision": body["current_revision"],
+                "key": "short key",
+            },
+        )
+        assert bad.json()["error"]["code"] == "AI_CREDENTIAL_INVALID"
+        assert "short key" not in bad.text
         # Nothing serves that port: nothing can be approved, and nothing is ready.
         assert body["observed"]["serving"] is False
         assert body["capability"]["status"] == "NOT_CONFIGURED"
@@ -455,3 +492,38 @@ def test_only_the_owners_model_is_asked_and_a_move_withdraws_the_transfer_approv
     assert moved.content["data_transfer_approved"] is False
     assert moved.capability.detail == "not approved: data_transfer"
     assert world["provider"].requested_identity() is None
+    # The endpoint is part of the requested identity: a re-approved move is a new identity.
+    again = service.set_data_transfer(
+        DataTransferRequest(
+            actor="owner", expected_current_revision=moved.current_revision, approved=True
+        ),
+        cid="c",
+    )
+    assert again.capability.detail.startswith("provider=")
+    identity = world["provider"].requested_identity()
+    assert identity is not None
+    assert identity.routing_config_version == routing_version(
+        "http://127.0.0.1:18318", again.content["approved_routing"]["fingerprint"]
+    )
+    assert identity.routing_config_version != routing_version(
+        "http://127.0.0.1:18317", again.content["approved_routing"]["fingerprint"]
+    )
+
+
+def test_without_the_credential_nothing_is_ready_and_it_is_kept_only_in_the_secret_store(
+    world: dict[str, Any], config: AppConfig
+) -> None:
+    service: ProviderProfileService = world["service"]
+    ready = _approve_all(service)
+    assert ready.capability.status is CapabilityStatus.READY
+    assert world["secrets"].get("ai.cliproxyapi.client-key") == KEY
+    world["secrets"].delete("ai.cliproxyapi.client-key")
+    assert world["provider"].capability_report().detail == "not approved: credential"
+    assert world["provider"].requested_identity() is None
+    with sqlite3.connect(database_path(config.data_dir)) as raw:
+        dump = "\n".join(
+            str(row)
+            for table in ("ai_provider_profile_revisions", "audit_events")
+            for row in raw.execute(f"SELECT * FROM {table}")
+        )
+    assert KEY not in dump

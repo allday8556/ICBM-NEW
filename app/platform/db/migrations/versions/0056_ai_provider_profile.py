@@ -10,7 +10,7 @@ touches no existing table, row, trigger or index.
 - `ai_provider_profiles`, `ai_provider_profile_revisions`, `ai_provider_profile_current`: one profile
   per key, its append-only revisions, and a current pointer that moves only forward to its own
   newest revision. A revision's content is one JSON object (provider type, loopback endpoint,
-  requested model, credential source, approved executable and routing identity, billing mode, the
+  requested model, the OS secret-store name of the client key, approved executable and routing identity, billing mode, the
   owner's data-transfer approval and the daily call cap). No secret is ever in it.
 - `ai_provider_calls`: one row per provider call the profile made, counted per UTC day for the
   daily cap. The row is written `SENT` before the call, in the same serialized write unit that
@@ -82,7 +82,8 @@ def upgrade() -> None:
         ),
         _check(
             REVISIONS,
-            "action IN ('CONFIGURE', 'APPROVE_EXECUTABLE', 'APPROVE_ROUTING', 'DATA_TRANSFER')",
+            "action IN ('CONFIGURE', 'APPROVE_EXECUTABLE', 'APPROVE_ROUTING', 'DATA_TRANSFER',"
+            " 'SET_CREDENTIAL')",
             "action_known",
         ),
         _check(REVISIONS, "authored_by <> ''", "authored_by_present"),

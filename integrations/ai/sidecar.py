@@ -6,9 +6,9 @@ the command line and the sidecar's own configuration file it derives the routing
 SHA-256 over the configuration with every secret removed and the launch arguments, plus whether
 the remote model catalog (``-local-model``) and the panel auto-update are off.
 
-The probe reads; it never starts, stops, edits or downloads anything (ADR-0027 AIS-05). The client
-key is read from the sidecar's configuration at call time and returned only to the adapter; it is
-never logged, stored or fingerprinted (AIS-01).
+The probe reads; it never starts, stops, edits or downloads anything (ADR-0027 AIS-05). It never
+reads a secret: every key, secret, token and password line is removed before the configuration is
+fingerprinted, and the client key ICBM uses is its own, in the OS secret store (AIS-01).
 """
 
 import hashlib
@@ -158,21 +158,3 @@ def routing(process: ServingProcess) -> RoutingObservation | None:
         local_model=bool(_LOCAL_MODEL_FLAGS & set(args)),
         panel_auto_update_disabled=bool(_PANEL_OFF.search(text)),
     )
-
-
-def client_key(process: ServingProcess) -> str | None:
-    """The first client key of the sidecar's ``api-keys`` list. Returned to the adapter only."""
-    try:
-        text = config_path(process).read_text(encoding="utf-8")
-    except OSError:
-        return None
-    lines = text.splitlines()
-    for index, line in enumerate(lines):
-        if re.match(r"^api-keys\s*:\s*$", line):
-            for item in lines[index + 1 :]:
-                match = re.match(r'^\s*-\s*["\']?([^"\'\s#]+)["\']?\s*$', item)
-                if match:
-                    return match.group(1)
-                if item.strip() and not item.lstrip().startswith("#"):
-                    return None
-    return None

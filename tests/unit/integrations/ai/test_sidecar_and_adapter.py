@@ -59,17 +59,16 @@ def test_the_routing_identity_holds_no_secret_and_sees_both_update_switches(tmp_
     assert off is not None and off.panel_auto_update_disabled is False
 
 
-def test_the_client_key_is_read_from_the_sidecar_config_and_explicit_config_paths_count(
-    tmp_path: Path,
-) -> None:
-    assert sidecar.client_key(_process(tmp_path)) == "client-key-123"
-    assert sidecar.client_key(_process(tmp_path, CONFIG.replace("api-keys:", "keys:"))) is None
+def test_an_explicit_config_path_is_the_one_fingerprinted(tmp_path: Path) -> None:
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    (elsewhere / "custom.yaml").write_text(CONFIG.replace("client-key-123", "k2"), encoding="utf-8")
-    process = _process(tmp_path, args=f' -config "{elsewhere / "custom.yaml"}"')
+    (elsewhere / "custom.yaml").write_text(CONFIG.replace("8317", "9000"), encoding="utf-8")
+    process = _process(tmp_path, args=f' -local-model -config "{elsewhere / "custom.yaml"}"')
     assert sidecar.config_path(process) == elsewhere / "custom.yaml"
-    assert sidecar.client_key(process) == "k2"
+    here = sidecar.routing(_process(tmp_path))
+    there = sidecar.routing(process)
+    assert here is not None and there is not None and here.fingerprint != there.fingerprint
+    assert not hasattr(sidecar, "client_key")
 
 
 def test_the_adapter_reads_the_first_json_object_of_an_answer() -> None:

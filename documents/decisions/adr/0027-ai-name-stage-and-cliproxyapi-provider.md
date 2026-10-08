@@ -46,7 +46,7 @@ Date: 2026-10-09
 **The provider.** A `CLIPROXYAPI` provider profile and its adapter. The adapter is an OpenAI-compatible `POST /v1/chat/completions` on a loopback endpoint, behind the ADR-0012 checks:
 - the approved executable identity of the process actually serving the endpoint;
 - the approved routing identity;
-- the sidecar's own client key, read from its configuration per call and never stored (§2 amendment);
+- the credential in the OS secret store;
 - the owner's data-transfer approval;
 - a daily call cap.
 
@@ -85,16 +85,9 @@ One profile store, `ai_provider_profiles`, with append-only revisions and a curr
 - `routing_config_version` = the approved routing identity;
 - `proxy_version` = the approved binary version and SHA-256.
 
-**Amendment (2026-10-09, AIS-1): the credential source.** ICBM never stores the sidecar's
-client key: not in the database, not in the OS secret store, not in a log, audit record or
-fingerprint.
-- The profile's `credential_source` is `SIDECAR_CONFIG`. At call time, and only for the call, the key
-  is read from the `api-keys` list of the approved sidecar's own configuration file. That file is
-  found from the serving process's `-config` argument, or next to the approved executable.
-- So the key exists in exactly one place, the operator's sidecar configuration.
-- No one types it into ICBM, Track A included.
-- `credential_ref` is replaced by this source, and AIS-01 reads: the only AI endpoint is loopback, and
-  ICBM never persists the sidecar client key.
+**Implementation note (2026-10-09, AIS-1): the requested identity's routing version** is one
+SHA-256 over the endpoint and the approved routing fingerprint, so a moved endpoint is a new identity
+and every earlier result stale, as this section requires.
 
 **Amendment (2026-10-09, AIS-1): the version, as applicable (ADR-0012 §2).** The CLIProxyAPI
 Windows image carries no version resource, and ICBM never runs the binary to ask it (AIS-05).
@@ -159,7 +152,7 @@ The target-free subject is used, because the v29 bundle composes with the common
 ## 7. Screens
 
 **Settings › AI / Prompt › AI 공급자.**
-- The profile form: endpoint, model, billing mode, daily cap. It has no key field (§2 amendment).
+- The profile form: endpoint, model, key (written to the OS secret store), billing mode, daily cap.
 - The observed executable (path, SHA-256) beside the approved one, with an approve button. The same for the routing identity.
 - The data-transfer approval.
 - The state, in ADR-0012's vocabulary:
@@ -222,7 +215,7 @@ Each slice is its own PR under the Track A loop.
 ## Invariants
 
 ```text
-AIS-01  the only AI endpoint is loopback; ICBM never persists the sidecar client key (read from the sidecar's config per call)
+AIS-01  the only AI endpoint is loopback; the sidecar client key lives only in the OS secret store
 AIS-02  every call verifies the serving process against the approved executable identity, fail-closed
 AIS-03  approving an executable, a routing identity or data transfer is a protected, audited action
 AIS-04  no call is made without the owner's data-transfer approval on the profile, or past the daily cap

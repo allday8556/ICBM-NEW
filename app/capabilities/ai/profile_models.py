@@ -36,7 +36,8 @@ class AIProviderProfileRevision(Base):
             name="content_fingerprint_hex",
         ),
         CheckConstraint(
-            "action IN ('CONFIGURE', 'APPROVE_EXECUTABLE', 'APPROVE_ROUTING', 'DATA_TRANSFER')",
+            "action IN ('CONFIGURE', 'APPROVE_EXECUTABLE', 'APPROVE_ROUTING', 'DATA_TRANSFER',"
+            " 'SET_CREDENTIAL')",
             name="action_known",
         ),
         CheckConstraint("authored_by <> ''", name="authored_by_present"),

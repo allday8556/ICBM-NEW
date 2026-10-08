@@ -364,7 +364,7 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
 - **AI 공급자 card (ADR-0027 AIS-1).** The card holds the operator's CLIProxyAPI profile: a loopback endpoint, the owner's model (`gpt-5.6-sol`, shown read-only; any other is refused), the billing mode and the daily call cap. Moving the endpoint or the model withdraws the data-transfer approval.
   - It shows the approved executable and routing identity beside what is actually serving now. Each approve button names what is served now and is a protected, audited server action.
   - It holds the data-transfer approval, today's calls and the capability state (`연결됨`, `승인 필요 · …`, or the mismatch reason).
-  - The client key is never asked for.
+  - The ICBM-dedicated client key is typed once into a password field. The server writes it to the OS secret store, and it is never shown again: the card shows only `저장됨 · <time>` or `없음`.
 - **Still inert.** The "AI 기본 설정" toggles stay inert placeholders until their stage.
 
 ## Supplier common images (A-NEXT2a, owner decision 2026-10-04 option 1, Issue #231)

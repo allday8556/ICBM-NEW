@@ -10,6 +10,7 @@ from fastapi import APIRouter, Query
 from app.capabilities.ai.profiles import (
     ApproveRequest,
     ConfigureRequest,
+    CredentialRequest,
     DataTransferRequest,
     ProviderView,
 )
@@ -92,6 +93,13 @@ def approve_executable(container: ContainerDep, request: ApproveRequest) -> Prov
 def approve_routing(container: ContainerDep, request: ApproveRequest) -> ProviderView:
     """A protected, audited approval of the routing identity actually served now (ADR-0012 §5)."""
     return container.ai_provider.approve_routing(request, cid=_cid())
+
+
+@router.post("/provider/credential")
+def set_credential(container: ContainerDep, request: CredentialRequest) -> ProviderView:
+    """The ICBM-dedicated client key, written to the OS secret store and never returned
+    (ADR-0012 §2, ADR-0027 AIS-01). The revision and its audit name only the reference."""
+    return container.ai_provider.set_credential(request, cid=_cid())
 
 
 @router.post("/provider/data-transfer")

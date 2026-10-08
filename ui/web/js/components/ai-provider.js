@@ -3,8 +3,8 @@
 // The operator's CLIProxyAPI profile and its approvals, as the server holds them (GET
 // /api/v1/ai/provider). The executable and routing approvals name what is actually serving now,
 // and each is a protected, audited server action; the page computes no approval itself. The
-// sidecar's client key is never shown or typed here: ICBM reads it from the approved sidecar's own
-// configuration at call time.
+// ICBM-dedicated client key is typed once into a password field and written to the OS secret store
+// by the server (ADR-0012 §2); it is never shown again, and the field is cleared after the save.
 
 import { ApiError, getJson, sendJson } from '../core/api.js';
 import { h } from '../core/dom.js';
@@ -20,7 +20,7 @@ const DETAIL_COPY = {
   AI_ROUTING_UNREADABLE: '실행 중인 CLIProxyAPI의 설정 파일을 읽을 수 없습니다',
   AI_DAILY_CAP_REACHED: '오늘 호출 상한에 도달했습니다',
 };
-const MISSING_COPY = { executable: '실행 파일', routing: '라우팅', data_transfer: '상품 정보 전송' };
+const MISSING_COPY = { model: '모델', executable: '실행 파일', routing: '라우팅', data_transfer: '상품 정보 전송', credential: '접속 키' };
 const ERROR_COPY = {
   AI_PROFILE_INVALID: '주소는 http://127.0.0.1:<포트> 형식의 내 PC 주소만 쓸 수 있습니다.',
   AI_PROFILE_CURRENT_MOVED: '다른 곳에서 먼저 바뀌었습니다. 다시 불러온 뒤 저장하세요.',
@@ -29,6 +29,7 @@ const ERROR_COPY = {
   AI_ROUTING_UPDATES_ON: 'CLIProxyAPI를 -local-model 옵션과 disable-auto-update-panel: true 설정으로 실행해야 승인할 수 있습니다.',
   AI_PROFILE_MISSING: '먼저 공급자 설정을 저장하세요.',
   AI_MODEL_NOT_APPROVED: '모델은 소유자가 정한 gpt-5.6-sol만 쓸 수 있습니다.',
+  AI_CREDENTIAL_INVALID: '접속 키는 공백 없는 영문·숫자·기호 16~200자입니다.',
 };
 
 function stateText(capability) {
@@ -126,8 +127,27 @@ export function aiProviderPanel() {
         h('label', { class: 'kv' }, h('span', {}, '모델'), model),
         h('label', { class: 'kv' }, h('span', {}, '과금 방식'), billing),
         h('label', { class: 'kv' }, h('span', {}, '하루 호출 상한'), cap),
-        h('div', { class: 'note' }, '접속 키는 입력하지 않습니다. 승인한 CLIProxyAPI의 설정 파일에서 호출할 때만 읽고 저장하지 않습니다. 모델 변경은 소유자 결정입니다.'),
+        h('div', { class: 'note' }, '모델 변경은 소유자 결정입니다. 주소나 모델을 바꾸면 상품 정보 전송 승인이 취소됩니다.'),
         h('button', { type: 'submit', class: 'btn blue', 'data-action': 'ai-provider-save' }, '공급자 설정 저장'),
+      ),
+      h('h4', {}, '접속 키'),
+      row('상태', content.credential_set_at ? `저장됨 · ${content.credential_set_at.slice(0, 16).replace('T', ' ')}` : '없음'),
+      h(
+        'form',
+        {
+          class: 'ai-provider-form',
+          'data-role': 'ai-credential-form',
+          onsubmit: (event) => {
+            event.preventDefault();
+            const input = event.currentTarget.querySelector('input[name=client_key]');
+            const key = input.value;
+            input.value = '';
+            send(`${ENDPOINT}/credential`, { actor: 'operator', expected_current_revision: revision, key }, '접속 키를 저장했습니다');
+          },
+        },
+        h('label', { class: 'kv' }, h('span', {}, 'ICBM 전용 접속 키'), h('input', { name: 'client_key', type: 'password', autocomplete: 'off', class: 'field', disabled: !revision })),
+        h('div', { class: 'note' }, 'CLIProxyAPI 설정의 api-keys에 ICBM 전용으로 넣은 키입니다. OS 자격 증명 보관소에만 저장되고 다시 보여주지 않습니다.'),
+        h('button', { type: 'submit', class: 'btn', 'data-action': 'ai-credential-save', disabled: !revision }, '접속 키 저장'),
       ),
       h('h4', {}, '실행 파일'),
       row('승인됨', approvedExe ? `${approvedExe.path} · ${short(approvedExe.sha256)}` : '없음'),

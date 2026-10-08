@@ -463,7 +463,7 @@ def build_container(
     # ADR-0027: the profiled CLIProxyAPI sidecar. With no approved profile it names no
     # identity, so the ai capability reads NOT_CONFIGURED and nothing is ever sent.
     profile_store = ProfileStore(db, clock, audit)
-    profiled_provider = ProfiledProvider(profile_store, WindowsProcessProbe(), clock)
+    profiled_provider = ProfiledProvider(profile_store, WindowsProcessProbe(), clock, secrets)
     ai_execution = AIExecution(profiled_provider)
     ai_provider = ProviderProfileService(profile_store, profiled_provider, clock)
     readiness = ReadinessService(

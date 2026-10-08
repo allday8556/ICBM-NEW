@@ -178,7 +178,8 @@ def test_the_ai_provider_card_saves_a_profile_and_approves_only_what_is_served(
         state = card.locator("[data-role='ai-provider-state']")
         state.wait_for(timeout=15_000)
         assert state.get_attribute("data-status") == "NOT_CONFIGURED"
-        assert card.locator("input[type='password']").count() == 0
+        # The key field is a password field, disabled until a profile exists.
+        assert card.locator("input[type='password']").count() == 1
         card.locator("input[name='endpoint']").fill("http://127.0.0.1:45998")
         card.locator("[data-action='ai-provider-save']").click()
         page.wait_for_function(
