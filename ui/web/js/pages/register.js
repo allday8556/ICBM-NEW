@@ -15,6 +15,7 @@ import { fragment, h } from '../core/dom.js';
 import { dotDateTime } from '../core/format.js';
 import { withHelp } from '../core/help.js';
 import { toast } from '../core/toast.js';
+import { openModal } from '../core/modal.js';
 import { markInert } from '../core/inert.js';
 import { platformTag } from '../core/platform.js';
 import { pageHead } from '../components/page-head.js';
@@ -55,7 +56,7 @@ const PROOF_LABEL = {
   visual_acceptance_recorded: '화면 검수 기록',
 };
 
-const INTENT_LABEL = {
+export const INTENT_LABEL = {
   PREPARED: '전송 준비됨',
   SENT: '전송됨',
   CONFIRMED: '확인 완료',
@@ -75,7 +76,7 @@ const OUTCOME_LABEL = {
   UNKNOWN: '결과 미확인',
 };
 
-const PREPARATION_LABEL = {
+export const PREPARATION_LABEL = {
   DRAFTED: '초안',
   SNAPSHOT_FROZEN: '스냅샷 고정됨',
   INTENT_OPEN: '등록 요청 생성됨',
@@ -100,7 +101,7 @@ const ACTION_LABEL = {
 const OPERATOR = 'operator';
 
 // Server reason codes rendered as copy. The page never derives a verdict, only its wording.
-const REASON_COPY = {
+export const REASON_COPY = {
   // B-PRICE1: the repin command's refusals.
   REGISTER_DRAFT_REVISION_MOVED: '초안이 바뀌었습니다. 화면을 새로 고친 뒤 다시 시도하세요.',
   REGISTER_REPIN_INTENT_OPEN: '이 초안의 등록 요청이 아직 진행 중이라 가격을 다시 고정할 수 없습니다.',
@@ -179,19 +180,19 @@ const REASON_COPY = {
   LIVE_ASSET_CANDIDATE_DRIFT: '실행 권한 발급 이후 후보가 바뀌었습니다.',
 };
 
-function kv(label, value) {
+export function kv(label, value) {
   return h('div', { class: 'kv' }, h('span', {}, label), h('b', {}, value ?? '—'));
 }
 
-function chip(text, tone) {
+export function chip(text, tone) {
   return h('span', { class: tone ? `chip ${tone}` : 'chip' }, text);
 }
 
-function reason(code) {
+export function reason(code) {
   return code ? h('div', { class: 'mini' }, REASON_COPY[code] ?? code) : null;
 }
 
-function table(headers, rows) {
+export function table(headers, rows) {
   return h(
     'table',
     { class: 'table' },
@@ -220,7 +221,7 @@ function reasonNode(tag, reason) {
   );
 }
 
-function statusChip(status, codes, reasons) {
+export function statusChip(status, codes, reasons) {
   if (!status) return '—';
   const structured = reasons ?? [];
   return fragment(
@@ -233,7 +234,7 @@ function statusChip(status, codes, reasons) {
 
 // B-UX1: a unit's reasons grouped under the first area the server gave each; a reason is listed
 // once, and an area the server could not classify keeps its real code under UNCLASSIFIED.
-function reasonGroups(reasons, labels) {
+export function reasonGroups(reasons, labels) {
   const groups = new Map();
   for (const reason of reasons) {
     const area = (reason.areas ?? [])[0] ?? 'UNCLASSIFIED';
@@ -350,7 +351,7 @@ function readinessPanel(readiness) {
   );
 }
 
-function itemRow(item) {
+export function itemRow(item) {
   const assets = item.publication_assets ?? [];
   return h(
     'tr',
@@ -398,7 +399,7 @@ function fieldRow(field) {
   );
 }
 
-function categoryBlock(category) {
+export function categoryBlock(category) {
   const fields = [...category.attributes, ...category.notice_fields];
   return h(
     'div',
@@ -429,7 +430,7 @@ function field(label, name, value, type = 'input') {
 
 // The authoring form of one provider-listing unit (§27). It collects the operator's own inputs
 // and sends them; it computes no readiness and stores nothing of its own — the server keeps them.
-function authoringForm(unit, onDone) {
+export function authoringForm(unit, onDone) {
   const authored = unit.authored;
   const inputs = authored?.inputs ?? {};
   const categoryInput = field('카테고리', 'category_id', inputs.category?.category_id);
@@ -569,34 +570,41 @@ function authoringForm(unit, onDone) {
     renderMetadata(found);
     return found;
   }
+  const head = h('div', { class: 'supplier-head-row' }, h('b', {}, '등록 준비 입력'),
+    authored ? chip(`리비전 ${authored.revision_no}`) : chip('미저장', 'warn'));
+  const nameField = field('상품명', 'name', inputs.name?.value);
+  // B-DETAIL: the selected detail images come first; the text after them is optional when the
+  // unit has detail images (the server decides, never this page).
+  const detailField = field(
+    '상세 본문 (상세 이미지 뒤, 상세 이미지가 있으면 선택)',
+    'detail_body',
+    inputs.detail_body,
+    'textarea',
+  );
+  const submit = h(
+    'button',
+    {
+      type: 'submit',
+      class: 'btn blue',
+      'data-action': 'SAVE_PREPARATION',
+      'data-unit': unit.unit_ref,
+    },
+    authored ? '준비 내용 저장' : '준비 내용 만들기',
+  );
   const form = h(
     'form',
     { class: 'register-authoring', 'data-preparation': authored?.preparation_id ?? '' },
-    h('div', { class: 'supplier-head-row' }, h('b', {}, '등록 준비 입력'),
-      authored ? chip(`리비전 ${authored.revision_no}`) : chip('미저장', 'warn')),
+    head,
     categoryInput,
-    field('상품명', 'name', inputs.name?.value),
+    nameField,
     dynamicFields,
     optionFields,
-    // B-DETAIL: the selected detail images come first; the text after them is optional when the
-    // unit has detail images (the server decides, never this page).
-    field(
-      '상세 본문 (상세 이미지 뒤, 상세 이미지가 있으면 선택)',
-      'detail_body',
-      inputs.detail_body,
-      'textarea',
-    ),
-    h(
-      'button',
-      {
-        type: 'submit',
-        class: 'btn blue',
-        'data-action': 'SAVE_PREPARATION',
-        'data-unit': unit.unit_ref,
-      },
-      authored ? '준비 내용 저장' : '준비 내용 만들기',
-    ),
+    detailField,
+    submit,
   );
+  // The editor page places these by step and binds them back to this form (the `form` attribute);
+  // the save reads them through the same references either way.
+  form.parts = { head, category: categoryInput, name: nameField, fields: dynamicFields, options: optionFields, detail: detailField, submit };
   categoryControl.addEventListener('change', () => {
     loadMetadata().catch((error) => {
       const code = error instanceof ApiError ? error.error?.code : null;
@@ -686,7 +694,7 @@ function authoringForm(unit, onDone) {
   return form;
 }
 
-function preflightBlock(unit, labels) {
+export function preflightBlock(unit, labels) {
   if (!unit.preflight) {
     return h(
       'div',
@@ -712,7 +720,7 @@ function preflightBlock(unit, labels) {
   );
 }
 
-function attemptRow(attempt) {
+export function attemptRow(attempt) {
   return h(
     'tr',
     {},
@@ -724,7 +732,7 @@ function attemptRow(attempt) {
   );
 }
 
-function scopeBlock(scope) {
+export function scopeBlock(scope) {
   const paused = scope.state === 'PAUSED';
   return h(
     'div',
@@ -780,7 +788,7 @@ function call(unit, action, intentId) {
 }
 
 // ADR-0014 §28.5: the server's read state, as it labelled it. Only 등록실패 is red.
-function readStateChip(read, problem) {
+export function readStateChip(read, problem) {
   if (!read) {
     return h('span', { class: 'chip bad', 'data-reason': problem ?? 'REGISTER_READ_STATE_UNCLASSIFIED' }, '분류 오류');
   }
@@ -889,7 +897,7 @@ function registrationStatusPanel(status, onDone) {
   );
 }
 
-function actionCell(unit, action, onDone) {
+export function actionCell(unit, action, onDone) {
   const button = h(
     'button',
     {
@@ -909,7 +917,7 @@ function actionCell(unit, action, onDone) {
 // B-PREVIEW: what this frozen Snapshot would send, as the server projected it. Every value is
 // inserted as text; provider URLs never arrive (the server redacts them) and the detail body is
 // its structure, never HTML.
-function previewBlock(unit) {
+export function previewBlock(unit) {
   if (!unit.snapshot) return null;
   const holder = h('div', { class: 'register-preview', 'data-preview': unit.snapshot.registration_snapshot_id });
   const button = h('button', { type: 'button', class: 'btn', 'data-action': 'PREVIEW_SNAPSHOT' }, '스마트스토어 미리보기');
@@ -986,7 +994,7 @@ function previewView(view) {
 // ask M4 to price again and re-pin the Draft. The page names no price; the server decides all.
 const REPIN_REASONS = new Set(['PRICING_SNAPSHOT_MISSING', 'PRICING_SNAPSHOT_SUPERSEDED']);
 
-function repinBlock(unit, onDone) {
+export function repinBlock(unit, onDone) {
   // Offered when the server says the pin is not M4's current price, or M4's own pricing readiness
   // names a missing or superseded snapshot; the server decides everything else.
   const moved = unit.items.some(
@@ -1324,12 +1332,78 @@ function utilityRow(overview) {
   );
 }
 
+// The registration editor (2026-10-08 owner UX): a row opens this choice, and the chosen work opens
+// in a new tab. 상품수정 needs a registration the server has confirmed; the choice itself sends
+// nothing. A unit's ref moves as it is authored and frozen (the server's UnitView), so the link also
+// carries its Items: the editor follows the same unit through those moves.
+export function unitItemsKey(unit) {
+  return unit.items.map((item) => item.item_id).sort().join(',');
+}
+
+export function editorHref(unit, mode) {
+  const params = new URLSearchParams({ draft: unit.draft_id, unit: unit.unit_ref, items: unitItemsKey(unit), mode });
+  return `${window.location.pathname}#/register-editor?${params}`;
+}
+
+function openUnitChoice(unit) {
+  const registered = unit.intent?.read_state?.state === 'REGISTERED';
+  const open = (mode) => {
+    window.open(editorHref(unit, mode), '_blank');
+  };
+  const card = (mode, tag, tone, title, copy, enabled) =>
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'choice-card',
+        'data-choice': mode,
+        disabled: !enabled,
+        onclick: () => enabled && open(mode),
+      },
+      h('span', { class: `chip ${tone}` }, tag),
+      h('b', {}, title),
+      h('span', { class: 'mini' }, copy),
+    );
+  openModal({
+    eyebrow: '등록관리 · 상품 편집기',
+    title: unit.unit_ref,
+    help: '편집기는 새 탭으로 열립니다. 등록관리 화면은 그대로 두고 여러 상품을 나란히 열어 작업할 수 있습니다.',
+    body: h(
+      'div',
+      { class: 'unit-choice', 'data-role': 'unit-choice', 'data-unit': unit.unit_ref },
+      h(
+        'div',
+        { class: 'detail-group' },
+        h('div', { class: 'kv' }, h('span', {}, '대상 플랫폼'), platformTag(unit.marketplace_key)),
+        kv('준비 상태', PREPARATION_LABEL[unit.preparation] ?? unit.preparation),
+        unit.intent ? h('div', { class: 'kv' }, h('span', {}, '등록 상태'), readStateChip(unit.intent.read_state, unit.intent.read_state_problem)) : null,
+      ),
+      h(
+        'div',
+        { class: 'choice-grid' },
+        card('register', '상품등록', 'info', '마켓에 등록하기', '편집기에서 상품 정보·이미지·가격·고시·상세를 채우고 등록합니다.', !registered),
+        card('edit', '상품수정', 'good', '등록된 상품 수정하기', registered ? '등록된 상품의 내용을 확인합니다. 마켓에 수정 반영은 준비 중입니다.' : '마켓 등록이 확인된 뒤에 수정할 수 있습니다.', registered),
+      ),
+    ),
+  });
+}
+
 // One row per unit, as the server read it; 열기 brings that unit's own workspace into view.
 function queueRow(unit) {
   const read = unit.intent?.read_state;
   return h(
     'tr',
-    { 'data-queue-unit': unit.unit_ref },
+    {
+      class: 'register-queue-row',
+      'data-queue-unit': unit.unit_ref,
+      tabindex: '0',
+      onclick: (event) => {
+        if (!event.target.closest('button')) openUnitChoice(unit);
+      },
+      onkeydown: (event) => {
+        if (event.key === 'Enter') openUnitChoice(unit);
+      },
+    },
     h('td', {}, h('b', {}, unit.unit_ref), h('div', { class: 'mini mono' }, `초안 ${unit.draft_id.slice(0, 8)}`)),
     h('td', {}, platformTag(unit.marketplace_key)),
     unit.category ? h('td', {}, h('span', { class: 'mono' }, unit.category.category_id)) : noDataCell('카테고리'),
