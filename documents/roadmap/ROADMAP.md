@@ -466,10 +466,14 @@ Before the first vertical closes:
 
 - the registration list / quick-review panel / full individual editor UX may be frozen and wired to
   **existing server-owned** Product, image, Item, Pricing, readiness, Draft/Preparation and review state;
-- the approved/prototype UX may reserve locations for the existing Canonical v3.1 enrichment tasks,
-  but the production runtime must not render that AI control at all until an authoritative server
-  capability/owner exists for it. Do not leave a reasonless disabled placeholder, and do not
-  hardcode an "unavailable" reason in JavaScript merely to fill the slot;
+- the approved/prototype UX may reserve locations for the existing Canonical v3.1 enrichment tasks.
+  Owner decision 2026-10-08 (Issue #219 comment `6054956408`) lets the production runtime render such
+  an AI control ahead of its server owner, in the position the approved layout or editor draft fixes.
+  It may do so only as an inert placeholder: disabled, named for its feature and marked 준비 중.
+  It sends no request and calls no AI provider. It never performs or simulates the AI operation and
+  never shows a manufactured result. It becomes active only through the authoritative server
+  capability/owner that the §12 sequence delivers, and no interim client-owned path is built to
+  activate it;
 - the baseline authoring path must remain deterministic/manual and work with **no AI provider**.
   This restates repository-canonical M5 requirements: ADR-0014 §18 says M5 registers with no AI
   provider configured, and `documents/acceptance/milestones/M5.md` §2 repeats that AI is outside M5 acceptance.
