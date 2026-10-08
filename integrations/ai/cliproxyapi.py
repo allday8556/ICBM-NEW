@@ -107,8 +107,11 @@ def complete(
     if response.status_code in (401, 403):
         return answer(error_kind="AUTH", error_code=AI_SIDECAR_AUTH, sidecar_version=version)
     if response.status_code >= 400:
-        kind = "TRANSIENT" if response.status_code >= 500 else "UNKNOWN"
-        return answer(error_kind=kind, error_code=AI_SIDECAR_HTTP_ERROR, sidecar_version=version)
+        # Any other HTTP error, 5xx included, is UNKNOWN (ADR-0027 §4): the sidecar may have sent
+        # the request on, so it is never retried automatically into a second transmission.
+        return answer(
+            error_kind="UNKNOWN", error_code=AI_SIDECAR_HTTP_ERROR, sidecar_version=version
+        )
     try:
         body = response.json()
         content = body["choices"][0]["message"]["content"]

@@ -21,8 +21,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Protocol
 
-_SECRET_LINE: Final = re.compile(r"(keys?|secrets?|tokens?|passwords?)\s*:", re.IGNORECASE)
-_SECRET_NAME: Final = re.compile(r"(key|secret|token|password|auth)", re.IGNORECASE)
+# One YAML field: its indent and an optional list dash, its name, and its value.
+_FIELD: Final = re.compile(
+    r"^(\s*(?:-\s+)?)([^\s:#\-\"'][^:#]*?|\"[^\"]+\"|'[^']+')\s*:(?:\s+(.*))?$"
+)
+_SECRET_NAME: Final = re.compile(r"(key|secret|token|password)", re.IGNORECASE)
+_SECRET_FLAG: Final = re.compile(r"(key|secret|token|password|auth)", re.IGNORECASE)
 _PANEL_OFF: Final = re.compile(r"^\s*disable-auto-update-panel\s*:\s*true\s*$", re.MULTILINE)
 _LOCAL_MODEL_FLAGS: Final = frozenset({"-local-model", "--local-model"})
 
@@ -129,31 +133,58 @@ def config_path(process: ServingProcess) -> Path:
 
 
 def _indent(line: str) -> int:
-    return len(line) - len(line.lstrip(" 	"))
+    return len(line) - len(line.lstrip())
+
+
+_BLOCK_SCALAR: Final = frozenset({"|", ">", "|-", ">-", "|+", ">+"})
 
 
 def _without_secrets(text: str) -> str:
-    """The configuration with every secret removed: a key, secret, token or password line, and
-    everything nested under it (list items, mappings, blank and comment lines between them), until
-    the next line at the same or a shallower indentation. Comments are dropped as well, so no
-    secret written in one ever reaches the fingerprint."""
+    """The configuration with every secret value replaced, and nothing else removed.
+
+    - A key whose name is secret (a key, secret, token or password) keeps its line with its value
+      replaced: ``api-key: <redacted>``. A block scalar under it is dropped.
+    - The bare list items directly under a secret header (``api-keys:`` then ``- "…"``) are
+      replaced: ``- <redacted>``.
+    - Every other field stays, so a mapping such as ``- api-key: …`` with its ``base-url: …`` keeps
+      the destination in the fingerprint.
+    - Comments and blank lines are dropped, so no secret written in a comment reaches it."""
     kept: list[str] = []
-    secret_indent: int | None = None
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+    header: tuple[int, bool] | None = None  # the newest header above: its indent, and if secret
+    hidden: int | None = None  # the indent of a secret block scalar being dropped
+    for raw in text.splitlines():
+        line = raw.split(" #", 1)[0].rstrip()
+        if not line.strip() or line.lstrip().startswith("#"):
             continue
-        if secret_indent is not None:
-            if _indent(line) > secret_indent or (
-                _indent(line) == secret_indent and stripped.startswith("- ")
-            ):
+        indent = _indent(line)
+        if hidden is not None:
+            if indent > hidden:
                 continue
-            secret_indent = None
-        content = line.split(" #", 1)[0].rstrip()
-        if _SECRET_LINE.search(content):
-            secret_indent = _indent(line)
+            hidden = None
+        while (
+            header is not None
+            and indent <= header[0]
+            and not (indent == header[0] and line.lstrip().startswith("- ") and header[1])
+        ):
+            header = None
+        field = _FIELD.match(line)
+        if field is None:
+            if header is not None and header[1] and line.lstrip().startswith("-"):
+                kept.append(" " * indent + "- <redacted>")
+            else:
+                kept.append(line)
             continue
-        kept.append(content)
+        lead, name, value = field.group(1), field.group(2), (field.group(3) or "").strip()
+        secret = bool(_SECRET_NAME.search(name))
+        if not value:
+            header = (indent, secret)
+            kept.append(line)
+        elif secret:
+            if value in _BLOCK_SCALAR:
+                hidden = indent
+            kept.append(f"{lead}{name}: <redacted>")
+        else:
+            kept.append(line)
     return "\n".join(kept).strip()
 
 
@@ -168,7 +199,7 @@ def _redacted_args(args: list[str]) -> list[str]:
             continue
         hide_next = False
         name, sep, _ = arg.partition("=")
-        if arg.startswith("-") and _SECRET_NAME.search(name):
+        if arg.startswith("-") and _SECRET_FLAG.search(name):
             if sep:
                 redacted.append(f"{name}=<redacted>")
                 continue

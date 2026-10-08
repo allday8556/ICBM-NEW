@@ -165,6 +165,9 @@ def test_every_secret_is_removed_however_it_is_spread_and_from_the_arguments(
     assert "SECRET" not in kept
     assert "port: 8317" in kept and "debug: false" in kept
     assert "disable-auto-update-panel: true" in kept
+    # Only values are hidden: the destination beside a secret stays in the fingerprint.
+    assert 'base-url: "https://example.invalid"' in kept
+    assert "api-key: <redacted>" in kept and kept.count("- <redacted>") == 2
     args = " -local-model -password=SECRET-6 --token SECRET-7 -config-name x"
     redacted = sidecar._redacted_args(sidecar._arguments(f'"exe"{args}'))
     assert not any("SECRET" in arg for arg in redacted)
@@ -176,3 +179,31 @@ def test_every_secret_is_removed_however_it_is_spread_and_from_the_arguments(
     assert first is not None and other is not None
     assert first.fingerprint == other.fingerprint
     assert first.panel_auto_update_disabled is True
+    moved = sidecar.routing(
+        _process(tmp_path, SPREAD.replace("example.invalid", "elsewhere.invalid"), args)
+    )
+    assert moved is not None and moved.fingerprint != first.fingerprint
+
+
+def test_an_http_error_from_the_sidecar_is_never_retried_automatically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0027 §4: a 5xx may have been forwarded; it is UNKNOWN, never TRANSIENT."""
+
+    class Failing(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            self.rfile.read(int(self.headers["Content-Length"]))
+            self.send_response(502)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), Failing)
+    threading.Thread(target=server.handle_request, daemon=True).start()
+    try:
+        answer = cliproxyapi.complete(f"http://127.0.0.1:{server.server_port}", "k", "m", "x")
+    finally:
+        server.server_close()
+    assert (answer.error_kind, answer.error_code) == ("UNKNOWN", "AI_SIDECAR_HTTP_ERROR")
