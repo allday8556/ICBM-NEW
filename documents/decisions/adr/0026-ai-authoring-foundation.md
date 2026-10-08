@@ -69,22 +69,43 @@ COLLECT never imports the AI capability or the enrichment module. A repository r
 
 ## 3. PromptTemplate and PlatformPolicy stores
 
-This section follows Issue #30 and its refinement `5661813529`. Settings help in the v29 prototype describes the composition order as 공통 규칙 → 역할 → 플랫폼 정책 → 작업 → 실행 데이터.
+This section follows three sources:
+- Issue #30 and its refinement `5661813529`;
+- the AI / Prompt tab of the approved v29 prototype, as it already stands in Settings: the "AI Prompt Registry" in `ui/web/js/pages/settings/settings-schema.js`.
+
+The stores follow that registry exactly. They add no role, policy or task the registry does not name.
+
+The composition order is the one the registry's help states: 공통 규칙(Global) → 역할(Role) → 플랫폼 정책(Platform Policy) → 작업(Task) → 실행 데이터.
+
+**The registry's entries are the store's keys.**
+
+| Layer | Keys (v29 registry) |
+| --- | --- |
+| GLOBAL | 공통 규칙 |
+| ROLE | 수집 검증 AI, 상품/MD AI, 커머스 운영 AI, CS 응대 AI, 판매상태 검증 AI |
+| PLATFORM POLICY | 스마트스토어 정책, 쿠팡 정책, 11번가 정책 |
+| TASK | 추출 보정 (수집관리), 통합 상품 추천 (통합DB), 카테고리 재추천 (등록관리), 주문 운영 보조 (주문관리), 문의 답변 (문의관리), 품절 판정 (품절확인) |
+
+Canon requires independent tasks (Canonical §7.1, Issue #30 refinement). So the registry task `통합 상품 추천` holds one prompt per independent task: 상품명, 태그, 카테고리 and 옵션. These are Issue #30's `PROMPT_NAME`, `PROMPT_TAGS`, `PROMPT_CATEGORY` and `PROMPT_OPTIONS`, under the role 상품/MD AI.
+
+Each registry task names the role it composes with. The foundation stores and edits every registry entry. A task runs only when its own stage lands (§1, ROADMAP §12).
 
 **PromptTemplate store.**
-- It holds versioned prompt text in three layers:
-  - `GLOBAL`: common rules;
-  - `ROLE`, for example `ROLE_PRODUCT_MD_V1`;
-  - `TASK`, for example `PROMPT_NAME_V1`, `PROMPT_TAGS_V1`, `PROMPT_CATEGORY_V1`, `PROMPT_OPTIONS_V1`.
-- Each template key has append-only revisions plus a current pointer. The current pointer moves only with `expected_current_revision`.
-- Each revision writes one audit event, `AI_PROMPT_TEMPLATE_REVISED`, carrying the key, the prior revision, the new revision, the actor and the time, and never the text.
+- It holds the GLOBAL, ROLE and TASK layers above.
+- Each key has append-only revisions and a current pointer. The current pointer moves only with `expected_current_revision`.
+- Each revision writes one audit event, `AI_PROMPT_TEMPLATE_REVISED`. The event carries the key, the prior and new revision, the actor and the time, never the text.
 - Each revision is content-addressed by a SHA-256 digest.
-- Seeds enter the store as explicit revision 1 rows of a seed version, taken from the approved prototype's prompt registry. Runtime never reads a prompt from code.
+- **Seeds.** Seeds enter the store as explicit revision 1 rows of a seed version, from the v29 prompts. Issue #30's refinement keeps the v29 prompts as seeds.
+  - A registry entry with no v29 prompt text is seeded empty and reads `미작성`. No text is invented for it.
+  - Runtime never reads a prompt from code.
 - This is the same pattern as the registration target policy: an append-only revision, a current table and an audited save.
 
 **PlatformPolicy store.**
 - It is separate from PromptTemplate, with its own keys, revisions, lifecycle and audit event `AI_PLATFORM_POLICY_REVISED` (Issue #30: no shared storage or version lifecycle).
-- A policy holds the marketplace's AI-facing guidance text per marketplace key.
+- Its keys are the registry's three policies. Each holds its marketplace's AI-facing guidance, as the registry describes it:
+  - 스마트스토어: 추천/제외 태그 ID · SEO · 공식 데이터 우선
+  - 쿠팡: 카테고리 추천 → AI 재검증 · 필수 옵션 확인
+  - 11번가: 실제 카테고리 ID 범위 · 등록 정책
 - A numeric or rule limit that a canonical owner already holds is **referenced, never copied**. Examples are the listing-name length, the tag count and the prohibited-expression rules of the register preflight. At composition, the policy reads the current value from that owner, and the owner's revision becomes part of the policy's version identity.
 - The deterministic prohibited-expression filter stays authoritative over any AI output (Issue #30 refinement).
 
@@ -205,8 +226,9 @@ The lock and the revision check are both kept, one against a locked value and on
 ## 8. Screens
 
 **Settings › AI / Prompt.**
-- The existing "AI Prompt Registry" reads the two stores and edits a template or a policy with its expected revision. Each save shows the new revision.
-- The prompt toggles stay inert placeholders (`6054956408`).
+- The tab keeps its v29 layout: the "AI 기본 설정" card, and the full-width "AI Prompt Registry" with its roles, platform policies and tasks.
+- Each registry entry opens its current text and revision from the two stores, and saves with its expected revision. Each save shows the new revision.
+- The "AI 기본 설정" toggles stay inert placeholders until their stage (`6054956408`). They are AI 상품명 추천, AI 태그 추천, AI 카테고리 검증 and 결과 미리보기 후 적용.
 - There is no provider, model or key field until the owner decides them.
 
 **AI status.** The `ai` capability (`NOT_CONFIGURED`) is shown where readiness is shown.
@@ -218,7 +240,7 @@ The lock and the revision check are both kept, one against a locked value and on
 Each slice is provider-zero and its own PR, under the Track A loop.
 
 1. **AIF-1 — Stores.**
-   - PromptTemplate and PlatformPolicy: migration, store, seeds, audited revisioned save, read and save routes, Settings screen;
+   - PromptTemplate and PlatformPolicy: migration, store, the v29 registry's keys and seeds, audited revisioned save, read and save routes, the Settings registry screen;
    - the COLLECT import rule.
 2. **AIF-2 — Port and execution.**
    - `AIProvider` port, `NoAIProvider`, the `ai` capability readiness;
