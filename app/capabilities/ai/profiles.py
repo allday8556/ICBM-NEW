@@ -377,6 +377,9 @@ class ProfiledProvider:
         """Write the client key to the OS secret store, the only place it lives (AIS-01)."""
         self._secrets.set(ref, key)
 
+    def forget_credential(self, ref: str) -> None:
+        self._secrets.delete(ref)
+
     def missing(self, content: Mapping[str, Any]) -> list[str]:
         missing = _missing(content)
         if self._key(content) is None:
@@ -750,27 +753,43 @@ class ProviderProfileService:
 
     def set_credential(self, request: CredentialRequest, *, cid: str) -> ProviderView:
         """Write the ICBM-dedicated client key to the OS secret store, as an audited revision that
-        names only its reference and time. The key is never returned, stored, logged or audited."""
+        names only its reference and time. The key is never returned, stored, logged or audited.
+
+        Each key gets its own secret-store name, written **before** the revision that names it is
+        published: a call that reserves a revision always finds that revision's own key, never a
+        superseded or a not-yet-written one, and two overlapping writes can never cross. The
+        previous key is removed only after the new revision is current."""
         current = self._require_current()
         key = request.key.get_secret_value()
         if not _CREDENTIAL.match(key):
             raise InputValidationError(
                 AI_CREDENTIAL_INVALID, "the client key is 16 to 200 visible ASCII characters"
             )
-        ref = str(current.content.get("credential_ref") or CREDENTIAL_REF)
-        self._store.append(
-            {
-                **current.content,
-                "credential_ref": ref,
-                "credential_set_at": self._clock.now().isoformat(),
-            },
-            action="SET_CREDENTIAL",
-            expected_current_revision=request.expected_current_revision,
-            actor=request.actor,
-            correlation_id=cid,
-            audit_details={"credential_ref": ref},
+        previous = (
+            current.content.get("credential_ref")
+            if current.content.get("credential_set_at")
+            else None
         )
+        ref = f"{CREDENTIAL_REF}.{uuid.uuid4().hex}"
         self._provider.store_credential(ref, key)
+        try:
+            self._store.append(
+                {
+                    **current.content,
+                    "credential_ref": ref,
+                    "credential_set_at": self._clock.now().isoformat(),
+                },
+                action="SET_CREDENTIAL",
+                expected_current_revision=request.expected_current_revision,
+                actor=request.actor,
+                correlation_id=cid,
+                audit_details={"credential_ref": ref},
+            )
+        except BaseException:
+            self._provider.forget_credential(ref)
+            raise
+        if previous and previous != ref:
+            self._provider.forget_credential(str(previous))
         return self.view()
 
     def set_data_transfer(self, request: DataTransferRequest, *, cid: str) -> ProviderView:

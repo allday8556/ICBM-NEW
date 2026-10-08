@@ -529,8 +529,9 @@ def test_without_the_credential_nothing_is_ready_and_it_is_kept_only_in_the_secr
     service: ProviderProfileService = world["service"]
     ready = _approve_all(service)
     assert ready.capability.status is CapabilityStatus.READY
-    assert world["secrets"].get("ai.cliproxyapi.client-key") == KEY
-    world["secrets"].delete("ai.cliproxyapi.client-key")
+    ref = ready.content["credential_ref"]
+    assert ref.startswith("ai.cliproxyapi.client-key.") and world["secrets"].get(ref) == KEY
+    world["secrets"].delete(ref)
     assert world["provider"].capability_report().detail == "not approved: credential"
     assert world["provider"].requested_identity() is None
     with sqlite3.connect(database_path(config.data_dir)) as raw:
@@ -569,3 +570,46 @@ def test_a_revision_committed_after_the_call_read_the_profile_refuses_it(
     assert world["complete"].calls == []
     with sqlite3.connect(database_path(config.data_dir)) as raw:
         assert raw.execute("SELECT COUNT(*) FROM ai_provider_calls").fetchone()[0] == 0
+
+
+def test_each_key_is_written_before_the_revision_that_names_it(world: dict[str, Any]) -> None:
+    """GPT audit of #273: a reserved revision always finds its own key; a replaced key is removed
+    only after the new revision is current, and a refused save leaves no key behind."""
+    service: ProviderProfileService = world["service"]
+    secrets: MemorySecretStore = world["secrets"]
+    ready = _approve_all(service)
+    first = ready.content["credential_ref"]
+    store = world["provider"]._store
+    real = store.append
+    seen: list[bool] = []
+
+    def watching(content: dict[str, Any], **kwargs: Any) -> Any:
+        if kwargs.get("action") == "SET_CREDENTIAL":
+            seen.append(secrets.get(content["credential_ref"]) == "icbm-second-key-000000")
+        return real(content, **kwargs)
+
+    store.append = watching  # type: ignore[method-assign]
+    second = service.set_credential(
+        CredentialRequest(
+            actor="owner",
+            expected_current_revision=ready.current_revision,
+            key="icbm-second-key-000000",
+        ),
+        cid="c",
+    )
+    assert seen == [True]
+    assert second.content["credential_ref"] != first
+    assert secrets.get(first) is None
+    # A save against a moved revision is refused and writes no key.
+    before = dict(secrets._values)
+    with pytest.raises(AppError) as moved:
+        service.set_credential(
+            CredentialRequest(
+                actor="owner",
+                expected_current_revision=ready.current_revision,
+                key="icbm-third-key-0000000",
+            ),
+            cid="c",
+        )
+    assert moved.value.code == "AI_PROFILE_CURRENT_MOVED"
+    assert secrets._values == before
