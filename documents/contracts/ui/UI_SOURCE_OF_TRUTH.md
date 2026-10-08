@@ -361,7 +361,7 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
   - The preview is the server's composition of the saved layers.
 - **Other entry points.** Each marketplace tab's `Policy 편집` button opens its platform policy. AI 쇼핑 인사이트's `✨ Shopping Insight Agent 설정` opens its role and task. Both only edit prompts.
 - **AI 공급자 row.** The "AI 기본 설정" card shows a row that reads the readiness `ai` capability (ADR-0026 AIF-2). With no provider it reads `미설정 · AI 공급자 없음`.
-- **AI 공급자 card (ADR-0027 AIS-1).** The card holds the operator's CLIProxyAPI profile: a loopback endpoint, the owner's model (`gpt-5.6-sol`), the billing mode and the daily call cap.
+- **AI 공급자 card (ADR-0027 AIS-1).** The card holds the operator's CLIProxyAPI profile: a loopback endpoint, the owner's model (`gpt-5.6-sol`, shown read-only; any other is refused), the billing mode and the daily call cap. Moving the endpoint or the model withdraws the data-transfer approval.
   - It shows the approved executable and routing identity beside what is actually serving now. Each approve button names what is served now and is a protected, audited server action.
   - It holds the data-transfer approval, today's calls and the capability state (`연결됨`, `승인 필요 · …`, or the mismatch reason).
   - The client key is never asked for.

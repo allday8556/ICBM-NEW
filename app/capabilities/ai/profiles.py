@@ -72,11 +72,14 @@ PROFILE_KEY: Final = "default"
 PROVIDER_TYPE: Final = "CLIPROXYAPI"
 REQUESTED_PROVIDER: Final = "cliproxyapi"
 DEFAULT_MODEL: Final = "gpt-5.6-sol"
+# The owner's model, Issue #219 comment 6068160917 (ADR-0027 AIS-09). Nothing else is requested.
+OWNER_APPROVED_MODELS: Final = (DEFAULT_MODEL,)
 _LOOPBACK: Final = re.compile(r"^http://(127\.0\.0\.1|localhost):(\d{2,5})$")
 _PROBE_TTL_S: Final = 10.0
 
 AI_PROFILE_CURRENT_MOVED: Final = "AI_PROFILE_CURRENT_MOVED"
 AI_PROFILE_INVALID: Final = "AI_PROFILE_INVALID"
+AI_MODEL_NOT_APPROVED: Final = "AI_MODEL_NOT_APPROVED"
 AI_PROFILE_MISSING: Final = "AI_PROFILE_MISSING"
 AI_EXECUTABLE_NOT_SERVING: Final = "AI_EXECUTABLE_NOT_SERVING"
 AI_EXECUTABLE_MISMATCH: Final = "AI_EXECUTABLE_MISMATCH"
@@ -471,6 +474,9 @@ def _report(status: CapabilityStatus, detail: str) -> CapabilityReport:
 
 def _missing(content: Mapping[str, Any]) -> list[str]:
     missing = []
+    # Defence in depth: a stored model other than the owner's is never asked (AIS-09).
+    if content.get("requested_model") not in OWNER_APPROVED_MODELS:
+        missing.append("model")
     if not content.get("approved_executable"):
         missing.append("executable")
     if not content.get("approved_routing"):
@@ -572,7 +578,16 @@ class ProviderProfileService:
         )
 
     def configure(self, request: ConfigureRequest, *, cid: str) -> ProviderView:
+        """Save the profile. The model is the owner's (AIS-09): any other is refused here, and a
+        change of it is a new owner decision and a code change. The data-transfer approval names
+        the endpoint and model it was given for, so a change of either withdraws it."""
         _port(request.endpoint)
+        if request.requested_model not in OWNER_APPROVED_MODELS:
+            raise PolicyBlockedError(
+                AI_MODEL_NOT_APPROVED,
+                "only the owner's model is requested; changing it is the owner's decision",
+                details={"approved": list(OWNER_APPROVED_MODELS)},
+            )
         current = self._store.current()
         base = (
             dict(current.content)
@@ -585,12 +600,17 @@ class ProviderProfileService:
                 "data_transfer_approved": False,
             }
         )
+        moved = (base.get("endpoint"), base.get("requested_model")) != (
+            request.endpoint,
+            request.requested_model,
+        )
         content = {
             **base,
             "endpoint": request.endpoint,
             "requested_model": request.requested_model,
             "billing_mode": request.billing_mode,
             "daily_call_cap": request.daily_call_cap,
+            "data_transfer_approved": bool(base.get("data_transfer_approved")) and not moved,
         }
         self._store.append(
             content,
@@ -603,6 +623,7 @@ class ProviderProfileService:
                 "requested_model": request.requested_model,
                 "billing_mode": request.billing_mode,
                 "daily_call_cap": request.daily_call_cap,
+                "data_transfer_withdrawn": bool(base.get("data_transfer_approved")) and moved,
             },
         )
         return self.view()

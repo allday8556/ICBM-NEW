@@ -48,23 +48,17 @@ class ServingProcessProbe(Protocol):
         ...
 
 
-_HASHES: dict[tuple[str, int, int], str] = {}
-
-
 def file_sha256(path: str) -> str | None:
-    file = Path(path)
+    """The SHA-256 of the file's bytes, read now. Never cached: a replaced binary that keeps the
+    same size and modification time is still a different identity (ADR-0012 §3, AIS-02)."""
+    digest = hashlib.sha256()
     try:
-        stat = file.stat()
-    except OSError:
-        return None
-    key = (str(file), stat.st_size, stat.st_mtime_ns)
-    if key not in _HASHES:
-        digest = hashlib.sha256()
-        with file.open("rb") as handle:
+        with Path(path).open("rb") as handle:
             for block in iter(lambda: handle.read(1 << 20), b""):
                 digest.update(block)
-        _HASHES[key] = digest.hexdigest()
-    return _HASHES[key]
+    except OSError:
+        return None
+    return digest.hexdigest()
 
 
 _PROBE_SCRIPT: Final = (

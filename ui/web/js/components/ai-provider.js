@@ -28,6 +28,7 @@ const ERROR_COPY = {
   AI_ROUTING_MISMATCH: '지금 라우팅 설정만 승인할 수 있습니다. 새로고침 후 다시 확인하세요.',
   AI_ROUTING_UPDATES_ON: 'CLIProxyAPI를 -local-model 옵션과 disable-auto-update-panel: true 설정으로 실행해야 승인할 수 있습니다.',
   AI_PROFILE_MISSING: '먼저 공급자 설정을 저장하세요.',
+  AI_MODEL_NOT_APPROVED: '모델은 소유자가 정한 gpt-5.6-sol만 쓸 수 있습니다.',
 };
 
 function stateText(capability) {
@@ -78,7 +79,9 @@ export function aiProviderPanel() {
     const ready = view.capability.status === 'READY';
     const field = (name, value, type = 'text') => h('input', { name, type, value: value ?? '', class: 'field' });
     const endpoint = field('endpoint', content.endpoint ?? 'http://127.0.0.1:8317');
+    // The owner's model (ADR-0027 AIS-09): shown, never chosen here.
     const model = field('requested_model', content.requested_model ?? 'gpt-5.6-sol');
+    model.readOnly = true;
     const cap = field('daily_call_cap', content.daily_call_cap ?? 200, 'number');
     const billing = h(
       'select',

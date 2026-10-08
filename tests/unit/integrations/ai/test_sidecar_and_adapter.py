@@ -2,6 +2,7 @@
 answer. The configuration's secrets never reach the routing fingerprint."""
 
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -123,3 +124,16 @@ def test_the_call_never_goes_through_an_environment_proxy(
     finally:
         server.server_close()
     assert (answer.value, answer.error_code, answer.actual_model) == ({"ok": True}, None, "m-1")
+
+
+def test_the_executable_hash_is_read_again_every_time(tmp_path: Path) -> None:
+    """A same-size replacement that restores the modification time is a new identity."""
+    exe = tmp_path / "cli-proxy-api.exe"
+    exe.write_bytes(b"approved")
+    before = exe.stat()
+    first = sidecar.file_sha256(str(exe))
+    exe.write_bytes(b"replaced")
+    os.utime(exe, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert exe.stat().st_size == before.st_size
+    assert exe.stat().st_mtime_ns == before.st_mtime_ns
+    assert sidecar.file_sha256(str(exe)) != first

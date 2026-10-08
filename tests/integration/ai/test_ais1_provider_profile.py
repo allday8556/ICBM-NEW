@@ -76,7 +76,6 @@ def _serving(
     (tmp_path / "config.yaml").write_text(CONFIG, encoding="utf-8")
     exe = tmp_path / "cli-proxy-api.exe"
     exe.write_bytes(body)
-    sidecar._HASHES.clear()
     return sidecar.ServingProcess(
         pid=7,
         path=str(exe),
@@ -408,3 +407,51 @@ def test_a_call_that_raises_is_settled_failed_and_still_counts(
             ("FAILED", "AI_PROVIDER_CALL_FAILED")
         ]
     assert world["service"].view().calls_today == 1
+
+
+def test_only_the_owners_model_is_asked_and_a_move_withdraws_the_transfer_approval(
+    world: dict[str, Any],
+) -> None:
+    """GPT audit of #273: the model is the owner's (AIS-09), and the data-transfer approval names
+    the endpoint and model it was given for."""
+    service: ProviderProfileService = world["service"]
+    with pytest.raises(AppError) as other:
+        service.configure(
+            ConfigureRequest(
+                actor="owner",
+                endpoint="http://127.0.0.1:18317",
+                requested_model="another-model",
+                billing_mode="SUBSCRIPTION",
+                daily_call_cap=3,
+            ),
+            cid="c",
+        )
+    assert other.value.code == "AI_MODEL_NOT_APPROVED"
+    ready = _approve_all(service)
+    # A new cap keeps the approval: the endpoint and the model are unchanged.
+    capped = service.configure(
+        ConfigureRequest(
+            actor="owner",
+            expected_current_revision=ready.current_revision,
+            endpoint="http://127.0.0.1:18317",
+            requested_model="gpt-5.6-sol",
+            billing_mode="SUBSCRIPTION",
+            daily_call_cap=5,
+        ),
+        cid="c",
+    )
+    assert capped.capability.status is CapabilityStatus.READY
+    moved = service.configure(
+        ConfigureRequest(
+            actor="owner",
+            expected_current_revision=capped.current_revision,
+            endpoint="http://127.0.0.1:18318",
+            requested_model="gpt-5.6-sol",
+            billing_mode="SUBSCRIPTION",
+            daily_call_cap=5,
+        ),
+        cid="c",
+    )
+    assert moved.content["data_transfer_approved"] is False
+    assert moved.capability.detail == "not approved: data_transfer"
+    assert world["provider"].requested_identity() is None
