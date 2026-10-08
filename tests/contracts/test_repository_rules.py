@@ -2899,6 +2899,20 @@ def test_no_production_module_imports_an_ai_vendor_sdk() -> None:
             assert not vendor, f"{path}: {name}"
 
 
+def test_the_register_owner_imports_no_ai_module() -> None:
+    """ADR-0026 AIF-4: the register owner reads enrichment results only through the read the
+    composition root hands it, so an acceptance run that loads the register owners loads no AI
+    module (the harness guards forbid them)."""
+    forbidden = ("app.capabilities.ai", "app.stages.products.enrichment")
+    for path, tree in _production_modules().items():
+        if not path.startswith("app/stages/register/"):
+            continue
+        for name in _imported_modules(tree):
+            assert not any(name == f or name.startswith(f"{f}.") for f in forbidden), (
+                f"{path}: {name}"
+            )
+
+
 def test_the_container_binds_no_ai_provider() -> None:
     source = (REPO_ROOT / "app" / "container.py").read_text("utf-8")
     assert "AIExecution(NoAIProvider())" in source

@@ -27,7 +27,6 @@ from sqlalchemy.exc import IntegrityError
 
 from app.platform.core.correlation import get_correlation_id, new_correlation_id
 from app.platform.core.errors import InputValidationError, NotFoundError
-from app.stages.products.enrichment import ResultView, Target
 from app.stages.products.image_model import ImageAssetKind
 from app.stages.products.model import ReadinessStatus
 from app.stages.register.builder import RegistrationSnapshotBuilder
@@ -253,10 +252,36 @@ def preflight_request(
     )
 
 
+class AppliedResult(Protocol):
+    """What an apply reads of one enrichment result (PRODUCT DB's ``ResultView``)."""
+
+    @property
+    def status(self) -> str: ...
+    @property
+    def stale(self) -> bool: ...
+    @property
+    def stale_reasons(self) -> list[str]: ...
+    @property
+    def value(self) -> dict[str, Any] | None: ...
+    @property
+    def sequence(self) -> int: ...
+    @property
+    def input_fingerprint(self) -> str: ...
+
+
 class EnrichmentResultSource(Protocol):
+    """PRODUCT DB's enrichment owner, as an apply reads it. The register owner never imports the
+    AI capability or the enrichment owner: the composition root hands it this read (ADR-0026
+    AIF-02: an acceptance run that loads the register owners loads no AI module)."""
+
     def current_result(
-        self, product_group_id: str, task_key: str, result_key: str, target: Target | None
-    ) -> ResultView | None: ...
+        self,
+        product_group_id: str,
+        task_key: str,
+        result_key: str,
+        marketplace_key: str,
+        marketplace_account_id: str,
+    ) -> AppliedResult | None: ...
 
 
 AI_APPLY_FIELD_INVALID: Final = "AI_APPLY_FIELD_INVALID"
@@ -440,12 +465,15 @@ class RegistrationPreparationService:
             raise InputValidationError(
                 AI_APPLY_RESULT_FOREIGN, "the result is not of a product this unit prepares"
             )
-        target = Target(current.marketplace_key, current.marketplace_account_id)
         result = (
             None
             if self._enrichment is None
             else self._enrichment.current_result(
-                apply.product_group_id, apply.task_key, apply.result_key, target
+                apply.product_group_id,
+                apply.task_key,
+                apply.result_key,
+                current.marketplace_key,
+                current.marketplace_account_id,
             )
         )
         if result is None or result.status != "OK" or result.stale or result.value is None:

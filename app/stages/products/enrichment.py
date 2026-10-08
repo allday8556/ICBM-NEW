@@ -488,10 +488,17 @@ class EnrichmentService:
         )
 
     def current_result(
-        self, product_group_id: str, task_key: str, result_key: str, target: Target | None
+        self,
+        product_group_id: str,
+        task_key: str,
+        result_key: str,
+        marketplace_key: str,
+        marketplace_account_id: str,
     ) -> ResultView | None:
-        """The current result of one subject with its derived staleness, or ``None``. A
-        target-free result serves any target; a targeted one serves only its own (ADR-0026 §7)."""
+        """The current result of one subject for one target, with its derived staleness, or
+        ``None``. A target-free result serves any target; a targeted one serves only its own
+        (ADR-0026 §7)."""
+        target = Target(marketplace_key, marketplace_account_id)
         for view in self.results(product_group_id).results:
             if (view.task_key, view.result_key) != (task_key, result_key):
                 continue
