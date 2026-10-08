@@ -527,3 +527,32 @@ def test_without_the_credential_nothing_is_ready_and_it_is_kept_only_in_the_secr
             for row in raw.execute(f"SELECT * FROM {table}")
         )
     assert KEY not in dump
+
+
+def test_a_revision_committed_after_the_call_read_the_profile_refuses_it(
+    world: dict[str, Any], config: AppConfig
+) -> None:
+    """GPT audit of #273: the call's reservation proves the profile revision it read is still the
+    current one, so a revocation in between is never overtaken by a send."""
+    service: ProviderProfileService = world["service"]
+    ready = _approve_all(service)
+    provider: ProfiledProvider = world["provider"]
+    store = provider._store
+    real = store.reserve_call
+
+    def revoked_meanwhile(*args: Any, **kwargs: Any) -> Any:
+        service.set_data_transfer(
+            DataTransferRequest(
+                actor="owner", expected_current_revision=ready.current_revision, approved=False
+            ),
+            cid="c-revoke",
+        )
+        return real(*args, **kwargs)
+
+    store.reserve_call = revoked_meanwhile  # type: ignore[method-assign]
+    with pytest.raises(AppError) as moved:
+        provider.execute(TaskRequest("TASK_X", "t", "c"))
+    assert moved.value.code == "AI_PROFILE_CURRENT_MOVED"
+    assert world["complete"].calls == []
+    with sqlite3.connect(database_path(config.data_dir)) as raw:
+        assert raw.execute("SELECT COUNT(*) FROM ai_provider_calls").fetchone()[0] == 0

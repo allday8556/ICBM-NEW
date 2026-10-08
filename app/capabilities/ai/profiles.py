@@ -258,10 +258,20 @@ class ProfileStore:
         self, revision_id: str, task_key: str, cap: int, correlation_id: str
     ) -> str | None:
         """Count today's calls and, below ``cap``, write this one as ``SENT``, in one serialized
-        write unit: two calls can never both take the last place (AIS-04). ``None`` at the cap."""
+        write unit: two calls can never both take the last place (AIS-04). ``None`` at the cap.
+
+        The same unit proves that ``revision_id`` is still the current profile revision: a
+        revocation, an endpoint or model move, or any other revision committed since the call
+        read the profile refuses it before anything is sent (``AI_PROFILE_CURRENT_MOVED``)."""
         now = self._clock.now()
         day = now.date().isoformat()
         with self._db.write() as session:
+            pointer = session.get(AIProviderProfileCurrent, PROFILE_KEY)
+            if pointer is None or pointer.revision_id != revision_id:
+                raise ProfileConflictError(
+                    AI_PROFILE_CURRENT_MOVED,
+                    "the profile changed since this call read it; nothing was sent",
+                )
             made = session.scalar(
                 select(func.count()).where(
                     AIProviderCall.profile_key == PROFILE_KEY, AIProviderCall.call_day == day

@@ -219,6 +219,11 @@ def test_the_update_switches_are_read_as_they_take_effect() -> None:
     assert sidecar._panel_off("other:\n  disable-auto-update-panel: true\n") is False
     assert sidecar._panel_off("disable-auto-update-panel: true\n") is False
     assert sidecar._panel_off(good.replace("true\n", "false\n")) is False
+    nested = (
+        "remote-management:\n  allow-remote: false\n  panel:\n    disable-auto-update-panel: true\n"
+    )
+    assert sidecar._panel_off(nested) is False
+    assert sidecar._panel_off("disable-auto-update-panel: true\n" + good) is False
     assert sidecar._local_model(["-local-model"]) is True
     assert sidecar._local_model(["-local-model", "-local-model=false"]) is False
     assert sidecar._local_model(["--local-model=true"]) is True

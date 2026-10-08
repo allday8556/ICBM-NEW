@@ -221,28 +221,39 @@ def _local_model(args: list[str]) -> bool:
 
 def _panel_off(text: str) -> bool:
     """Whether the panel auto-update is off, read strictly: exactly one top-level
-    ``remote-management:`` mapping holding exactly one ``disable-auto-update-panel: true``, and no
-    such key anywhere else. A shadowed, duplicated or misplaced setting is never taken as off."""
+    ``remote-management:`` mapping whose own direct field ``disable-auto-update-panel`` is ``true``,
+    and that key nowhere else at any depth. A shadowed, duplicated, nested or misplaced setting is
+    never taken as off."""
     sections: list[str] = []
-    found: list[tuple[str | None, str]] = []
+    child_indent: int | None = None  # the indent of the current top-level section's own fields
+    found: list[tuple[str | None, bool, str]] = []  # (section, a direct field, value)
     for raw in text.splitlines():
         line = raw.split(" #", 1)[0].rstrip()
         if not line.strip() or line.lstrip().startswith("#"):
             continue
+        indent = _indent(line)
         field = _FIELD.match(line)
+        if indent == 0:
+            child_indent = None
+            if field is not None and not field.group(1).strip():
+                name = field.group(2).strip("\"'")
+                sections.append(name)
+                if name == "disable-auto-update-panel":
+                    found.append((None, False, (field.group(3) or "").strip().lower()))
+            continue
+        if child_indent is None:
+            child_indent = indent
         if field is None:
             continue
         name = field.group(2).strip("\"'")
-        if _indent(line) == 0 and not field.group(1).strip():
-            sections.append(name)
-            continue
         if name == "disable-auto-update-panel":
+            direct = indent == child_indent and not field.group(1).strip().startswith("-")
             value = (field.group(3) or "").strip().strip("\"'").lower()
-            found.append((sections[-1] if sections else None, value))
+            found.append((sections[-1] if sections else None, direct, value))
     return (
         sections.count("remote-management") == 1
         and len(found) == 1
-        and found[0] == ("remote-management", "true")
+        and found[0] == ("remote-management", True, "true")
     )
 
 
