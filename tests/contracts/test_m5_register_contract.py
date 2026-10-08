@@ -246,7 +246,9 @@ M6_ORDERS = "0050_m6_orders"
 M6_ADOPTED_LISTINGS = "0051_m6_adopted_listings"
 # M6.5-A (ADR-0025 §3, §4): supplier orders placed by hand, their tracking and history.
 M65_SUPPLIER_ORDERS = "0052_m65_supplier_orders"
-SCHEMA_HEAD = M65_SUPPLIER_ORDERS
+# ADR-0026 AIF-1: the PromptTemplate and PlatformPolicy stores, seeded with the v29 registry.
+AI_PROMPT_REGISTRY = "0053_ai_prompt_registry"
+SCHEMA_HEAD = AI_PROMPT_REGISTRY
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -280,6 +282,7 @@ AFTER_M5 = (
     M6_ORDERS,
     M6_ADOPTED_LISTINGS,
     M65_SUPPLIER_ORDERS,
+    AI_PROMPT_REGISTRY,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

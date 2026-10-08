@@ -21,6 +21,7 @@ from app.container import build_container
 from app.interface.api.errors import install_error_handlers
 from app.interface.api.middleware import ClientHeaderGuard, RequestContextMiddleware
 from app.interface.api.routes import (
+    ai,
     collect,
     collect_extension,
     connect,
@@ -188,6 +189,7 @@ def create_app(
     app.include_router(product_images.router)
     app.include_router(register.router)
     app.include_router(settings.router)
+    app.include_router(ai.router)
     app.include_router(review.router)
 
     # Starlette wraps in reverse order: RequestContextMiddleware ends up outermost.

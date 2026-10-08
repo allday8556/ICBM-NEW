@@ -2849,6 +2849,8 @@ SOURCE_TRUTH_FORBIDDEN = (
     "azure.cognitiveservices",
     # app.ai is a reserved AI namespace that has never existed; it is not a moved package.
     "app.ai",
+    # ADR-0026 (AIF-02): the AI capability, its prompt registry and later its provider port.
+    "app.capabilities.ai",
     "integrations.ai",
     "integrations.marketplaces",
     "app.stages.connect.marketplace",
@@ -3720,6 +3722,13 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "operate_order_adoption_links",
         "operate_supplier_orders",
         "operate_supplier_order_history",
+        # ADR-0026 AIF-1: the PromptTemplate and PlatformPolicy stores.
+        "ai_prompt_templates",
+        "ai_prompt_template_revisions",
+        "ai_prompt_template_current",
+        "ai_platform_policies",
+        "ai_platform_policy_revisions",
+        "ai_platform_policy_current",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

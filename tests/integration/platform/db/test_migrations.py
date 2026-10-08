@@ -181,8 +181,24 @@ CANONICAL_TABLES = (
     "operate_order_adoption_links",
     "operate_supplier_orders",
     "operate_supplier_order_history",
+    "ai_prompt_templates",
+    "ai_prompt_template_revisions",
+    "ai_prompt_template_current",
+    "ai_platform_policies",
+    "ai_platform_policy_revisions",
+    "ai_platform_policy_current",
 )
-HEAD = "0052_m65_supplier_orders"
+HEAD = "0053_ai_prompt_registry"
+# The only rows a fresh database holds: the v29 prompt registry's seed (ADR-0026 §3, migration
+# 0053), one identity, one revision and one current pointer per entry.
+SEEDED = {
+    "ai_prompt_templates": 22,
+    "ai_prompt_template_revisions": 22,
+    "ai_prompt_template_current": 22,
+    "ai_platform_policies": 4,
+    "ai_platform_policy_revisions": 4,
+    "ai_platform_policy_current": 4,
+}
 
 
 def _url(path: Path) -> str:
@@ -202,7 +218,8 @@ def test_fresh_database_is_created_at_head_in_wal_mode(tmp_path: Path) -> None:
     with sqlite3.connect(database) as raw:
         assert raw.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         for table in CANONICAL_TABLES:
-            assert raw.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+            count = raw.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            assert count == SEEDED.get(table, 0), table
 
 
 def test_orm_models_match_the_migrations(migrated_template: Path) -> None:

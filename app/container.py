@@ -9,6 +9,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import integrations.suppliers as supplier_packages
+from app.capabilities.ai.prompts import PromptRegistryService, PromptRegistryStore
 from app.capabilities.audit.service import AuditLog
 from app.capabilities.jobs.diagnostic import FAILING_JOB
 from app.capabilities.jobs.policy import RetryPolicy
@@ -252,6 +253,8 @@ class Container:
     registrations: RegistrationStore
     authoring_revisions: AuthoringRevisionStore
     target_policies: TargetPolicyService
+    # ADR-0026 AIF-1: the PromptTemplate and PlatformPolicy stores (Settings' AI Prompt Registry).
+    prompt_registry: PromptRegistryService
     category_metadata: CategoryMetadataService
     category_catalog: CategoryCatalogService
     # Settings delivery policy: the seller's address book, read on request and never stored.
@@ -670,6 +673,7 @@ def build_container(
     authoring_revisions = AuthoringRevisionStore(db, clock, audit)
     target_policy_store = TargetPolicyStore(db, clock, audit, authoring_revisions)
     target_policies = TargetPolicyService(target_policy_store, accounts)
+    prompt_registry = PromptRegistryService(PromptRegistryStore(db, clock, audit))
     # Official SmartStore leaf-category catalog (owner decision 2026-10-04): one read-only provider
     # capture becomes an immutable local snapshot. Its digest is the taxonomy revision used by the
     # target policy and category metadata.
@@ -1078,6 +1082,7 @@ def build_container(
         registrations=registrations,
         authoring_revisions=authoring_revisions,
         target_policies=target_policies,
+        prompt_registry=prompt_registry,
         category_metadata=category_metadata,
         category_catalog=category_catalog,
         smartstore_addressbook=SmartStoreAddressBookSource(
