@@ -21,6 +21,7 @@ from app.capabilities.ai.registry import CATALOG
 from app.capabilities.audit.models import AuditEventType
 from app.config import AppConfig, database_path
 from app.container import Container
+from app.platform.core.secrets import MemorySecretStore
 from app.stages.products.enrichment import EnrichmentRequest, EnrichmentService
 from app.stages.products.tasks import PRODUCT_NAME_TASK, PRODUCTION_TASKS
 from app.stages.register.authoring import (
@@ -72,7 +73,9 @@ def world(
     container.prompt_registry.seed_on_startup()
     complete = FakeComplete(value=ANSWER)
     store = ProfileStore(container.db, container.clock, container.audit)
-    provider = ProfiledProvider(store, FakeProbe(_serving(tmp_path)), container.clock, complete)
+    provider = ProfiledProvider(
+        store, FakeProbe(_serving(tmp_path)), container.clock, MemorySecretStore(), complete
+    )
     _approve_all(ProviderProfileService(store, provider, container.clock))
     enrichment = EnrichmentService(
         db=container.db,
