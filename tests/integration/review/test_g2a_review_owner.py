@@ -736,6 +736,7 @@ def test_0021_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "ai_platform_policies",
         "ai_platform_policy_revisions",
         "ai_platform_policy_current",
+        "product_enrichment_results",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before

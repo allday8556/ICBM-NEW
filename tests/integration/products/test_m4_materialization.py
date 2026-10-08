@@ -1006,6 +1006,10 @@ def test_the_products_api_is_read_only(client: TestClient) -> None:
         # the rule's own selection and never moves an operator's.
         "/api/v1/products/items/{item_id}/image-auto-selection": {"post"},
         "/api/v1/products/image-auto-selection": {"post"},
+        # ADR-0026 AIF-3: the enrichment results of a Product, read, and a request that reuses
+        # fresh results or queues one job. A result is a proposal of its own: still no Product or
+        # source fact is ever written by a request.
+        "/api/v1/products/{product_group_id}/enrichment": {"get", "post"},
     }
     unknown = client.get(f"/api/v1/products/{uuid.uuid4()}")
     assert unknown.status_code == 404

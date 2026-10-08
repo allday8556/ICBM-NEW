@@ -130,6 +130,7 @@ from app.stages.products.auto_images import (
 from app.stages.products.common_images import SupplierCommonImageService
 from app.stages.products.common_option_mapping_store import CommonOptionFactMappingStore
 from app.stages.products.common_option_store import CommonSalesOptionStore
+from app.stages.products.enrichment import EnrichmentService
 from app.stages.products.image_store import DerivedImageStore
 from app.stages.products.images import ProductImageService
 from app.stages.products.materialization import Materialization, ProductMaterializer
@@ -246,6 +247,9 @@ class Container:
     atomic_sku_items: AtomicSKUItemStore
     atomic_sku_economics: AtomicSKUEconomicsStore
     products: ProductsService
+    # ADR-0026 AIF-3: PRODUCT DB's enrichment results and the enrich.tasks job. No task is
+    # defined yet and no provider is bound, so every request is refused before any write.
+    enrichment: EnrichmentService
     materializer: ProductMaterializer
     pricing: ProductPricingService
     images: ProductImageService
@@ -638,6 +642,17 @@ def build_container(
     # The canonical marketplace-account identity that scopes registration state (M5 PR-B,
     # ACCOUNT_IDENTITY §2): established only from a committed M2 binding, with no provider call.
     accounts = MarketplaceAccountStore(db, clock, audit)
+    enrichment = EnrichmentService(
+        db=db,
+        clock=clock,
+        audit=audit,
+        jobs=jobs,
+        products=product_store,
+        accounts=accounts,
+        composer=ai_composer,
+        execution=ai_execution,
+    )
+    registry.register(enrichment.job_definition())
     registrations = RegistrationStore(db, clock, audit)
     # The only bearer source for provider metadata reads as well as REGISTER execution. Reading it
     # never renews or commits a token and authorizes no mutation.
@@ -1086,6 +1101,7 @@ def build_container(
         atomic_sku_items=atomic_sku_items,
         atomic_sku_economics=atomic_sku_economics,
         products=products,
+        enrichment=enrichment,
         materializer=materializer,
         pricing=pricing,
         images=images,

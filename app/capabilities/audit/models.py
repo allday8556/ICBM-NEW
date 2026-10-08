@@ -85,6 +85,9 @@ class AuditEventType(StrEnum):
     # Keys, fields, revision ids and fingerprints only, never prompt text.
     AI_PROMPT_TEMPLATE_REVISED = "AI_PROMPT_TEMPLATE_REVISED"
     AI_PLATFORM_POLICY_REVISED = "AI_PLATFORM_POLICY_REVISED"
+    # ADR-0026 AIF-3: the results of one task run recorded (statuses, fingerprint, models,
+    # billing mode, error code). Never a value, a prompt or a fact.
+    AI_ENRICHMENT_RESULT_RECORDED = "AI_ENRICHMENT_RESULT_RECORDED"
     # Gate 1 G1-B (ADR-0015 §3): a revision of one marketplace × taxonomy × category's reviewed
     # metadata, appended by the server and made current. Key, identifiers, revision number, content
     # fingerprint and the review flag only — never a metadata value.

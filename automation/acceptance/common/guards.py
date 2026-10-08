@@ -69,6 +69,7 @@ FORBIDDEN_MODULES = (
     # registry and every later AI module are forbidden one by one.
     "app.capabilities.ai.prompts",
     "app.capabilities.ai.registry",
+    "app.stages.products.enrichment",
     "integrations.ai",
     "integrations.marketplaces",
     "app.stages.connect.marketplace.service",
