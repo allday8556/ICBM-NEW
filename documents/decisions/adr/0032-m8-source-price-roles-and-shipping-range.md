@@ -75,10 +75,14 @@ For the first sites:
 
 ### 3. Choosing the purchase price
 
-The pricing owners (`pricing.py` `source_inputs` and the atomic-SKU economics store) choose the purchase price as follows:
-1. **Exactly one stated price:** that price, as today.
-2. **Several prices, and exactly one with role `PURCHASE`:** that price. `LIST` prices are kept as facts and never used as cost.
-3. **Otherwise:** `PRICING_PURCHASE_PRICE_AMBIGUOUS`, as today. This covers no `PURCHASE` price, more than one, or prices without roles.
+The pricing owners (`pricing.py` `source_inputs` and the atomic-SKU economics store) choose the purchase price by these rules, in order:
+1. **Any price has role `PURCHASE`:** if exactly one does, it is the purchase price. If more than one does, the result is `PRICING_PURCHASE_PRICE_AMBIGUOUS`.
+2. **No price has role `PURCHASE`, and exactly one price is stated without a role:** that price is the purchase price, as today. Any `LIST` prices beside it are ignored as cost.
+3. **Anything else:** `PRICING_PURCHASE_PRICE_AMBIGUOUS`, as today. This includes:
+   - several prices without a role;
+   - only `LIST` prices, including a page whose only stated price is `LIST`.
+
+A `LIST` price is never the purchase price, even when it is the only price on the page. `LIST` prices are kept as facts.
 
 The purchase price is never chosen by label text, name or order. It is chosen only by a role the site declared.
 
@@ -102,7 +106,7 @@ P1 is provider-zero.
 
 ## Invariants
 
-- **PR-01** A purchase price is chosen by a declared `PURCHASE` role or by being the only price, never by label text, name or order.
+- **PR-01** A purchase price is chosen by a declared `PURCHASE` role, or by being the only price that carries no role. It is never chosen by label text, name or order.
 - **PR-02** A `LIST` price is never a cost.
 - **PR-03** A role comes only from site words in the site configuration.
 - **PR-04** A shipping range is read as its highest amount, and its words are kept.
