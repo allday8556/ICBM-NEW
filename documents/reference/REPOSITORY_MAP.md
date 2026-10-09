@@ -96,7 +96,7 @@ ADR-0029 C3a moved the SmartStore-targeted recommendation panel into the shared 
 ADR-0029 C3 added the category apply to the register owner, the component
 `ui/web/js/components/ai-category.js` (on the shared panel) and two integration suites.
 ADR-0033 G1 added the Detail Guidance renderer `app/capabilities/detail_guidance/` (content,
-renderer, the bundled OFL font) and one unit suite.
+renderer with five templates, shipping presets, the bundled OFL font) and one unit suite.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -124,8 +124,8 @@ payload or external call and leaves legacy Item economics unchanged.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 344 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 63 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
+| `app/` | 345 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 64 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
 | `app/interface/` | 27 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 87 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 162 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |

@@ -1,7 +1,7 @@
 """The one Detail Guidance renderer (ADR-0033 §3, DG-02).
 
 ``render(content, template)`` draws a validated notice into a PNG with the bundled Noto Sans KR
-(SIL OFL 1.1) and one of the three official templates. The settings preview, the editor preview
+(SIL OFL 1.1) and one of the five official templates. The settings preview, the editor preview
 and the registration all use it. The bytes depend only on ``(content, template, RENDERER_VERSION)``:
 fixed fonts, sizes and encoder parameters, and no time, metadata or randomness. A change of the
 font, the Pillow pin or any drawing below bumps ``RENDERER_VERSION``.
@@ -42,12 +42,17 @@ BODY_WEIGHT: Final = 400
 BODY_LINE: Final = 44
 BLOCK_GAP: Final = 30
 ACCENT_WIDTH: Final = 6
+BAND_HEIGHT: Final = 96
+MARK_HEIGHT: Final = 56
+SUPERSAMPLE: Final = 4
 
 
 class Template(StrEnum):
     CLEAN = "CLEAN"
     MODERN = "MODERN"
     WARM = "WARM"
+    DOMESTIC = "DOMESTIC"
+    OVERSEAS = "OVERSEAS"
 
 
 @dataclass(frozen=True)
@@ -60,6 +65,8 @@ class _Style:
     text: str
     rule: str
     accent: str | None
+    band: str | None = None
+    mark: str | None = None
 
 
 _STYLES: Final[dict[Template, _Style]] = {
@@ -71,6 +78,30 @@ _STYLES: Final[dict[Template, _Style]] = {
     ),
     Template.WARM: _Style(
         "#fff7ed", "#ffffff", "#fdba74", 24, "#c2410c", "#431407", "#fed7aa", None
+    ),
+    Template.DOMESTIC: _Style(
+        "#eff6ff",
+        "#ffffff",
+        "#93c5fd",
+        20,
+        "#1d4ed8",
+        "#1f2937",
+        "#dbeafe",
+        None,
+        band="#2563eb",
+        mark="truck",
+    ),
+    Template.OVERSEAS: _Style(
+        "#f0f9ff",
+        "#ffffff",
+        "#7dd3fc",
+        20,
+        "#0369a1",
+        "#0f172a",
+        "#e0f2fe",
+        None,
+        band="#0c4a6e",
+        mark="plane",
     ),
 }
 
@@ -166,8 +197,57 @@ def _check_widths(content: GuidanceContent) -> None:
                 )
 
 
-def _height(content: GuidanceContent) -> int:
-    inner = 0
+def _mark(kind: str, band: str) -> Image.Image:
+    """A shipping mark (ADR-0033 §11): shapes only, drawn large and reduced for smooth edges."""
+    k = SUPERSAMPLE * MARK_HEIGHT / 72
+    mark = Image.new("RGBA", (round(120 * k), round(72 * k)), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(mark)
+
+    def box(*xy: float) -> tuple[float, ...]:
+        return tuple(v * k for v in xy)
+
+    white = "#ffffff"
+    if kind == "truck":
+        draw.rounded_rectangle(box(2, 8, 72, 52), radius=4 * k, fill=white)
+        draw.polygon(box(74, 20, 96, 20, 114, 38, 114, 52, 74, 52), fill=white)
+        draw.polygon(box(80, 26, 94, 26, 104, 38, 80, 38), fill=band)
+        for cx in (22, 92):
+            draw.ellipse(box(cx - 11, 47, cx + 11, 69), fill=white)
+            draw.ellipse(box(cx - 4, 54, cx + 4, 62), fill=band)
+    else:
+        draw.ellipse(box(8, 30, 116, 42), fill=white)
+        draw.polygon(box(54, 32, 34, 2, 46, 2, 80, 32), fill=white)
+        draw.polygon(box(54, 40, 34, 70, 46, 70, 80, 40), fill=white)
+        draw.polygon(box(14, 32, 4, 14, 12, 14, 28, 32), fill=white)
+        draw.polygon(box(14, 40, 4, 58, 12, 58, 28, 40), fill=white)
+    size = (round(mark.width / SUPERSAMPLE), round(mark.height / SUPERSAMPLE))
+    return mark.resize(size, Image.Resampling.LANCZOS)
+
+
+def _band(image: Image.Image, style: _Style) -> None:
+    assert style.band and style.mark
+    draw = ImageDraw.Draw(image)
+    top, left, right = OUTER, OUTER, CANVAS_WIDTH - OUTER - 1
+    draw.rounded_rectangle(
+        (left, top, right, top + BAND_HEIGHT),
+        radius=style.radius,
+        fill=style.band,
+        corners=(True, True, False, False),
+    )
+    mark = _mark(style.mark, style.band)
+    mark_x = OUTER + PADDING
+    mark_y = top + (BAND_HEIGHT - mark.height) // 2
+    image.paste(mark, (mark_x, mark_y), mark)
+    middle = top + BAND_HEIGHT // 2
+    dash, gap = (18, 12) if style.mark == "truck" else (6, 10)
+    x = mark_x + mark.width + 28
+    while x + dash <= right - PADDING:
+        draw.rounded_rectangle((x, middle - 2, x + dash, middle + 2), radius=2, fill="#ffffff")
+        x += dash + gap
+
+
+def _height(content: GuidanceContent, style: _Style) -> int:
+    inner = BAND_HEIGHT if style.band else 0
     for b, block in enumerate(content.blocks):
         if b:
             inner += BLOCK_GAP
@@ -181,7 +261,7 @@ def render(content: GuidanceContent, template: Template) -> RenderedGuidance:
     """Draw ``content`` with ``template`` into a PNG."""
     _check_widths(content)
     style = _STYLES[template]
-    height = _height(content)
+    height = _height(content, style)
     image = Image.new("RGB", (CANVAS_WIDTH, height), style.background)
     draw = ImageDraw.Draw(image)
     draw.rounded_rectangle(
@@ -191,8 +271,10 @@ def render(content: GuidanceContent, template: Template) -> RenderedGuidance:
         outline=style.border,
         width=2 if style.border else 0,
     )
+    if style.band:
+        _band(image, style)
     heading, body = _font(HEADING_SIZE, HEADING_WEIGHT), _font(BODY_SIZE, BODY_WEIGHT)
-    x, y = OUTER + PADDING, OUTER + PADDING
+    x, y = OUTER + PADDING, OUTER + PADDING + (BAND_HEIGHT if style.band else 0)
     for b, block in enumerate(content.blocks):
         if b:
             rule_y = y + BLOCK_GAP // 2
@@ -229,5 +311,5 @@ def render(content: GuidanceContent, template: Template) -> RenderedGuidance:
 
 
 def preview(content: GuidanceContent) -> tuple[RenderedGuidance, ...]:
-    """The three official templates for one notice, in template order; nothing is stored."""
+    """The five official templates for one notice, in template order; nothing is stored."""
     return tuple(render(content, template) for template in Template)

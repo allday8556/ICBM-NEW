@@ -13,6 +13,7 @@ from app.capabilities.detail_guidance.content import (
     LINE_MAX_LENGTH,
     guidance_content,
 )
+from app.capabilities.detail_guidance.presets import PLACEHOLDER, PRESETS, PRESETS_VERSION
 from app.capabilities.detail_guidance.renderer import (
     CANVAS_WIDTH,
     FONT_FILE,
@@ -38,6 +39,8 @@ PIXELS = {
     Template.CLEAN: "fee09a799966cb547916734dfa2493bdc72ea6678b688f2488a81970ac4fdd03",
     Template.MODERN: "fdfbe591fad4c4384ae9626e696cd167cd935a1ec650e671e6e031ca5872bb9d",
     Template.WARM: "544a9fdada7d788687754f19ff6181d2772bc841557d0adb991a7973ed71a1ad",
+    Template.DOMESTIC: "5cff2bc5ca8dcedaea649567e20afe84f36b21eacb4c9f23c64a751907eabd4e",
+    Template.OVERSEAS: "172dc617d898825b2e64800a56f597198e9384c87a2736a22f3c46aae618f92e",
 }
 
 
@@ -78,12 +81,13 @@ def test_each_template_draws_the_same_pixels_and_bytes(template: Template) -> No
     )
 
 
-def test_the_preview_is_the_three_templates_of_the_one_renderer() -> None:
+def test_the_preview_is_the_five_templates_of_the_one_renderer() -> None:
     content = _content(SAMPLE)
     shown = preview(content)
-    assert [g.template for g in shown] == [Template.CLEAN, Template.MODERN, Template.WARM]
+    assert [g.template for g in shown] == list(Template)
+    assert [t.value for t in Template] == ["CLEAN", "MODERN", "WARM", "DOMESTIC", "OVERSEAS"]
     assert [g.png for g in shown] == [render(content, t).png for t in Template]
-    assert len({g.sha256 for g in shown}) == 3
+    assert len({g.sha256 for g in shown}) == 5
 
 
 def test_the_height_follows_the_text_and_a_heading_is_optional() -> None:
@@ -132,3 +136,30 @@ def test_a_line_wider_than_the_text_box_is_refused_never_shrunk(
     with pytest.raises(InputValidationError) as caught:
         render(content, Template.CLEAN)
     assert caught.value.code == GUIDANCE_TEXT_TOO_WIDE
+
+
+def test_a_shipping_template_draws_its_mark_band_above_the_text() -> None:
+    content = _content(SAMPLE)
+    plain = render(content, Template.CLEAN)
+    for template in (Template.DOMESTIC, Template.OVERSEAS):
+        shipped = render(content, template)
+        assert shipped.height == plain.height + renderer.BAND_HEIGHT
+
+
+def test_the_shipping_presets_are_valid_editable_examples() -> None:
+    assert PRESETS_VERSION == "guidance-presets/v1"
+    assert [(p.key, p.label, p.template) for p in PRESETS] == [
+        ("DOMESTIC", "국내배송", Template.DOMESTIC),
+        ("OVERSEAS", "해외배송", Template.OVERSEAS),
+    ]
+    for preset in PRESETS:
+        for raw in (preset.top, preset.bottom):
+            content = _content(raw)
+            for template in Template:
+                render(content, template)
+        text = str(preset.top) + str(preset.bottom)
+        assert PLACEHOLDER in text
+    overseas = str(PRESETS[1].top) + str(PRESETS[1].bottom)
+    assert "개인통관고유부호" in overseas and "관부가세" in overseas
+    # No fixed legal threshold or amount (ADR-0033 §11).
+    assert not any(word in overseas for word in ("달러", "USD", "$", "원 ", "만원"))
