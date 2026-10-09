@@ -33,7 +33,7 @@ from tests.integration.ai.test_ais1_provider_profile import (
     _serving,
 )
 from tests.support.product_support import Collections, product
-from tests.support.register_support import establish
+from tests.support.register_support import bind, establish
 
 pytestmark = pytest.mark.integration
 
@@ -241,3 +241,30 @@ def test_readiness_reports_the_search_signal_port_as_not_configured(config: AppC
             "detail": "no search-signal source is configured (ADR-0028 §3)",
         }
     ]
+
+
+def test_only_the_account_bound_to_the_connection_is_a_tag_target(
+    container: Container, config: AppConfig, world: dict[str, Any]
+) -> None:
+    """GPT audit of #277: the reads go through the one committed SmartStore connection, so a
+    target that is not the account bound to it is refused at the request, and again in the job
+    when the binding moved in between, before any read or call."""
+    enrichment: EnrichmentService = world["enrichment"]
+    sent = enrichment.request(
+        world["group"],
+        EnrichmentRequest(actor="operator", tasks=[TAGS], target=world["target"]),
+        correlation_id="c-b",
+    )
+    # The connection is rebound to another provider account before the job runs.
+    bind(config, "smartstore", "uid-someone-else")
+    _run(container, enrichment, sent.job_id)
+    [result] = [r for r in enrichment.results(world["group"]).results if r.task_key == TAGS]
+    assert (result.status, result.error_code) == ("FAILED", "AI_TARGET_NOT_BOUND")
+    assert world["reader"].recommended == [] and world["complete"].calls == []
+    with pytest.raises(PolicyBlockedError) as refused:
+        enrichment.request(
+            world["group"],
+            EnrichmentRequest(actor="operator", tasks=[TAGS], target=world["target"]),
+            correlation_id="c-b2",
+        )
+    assert refused.value.code == "AI_TARGET_NOT_BOUND"

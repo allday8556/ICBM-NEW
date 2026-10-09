@@ -60,11 +60,12 @@ from app.platform.core.errors import (
     ErrorClass,
     InputValidationError,
     NotFoundError,
+    PolicyBlockedError,
     RateLimitedError,
     TransientError,
 )
 from app.platform.db.database import Database
-from app.stages.connect.accounts import MarketplaceAccountStore
+from app.stages.connect.accounts import AccountBinding, MarketplaceAccountStore
 from app.stages.connect.contracts import CapabilityReport
 from app.stages.products.enrichment_models import ProductEnrichmentResult
 from app.stages.products.store import ProductFoundationStore
@@ -79,6 +80,7 @@ AI_TARGET_HAS_NO_POLICY: Final = "AI_TARGET_HAS_NO_POLICY"
 AI_OUTPUT_FIELD_MISSING: Final = "AI_OUTPUT_FIELD_MISSING"
 AI_OUTPUT_SCHEMA_INVALID: Final = "AI_OUTPUT_SCHEMA_INVALID"
 AI_TASK_NEEDS_TARGET: Final = "AI_TASK_NEEDS_TARGET"
+AI_TARGET_NOT_BOUND: Final = "AI_TARGET_NOT_BOUND"
 # The structured envelope every result object carries (ADR-0026 §5, Issue #30 refinement):
 # its evidence, its confidence in 0..1 and whether it requires review.
 ENVELOPE: Final = ("evidence", "confidence", "requires_review")
@@ -336,6 +338,7 @@ class EnrichmentService:
                     f"{task.task_key} needs a {task.marketplace} target",
                     details={"task": task.task_key, "marketplace": task.marketplace},
                 )
+            self._require_bound(task, target)
         decisions: list[TaskDecision] = []
         queued: list[str] = []
         with self._db.read() as session:
@@ -389,6 +392,8 @@ class EnrichmentService:
                 assert target is not None  # the request refused a missing target
                 local = self._inputs(task, product_group_id, target, identity)
                 try:
+                    # The binding may have moved since the request: proved again before any read.
+                    self._require_bound(task, target)
                     gathered = task.context.gather(local.inputs["facts"], target)
                 except AppError as error:
                     if retryable(error.error_class) and ctx.attempt_no < ctx.max_attempts:
@@ -730,6 +735,21 @@ class EnrichmentService:
                 AI_TARGET_UNKNOWN, "the target is not a canonical account of that marketplace"
             )
         return Target(view.marketplace_key, view.marketplace_account_id)
+
+    def _require_bound(self, task: TaskDefinition, target: Target | None) -> None:
+        """A marketplace task reads through that marketplace's one committed connection, so its
+        target must be the canonical account bound to that connection now: another account's
+        request never reads through it, and a result is never filed under an account that did not
+        read it (ADR-0028 §4)."""
+        if task.marketplace is None or target is None:
+            return
+        binding = self._accounts.binding(target.marketplace_key, target.marketplace_account_id)
+        if binding is not AccountBinding.BOUND:
+            raise PolicyBlockedError(
+                AI_TARGET_NOT_BOUND,
+                "the target account is not the one bound to the marketplace connection",
+                details={"binding": binding.value},
+            )
 
     def _require_product(self, product_group_id: str) -> None:
         with self._products.reading() as unit:
