@@ -9,8 +9,9 @@ nothing at all. These are its stated differences (ADR-0030 §10), and each is fa
 
 - Several declarations of one fact that disagree are held for review, never the first one read.
 - A money cell is read only when it states exactly one amount. Anything else in it — a condition,
-  a range, a second amount or no amount — holds the field for review. A fee cell that says exactly
-  무료 states free shipping.
+  a second amount or no amount — holds the field for review. A fee cell that says exactly 무료
+  states free shipping, and one that is exactly a range (outside the platform's tier tooltip) is
+  priced at its highest amount (ADR-0032 §4, the owner's rule).
 - Stock is decided only by controls and marks inside the product's own action area. A hidden or
   disabled control is no offer. An active control decides ``ON_SALE`` (ADR-0010 §10), and a
   sold-out mark decides ``SOLD_OUT`` only when no active control exists.
@@ -91,9 +92,9 @@ class Vocabulary:
     # A template declares none; only a site's words give a price a role.
     purchase_price: tuple[str, ...] = ()
     list_price: tuple[str, ...] = ()
-    # ADR-0031 §3: the sales-channel row label and the phrases that read it. Empty by default: a
-    # row the site has not worded stays under review, never allowed.
-    sales_channel_row: tuple[str, ...] = ()
+    # ADR-0031 §3: the sales-channel row label, and the phrases that read it. The phrases are
+    # empty by default, so a row a site has not worded stays under review, never allowed.
+    sales_channel_row: tuple[str, ...] = ("판매가능플랫폼",)
     channel_all_allowed: tuple[str, ...] = ()
     channel_closed_only: tuple[str, ...] = ()
     channel_forbid_coupang: tuple[str, ...] = ()
@@ -104,6 +105,8 @@ class Vocabulary:
     detail_menu: str = "dMenu"
     # The representative image's container inside the product image module (cafe24-2).
     key_image: str = "keyImg"
+    # The words a skin appends to the declared title after the product's name (cafe24-2).
+    title_suffix: tuple[str, ...] = ()
 
 
 DEFAULT_VOCABULARY = Vocabulary()
@@ -122,7 +125,10 @@ _FEE_CELL = re.compile(_NUMBER + r"원")
 _MINIMUM_CELL = re.compile(_NUMBER + r"원(?:이상)?")
 # ADR-0032 §4 (the owner's rule, Issue #219 6086421199): a fee stated as a range, ``A원 ~ B원``,
 # is read as its highest amount.
-_FEE_RANGE = re.compile(_NUMBER + r"원?[~∼〜]" + _NUMBER + r"원")
+_FEE_RANGE = re.compile(_NUMBER + r"원?[~∼〜～]" + _NUMBER + r"원")
+# The platform's own quantity-tier tooltip inside a fee cell: it explains a stated range and states
+# no fee of its own, so a range is read from the cell outside it.
+FEE_TOOLTIP = ".ec-front-shop-delivery-defferent-shipping"
 _FREE_WORDS = ("무료", "무료배송")
 # URL material: a scheme or a protocol-relative reference. It is never quoted and never stored.
 _URL_MATERIAL = re.compile(r"(?i)(?:[a-z][a-z0-9+.-]*:)?//\S*")
@@ -234,11 +240,11 @@ def _name(
     if (
         declared
         and len(stated) == 1
-        and declared != stated[0][1]
-        and declared.startswith(stated[0][1] + " ")
+        and any(declared == f"{stated[0][1]} {suffix}" for suffix in words.title_suffix)
     ):
-        # A skin that appends the shop's name to the declared title (U-PICK: "<name> - U-PICK
-        # B2B") states the product's own name in its 상품명 row; the suffix is not the name.
+        # A skin that appends the shop's own name to the declared title (U-PICK: "<name> -
+        # U-PICK B2B") states the product's name in its 상품명 row. Only the exact suffix the site
+        # names is set aside; any other difference is a disagreement.
         declared = ""
     disagreeing = _disagreement(
         locator, [*([declared] if declared else []), *(v for _, v, _n in stated)]
@@ -360,12 +366,23 @@ def _shipping(rows: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Field
     if disagreeing is not None:
         return disagreeing
     cell = _squash(fee[0][1])
-    ranged = _FEE_RANGE.match(cell)
+    ranged = _FEE_RANGE.fullmatch(_squash(fee[0][2].text_outside(FEE_TOOLTIP)))
+    range_evidence: tuple[Evidence, ...] = ()
     if cell in _FREE_WORDS:
         amount = 0
     elif ranged is not None:
-        # ADR-0032 §4: the highest amount of the range the cell opens with; its words are kept.
+        # ADR-0032 §4: a cell that is exactly a range (outside the platform's tier tooltip) is
+        # priced at its highest amount; its words are kept and the evidence names the reading.
         amount = max(int(group.replace(",", "")) for group in ranged.groups())
+        range_evidence = (
+            Evidence(
+                EvidenceKind.DOM_TEXT,
+                fee_locator,
+                FieldStatus.CONFIRMED,
+                observed=_quote(fee[0][1]),
+                normalized=str(amount),
+            ),
+        )
     else:
         stated = _FEE_CELL.fullmatch(cell)
         if stated is None:
@@ -377,14 +394,17 @@ def _shipping(rows: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Field
     if _carries_url(policy):
         return _review(fee_locator, policy)
     kind = ShippingKind.FREE if amount == 0 else ShippingKind.FIXED
-    evidence = tuple(
-        Evidence(
-            EvidenceKind.DOM_TEXT,
-            _row_locator(label),
-            FieldStatus.CONFIRMED,
-            observed=_quote(value),
+    evidence = (
+        tuple(
+            Evidence(
+                EvidenceKind.DOM_TEXT,
+                _row_locator(label),
+                FieldStatus.CONFIRMED,
+                observed=_quote(value),
+            )
+            for label, value, _cell in (*method, *fee)
         )
-        for label, value, _cell in (*method, *fee)
+        + range_evidence
     )
     value = ShippingValue(
         kind=kind, policy_text=policy, fee_krw=None if kind is ShippingKind.FREE else amount
@@ -535,52 +555,75 @@ def _sales_channels(
 ) -> FieldFact:
     """ADR-0031 §3: what the page says about where the product may be resold.
 
-    Only the site's own phrases are read, in its sales-channel row and in the closed description
-    block's text; nothing is read from an image. A row no phrase reads, or phrases that contradict
-    each other, stay under review: an unread restriction is never an allowed one.
+    Only the site's own phrases are read, from its sales-channel rows and the closed description
+    block's text; nothing is read from an image. Fail closed throughout:
+    - every channel row must be read; a row no phrase reads, or one that holds only an image or
+      nothing, is held for review;
+    - "all allowed" is read only from a row whose whole value is an allowed phrase, never from a
+      phrase inside other words;
+    - an allowed reading beside any restriction is a contradiction, held for review.
+    A restricting phrase is read wherever it appears.
     """
-    stated = _labelled(rows, words.sales_channel_row) if words.sales_channel_row else []
-    row_locator = _row_locator((words.sales_channel_row or ("판매가능플랫폼",))[0])
-    blocks = [node for node in nodes if node.marks_exactly(words.detail_container)]
+    row_locator = _row_locator(words.sales_channel_row[0])
     detail_locator = f"#{words.detail_container.lstrip('#.')}"
-    sources: list[tuple[str, str]] = [(row_locator, value) for _label, value, _n in stated]
-    if len(blocks) == 1 and blocks[0].closed:
-        sources.append((detail_locator, blocks[0].text_outside(words.detail_menu)))
-    elif blocks:
-        # A description the page never closed proves nothing about what it says.
+    headed = [node for node in nodes if node.tag == "th" and node.text in words.sales_channel_row]
+    stated = _labelled(rows, words.sales_channel_row)
+    if len(headed) > len(stated):
+        # A channel row whose value is an image or nothing: a statement no rule can read.
+        return _review(row_locator, *(v for _, v, _n in stated))
+    blocks = [node for node in nodes if node.marks_exactly(words.detail_container)]
+    if len(blocks) > 1 or (blocks and not blocks[0].closed):
         return _review(detail_locator)
+    description = blocks[0].text_outside(words.detail_menu) if blocks else ""
 
-    def found(phrases: Sequence[str]) -> list[tuple[str, str]]:
-        return [
-            (locator, phrase)
-            for locator, text in sources
-            for phrase in phrases
-            if _squash(phrase) in _squash(text)
-        ]
+    def contains(text: str, phrases: Sequence[str]) -> list[str]:
+        return [phrase for phrase in phrases if _squash(phrase) in _squash(text)]
 
-    allowed = found(words.channel_all_allowed)
-    closed = found(words.channel_closed_only)
-    forbids = {
-        "coupang": found(words.channel_forbid_coupang),
-        "smartstore": found(words.channel_forbid_smartstore),
-    }
-    assert set(forbids) <= SALES_CHANNEL_MARKETPLACES
-    restricting = closed + [hit for hits in forbids.values() for hit in hits]
-    matched = allowed + restricting
-    row_read = any(locator == row_locator for locator, _phrase in matched)
-    if not matched:
-        return _review(row_locator, *(v for _, v, _n in stated)) if stated else _absent(row_locator)
-    if (allowed and restricting) or (stated and not row_read):
-        # Phrases that contradict each other, or a row no phrase reads: never allowed.
-        return _review(row_locator, *(phrase for _locator, phrase in matched))
+    def restrictions(text: str) -> dict[str, list[str]]:
+        return {
+            "closed": contains(text, words.channel_closed_only),
+            "coupang": contains(text, words.channel_forbid_coupang),
+            "smartstore": contains(text, words.channel_forbid_smartstore),
+        }
+
+    allowed_rows: list[str] = []
+    found: dict[str, list[str]] = {"closed": [], "coupang": [], "smartstore": []}
+    quoted: list[str] = []
+    for _label, row_value, _node in stated:
+        row_restrictions = restrictions(row_value)
+        whole_allowed = any(_squash(row_value) == _squash(p) for p in words.channel_all_allowed)
+        if not whole_allowed and not any(row_restrictions.values()):
+            # A row no phrase reads, or an allowed phrase inside other words: never allowed.
+            return _review(row_locator, row_value)
+        if whole_allowed:
+            allowed_rows.append(row_value)
+        for key, hits in row_restrictions.items():
+            found[key].extend(hits)
+        quoted.append(row_value)
+    for key, hits in restrictions(description).items():
+        found[key].extend(hits)
+        quoted.extend(hits)
+    restricted = any(found.values())
+    if allowed_rows and restricted:
+        return _review(row_locator, *quoted)
+    if not allowed_rows and not restricted:
+        return _absent(row_locator)
+    assert {"coupang", "smartstore"} <= SALES_CHANNEL_MARKETPLACES
+    policy = _quote(" / ".join(dict.fromkeys(quoted)))
     evidence = tuple(
-        _evidence(locator, FieldStatus.CONFIRMED, phrase) for locator, phrase in matched
+        _evidence(
+            row_locator
+            if text in allowed_rows or text in [v for _, v, _n in stated]
+            else detail_locator,
+            FieldStatus.CONFIRMED,
+            text,
+        )
+        for text in dict.fromkeys(quoted)
     )
-    policy = _quote(" / ".join(dict.fromkeys(phrase for _locator, phrase in matched)))
-    if closed:
+    if found["closed"]:
         value = SalesChannelsValue(scope=SalesChannelScope.CLOSED_MALL_ONLY, policy_text=policy)
-    elif restricting:
-        forbidden = tuple(sorted(key for key, hits in forbids.items() if hits))
+    elif restricted:
+        forbidden = tuple(sorted(key for key in ("coupang", "smartstore") if found[key]))
         value = SalesChannelsValue(
             scope=SalesChannelScope.LISTED, forbidden=forbidden, policy_text=policy
         )

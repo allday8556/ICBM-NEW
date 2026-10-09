@@ -103,6 +103,16 @@ LABEL_SLOTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "channel_forbid_coupang": DEFAULT_VOCABULARY.channel_forbid_coupang,
         "channel_forbid_smartstore": DEFAULT_VOCABULARY.channel_forbid_smartstore,
         "purchase_controls": DEFAULT_VOCABULARY.purchase_controls,
+        "title_suffix": DEFAULT_VOCABULARY.title_suffix,
+    }
+)
+# Which vocabulary field each region slot sets.
+REGION_FIELDS: Mapping[str, str] = MappingProxyType(
+    {
+        "detail": "detail_container",
+        "option": "option_container",
+        "detail_menu": "detail_menu",
+        "key_image": "key_image",
     }
 )
 # The regions a site may relocate, by slot, with the template's defaults.
@@ -157,8 +167,11 @@ def vocabulary(site: SiteConfig) -> Vocabulary:
         return defaults + tuple(word for word in extra if word not in defaults)
 
     def region(slot: str) -> str:
-        # A region is matched as the site declares it: ``#id`` or ``.class``.
-        chosen = site.region_overrides.get(slot, REGION_SLOTS[slot])
+        # A region the site relocates is matched as it declares it, ``#id`` or ``.class``; one it
+        # does not keeps the template's own token, read as KM통상 reads it.
+        chosen = site.region_overrides.get(slot)
+        if chosen is None:
+            return str(getattr(DEFAULT_VOCABULARY, REGION_FIELDS[slot]))
         return f"{'#' if chosen.by == 'id' else '.'}{chosen.token}"
 
     return Vocabulary(
@@ -179,6 +192,7 @@ def vocabulary(site: SiteConfig) -> Vocabulary:
         channel_forbid_coupang=words("channel_forbid_coupang"),
         channel_forbid_smartstore=words("channel_forbid_smartstore"),
         purchase_controls=words("purchase_controls"),
+        title_suffix=words("title_suffix"),
         option_container=region("option"),
         detail_container=region("detail"),
         detail_menu=region("detail_menu"),

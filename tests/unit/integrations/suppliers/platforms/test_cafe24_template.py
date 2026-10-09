@@ -140,12 +140,7 @@ def test_a_relocated_description_region_is_read_where_the_site_puts_it() -> None
     body = page(body=BUY + '<div id="goodsDetail"><p>다른 스킨의 설명</p></div>')
     assert parse_fields(document(body))["detail_description"].status is FieldStatus.ABSENT
     words = vocabulary(site(region_overrides={"detail": SiteRegion("id", "goodsDetail")}))
-    assert words == Vocabulary(
-        option_container=".xans-product-option",
-        detail_container="#goodsDetail",
-        detail_menu=".dMenu",
-        key_image=".keyImg",
-    )
+    assert words == Vocabulary(detail_container="#goodsDetail")
     fact = parse_fields(document(body), words)["detail_description"]
     assert fact.status is FieldStatus.CONFIRMED
     images = classify_images(

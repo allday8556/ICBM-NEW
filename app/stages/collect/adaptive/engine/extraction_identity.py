@@ -21,11 +21,12 @@ EXTRACTOR_INPUTS = (
 )
 # adaptive-engine-2 (2026-10-10, ADR-0031 §2): FIELD_REGISTRY gained the COVERAGE field
 # ``sales_channels``, so every extraction reports one field more and the goldens were recorded
-# again. The engine's code is unchanged, so EXTRACTOR_FINGERPRINT is unchanged.
+# again. Its lint revision advanced to adaptive-lint-2 for the same field, so the fingerprint was
+# re-pinned.
 # Re-pinned for the Issue #151 path-only move (ADR-0021 section 9): the hashed inputs moved from
 # app/collect/adaptive/ to app/stages/collect/adaptive/engine/ and their imports followed.
 # EXTRACTOR_REVISION is unchanged and the engine goldens pass unchanged. A reader cannot recompute
 # a SHA-256; the proof is mechanical: tests/unit/collect/adaptive/engine/test_identity.py
 # recomputes this digest from EXTRACTOR_INPUTS, and the merge guard requires that test green in
 # the FULL CI of the exact HEAD.
-EXTRACTOR_FINGERPRINT = "c44f0007a990062141b69272895a91560c85d69bb2538ee5fdd73ed88cf544ed"
+EXTRACTOR_FINGERPRINT = "4a559460c6c95e3dff9b4b02c63eed7121dfbf653c0748f716ec4ae5135dbee3"
