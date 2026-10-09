@@ -1020,15 +1020,19 @@ def _listing_reasons(request: PreflightRequest, metadata: CategoryMetadata | Non
     else:
         name_rule = FieldRule("name", required=True, max_length=None)
         reasons.extend(_value_reasons("name", name_rule, name))
-    if listing.tags and listing.tags_provenance is not None:
-        if listing.tags_provenance not in SATISFYING:
-            reasons.append(Reason(FIELD_AI_SUGGESTION_UNCONFIRMED, _R, "tags"))
         if (
             metadata is not None
             and isinstance(name.value, str)
             and len(name.value) > metadata.name_max_length
         ):
             reasons.append(Reason(LISTING_NAME_TOO_LONG, _R, "name"))
+    # ADR-0028 §6: an AI tag set is unconfirmed until the operator's own save (ADR-0014 §18).
+    if (
+        listing.tags
+        and listing.tags_provenance is not None
+        and listing.tags_provenance not in SATISFYING
+    ):
+        reasons.append(Reason(FIELD_AI_SUGGESTION_UNCONFIRMED, _R, "tags"))
     if metadata is None:
         return reasons
     reasons.extend(
