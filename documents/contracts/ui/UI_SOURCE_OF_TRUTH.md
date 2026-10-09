@@ -300,7 +300,10 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
   - The supplier and the status come from the row. The price columns and `등록유형` read `데이터 없음`.
 - **Detail panel.**
   - The title shows the representative image through the bound Item's own image read, the member's confirmed name, the id and the status.
-  - v29's groups follow: `브랜드` from the member's facts; `카테고리 / 카테고리 추천 신뢰도 / 가격 정보 / 채널별 판매가 / 마진율` read `데이터 없음`.
+  - v29's groups follow: `브랜드` from the member's facts; `가격 정보 / 채널별 판매가 / 마진율` read `데이터 없음`.
+  - **`카테고리 / 카테고리 추천 신뢰도` (ADR-0029 C3).** These show the `SMARTSTORE_CATEGORY_V1` `category` result for the bound SmartStore account: the chosen leaf's whole name, the confidence, the candidate count, `검토 필요`, `최신` or `입력 바뀜`, and the model.
+    - Its own `✨ AI 카테고리 추천` is live only while the `ai` capability is READY and such an account exists.
+    - The candidates are the server's, from ICBM's durable official catalog.
   - **`태그 / AI 상태` (ADR-0028 T4).** The group shows the product's `SMARTSTORE_TAGS_V1` `tags` result for the SmartStore account bound to the connection (read from `/register/draft-targets`):
     - each tag with its source, `네이버 추천` or `AI 직접`;
     - what the filter removed and why;
@@ -346,6 +349,10 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
   - A unit's ref moves when it is authored and again when it is frozen. The editor follows the one unit of the Draft that holds the same Items. Two units holding them are never guessed between.
 - **Six steps.** Phase 1 places the register page's own pieces by step and adds no route:
   1. `기본정보`: the main image, the platform tabs (the target marketplace only; the others are inert), the category, the name, `AI 상품명 추천` and the tags.
+     - For a SmartStore unit, `AI 카테고리 추천` sits under the category. `AI 카테고리 적용` writes the exact result as an `AI_SUGGESTION` selection under the target's current mapping revision.
+       - It is refused under another taxonomy.
+       - It never confirms a category: `AI 추천 적용됨 · 저장해야 확정됩니다`, and the operator's save confirms.
+       - A confirmed category is never overwritten (ADR-0029 §5).
      - For a SmartStore unit, the tag block shows the unit account's tag recommendation (the 통합DB panel) and `AI 태그 적용`.
      - `AI 태그 적용` applies the exact result revision as one `AI_SUGGESTION` set of texts (ADR-0028 §6).
      - It is enabled only for a fresh OK result, on a saved Preparation with no confirmed tags. A confirmed set is never overwritten.

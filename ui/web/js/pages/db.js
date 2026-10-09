@@ -27,6 +27,7 @@ import { markInert } from '../core/inert.js';
 import { marketplaceLabel } from '../core/platform.js';
 import { toast } from '../core/toast.js';
 import { aiNamePanel } from '../components/ai-name.js';
+import { aiCategoryPanel } from '../components/ai-category.js';
 import { aiTagsPanel } from '../components/ai-tags.js';
 import { pageHead } from '../components/page-head.js';
 import { emptyState, errorState, unsupportedState } from '../components/states.js';
@@ -307,8 +308,11 @@ function v29Groups(detail) {
       detail
         ? h('div', { class: 'kv', 'data-fact': 'brand-summary' }, h('span', {}, '브랜드'), h('b', {}, factValue(brand)))
         : noDataKv('브랜드'),
-      noDataKv('카테고리'),
-      noDataKv('카테고리 추천 신뢰도'),
+      // ADR-0029 C3: the bound SmartStore account's category recommendation (both v29 slots).
+      detail
+        ? h('div', { 'data-role': 'detail-ai-category' }, aiCategoryPanel(detail.product.product_group_id))
+        : noDataKv('카테고리'),
+      detail ? null : noDataKv('카테고리 추천 신뢰도'),
     ),
     h('div', { class: 'detail-group', 'data-role': 'detail-prices' }, h('h4', {}, '가격 정보'), ...['도매가', '배송비', '원가', '가격기준'].map(noDataKv)),
     h('div', { class: 'detail-group', 'data-role': 'detail-channels' }, h('h4', {}, '채널별 판매가 / 마진율'), ...['네이버', '쿠팡', '11번가'].map(noDataKv)),

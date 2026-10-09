@@ -21,6 +21,7 @@ import { platformTag } from '../core/platform.js';
 import { toast } from '../core/toast.js';
 import { NAME_RESULT, NAME_TASK, aiNamePanel } from '../components/ai-name.js';
 import { TAG_RESULT, TAG_TASK, aiTagsPanel } from '../components/ai-tags.js';
+import { CATEGORY_RESULT, CATEGORY_TASK, aiCategoryPanel } from '../components/ai-category.js';
 import { itemImagesEditor } from '../components/item-images.js';
 import { emptyState } from '../components/states.js';
 import {
@@ -213,6 +214,77 @@ function aiNameBlock(unit, reload) {
   );
 }
 
+const CATEGORY_APPLY_COPY = {
+  ...APPLY_COPY,
+  AI_APPLY_FIELD_LOCKED: '확정된 카테고리는 AI 값으로 덮어쓰지 않습니다.',
+  AI_APPLY_RESULT_UNUSABLE: '최신이고 성공한, 지금 카테고리 목록 기준의 추천만 적용할 수 있습니다.',
+  AI_APPLY_VALUE_INVALID: '추천에 카테고리가 없습니다.',
+};
+
+// ADR-0029 §5 (C3): for a SmartStore unit, the account's category recommendation and
+// `AI 카테고리 적용` — the exact result revision shown, as an AI_SUGGESTION selection under the
+// target's current mapping revision. It never confirms a category (AIC-04): the operator's own
+// save of the category does; an operator-confirmed selection is never overwritten (AIC-05).
+function aiCategoryBlock(unit, reload) {
+  const authored = unit.authored;
+  const productGroupId = unit.items[0]?.product_group_id;
+  if (unit.marketplace_key !== 'smartstore' || !productGroupId) return null;
+  const category = authored?.inputs?.category ?? null;
+  const applied = category?.confirmation === 'AI_SUGGESTION';
+  const locked = category?.confirmation === 'OPERATOR_CONFIRMED';
+  const apply = h('button', { type: 'button', class: 'btn blue', 'data-action': 'ai-category-apply', disabled: true }, 'AI 카테고리 적용');
+  const why = h('span', { class: 'mini', 'data-role': 'ai-category-apply-why' });
+  let shown = null;
+  const target = { marketplace_key: unit.marketplace_key, marketplace_account_id: unit.marketplace_account_id };
+  const panel = aiCategoryPanel(productGroupId, target, {
+    onResult: (result) => {
+      shown = result;
+      const usable = Boolean(authored && !locked && result?.status === 'OK' && !result.stale && result.value?.category_id);
+      apply.disabled = !usable;
+      why.textContent = !authored
+        ? '먼저 준비 내용을 저장하면 적용할 수 있습니다.'
+        : locked
+          ? '확정된 카테고리가 있어 AI 값으로 덮어쓰지 않습니다.'
+          : result?.stale
+            ? '추천 이후 입력이 바뀌었습니다. 다시 추천받으세요.'
+            : usable
+              ? '적용하면 저장한 내용 기준으로 다시 불러옵니다. 카테고리는 저장해야 확정됩니다.'
+              : '';
+    },
+  });
+  apply.addEventListener('click', async () => {
+    if (apply.disabled || !shown) return;
+    apply.disabled = true;
+    try {
+      await sendJson('POST', `/api/v1/register/preparations/${authored.preparation_id}/apply-enrichment`, {
+        actor: OPERATOR,
+        expected_revision_no: authored.revision_no,
+        field: 'category',
+        product_group_id: productGroupId,
+        task_key: CATEGORY_TASK,
+        result_key: CATEGORY_RESULT,
+        result_targeted: true,
+        result_sequence: shown.sequence,
+        value_field: 'category_id',
+      });
+      toast('AI 추천 카테고리를 적용했습니다', '저장해야 확정된 카테고리가 됩니다.');
+      reload();
+    } catch (error) {
+      const code = error instanceof ApiError ? error.error?.code : null;
+      toast('적용하지 못했습니다', CATEGORY_APPLY_COPY[code] ?? (error instanceof ApiError ? error.message : String(error)));
+      apply.disabled = false;
+    }
+  });
+  return h(
+    'div',
+    { class: 'field ai-category-field', 'data-role': 'editor-ai-category' },
+    h('label', {}, 'AI 카테고리 추천'),
+    applied ? h('span', { class: 'chip warn', 'data-role': 'ai-category-applied' }, 'AI 추천 적용됨 · 저장해야 확정됩니다') : null,
+    panel,
+    h('div', { class: 'row' }, apply, why),
+  );
+}
+
 const TAGS_APPLY_COPY = {
   ...APPLY_COPY,
   AI_APPLY_FIELD_LOCKED: '확인된 태그는 AI 값으로 덮어쓰지 않습니다.',
@@ -343,7 +415,7 @@ function editor(unit, ctx, labels, mode, step) {
       '플랫폼마다 다른 값은 준비 중 · 지금은 대상 플랫폼 하나',
       h('div', { class: 'hero' }, mainImage(unit), h('div', { class: 'stack' }, h('div', { class: 'row' }, pending('수집 이미지에서 선택'), pending('업로드'), pending('이미지 편집')), h('span', { class: 'mini' }, '메인 이미지는 대표이미지 단계의 대표 이미지입니다.'))),
       platformTabs(unit),
-      ...(parts ? [parts.head, parts.category, parts.name, aiNameBlock(unit, reload)] : readOnlyInputs(unit)),
+      ...(parts ? [parts.head, parts.category, aiCategoryBlock(unit, reload), parts.name, aiNameBlock(unit, reload)] : readOnlyInputs(unit)),
       tagsBlock(unit, reload),
     ),
     pane(
