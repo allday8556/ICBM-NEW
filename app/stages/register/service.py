@@ -1548,6 +1548,9 @@ def _preparation_view(record: PreparationRecord) -> PreparationView:
             ),
             name=None if listing.name is None else _field_view(listing.name),
             tags=tuple(sorted(listing.tags)),
+            tags_provenance=(
+                None if listing.tags_provenance is None else listing.tags_provenance.value
+            ),
             attributes={key: _field_view(value) for key, value in listing.attributes.items()},
             notices={key: _field_view(value) for key, value in listing.notices.items()},
             options={item: dict(values) for item, values in listing.options.items()},

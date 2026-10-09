@@ -69,6 +69,17 @@ export function aiProviderPanel() {
 
   async function draw() {
     let view;
+    // ADR-0028 §3: the search_signal capability, as readiness reports it.
+    const signalState = h('span', { 'data-role': 'search-signal-state' }, '확인 중…');
+    getJson('/api/ready')
+      .then((ready) => {
+        const signal = (ready.capabilities ?? []).find((capability) => capability.key === 'search_signal');
+        signalState.dataset.status = signal?.status ?? 'UNKNOWN';
+        signalState.textContent = !signal ? '확인할 수 없음' : signal.status === 'READY' ? '연결됨' : '연결된 출처 없음 · 출처마다 소유자 결정이 필요합니다';
+      })
+      .catch(() => {
+        signalState.textContent = '확인할 수 없음';
+      });
     try {
       view = await getJson(ENDPOINT);
     } catch (error) {
@@ -106,6 +117,8 @@ export function aiProviderPanel() {
       ),
       row('런타임 상태', h('span', { 'data-role': 'ai-provider-runtime' }, view.runtime_state)),
       row('오늘 호출', `${view.calls_today} / ${content.daily_call_cap ?? '—'}`),
+      // ADR-0028 §3: the SearchSignal port, provider-zero until a source has its own owner decision.
+      row('외부 검색 신호', signalState),
       h(
         'form',
         {
