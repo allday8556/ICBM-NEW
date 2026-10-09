@@ -54,6 +54,12 @@ def template_problems(site: SiteConfig, template: PlatformTemplate) -> list[str]
         problems.append(f"label slots the template does not have: {unknown}")
     if unknown := sorted(set(site.region_overrides) - set(template.region_slots)):
         problems.append(f"region slots the template does not have: {unknown}")
+    # ADR-0032 §2: a label names one price role at most.
+    both = set(site.label_overrides.get("purchase_price", ())) & set(
+        site.label_overrides.get("list_price", ())
+    )
+    if both:
+        problems.append(f"a label is both a purchase and a list price: {sorted(both)}")
     if site.product_path_form not in template.path_forms:
         problems.append(f"the template has no product path form {site.product_path_form!r}")
     raised = sorted(

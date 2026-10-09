@@ -95,7 +95,24 @@ LABEL_SLOTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "manufacturer": DEFAULT_VOCABULARY.manufacturer,
         "origin": DEFAULT_VOCABULARY.origin,
         "sold_out": DEFAULT_VOCABULARY.sold_out,
+        "purchase_price": DEFAULT_VOCABULARY.purchase_price,
+        "list_price": DEFAULT_VOCABULARY.list_price,
+        "sales_channel_row": DEFAULT_VOCABULARY.sales_channel_row,
+        "channel_all_allowed": DEFAULT_VOCABULARY.channel_all_allowed,
+        "channel_closed_only": DEFAULT_VOCABULARY.channel_closed_only,
+        "channel_forbid_coupang": DEFAULT_VOCABULARY.channel_forbid_coupang,
+        "channel_forbid_smartstore": DEFAULT_VOCABULARY.channel_forbid_smartstore,
         "purchase_controls": DEFAULT_VOCABULARY.purchase_controls,
+        "title_suffix": DEFAULT_VOCABULARY.title_suffix,
+    }
+)
+# Which vocabulary field each region slot sets.
+REGION_FIELDS: Mapping[str, str] = MappingProxyType(
+    {
+        "detail": "detail_container",
+        "option": "option_container",
+        "detail_menu": "detail_menu",
+        "key_image": "key_image",
     }
 )
 # The regions a site may relocate, by slot, with the template's defaults.
@@ -104,6 +121,7 @@ REGION_SLOTS: Mapping[str, SiteRegion] = MappingProxyType(
         "detail": SiteRegion("id", DEFAULT_VOCABULARY.detail_container),
         "option": SiteRegion("class", DEFAULT_VOCABULARY.option_container),
         "detail_menu": SiteRegion("class", DEFAULT_VOCABULARY.detail_menu),
+        "key_image": SiteRegion("class", DEFAULT_VOCABULARY.key_image),
     }
 )
 CAPTURE_REVISION = "cafe24-capture-1"
@@ -149,8 +167,11 @@ def vocabulary(site: SiteConfig) -> Vocabulary:
         return defaults + tuple(word for word in extra if word not in defaults)
 
     def region(slot: str) -> str:
-        # A region is matched as the site declares it: ``#id`` or ``.class``.
-        chosen = site.region_overrides.get(slot, REGION_SLOTS[slot])
+        # A region the site relocates is matched as it declares it, ``#id`` or ``.class``; one it
+        # does not keeps the template's own token, read as KM통상 reads it.
+        chosen = site.region_overrides.get(slot)
+        if chosen is None:
+            return str(getattr(DEFAULT_VOCABULARY, REGION_FIELDS[slot]))
         return f"{'#' if chosen.by == 'id' else '.'}{chosen.token}"
 
     return Vocabulary(
@@ -163,10 +184,19 @@ def vocabulary(site: SiteConfig) -> Vocabulary:
         manufacturer=words("manufacturer"),
         origin=words("origin"),
         sold_out=words("sold_out"),
+        purchase_price=words("purchase_price"),
+        list_price=words("list_price"),
+        sales_channel_row=words("sales_channel_row"),
+        channel_all_allowed=words("channel_all_allowed"),
+        channel_closed_only=words("channel_closed_only"),
+        channel_forbid_coupang=words("channel_forbid_coupang"),
+        channel_forbid_smartstore=words("channel_forbid_smartstore"),
         purchase_controls=words("purchase_controls"),
+        title_suffix=words("title_suffix"),
         option_container=region("option"),
         detail_container=region("detail"),
         detail_menu=region("detail_menu"),
+        key_image=region("key_image"),
     )
 
 
@@ -202,7 +232,9 @@ def bind(site: SiteConfig, extraction_revision: str) -> SiteBinding:
             path=LOGIN_PATH,
             username_selector=f'{_LOGIN_FORM} input[name="member_id"]',
             password_selector=f'{_LOGIN_FORM} input[name="member_passwd"]',
-            submit_selector=f"{_LOGIN_FORM} a.btnLogin",
+            # Older skins name the submit link ``btnLogin``; smart-design skins ``btnSubmit``
+            # (U-PICK, reconnaissance of 2026-10-10). Both sit inside the login form.
+            submit_selector=f"{_LOGIN_FORM} a.btnLogin, {_LOGIN_FORM} a.btnSubmit",
         ),
     )
 

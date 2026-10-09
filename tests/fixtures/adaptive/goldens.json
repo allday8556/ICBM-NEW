@@ -1,12 +1,12 @@
 {
-  "extractor_revision": "adaptive-engine-1",
+  "extractor_revision": "adaptive-engine-2",
   "note": "Engine goldens (ADR-0017 §5.6 guard 2): the extraction digest of each synthetic page under this engine revision. A behaviour change fails this pin until EXTRACTOR_REVISION advances and new goldens are recorded for it.",
   "extractions": {
-    "on_sale": "d3dc4d23476a5afe3276f1d644dabc920035a031ad9b36f36cccb9d61f4ef6d8",
-    "sold_out": "99fc1b1fb39d4c924288478420c85f0e38b378d285255186ef05b94a32bb95ae",
-    "optioned": "53f98e8f233719535b1a699eb7a8d5e9f97508092d394237e1955d0c2d3a4c4e",
+    "on_sale": "81e4445fcfbbd077fb4c4b2ddc4da1d1d5b6d352e34b256a844914c14c246509",
+    "sold_out": "6e06846bef3e23ad83277712c0de4ff971e62c5b772a2dadd2cfa40e8dd3bd6c",
+    "optioned": "ce67c441b453bd78b28357e78d37291b70135a2b37130d2e680bb86ebc7038b5",
     "login": "fb757ad0bff93710fbb1eec41c32bcc5afec524ca61a39abaa894890cab0830f",
     "listing": "fb757ad0bff93710fbb1eec41c32bcc5afec524ca61a39abaa894890cab0830f",
-    "hooked": "416be554f85346548bc7161305e3568234d4fdfd185cf9af704010f0ef3b85cc"
+    "hooked": "446ab7696a3eccb7b7cd3e7d7bc36f8a118026c55359cdbd014da0cc88d7d3dc"
   }
 }

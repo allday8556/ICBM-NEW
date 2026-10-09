@@ -21,7 +21,8 @@ The limits are bounded by what was actually observed, with headroom and nothing 
 references 32 images, of which the role rules recognise 13 as product evidence, and the largest
 image phase B fetched was 1,437,349 bytes. The E3 real run (2026-10-02, 27 products of one list
 page) then met description images over 2 MiB on 9 of them, and the user set the per-image bound to
-4 MiB on 2026-10-03 (``kmretail-2``); the per-run total stays 24 MiB.
+4 MiB on 2026-10-03 (``kmretail-2``). The owner set 5 MiB for every supplier on 2026-10-10
+(``kmretail-4``, Issue #219 6086299406); the per-run total stays 24 MiB.
 
 This module performs nothing. It holds no client, opens no connection, computes no checksum and
 writes no row; the run, the fetch, the asset store, the revision and the job belong to generic
@@ -55,8 +56,10 @@ STOREFRONT_HOST = "kmretail.co.kr"
 # The image hosts phase B was approved for, and no others.
 IMAGE_HOSTS = frozenset({STOREFRONT_HOST, "onewbio.diskn.com"})
 # Observed: largest sampled image 1,437,349 bytes; 32 references, 13 of them product evidence;
-# the E3 real run met images over 2 MiB, and the user set 4 MiB (2026-10-03).
-MAX_IMAGE_BYTES = 4 * 1024 * 1024
+# the E3 real run met images over 2 MiB, and the user set 4 MiB (2026-10-03). The owner then set
+# 5 MiB for every supplier (Issue #219 6086299406, 2026-10-10), after a U-PICK description image of
+# about 4.4 MB; as a semantic profile change (ADR-0010 §12) it advances the revision (kmretail-4).
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_IMAGE_REFS = 30
 MAX_IMAGE_REQUESTS_PER_RUN = 30
 MAX_NEW_IMAGE_BYTES_PER_RUN = 24 * 1024 * 1024

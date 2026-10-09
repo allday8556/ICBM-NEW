@@ -28,8 +28,10 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     StringConstraints,
     ValidationError,
+    model_serializer,
     model_validator,
 )
 
@@ -170,6 +172,25 @@ class ShippingKind(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
+class PriceRole(StrEnum):
+    """ADR-0032 §2: what a source price is for, declared only by the site's own words."""
+
+    PURCHASE = "PURCHASE"  # the price the reseller pays the supplier (도매가)
+    LIST = "LIST"  # the original, consumer or list price, shown for reference; never a cost
+
+
+class SalesChannelScope(StrEnum):
+    """ADR-0031 §2: what a supplier's page says about where the product may be resold."""
+
+    ALL_ALLOWED = "ALL_ALLOWED"
+    CLOSED_MALL_ONLY = "CLOSED_MALL_ONLY"  # every open marketplace is forbidden
+    LISTED = "LISTED"  # the marketplaces in ``forbidden`` are forbidden
+
+
+# ADR-0031 §2: the marketplaces a page can forbid by name.
+SALES_CHANNEL_MARKETPLACES = frozenset({"smartstore", "coupang"})
+
+
 # ---------------------------------------------------------------- field values
 
 NonEmpty = Annotated[str, StringConstraints(min_length=1)]
@@ -188,14 +209,58 @@ class TextValue(FactValue):
 
 
 class SourcePrice(FactValue):
-    """One source price with the exact source label that names it (ADR-0010 §7)."""
+    """One source price with the exact source label that names it (ADR-0010 §7), and the role
+    the site's words give it, if any (ADR-0032 §2)."""
 
     label: NonEmpty
     amount_krw: Krw
+    role: PriceRole | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_role(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        # A price without a role serializes exactly as it did before ADR-0032, so an unchanged
+        # page keeps the same canonical value.
+        data: dict[str, object] = handler(self)
+        if data.get("role") is None:
+            data.pop("role", None)
+        return data
 
 
 class PricesValue(FactValue):
     prices: tuple[SourcePrice, ...] = Field(min_length=1)
+
+    def purchase(self) -> SourcePrice | None:
+        """The purchase price, or None when the page does not establish one (ADR-0032 §3).
+
+        A declared ``PURCHASE`` role decides when exactly one price carries it. Without one, the
+        only price that carries no role is the purchase price. A ``LIST`` price is never a cost,
+        even alone, and nothing is ever chosen by label text, name or order.
+        """
+        declared = [price for price in self.prices if price.role is PriceRole.PURCHASE]
+        if declared:
+            return declared[0] if len(declared) == 1 else None
+        unroled = [price for price in self.prices if price.role is None]
+        return unroled[0] if len(unroled) == 1 else None
+
+
+class SalesChannelsValue(FactValue):
+    """ADR-0031 §2: a supplier's stated sales-channel restriction, in its own words."""
+
+    scope: SalesChannelScope
+    forbidden: tuple[str, ...] = ()
+    policy_text: NonEmpty
+
+    @model_validator(mode="after")
+    def _coherent(self) -> "SalesChannelsValue":
+        if not set(self.forbidden) <= SALES_CHANNEL_MARKETPLACES:
+            raise ValueError("a forbidden marketplace is one ICBM knows by name")
+        if len(set(self.forbidden)) != len(self.forbidden):
+            raise ValueError("a forbidden marketplace is named once")
+        if (self.scope is SalesChannelScope.LISTED) != bool(self.forbidden):
+            raise ValueError("only a LISTED scope names forbidden marketplaces, and it names one")
+        if len(self.policy_text) > 200:
+            raise ValueError("the policy text is quoted in at most 200 characters")
+        return self
 
 
 class MoneyValue(FactValue):
@@ -407,6 +472,8 @@ FIELD_REGISTRY: Mapping[str, FieldSpec] = MappingProxyType(
         "origin": FieldSpec(FieldLevel.COVERAGE, TextValue),
         "notice": FieldSpec(FieldLevel.COVERAGE, NoticeValue),
         "detail_description": FieldSpec(FieldLevel.COVERAGE, TextValue),
+        # ADR-0031 §2: the supplier's sales-channel restriction.
+        "sales_channels": FieldSpec(FieldLevel.COVERAGE, SalesChannelsValue),
     }
 )
 SUPPLIED_FIELDS = frozenset(FIELD_REGISTRY) - {IMAGES_FIELD}

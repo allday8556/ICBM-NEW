@@ -15,7 +15,9 @@ from app.stages.collect.adaptive.engine.canonical import digest
 from app.stages.collect.adaptive.engine.profiles import RULED_FIELDS, Bundle
 from app.stages.collect.facts import FIELD_REGISTRY, SUPPLIED_FIELDS, FieldLevel
 
-LINT_REVISION = "adaptive-lint-1"
+# adaptive-lint-2 (2026-10-10, ADR-0031): the COVERAGE set gained ``sales_channels``, so a template
+# without a rule for it has one finding more.
+LINT_REVISION = "adaptive-lint-2"
 LINT_DIGEST_SCHEME = "icbm-profile-lint/v1"
 
 UNMAPPED_CORE_FIELD = "UNMAPPED_CORE_FIELD"

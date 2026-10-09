@@ -140,11 +140,7 @@ def test_a_relocated_description_region_is_read_where_the_site_puts_it() -> None
     body = page(body=BUY + '<div id="goodsDetail"><p>다른 스킨의 설명</p></div>')
     assert parse_fields(document(body))["detail_description"].status is FieldStatus.ABSENT
     words = vocabulary(site(region_overrides={"detail": SiteRegion("id", "goodsDetail")}))
-    assert words == Vocabulary(
-        option_container=".xans-product-option",
-        detail_container="#goodsDetail",
-        detail_menu=".dMenu",
-    )
+    assert words == Vocabulary(detail_container="#goodsDetail")
     fact = parse_fields(document(body), words)["detail_description"]
     assert fact.status is FieldStatus.CONFIRMED
     images = classify_images(
@@ -186,7 +182,7 @@ def test_connect_predicates_are_km_s() -> None:
 
 def test_a_fee_cell_with_a_condition_is_never_flattened_into_its_first_amount() -> None:
     # ADR-0010 §7; the one stated difference from KM통상's parser (ADR-0030 §10).
-    for cell in ("3,000원 (50,000원 이상 구매 시 무료)", "50,000원 이상 무료", "3,000원 ~ 5,000원"):
+    for cell in ("3,000원 (50,000원 이상 구매 시 무료)", "50,000원 이상 무료"):
         shipping = parse_fields(document(page(rows=row("배송비", cell), body=BUY)))["shipping"]
         assert shipping.status is FieldStatus.REVIEW_REQUIRED, cell
         assert shipping.value is None
@@ -194,6 +190,15 @@ def test_a_fee_cell_with_a_condition_is_never_flattened_into_its_first_amount() 
         parse_fields(document(page(rows=row("배송비", "3,000원"), body=BUY)))["shipping"].status
         is FieldStatus.CONFIRMED
     )
+
+
+def test_a_fee_range_is_read_as_its_highest_amount() -> None:
+    # ADR-0032 §4, the owner's rule (cafe24-2).
+    shipping = parse_fields(document(page(rows=row("배송비", "3,000원 ~ 5,000원"), body=BUY)))[
+        "shipping"
+    ]
+    assert shipping.status is FieldStatus.CONFIRMED
+    assert shipping.value.fee_krw == 5000
 
 
 def test_an_active_purchase_control_decides_on_sale_beside_sold_out_words() -> None:
