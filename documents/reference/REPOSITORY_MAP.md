@@ -91,6 +91,8 @@ ADR-0028 T4 added the tag provenance and apply to the register owner, the compon
 `ui/web/js/components/ai-tags.js` and two integration suites.
 ADR-0029 C2 added the category task's candidates and filter `app/capabilities/ai/platform_category.py`,
 the seed upgrade `v29-ai3` and one integration suite.
+ADR-0029 C3 added the category apply to the register owner, the components
+`ui/web/js/components/ai-category.js` and `ai-targeted.js`, and two integration suites.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -144,13 +146,13 @@ payload or external call and leaves legacy Item economics unchanged.
 | `integrations/` | 51 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 27 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 308 | tests |
+| `tests/` | 310 | tests |
 | `tests/contracts/` | 10 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 132 | integration tests by runtime owner |
+| `tests/integration/` | 134 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 109 | unit tests by runtime owner |
-| `ui/` | 66 | operator clients: the served web client and the capture extension |
+| `ui/` | 68 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 57 | the served web client |
+| `ui/web/` | 59 | the served web client |
