@@ -66,6 +66,8 @@ NO_MINIMUM_WORD = "자율"
 # The words a page would have to use to state a quantity tier. No accepted rule says how a Cafe24
 # skin lays one out, so a tier is never read into a value.
 TIER_LABELS = ("수량별 가격", "수량별 할인", "수량 할인", "수량별")
+# The heading a page writes over its product information notice (상품정보제공고시), spaces removed.
+NOTICE_WORDS = ("상품정보제공고시", "상품정보고시")
 
 
 @dataclass(frozen=True)
@@ -174,6 +176,24 @@ def _labelled(
     return [row for row in rows if any(label == row[0] for label in labels)]
 
 
+def _disagreement(locator: str, values: Sequence[str]) -> FieldFact | None:
+    """Several declarations of one fact that do not agree: the page does not say which is true,
+    so the field is held for review with every value kept (fail closed). None when they agree."""
+    distinct = list(dict.fromkeys(" ".join(value.split()) for value in values))
+    if len(distinct) <= 1:
+        return None
+    return FieldFact(
+        FieldStatus.REVIEW_REQUIRED,
+        None,
+        tuple(
+            Evidence(
+                EvidenceKind.DOM_TEXT, locator, FieldStatus.REVIEW_REQUIRED, observed=_quote(v)
+            )
+            for v in distinct[:3]
+        ),
+    )
+
+
 def _name(
     nodes: Sequence[Node], rows: Sequence[tuple[str, str, Node]], words: Vocabulary
 ) -> FieldFact:
@@ -185,6 +205,13 @@ def _name(
         # A skin that appends the shop's name to the declared title (U-PICK: "<name> - U-PICK
         # B2B") states the product's own name in its 상품명 row; the suffix is not the name.
         declared = ""
+    # Every declaration of the name must agree; KM통상's parser keeps og:title over a different
+    # 상품명 row, and the template states this difference (ADR-0030 §10).
+    disagreeing = _disagreement(
+        f"th:{words.name[0]} + td", [*([declared] if declared else []), *(v for _, v, _n in stated)]
+    )
+    if disagreeing is not None:
+        return disagreeing
     text = declared or stated[0][1]
     evidence = [
         Evidence(
@@ -223,7 +250,11 @@ def _prices(
         amount = _won(value)
         if amount is None:
             continue
-        if any(price.label == label for price in prices):
+        repeated = [price for price in prices if price.label == label]
+        if repeated and repeated[0].amount_krw != amount:
+            # One label, two amounts: the page does not say which is the price (fail closed).
+            return _review(f"th:{label} + td")
+        if repeated:
             continue  # the same labelled price repeated in another table is one source price
         role = (
             PriceRole.PURCHASE
@@ -262,6 +293,9 @@ def _minimum_sale_price(rows: Sequence[tuple[str, str, Node]], words: Vocabulary
     if not stated:
         # Never derived from a sale price: an unstated minimum is no minimum (CLAUDE.md §6.1).
         return _absent(f"th:{words.minimum_price[0]} + td")
+    disagreeing = _disagreement(f"th:{stated[0][0]} + td", [v for _, v, _n in stated])
+    if disagreeing is not None:
+        return disagreeing
     label, value, _ = stated[0]
     amount = _won(value)
     if amount is None and NO_MINIMUM_WORD in value.replace(" ", ""):
@@ -316,7 +350,7 @@ def _shipping(rows: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Field
         return FieldFact(
             FieldStatus.REVIEW_REQUIRED,
             None,
-            (*evidence, Evidence(EvidenceKind.DOM_TEXT, fee_locator, FieldStatus.ABSENT)),
+            (*evidence, Evidence(EvidenceKind.DOM_TEXT, fee_locator, FieldStatus.REVIEW_REQUIRED)),
         )
     amount = _won(fee[0][1])
     ranged = _RANGE.search(fee[0][1].replace(" ", ""))
@@ -512,6 +546,21 @@ def _detail_description(nodes: Sequence[Node], words: Vocabulary) -> FieldFact:
     )
 
 
+def _notice(nodes: Sequence[Node]) -> FieldFact:
+    """The template reads no notice table into a value. A page that shows one is held for review
+    with its heading quoted; only a page that shows none states no notice (fail closed). KM통상's
+    parser reports ``ABSENT`` without looking; the template states this difference."""
+    shown = [
+        node
+        for node in nodes
+        if node.tag in ("th", "td", "h3", "h4", "strong", "caption", "dt")
+        and any(word in _squash(node.text) for word in NOTICE_WORDS)
+    ]
+    if not shown:
+        return _absent(f"th:{NOTICE_WORDS[0]} + td")
+    return _review(f"th:{NOTICE_WORDS[0]} + td")
+
+
 def _squash(text: str) -> str:
     return "".join(text.split())
 
@@ -584,6 +633,9 @@ def _text_row(rows: Sequence[tuple[str, str, Node]], labels: Sequence[str]) -> F
     stated = _labelled(rows, labels)
     if not stated:
         return _absent(f"th:{labels[0]} + td")
+    disagreeing = _disagreement(f"th:{stated[0][0]} + td", [v for _, v, _n in stated])
+    if disagreeing is not None:
+        return disagreeing
     label, value, _ = stated[0]
     return FieldFact(
         FieldStatus.CONFIRMED,
@@ -616,7 +668,7 @@ def parse_fields(
         "brand": _text_row(rows, words.brand),
         "manufacturer": _text_row(rows, words.manufacturer),
         "origin": _text_row(rows, words.origin),
-        "notice": _absent("th:상품정보제공고시 + td"),
+        "notice": _notice(nodes),
         "detail_description": _detail_description(nodes, words),
         "sales_channels": _sales_channels(nodes, rows, words),
     }

@@ -83,10 +83,14 @@ def test_the_template_reads_every_km_document_as_km_does(body: str) -> None:
     # Each package has its own identity types, so they are compared by kind and content.
     assert (type(ours).__name__, asdict(ours)) == (type(theirs).__name__, asdict(theirs))
     ours_fields, km = parse_fields(view), km_fields(view)
-    differing = {"shipping", "stock"}
+    differing = {"shipping", "stock", "original_name", "prices", "notice"}
     assert {k: v for k, v in ours_fields.items() if k not in differing} == {
         k: v for k, v in km.items() if k not in differing
     }
+    # Stated difference: declarations that disagree are held for review, never the first read.
+    for key in ("original_name", "prices", "notice"):
+        if ours_fields[key] != km[key]:
+            assert ours_fields[key].status is FieldStatus.REVIEW_REQUIRED
     # Stated difference (ADR-0010 §10): an active control decides ON_SALE beside sold-out words.
     if ours_fields["stock"] != km["stock"]:
         assert km["stock"].status is FieldStatus.REVIEW_REQUIRED
@@ -192,3 +196,27 @@ def test_an_active_purchase_control_decides_on_sale_beside_sold_out_words() -> N
     assert stock.value.availability.value == "ON_SALE"
     neither = parse_fields(document(page()))["stock"]
     assert neither.status is FieldStatus.REVIEW_REQUIRED
+
+
+def test_declarations_that_disagree_are_held_for_review() -> None:
+    renamed = page(name="다른 이름", rows=row("상품명", "마그네슘"), body=BUY)
+    assert parse_fields(document(renamed))["original_name"].status is FieldStatus.REVIEW_REQUIRED
+    same = page(name="마그네슘", rows=row("상품명", "마그네슘"), body=BUY)
+    assert parse_fields(document(same))["original_name"].status is FieldStatus.CONFIRMED
+    two_prices = page(rows=row("판매가", "12,000원") + row("판매가", "13,000원"), body=BUY)
+    assert parse_fields(document(two_prices))["prices"].status is FieldStatus.REVIEW_REQUIRED
+    two_brands = page(rows=row("브랜드", "가") + row("브랜드", "나"), body=BUY)
+    assert parse_fields(document(two_brands))["brand"].status is FieldStatus.REVIEW_REQUIRED
+
+
+def test_a_shown_notice_is_held_for_review_and_an_unshown_one_is_absent() -> None:
+    shown = page(rows=row("상품정보제공고시", "식품위생법에 따른 표시"), body=BUY)
+    assert parse_fields(document(shown))["notice"].status is FieldStatus.REVIEW_REQUIRED
+    assert parse_fields(document(page(body=BUY)))["notice"].status is FieldStatus.ABSENT
+
+
+def test_a_shipping_method_without_a_fee_is_held_for_review_coherently() -> None:
+    fields = parse_fields(document(page(rows=row("배송방법", "택배"), body=BUY)))
+    shipping = fields["shipping"]
+    assert shipping.status is FieldStatus.REVIEW_REQUIRED
+    assert FieldStatus.REVIEW_REQUIRED in {e.status for e in shipping.evidence}
