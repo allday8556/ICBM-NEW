@@ -92,6 +92,8 @@ def template(key: str, *, choice: bool, supplier: str = SUPPLIER) -> dict[str, A
             "manufacturer": {"primary": _row(LEGAL, "maker_labels"), "absent_when": LEGAL},
             "notice": {"primary": _row(LEGAL, "notice_labels"), "cardinality": "MANY"},
             "detail_description": {"primary": {"kind": "TEXT", "locator": "div.description p"}},
+            # ADR-0031 §2: the synthetic pages state no sales-channel restriction.
+            "sales_channels": {"primary": _row(SPEC, "channel_labels"), "absent_when": SPEC},
             "quantity_tiers": {
                 "primary": _row("section.goods-view table.bulk", "tier_labels"),
                 "absent_when": "section.goods-view",
@@ -131,6 +133,7 @@ def epr(templates: list[str], *, supplier: str = SUPPLIER, **overrides: Any) -> 
             "maker_labels": ["제조원", "제조사"],
             "notice_labels": ["제조원", "원산지"],
             "tier_labels": ["수량별 할인", "수량별 가격"],
+            "channel_labels": ["판매가능플랫폼"],
         },
         "purchase_controls": ["a.btn-order", "button.btn-basket"],
         "sold_out_words": ["품절", "SOLD OUT"],

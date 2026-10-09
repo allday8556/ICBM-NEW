@@ -83,6 +83,8 @@ FORBIDDEN_MODULES = (
     "app.stages.connect.credentials",
     "integrations.suppliers.transport",
     "integrations.suppliers.kmretail",
+    # ADR-0030: the platform templates are supplier site knowledge too.
+    "integrations.suppliers.platforms",
     "app.stages.collect.collection",
     "playwright",
     "httpx",

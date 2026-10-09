@@ -171,6 +171,13 @@ LIVE_REGISTRATION_EXISTS: Final = "LIVE_REGISTRATION_EXISTS"
 # M6-E (ADR-0024 §5): a listing ICBM did not create but adopted already sells an Item of the unit.
 ADOPTED_LISTING_EXISTS: Final = "ADOPTED_LISTING_EXISTS"
 PROVIDER_DUPLICATE_FOUND: Final = "PROVIDER_DUPLICATE_FOUND"
+# ADR-0031 §4 and ADR-0030 §7: what an Item's source forbids about registering it.
+SOURCE_CHANNEL_FORBIDDEN: Final = "SOURCE_CHANNEL_FORBIDDEN"
+SOURCE_CHANNEL_UNRESOLVED: Final = "SOURCE_CHANNEL_UNRESOLVED"
+SUPPLIER_NOT_ACTIVE: Final = "SUPPLIER_NOT_ACTIVE"
+SOURCE_GATE_CODES: Final = frozenset(
+    {SOURCE_CHANNEL_FORBIDDEN, SOURCE_CHANNEL_UNRESOLVED, SUPPLIER_NOT_ACTIVE}
+)
 PROVIDER_DUPLICATE_WEAK_SIGNAL: Final = "PROVIDER_DUPLICATE_WEAK_SIGNAL"
 DUPLICATE_EVIDENCE_MISSING: Final = "DUPLICATE_EVIDENCE_MISSING"
 DUPLICATE_EVIDENCE_INCONCLUSIVE: Final = "DUPLICATE_EVIDENCE_INCONCLUSIVE"
@@ -252,6 +259,9 @@ REASON_CODES: Final = frozenset(
         UNRESOLVED_CREATE_CONFLICT,
         LIVE_REGISTRATION_EXISTS,
         ADOPTED_LISTING_EXISTS,
+        SOURCE_CHANNEL_FORBIDDEN,
+        SOURCE_CHANNEL_UNRESOLVED,
+        SUPPLIER_NOT_ACTIVE,
         PROVIDER_DUPLICATE_FOUND,
         PROVIDER_DUPLICATE_WEAK_SIGNAL,
         DUPLICATE_EVIDENCE_MISSING,
@@ -699,6 +709,9 @@ class ResolvedUnit:
     detail_profile: DetailProfile | None = None
     # M6-E (ADR-0024 §5): the ACTIVE adopted listings that already sell an Item of the unit.
     adopted_listings: tuple[str, ...] = ()
+    # ADR-0031 §4, ADR-0030 §7: ``(item_id, code)`` for each gate an Item's source puts on this
+    # marketplace (SOURCE_GATE_CODES).
+    source_gates: tuple[tuple[str, str], ...] = ()
 
 
 # ---------------------------------------------------------------- the result
@@ -891,6 +904,16 @@ def _m4_reasons(unit: ResolvedUnit) -> list[Reason]:
                     Reason(f"{prefix}{readiness.status.value}", readiness.status, item.item_id)
                 )
     return reasons
+
+
+def _source_gate_reasons(unit: ResolvedUnit) -> list[Reason]:
+    """ADR-0031 §4.1 and ADR-0030 §7: a source that forbids this marketplace, a restriction no rule
+    could read, or a supplier still in reconnaissance blocks the unit. No override applies."""
+    return [
+        Reason(code, _B, item_id)
+        for item_id, code in sorted(set(unit.source_gates))
+        if code in SOURCE_GATE_CODES
+    ]
 
 
 def _category_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Reason]:
@@ -1551,6 +1574,8 @@ def candidate_dependencies(request: PreflightRequest, unit: ResolvedUnit) -> dic
                 {"adopted_listings": sorted(unit.adopted_listings)} if unit.adopted_listings else {}
             ),
         },
+        # Only when present, so a unit its sources do not gate keeps its earlier fingerprint.
+        **({"source_gates": sorted(unit.source_gates)} if unit.source_gates else {}),
         "conflicts": sorted([c.intent_id, c.state] for c in unit.conflicts),
     }
 
@@ -1571,6 +1596,7 @@ def evaluate(
         *_unit_reasons(request, unit),
         *_pricing_reasons(unit.target, unit),
         *_m4_reasons(unit),
+        *_source_gate_reasons(unit),
         *_category_reasons(request, unit),
         *_listing_reasons(request, metadata),
         *_option_reasons(request, unit, metadata),

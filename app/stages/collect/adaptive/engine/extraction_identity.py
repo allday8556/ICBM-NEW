@@ -6,7 +6,7 @@ implementation identity over ``EXTRACTOR_INPUTS``: provenance and validation fre
 hashed set is every other module of this package; this manifest is never part of it.
 """
 
-EXTRACTOR_REVISION = "adaptive-engine-1"
+EXTRACTOR_REVISION = "adaptive-engine-2"
 EXTRACTOR_INPUTS = (
     "app/stages/collect/adaptive/engine/__init__.py",
     "app/stages/collect/adaptive/engine/canonical.py",
@@ -19,6 +19,9 @@ EXTRACTOR_INPUTS = (
     "app/stages/collect/adaptive/engine/profiles.py",
     "app/stages/collect/adaptive/engine/validation.py",
 )
+# adaptive-engine-2 (2026-10-10, ADR-0031 §2): FIELD_REGISTRY gained the COVERAGE field
+# ``sales_channels``, so every extraction reports one field more and the goldens were recorded
+# again. The engine's code is unchanged, so EXTRACTOR_FINGERPRINT is unchanged.
 # Re-pinned for the Issue #151 path-only move (ADR-0021 section 9): the hashed inputs moved from
 # app/collect/adaptive/ to app/stages/collect/adaptive/engine/ and their imports followed.
 # EXTRACTOR_REVISION is unchanged and the engine goldens pass unchanged. A reader cannot recompute

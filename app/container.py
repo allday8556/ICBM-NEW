@@ -118,6 +118,7 @@ from app.stages.connect.sessions import (
 )
 from app.stages.connect.smartstore.keeper import SmartStoreSessionKeeper
 from app.stages.connect.smartstore.service import SmartStoreConnectService
+from app.stages.operate.adoption import CONVENTIONS as ADOPTION_CONVENTIONS
 from app.stages.operate.adoption import AdoptionService
 from app.stages.operate.dispatch import DispatchService, dispatch_unit
 from app.stages.operate.fulfillment import FulfillmentService
@@ -144,6 +145,7 @@ from app.stages.products.materialization import Materialization, ProductMaterial
 from app.stages.products.pricing_service import ProductPricingService
 from app.stages.products.readiness import ProductReadinessService
 from app.stages.products.service import ProductsService
+from app.stages.products.source_gates import SourceGates
 from app.stages.products.store import ProductFoundationStore
 from app.stages.products.tasks import PRODUCTION_TASKS, platform_tag_task
 from app.stages.register.authoring import RegistrationPreparationService
@@ -351,7 +353,9 @@ def supplier_image_roles() -> dict[str, dict[str, ImageSlot]]:
         KM_PROFILE.supplier_key: slot_table(
             ((rule.rule_id, rule.role.value) for rule in (*KM_ROLE_RULES, KM_OG_IMAGE_RULE)),
             slot_of,
-        )
+        ),
+        # ADR-0030 §6: a site's rule names are its template's.
+        **{key: slot_table(site.template.role_table, slot_of) for key, site in SITES.items()},
     }
 
 
@@ -716,6 +720,15 @@ def build_container(
         ),
         bound_items=_bound_items,
         registered_sources=_registered_sources,
+        # ADR-0030 §3: a site's seller-code convention is the one its owner declared, if any.
+        conventions={
+            **ADOPTION_CONVENTIONS,
+            **{
+                key: site.config.seller_code_convention
+                for key, site in SITES.items()
+                if site.config.seller_code_convention is not None
+            },
+        },
     )
     # Gate 1 G1-A (ADR-0015 §2): the durable, append-only target policy of each canonical account,
     # saved from Settings. It is the production policy source: an account without a current
@@ -762,6 +775,11 @@ def build_container(
         detail_profiles=authoring_revisions,
         # M6-E (ADR-0024 §5): no second listing of an adopted Item.
         adopted_items=adoptions.adopted_items,
+        # ADR-0031 §4, ADR-0030 §7: a forbidden or unread sales channel, or a RECON supplier.
+        source_gates=SourceGates(
+            product_store,
+            lambda key: key not in SITES or SITES[key].config.active,
+        ),
     )
     # Gate 1 G1-D (ADR-0015 §5): a Draft from the operator's Product DB selection. It composes the
     # owners above — the revalidated selection, the bound account, the current target policy, M4

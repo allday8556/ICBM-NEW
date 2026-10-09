@@ -81,6 +81,8 @@ QUEUE_PATH = "/api/v1/collect/extension/queues/{queue_id}"
 QUEUE_NEXT_PATH = "/api/v1/collect/extension/queues/{queue_id}/next"
 QUEUE_CANCEL_PATH = "/api/v1/collect/extension/queues/{queue_id}/cancel"
 QUEUE_RELEASE_PATH = "/api/v1/collect/extension/queues/{queue_id}/release"
+# ADR-0030 §6: the reviewed supplier hosts, read by the extension instead of a constant of its own.
+SUPPLIERS_PATH = "/api/v1/collect/extension/suppliers"
 POLICY_REVISION_HEADER = "X-ICBM-Capture-Policy-Revision"
 POLICY_DIGEST_HEADER = "X-ICBM-Capture-Policy-Digest"
 # The whole request: the capture, JSON-escaped at worst, and its small envelope. It bounds what is
@@ -278,6 +280,14 @@ def _empty(sender: VerifiedSender) -> None:
         raise PairingRefused("EXTENSION_BODY_DIGEST_MISMATCH", "this request carries no body")
 
 
+@router.get(SUPPLIERS_PATH)
+def supplier_hosts(request: Request, container: ContainerDep) -> Response:
+    """The storefront host of every registered supplier, and its key (ADR-0030 §6)."""
+    sender = _authenticate(request, container.extension_pairing)
+    _empty(sender)
+    return _json(request, sender, {"suppliers": container.extension_queues.supplier_hosts()})
+
+
 @router.get(QUEUE_POLICY_PATH)
 def queue_policy(supplier_key: str, request: Request, container: ContainerDep) -> Response:
     """The supplier's reviewed product path form, its declared queue limits and its queue
@@ -406,6 +416,11 @@ def submit_capture_preflight(request: Request, container: ContainerDep) -> Respo
 def queue_policy_preflight(
     supplier_key: str, request: Request, container: ContainerDep
 ) -> Response:
+    return _preflight(request, container, "GET")
+
+
+@router.options(SUPPLIERS_PATH)
+def supplier_hosts_preflight(request: Request, container: ContainerDep) -> Response:
     return _preflight(request, container, "GET")
 
 

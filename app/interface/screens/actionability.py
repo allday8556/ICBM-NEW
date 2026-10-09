@@ -166,6 +166,10 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     "UNRESOLVED_CREATE_CONFLICT": (_R, _ACT),
     "LIVE_REGISTRATION_EXISTS": (_X, None),
     "ADOPTED_LISTING_EXISTS": (_X, None),
+    # ADR-0031 §4.1: nothing the operator does here clears a supplier's own restriction.
+    "SOURCE_CHANNEL_FORBIDDEN": (_X, None),
+    "SOURCE_CHANNEL_UNRESOLVED": (_X, None),
+    "SUPPLIER_NOT_ACTIVE": (_X, None),
     "PROVIDER_DUPLICATE_FOUND": (_X, None),
     "PROVIDER_DUPLICATE_WEAK_SIGNAL": (_X, None),
     # No provider duplicate lookup is adopted yet.

@@ -18,6 +18,7 @@ import {
   declareQueue,
   fetchPolicy,
   fetchQueuePolicy,
+  fetchSuppliers,
   nextRead,
   readQueue,
   readRevision,
@@ -28,9 +29,11 @@ import {
 import { discoverInPage } from "./lib/discover.js";
 import { parsePairingCode } from "./lib/signing.js";
 
-// The reviewed supplier hosts (ADR-0019 §3). This names which supplier a host belongs to and
-// nothing else: the capture topology is the server's policy, fetched for every capture.
-const SUPPLIERS = { "kmretail.co.kr": "kmretail" };
+// The reviewed supplier hosts (ADR-0019 §3, ADR-0030 §6) are the server's registry, not a constant
+// of this extension. They name which supplier a host belongs to and nothing else: the capture
+// topology is the server's policy, fetched for every capture. They are read with a signed request
+// only where one is made anyway, and kept in this worker's memory only.
+let supplierHostsKnown = null;
 const PAIRING_KEY = "pairing";
 const RUN_POLL_MS = 1000;
 const RUN_POLL_LIMIT = 60;
@@ -53,7 +56,20 @@ async function targetTab() {
   return tab || null;
 }
 
-async function activeSupplierTab() {
+async function supplierHosts(paired) {
+  // Read once per worker: a new site needs the extension reloaded anyway, for its host permission.
+  if (supplierHostsKnown) return supplierHostsKnown;
+  if (!paired) return supplierHostsKnown || {};
+  try {
+    const answer = await fetchSuppliers(paired, chrome.runtime.id);
+    supplierHostsKnown = answer.suppliers || {};
+  } catch {
+    // Nothing new is known: keep what was, and recognise nothing that was never read.
+  }
+  return supplierHostsKnown || {};
+}
+
+async function activeSupplierTab(hosts) {
   const tab = await targetTab();
   if (!tab || !tab.url) return null;
   let url;
@@ -62,7 +78,7 @@ async function activeSupplierTab() {
   } catch {
     return null;
   }
-  const supplierKey = url.protocol === "https:" ? SUPPLIERS[url.hostname] : undefined;
+  const supplierKey = url.protocol === "https:" ? hosts[url.hostname] : undefined;
   return supplierKey ? { tabId: tab.id, supplierKey } : null;
 }
 
@@ -76,7 +92,7 @@ async function activeSupplierTab() {
 async function capture(progress) {
   const paired = await pairing();
   if (!paired) return { state: "REFUSED", code: "EXTENSION_NOT_PAIRED" };
-  const target = await activeSupplierTab();
+  const target = await activeSupplierTab(await supplierHosts(paired));
   if (!target) return { state: "REFUSED", code: "NOT_A_REVIEWED_SUPPLIER_PAGE" };
   return captureTab(paired, target, null, progress);
 }
@@ -179,12 +195,14 @@ async function preview(paired, revisionId) {
 // uses one nonce of the server's bounded replay cache, so a tab change never sends one.
 async function status(probe) {
   const paired = await pairing();
-  const target = await activeSupplierTab();
+  // A tab change asks ICBM nothing and uses what is known; a probe reads the hosts if none are.
+  const hosts = probe && paired ? await supplierHosts(paired) : supplierHostsKnown || {};
+  const target = await activeSupplierTab(hosts);
   const answer = {
     extension_id: chrome.runtime.id,
     paired: Boolean(paired),
     supplier_key: target ? target.supplierKey : null,
-    reviewed_hosts: Object.keys(SUPPLIERS),
+    reviewed_hosts: Object.keys(hosts),
     icbm: "UNKNOWN",
     policy_revision: null,
   };
@@ -229,7 +247,7 @@ const codeOf = (error, fallback) => (error instanceof IcbmRefused ? error.code :
 async function discover() {
   const paired = await pairing();
   if (!paired) return { ok: false, code: "EXTENSION_NOT_PAIRED" };
-  const target = await activeSupplierTab();
+  const target = await activeSupplierTab(await supplierHosts(paired));
   if (!target) return { ok: false, code: "NOT_A_REVIEWED_SUPPLIER_PAGE" };
   let policy;
   try {
@@ -448,7 +466,7 @@ async function resume(queueId, port, tell) {
     return;
   }
   if (active) return tell({ type: "stopped", code: "QUEUE_ALREADY_RUNNING" });
-  const target = await activeSupplierTab();
+  const target = await activeSupplierTab(await supplierHosts(await pairing()));
   if (!target) return tell({ type: "stopped", code: "NOT_A_REVIEWED_SUPPLIER_PAGE" });
   drive(
     queueControl({

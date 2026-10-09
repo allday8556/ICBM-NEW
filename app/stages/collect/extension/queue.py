@@ -198,6 +198,14 @@ class ExtensionQueues:
 
     # ------------------------------------------------------------------ the declared bounds
 
+    def supplier_hosts(self) -> dict[str, str]:
+        """Each registered supplier's storefront host and its key (ADR-0030 §6): what the
+        extension recognises as a reviewed supplier page. It holds no constant of its own."""
+        return {
+            registered.collection.profile.storefront_host: key
+            for key, registered in sorted(self._collections.items())
+        }
+
     def discovery_policy(self, supplier_key: str) -> DiscoveryPolicy:
         """The supplier's reviewed product path form and its queue limits, or a refusal, with
         the supplier's queue that is still open, settled first."""

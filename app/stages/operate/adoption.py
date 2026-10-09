@@ -107,9 +107,13 @@ def _record(row: AdoptedListing) -> AdoptedRecord:
     )
 
 
-def seller_code_of(supplier_key: str, source_product_id: str) -> str | None:
+def seller_code_of(
+    supplier_key: str,
+    source_product_id: str,
+    conventions: Mapping[str, str] = CONVENTIONS,
+) -> str | None:
     """The code the supplier's convention gives this source product, or ``None``."""
-    convention = CONVENTIONS.get(supplier_key)
+    convention = conventions.get(supplier_key)
     return None if convention is None else convention.format(source_product_id=source_product_id)
 
 
@@ -124,6 +128,7 @@ class AdoptionService:
         bound_items: Callable[[str], Mapping[str, tuple[str, ...]]],
         registered_sources: Callable[[], Iterable[tuple[str, str]]],
         marketplace_key: str = "smartstore",
+        conventions: Mapping[str, str] = CONVENTIONS,
         pause_s: float = PROVIDER_PAUSE_S,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -134,6 +139,8 @@ class AdoptionService:
         self._bound_items = bound_items
         self._registered_sources = registered_sources
         self._marketplace_key = marketplace_key
+        # ADR-0024 §2, ADR-0030 §3: KM통상's convention and each site's owner-declared one.
+        self._conventions = dict(conventions)
         self._pause_s = pause_s
         self._sleep = sleep
         self._lock = threading.Lock()
@@ -208,7 +215,7 @@ class AdoptionService:
     def run(self, supplier_key: str, *, actor: str, correlation_id: str) -> AdoptionRun:
         """Try to adopt the listing of every source product of ``supplier_key`` with a single
         open-bound Item, in stable order. One pass at a time; a rate limit ends it."""
-        if CONVENTIONS.get(supplier_key) is None:
+        if self._conventions.get(supplier_key) is None:
             raise InputValidationError(
                 "OPERATE_ADOPTION_NO_CONVENTION",
                 "the owner declared no seller-code convention for this supplier",
@@ -236,7 +243,7 @@ class AdoptionService:
         outcomes: list[AdoptionOutcome] = []
         stopped = False
         for source_product_id, items in self._bound_items(supplier_key).items():
-            code = seller_code_of(supplier_key, source_product_id)
+            code = seller_code_of(supplier_key, source_product_id, self._conventions)
             assert code is not None
             if stopped:
                 outcomes.append(AdoptionOutcome(source_product_id, code, NOT_REACHED))
@@ -307,7 +314,7 @@ class AdoptionService:
                         marketplace_product_id=found.origin_product_no,
                         marketplace_channel_product_id=found.channel_product_no,
                         seller_code=code,
-                        convention=CONVENTIONS[supplier_key],
+                        convention=self._conventions[supplier_key],
                         supplier_key=supplier_key,
                         source_product_id=source_product_id,
                         item_id=item_id,
