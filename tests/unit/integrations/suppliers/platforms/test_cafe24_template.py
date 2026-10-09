@@ -86,8 +86,8 @@ def test_the_template_reads_every_km_document_as_km_does(body: str) -> None:
     assert {k: v for k, v in ours_fields.items() if k != "shipping"} == {
         k: v for k, v in km.items() if k != "shipping"
     }
-    # The one stated difference (ADR-0030 §10): a fee cell that does not state exactly one amount
-    # is REVIEW_REQUIRED, with evidence that says so, where KM통상 reads its first amount.
+    # The one stated difference (ADR-0030 §10): a fee cell that is not exactly one amount is
+    # REVIEW_REQUIRED, with evidence that says so, where KM통상 reads its first amount.
     if ours_fields["shipping"] != km["shipping"]:
         assert ours_fields["shipping"].status is FieldStatus.REVIEW_REQUIRED
         assert ours_fields["shipping"].value is None
@@ -161,10 +161,10 @@ def test_connect_predicates_are_km_s() -> None:
 
 def test_a_fee_cell_with_a_condition_is_never_flattened_into_its_first_amount() -> None:
     # ADR-0010 §7; the one stated difference from KM통상's parser (ADR-0030 §10).
-    body = page(rows=row("배송비", "3,000원 (50,000원 이상 구매 시 무료)"), body=BUY)
-    shipping = parse_fields(document(body))["shipping"]
-    assert shipping.status is FieldStatus.REVIEW_REQUIRED
-    assert shipping.value is None
+    for cell in ("3,000원 (50,000원 이상 구매 시 무료)", "50,000원 이상 무료", "3,000원 ~ 5,000원"):
+        shipping = parse_fields(document(page(rows=row("배송비", cell), body=BUY)))["shipping"]
+        assert shipping.status is FieldStatus.REVIEW_REQUIRED, cell
+        assert shipping.value is None
     assert (
         parse_fields(document(page(rows=row("배송비", "3,000원"), body=BUY)))["shipping"].status
         is FieldStatus.CONFIRMED
