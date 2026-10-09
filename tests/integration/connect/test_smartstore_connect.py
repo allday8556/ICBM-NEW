@@ -567,7 +567,7 @@ def test_the_production_wiring_supplies_the_identity_and_the_revision(p: Contain
     # value-level packet, the SEARCH slice when it adopted POST /v1/products/search, and the
     # DELETE slice (ADR-0018 §3.5) when it adopted the origin-product delete, and notice coverage
     # S0 when it adopted the two official 상품정보제공고시 reads.
-    assert p.permission_attestation.context(KEY).endpoint_mapping_revision == "ai-tags-r1"
+    assert p.permission_attestation.context(KEY).endpoint_mapping_revision == "m65-dispatch-r1"
 
 
 def test_the_address_book_is_read_with_the_committed_bearer_and_keeps_no_address(

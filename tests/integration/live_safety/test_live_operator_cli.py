@@ -100,6 +100,7 @@ def test_every_operator_command_is_an_owning_live_command() -> None:
         ("live", "issue-asset-grant"),
         ("live", "issue-create-grant"),
         ("live", "issue-delete-grant"),
+        ("live", "issue-dispatch-grant"),
         ("live", "release-brake"),
         ("live", "engage-brake"),
         ("live", "restore-drill-asset"),

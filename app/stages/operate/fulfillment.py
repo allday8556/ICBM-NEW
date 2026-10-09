@@ -35,6 +35,11 @@ from app.capabilities.audit.service import AuditEntry, AuditLog
 from app.platform.core.clock import Clock
 from app.platform.core.errors import AppError, ErrorClass, InputValidationError, NotFoundError
 from app.platform.db.database import Database
+from app.stages.operate.dispatch_models import (
+    DispatchAttempt,
+    blocking_attempt,
+    latest_attempt,
+)
 from app.stages.operate.fulfillment_models import SupplierOrder, SupplierOrderEntry
 from app.stages.operate.order_models import OrderAdoptionLink, ProductOrder
 
@@ -53,6 +58,28 @@ SUPPLIER_ORDERED: Final = "SUPPLIER_ORDERED"
 TRACKING_CAPTURED: Final = "TRACKING_CAPTURED"
 DISPATCHED: Final = "DISPATCHED"
 DELIVERED: Final = "DELIVERED"
+# ADR-0025 §5, §8 (M6.5-C): the dispatch the latest attempt shows.
+DISPATCHING: Final = "DISPATCHING"
+DISPATCH_SENT: Final = "DISPATCH_SENT"
+DISPATCH_REJECTED: Final = "DISPATCH_REJECTED"
+DISPATCH_UNKNOWN: Final = "DISPATCH_UNKNOWN"
+DISPATCH_CONFLICT: Final = "DISPATCH_CONFLICT"
+# 발송 대기 (ADR-0025 §8): tracking captured, and the dispatch neither sent nor confirmed.
+AWAITING_DISPATCH: Final = frozenset(
+    {
+        "TRACKING_CAPTURED",
+        "DISPATCHING",
+        "DISPATCH_REJECTED",
+        "DISPATCH_UNKNOWN",
+        "DISPATCH_CONFLICT",
+    }
+)
+_ATTEMPT_STATES: Final = {
+    "STARTED": DISPATCHING,
+    "APPLIED_PROVEN": DISPATCH_SENT,
+    "REJECTED": DISPATCH_REJECTED,
+    "UNKNOWN": DISPATCH_UNKNOWN,
+}
 # The documented delivery state and order statuses that mean the parcel arrived (packet D).
 DELIVERY_COMPLETED: Final = "DELIVERY_COMPLETION"
 ARRIVED_STATUSES: Final = frozenset({"DELIVERED", "PURCHASE_DECIDED"})
@@ -131,7 +158,7 @@ class _Identity:
     source_product_id: str
 
 
-def _identity(order: ProductOrder, link: OrderAdoptionLink | None) -> _Identity | None:
+def fulfillable_identity(order: ProductOrder, link: OrderAdoptionLink | None) -> _Identity | None:
     """The one canonical Item the order names, or None (ADR-0025 §3)."""
     if order.resolution == "MATCHED" and order.item_id and order.supplier_key:
         return _Identity(
@@ -142,19 +169,28 @@ def _identity(order: ProductOrder, link: OrderAdoptionLink | None) -> _Identity 
     return None
 
 
-def _payable(order: ProductOrder) -> bool:
+def awaiting_shipment(order: ProductOrder) -> bool:
     return order.status == PAYED and order.claim_type is None
 
 
-def _state(order: ProductOrder, identity: _Identity | None, record: SupplierOrder | None) -> str:
+def _state(
+    order: ProductOrder,
+    identity: _Identity | None,
+    record: SupplierOrder | None,
+    attempt: DispatchAttempt | None = None,
+) -> str:
+    if attempt is not None and attempt.verification == "CONFLICT":
+        return DISPATCH_CONFLICT
     if identity is not None and order.tracking_number:
         arrived = order.delivery_status == DELIVERY_COMPLETED or order.status in ARRIVED_STATUSES
         return DELIVERED if arrived else DISPATCHED
+    if attempt is not None and attempt.state in _ATTEMPT_STATES:
+        return _ATTEMPT_STATES[attempt.state]
     if record is not None:
         return TRACKING_CAPTURED if record.tracking_number else SUPPLIER_ORDERED
     if identity is None:
         return NOT_FULFILLABLE
-    return AWAITING_SUPPLIER_ORDER if _payable(order) else NOT_PAYED
+    return AWAITING_SUPPLIER_ORDER if awaiting_shipment(order) else NOT_PAYED
 
 
 class FulfillmentService:
@@ -205,14 +241,34 @@ class FulfillmentService:
                     select(SupplierOrder).where(SupplierOrder.product_order_id.in_(ids))
                 )
             }
+            attempts: dict[str, DispatchAttempt] = {}
+            for row in session.scalars(
+                select(DispatchAttempt)
+                .where(DispatchAttempt.product_order_id.in_(ids))
+                .order_by(DispatchAttempt.attempt_no)
+            ):
+                attempts[row.product_order_id] = row
             return {
                 order_id: _state(
                     order,
-                    _identity(order, links.get(order_id)),
+                    fulfillable_identity(order, links.get(order_id)),
                     records.get(order_id),
+                    attempts.get(order_id),
                 )
                 for order_id, order in orders.items()
             }
+
+    def awaiting_dispatch_count(self) -> int:
+        """ADR-0025 §8: orders with captured tracking whose dispatch is not sent or confirmed."""
+        with self._db.read() as session:
+            ids = list(
+                session.scalars(
+                    select(SupplierOrder.product_order_id).where(
+                        SupplierOrder.tracking_number.is_not(None)
+                    )
+                )
+            )
+        return sum(1 for state in self.states(ids).values() if state in AWAITING_DISPATCH)
 
     # ---------------------------------------------------------------- writes
 
@@ -327,9 +383,16 @@ class FulfillmentService:
                     "a tracking number needs a recorded supplier order",
                 )
             self._current(record, expected_revision)
-            if not _payable(order):
+            if not awaiting_shipment(order):
                 raise OrderNotFulfillable(
                     "OPERATE_ORDER_NOT_PAYED", "the order is not awaiting shipment (결제완료)"
+                )
+            # M65-04: the carrier and tracking freeze once a dispatch attempt opens, until it is
+            # proven not applied or a read-back shows a rejected one undispatched.
+            if blocking_attempt(session, product_order_id):
+                raise FulfillmentConflict(
+                    "OPERATE_TRACKING_FROZEN",
+                    "a dispatch of this order was sent; its tracking can no longer change",
                 )
             action = TRACKING_AMENDED if record.tracking_number else CAPTURED
             record.carrier_code = carrier_code
@@ -370,13 +433,13 @@ class FulfillmentService:
 
     @staticmethod
     def _fulfillable(order: ProductOrder, link: OrderAdoptionLink | None) -> _Identity:
-        identity = _identity(order, link)
+        identity = fulfillable_identity(order, link)
         if identity is None:
             raise OrderNotFulfillable(
                 "OPERATE_ORDER_NOT_FULFILLABLE",
                 "the order names no single canonical Item (MATCHED, or adopted and linked)",
             )
-        if not _payable(order):
+        if not awaiting_shipment(order):
             raise OrderNotFulfillable(
                 "OPERATE_ORDER_NOT_PAYED", "the order is not awaiting shipment (결제완료)"
             )
@@ -425,8 +488,8 @@ class FulfillmentService:
         link: OrderAdoptionLink | None,
         record: SupplierOrder | None,
     ) -> FulfillmentView:
-        identity = _identity(order, link)
-        state = _state(order, identity, record)
+        identity = fulfillable_identity(order, link)
+        state = _state(order, identity, record, latest_attempt(session, order.product_order_id))
         reason = {
             NOT_FULFILLABLE: "OPERATE_ORDER_NOT_FULFILLABLE",
             NOT_PAYED: "OPERATE_ORDER_NOT_PAYED",

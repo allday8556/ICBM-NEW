@@ -87,6 +87,7 @@ LIVE_OPERATOR_COMMANDS: tuple[str, ...] = (
     "issue-asset-grant",
     "issue-create-grant",
     "issue-delete-grant",
+    "issue-dispatch-grant",
     "release-brake",
     "engage-brake",
     "restore-drill-asset",
@@ -209,6 +210,12 @@ def _add_operator_commands(live_commands: Any) -> None:
     )
     delete.add_argument("--registration-id", required=True)
     _add_window(delete)
+    dispatch = live_commands.add_parser(
+        "issue-dispatch-grant",
+        help="issue the exact DISPATCH grant of one product order (ADR-0025 §5)",
+    )
+    dispatch.add_argument("--product-order-id", required=True)
+    _add_window(dispatch)
     release = live_commands.add_parser(
         "release-brake", help="release the protected-write brake (ADR-0018 §4.1)"
     )
@@ -535,6 +542,17 @@ def _issue_delete_grant(container: Any, args: argparse.Namespace, correlation_id
     )
 
 
+def _issue_dispatch_grant(container: Any, args: argparse.Namespace, correlation_id: str) -> Any:
+    return container.live_authority.issue_dispatch_grant(
+        product_order_id=args.product_order_id,
+        not_before=_instant(args.not_before, "--not-before"),
+        expires_at=_instant(args.expires_at, "--expires-at"),
+        approved_by=args.approved_by,
+        authorization_ref=args.authorization_ref,
+        correlation_id=correlation_id,
+    )
+
+
 def _issue_create_grant(container: Any, args: argparse.Namespace, correlation_id: str) -> Any:
     return container.live_authority.issue_create_grant(
         intent_id=args.intent_id,
@@ -600,6 +618,7 @@ _OPERATIONS: dict[str, Callable[[Any, argparse.Namespace, str], Any]] = {
     "issue-asset-grant": _issue_asset_grant,
     "issue-create-grant": _issue_create_grant,
     "issue-delete-grant": _issue_delete_grant,
+    "issue-dispatch-grant": _issue_dispatch_grant,
     "release-brake": _release_brake,
     "engage-brake": _engage_brake,
     "restore-drill-asset": _restore_drill_asset,

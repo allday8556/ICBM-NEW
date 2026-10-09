@@ -99,6 +99,8 @@ M5_ADOPTED = frozenset(
         # ADR-0028 T2: the two read-only tag reads of the tag stage.
         "SMARTSTORE_TAG_RECOMMEND",
         "SMARTSTORE_TAG_RESTRICTED",
+        # M6.5-C (ADR-0025 §5.1): the dispatch of one product order, a mutation.
+        "SMARTSTORE_ORDER_DISPATCH",
     }
 )
 M5_UNPROVEN = frozenset(
@@ -109,7 +111,7 @@ M5_UNPROVEN = frozenset(
         "SMARTSTORE_STANDARD_OPTIONS",
     }
 )
-M5_MAPPING_REVISION = "ai-tags-r1"
+M5_MAPPING_REVISION = "m65-dispatch-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:
@@ -130,10 +132,12 @@ def test_only_the_adopted_m5_contracts_resolve_and_the_rest_fail_locally() -> No
     assert registry.mapping_fingerprint() == registry.MAPPING_FINGERPRINTS[M5_MAPPING_REVISION]
 
 
-def test_the_image_upload_the_create_and_the_delete_are_the_only_adopted_mutations() -> None:
+def test_the_image_upload_the_create_the_delete_and_the_dispatch_are_the_only_mutations() -> None:
     from integrations.marketplaces.smartstore import registry
 
+    # M6.5-C (ADR-0025 §5.1) adds the dispatch of one product order to the three M5 mutations.
     assert sorted(c.endpoint_id.value for c in registry.ADOPTED.values() if c.mutating) == [
+        "SMARTSTORE_ORDER_DISPATCH",
         "SMARTSTORE_PRODUCT_CREATE_V2",
         "SMARTSTORE_PRODUCT_DELETE_V2",
         "SMARTSTORE_PRODUCT_IMAGE_UPLOAD",
@@ -257,7 +261,9 @@ AI_PROMPT_REGISTRY = "0054_ai_prompt_registry"
 AI_ENRICHMENT_RESULTS = "0055_ai_enrichment_results"
 # ADR-0027 AIS-1: the AI provider profile and its call ledger.
 AI_PROVIDER_PROFILE = "0056_ai_provider_profile"
-SCHEMA_HEAD = AI_PROVIDER_PROFILE
+# M6.5-C (ADR-0025 §5): the DISPATCH stage, its grant bindings and the dispatch attempts.
+M65_DISPATCH_STAGE = "0057_m65_dispatch_stage"
+SCHEMA_HEAD = M65_DISPATCH_STAGE
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -295,6 +301,7 @@ AFTER_M5 = (
     AI_PROMPT_REGISTRY,
     AI_ENRICHMENT_RESULTS,
     AI_PROVIDER_PROFILE,
+    M65_DISPATCH_STAGE,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

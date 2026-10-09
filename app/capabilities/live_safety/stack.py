@@ -63,6 +63,7 @@ from app.capabilities.live_safety.model import (
     ENDPOINT_NOT_ADOPTED,
     GRANT_MISSING,
     MODE_NOT_LIVE,
+    ORDER_GROUP_NOT_ATTESTED,
     RECONCILE_PATH_NOT_ADOPTED,
     REPLAY_APPLIED_REUSE_NOT_ADOPTED,
     REPLAY_KEY_UNDETERMINABLE,
@@ -82,6 +83,7 @@ from app.capabilities.live_safety.model import (
 )
 from app.capabilities.live_safety.store import (
     ArtifactRef,
+    DispatchBinding,
     GrantRecord,
     LiveAuthorityStore,
     LiveUnit,
@@ -328,6 +330,51 @@ class SafetyStack:
         _refuse_unless_all(layers)
         assert grant is not None
         return unit.consume(grant.grant_id, actor=actor, correlation_id=correlation_id)
+
+    # ------------------------------------------------------------------ DISPATCH (ADR-0025 §5)
+
+    def admit_dispatch(
+        self,
+        session: Session,
+        *,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        binding: DispatchBinding,
+        endpoint_adopted: bool,
+        order_group_attested: bool,
+        actor: str,
+        correlation_id: str,
+    ) -> GrantRecord:
+        """Admit one DISPATCH attempt inside the unit that opens it, and spend its grant.
+
+        The layers are DELETE's — the execution mode, the protected-write brake, the exact grant,
+        the adopted endpoint, evidence retention — and the operator-attested 주문 판매자 group the
+        endpoint needs. The canary-only rows are not causally relevant to a shipment and are not
+        layers of it (ADR-0025 §5).
+        """
+        unit = self._store.unit(session)
+        grant = self._dispatch_grant(unit, marketplace_key, marketplace_account_id, binding)
+        layers = self._delete_layers(unit, endpoint_adopted=endpoint_adopted)
+        layers.insert(2, _layer(Layer.GRANT, grant is not None, GRANT_MISSING))
+        layers.append(
+            _layer(Layer.PERMISSION_ATTESTED, order_group_attested, ORDER_GROUP_NOT_ATTESTED)
+        )
+        _refuse_unless_all(layers)
+        assert grant is not None
+        return unit.consume(grant.grant_id, actor=actor, correlation_id=correlation_id)
+
+    def _dispatch_grant(
+        self,
+        unit: LiveUnit,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        binding: DispatchBinding,
+    ) -> GrantRecord | None:
+        now = self._clock.now()
+        for grant in unit.grants(MutationStage.DISPATCH, marketplace_key, marketplace_account_id):
+            if grant.live_at(now) and unit.dispatch_binding(grant.grant_id) == binding:
+                return grant
+        return None
 
     def _delete_grant(self, unit: LiveUnit, registration: RegistrationRecord) -> GrantRecord | None:
         now = self._clock.now()

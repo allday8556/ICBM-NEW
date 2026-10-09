@@ -50,7 +50,7 @@ const LIVE_HELP =
 
 const BRAKE_LABEL = { ENGAGED: '잠김', RELEASED: '해제됨' };
 const GRANT_LABEL = { ACTIVE: '유효', EXPIRED: '만료됨', REVOKED: '회수됨', EXHAUSTED: '소진됨' };
-const STAGE_LABEL = { ASSET: '이미지 업로드', CREATE: '상품 등록' };
+const STAGE_LABEL = { ASSET: '이미지 업로드', CREATE: '상품 등록', DELETE: '상품 삭제', DISPATCH: '발송처리' };
 const PROOF_LABEL = {
   evidence_retention_ready: '증거 보존 증명',
   visual_acceptance_recorded: '화면 검수 기록',
