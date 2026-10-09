@@ -556,6 +556,8 @@ class RegistrationPreparationService:
                         "the field holds a confirmed value; an AI value never overwrites it",
                         details={"provenance": existing.provenance.value},
                     )
+                # Proved a non-empty text, boolean or integer above, before the unit of work.
+                assert isinstance(value, str | bool | int)
                 applied = _with_field(
                     inputs,
                     apply.field,

@@ -142,13 +142,13 @@ payload or external call and leaves legacy Item economics unchanged.
 | `integrations/` | 51 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 27 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 306 | tests |
+| `tests/` | 307 | tests |
 | `tests/contracts/` | 10 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 131 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 108 | unit tests by runtime owner |
+| `tests/unit/` | 109 | unit tests by runtime owner |
 | `ui/` | 66 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 57 | the served web client |
