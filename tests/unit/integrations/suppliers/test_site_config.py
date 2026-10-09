@@ -160,7 +160,7 @@ def test_a_raised_limit_needs_the_owner_s_decision(tmp_path: Path) -> None:
     _write(
         tmp_path,
         "example",
-        encoded(limits={"max_image_refs": 40}, limit_decision="Issue 219 comment 1"),
+        encoded(limits={"max_image_refs": 40}, limit_decision="Issue #219 6086299406"),
     )
     (only,), problems = bind_sites(tmp_path)
     assert problems == ()

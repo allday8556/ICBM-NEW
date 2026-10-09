@@ -33,6 +33,7 @@ _REVISION = re.compile(r"^[a-z0-9][a-z0-9._-]{0,23}$")
 _SLOT = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 _TOKEN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,79}$")
 _RECORD = re.compile(r"^documents/acceptance/suppliers/[a-z0-9_-]+\.md$")
+_DECISION = re.compile(r"^Issue #\d{1,6} \d{6,12}$")
 # A seller-code convention is a fixed prefix, then the source product id, then a fixed suffix.
 _CONVENTION = re.compile(r"^[A-Za-z0-9_-]{0,16}\{source_product_id\}[A-Za-z0-9_-]{0,16}$")
 _WORD_LIMIT = 40
@@ -247,7 +248,8 @@ def parse_site(raw: bytes, file_stem: str) -> SiteConfig:
         _text(convention, _CONVENTION, "seller_code_convention")
     decision = document.get("limit_decision")
     if decision is not None:
-        _word(decision, "limit_decision")
+        # PT-12: the owner's recorded decision, named by its Issue comment.
+        _text(decision, _DECISION, "limit_decision")
     image_hosts = _hosts(document["image_hosts"], "image_hosts")
     if not image_hosts:
         raise _fail("image_hosts names at least one observed host")

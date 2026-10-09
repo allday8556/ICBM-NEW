@@ -95,6 +95,7 @@ LABEL_SLOTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "manufacturer": DEFAULT_VOCABULARY.manufacturer,
         "origin": DEFAULT_VOCABULARY.origin,
         "sold_out": DEFAULT_VOCABULARY.sold_out,
+        "purchase_controls": DEFAULT_VOCABULARY.purchase_controls,
     }
 )
 # The regions a site may relocate, by slot, with the template's defaults.
@@ -109,17 +110,22 @@ CAPTURE_REVISION = "cafe24-capture-1"
 
 
 def login_required(response: ProbeResponse) -> Verdict:
-    """The target demands a login: redirect to it, denial, or the logged-off markers."""
+    """The target demands a login: a redirect to it, or the logged-off markers.
+
+    A status alone is never proof (ADR-0007 §4): a denial is recorded as a signal name and decides
+    nothing. KM통상's predicate also accepts 401/403 alone; the template does not.
+    """
     signals: list[str] = []
     if response.location and response.location.startswith("/member/login"):
         signals.append("redirect_to_login")
-    if response.status in (401, 403):
-        signals.append("access_denied")
     if _STATE_LOGOFF in response.body:
         signals.append("state_logoff")
     if _LOGIN_CHECK_REDIRECT in response.body:
         signals.append("login_check_redirect")
-    return bool(signals), tuple(signals)
+    proven = bool(signals)
+    if response.status in (401, 403):
+        signals.append("access_denied")
+    return proven, tuple(signals)
 
 
 def authenticated(response: ProbeResponse) -> Verdict:
@@ -143,7 +149,9 @@ def vocabulary(site: SiteConfig) -> Vocabulary:
         return defaults + tuple(word for word in extra if word not in defaults)
 
     def region(slot: str) -> str:
-        return site.region_overrides.get(slot, REGION_SLOTS[slot]).token
+        # A region is matched as the site declares it: ``#id`` or ``.class``.
+        chosen = site.region_overrides.get(slot, REGION_SLOTS[slot])
+        return f"{'#' if chosen.by == 'id' else '.'}{chosen.token}"
 
     return Vocabulary(
         name=words("name"),
@@ -155,6 +163,7 @@ def vocabulary(site: SiteConfig) -> Vocabulary:
         manufacturer=words("manufacturer"),
         origin=words("origin"),
         sold_out=words("sold_out"),
+        purchase_controls=words("purchase_controls"),
         option_container=region("option"),
         detail_container=region("detail"),
         detail_menu=region("detail_menu"),
