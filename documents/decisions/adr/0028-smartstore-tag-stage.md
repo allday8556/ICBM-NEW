@@ -149,6 +149,13 @@ The task is the v29 bundle `TASK_PRODUCT_RECOMMEND_BUNDLE_V1` with the result ke
 - **Where the names live.** The marketplace's reads and names live in the AI capability (`app/capabilities/ai/platform_tags.py`) and the composition root. The PRODUCT DB owner stays marketplace-neutral (M4 product contract).
 - **The live test of §8 T3** needs the operating instance's SmartStore session, so it follows the owner's 8790 deploy.
 
+**Implementation note (2026-10-09, T5): keywords.** The first read on the operating account (`R0`, Issue #219 `6079478595`) asked for a whole cleaned name and its first two words, and found 1 platform tag. Step 1 therefore asks at most **5** distinct queries:
+- the cleaned name;
+- the brand;
+- then the cleaned name's own words, at least 2 characters and not a bare number, longest first.
+
+The cleaning also removes the units `캡슐`, `알`, `개월`, `회분`, `일분`, `인분`, `장`, `롤`, `켤레` and `족` after a number. More reads of the same adopted endpoint are made, and nothing else changes. The category terms (ADR-0029 §2) share this cleaning.
+
 ## 5. The seed upgrade `v29-ai2`
 
 The bundle's `tags` output object gains the ADR-0026 §5 envelope, `"evidence":[]` and `"requires_review":false`, under the rules of ADR-0027 §6:
