@@ -1,4 +1,4 @@
-# ADR-0031 — Detail Guidance: the top and bottom notices of the detail page, as images rendered from templates
+# ADR-0033 — Detail Guidance: the top and bottom notices of the detail page, as images rendered from templates
 
 Status: **ACCEPTED** 2026-10-10. This activates the Detail Guidance module planned in Issue #61, after the first vertical (M7 accepted). It is the contract of every slice of §9. It lands before its code.
 
