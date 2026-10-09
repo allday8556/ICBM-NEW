@@ -12,8 +12,9 @@ EXTRACTOR_INPUTS = (
     "integrations/suppliers/kmretail/collect/images.py",
     "integrations/suppliers/kmretail/collect/revision.py",
 )
-# Re-pinned for kmretail-4 (2026-10-10, ADR-0031, ADR-0032): collect/facts.py reports no sales-channel
-# restriction and reads a shipping range as its highest amount; collect/revision.py advances it.
+# Re-pinned for kmretail-4 (2026-10-10, ADR-0031, ADR-0032): collect/facts.py reports no
+# sales-channel restriction and reads a shipping range as its highest amount; collect/revision.py
+# advances the revision with it.
 # A reader cannot recompute a SHA-256; the proof is mechanical:
 # tests/contracts/test_repository_rules.py recomputes this digest from EXTRACTOR_INPUTS, and the
 # merge guard requires that test green in the FULL CI of the exact HEAD.

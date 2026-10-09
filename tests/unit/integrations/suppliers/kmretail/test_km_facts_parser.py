@@ -427,3 +427,20 @@ def test_no_field_is_confirmed_without_evidence() -> None:
             assert fact.value is not None, key
         else:
             assert fact.value is None, key
+
+
+# ---------------------------------------------------------------- kmretail-4 (ADR-0031, ADR-0032)
+
+
+def test_a_shipping_range_is_read_as_its_highest_amount() -> None:
+    # ADR-0032 §4, the owner's rule (Issue #219 6086421199).
+    fields = parse_fields(document(page(rows=row("배송비", "3,000원 ~ 4,000원"), body=BUY)))
+    shipping = fields["shipping"]
+    assert shipping.status is FieldStatus.CONFIRMED
+    assert (shipping.value.kind, shipping.value.fee_krw) == (ShippingKind.FIXED, 4000)
+    assert shipping.evidence[-1].normalized == "4000"
+
+
+def test_km_states_no_sales_channel_restriction() -> None:
+    # ADR-0031 §3: KM통상's reconnaissance found no such statement.
+    assert parse_fields(document(page(body=BUY)))["sales_channels"].status is FieldStatus.ABSENT

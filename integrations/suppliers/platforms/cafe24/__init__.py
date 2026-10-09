@@ -228,7 +228,9 @@ def bind(site: SiteConfig, extraction_revision: str) -> SiteBinding:
             path=LOGIN_PATH,
             username_selector=f'{_LOGIN_FORM} input[name="member_id"]',
             password_selector=f'{_LOGIN_FORM} input[name="member_passwd"]',
-            submit_selector=f"{_LOGIN_FORM} a.btnLogin",
+            # Older skins name the submit link ``btnLogin``; smart-design skins ``btnSubmit``
+            # (U-PICK, reconnaissance of 2026-10-10). Both sit inside the login form.
+            submit_selector=f"{_LOGIN_FORM} a.btnLogin, {_LOGIN_FORM} a.btnSubmit",
         ),
     )
 

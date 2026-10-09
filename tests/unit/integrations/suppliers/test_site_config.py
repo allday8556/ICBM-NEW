@@ -12,6 +12,7 @@ import pytest
 
 from app.stages.collect.extension.policy import CapturePolicySource, parse_policy
 from integrations.suppliers.collection import DocumentView, ReadKind
+from integrations.suppliers.platforms.cafe24 import TEMPLATE as CAFE24
 from integrations.suppliers.site_config import SiteConfig, SiteConfigError, SiteStatus, parse_site
 from integrations.suppliers.sites import (
     PLATFORM_DIRECTORY,
@@ -120,7 +121,7 @@ def test_a_valid_site_is_bound_to_its_template(tmp_path: Path) -> None:
     bound, problems = bind_sites(tmp_path)
     assert problems == ()
     (only,) = bound
-    assert only.extractor_revision == "cafe24-1+example-1"
+    assert only.extractor_revision == f"{CAFE24.revision}+example-1"
     assert only.collection.supplier_key == "example"
     assert only.collection.roles.identity == only.extractor_revision
     assert only.collection.profile.storefront_host == "example.co.kr"

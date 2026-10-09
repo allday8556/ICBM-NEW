@@ -240,7 +240,7 @@ class PricesValue(FactValue):
         if declared:
             return declared[0] if len(declared) == 1 else None
         unroled = [price for price in self.prices if price.role is None]
-        return unroled[0] if len(self.prices) == 1 and len(unroled) == 1 else None
+        return unroled[0] if len(unroled) == 1 else None
 
 
 class SalesChannelsValue(FactValue):
