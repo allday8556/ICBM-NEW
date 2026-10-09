@@ -95,8 +95,25 @@ def _replace_once(sql: str, old: str, new: str) -> str:
 
 
 def _rebuild_grants(*, widen: bool) -> None:
-    """Rebuild ``live_grants`` from its own stored definition with the stage CHECKs changed."""
+    """Rebuild ``live_grants`` from its own stored definition with the stage CHECKs changed.
+
+    The rebuild runs inside a savepoint. The SQLite driver opens no transaction before DDL, so
+    without one ``defer_foreign_keys`` has no effect: the ``DROP TABLE`` then deletes the rows its
+    referrers (asset upload attempts) still name, and fails on a database that holds grants. Inside
+    the savepoint the foreign keys are checked once, after every row is back.
+    """
     bind = op.get_bind()
+    bind.exec_driver_sql("SAVEPOINT rebuild_live_grants_0057")
+    try:
+        _rebuild_grants_in_savepoint(bind, widen=widen)
+    except Exception:
+        bind.exec_driver_sql("ROLLBACK TO SAVEPOINT rebuild_live_grants_0057")
+        bind.exec_driver_sql("RELEASE SAVEPOINT rebuild_live_grants_0057")
+        raise
+    bind.exec_driver_sql("RELEASE SAVEPOINT rebuild_live_grants_0057")
+
+
+def _rebuild_grants_in_savepoint(bind: sa.Connection, *, widen: bool) -> None:
     bind.exec_driver_sql("PRAGMA defer_foreign_keys = ON")
     table_sql = bind.execute(
         sa.text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = :name"),

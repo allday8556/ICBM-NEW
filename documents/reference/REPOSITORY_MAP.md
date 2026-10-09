@@ -146,11 +146,11 @@ payload or external call and leaves legacy Item economics unchanged.
 | `integrations/` | 52 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 28 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 312 | tests |
+| `tests/` | 313 | tests |
 | `tests/contracts/` | 10 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 135 | integration tests by runtime owner |
+| `tests/integration/` | 136 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 110 | unit tests by runtime owner |
 | `ui/` | 68 | operator clients: the served web client and the capture extension |
