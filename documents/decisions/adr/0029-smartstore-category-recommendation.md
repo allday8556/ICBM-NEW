@@ -48,6 +48,8 @@ Date: 2026-10-09
 
 **Fingerprint.** It covers the candidates and the taxonomy revision. A new catalog snapshot that changes them asks again (ADR-0028 §4 reuse).
 
+**Implementation note (2026-10-09, C2): compound nouns.** A leaf whose own name (at least 2 characters) occurs **within** a term also scores one. Korean compound nouns put the category inside the product word, for example `들기름` in `생들기름`; the rule of step 3 alone finds no candidate for such a name. It adds only candidates from the same catalog, so AIC-01 and AIC-02 are unchanged.
+
 ## 3. The AI and the filter
 
 **The answer.** The composed bundle carries the candidates as `category_candidates`. The answer's `category` object carries `category_id`, `confidence`, `requires_review` and the ADR-0026 §5 envelope.

@@ -188,7 +188,7 @@ def test_a_fresh_store_is_seeded_upgraded_and_writes_no_audit(
             row[0]
             for row in raw.execute("SELECT DISTINCT seed_version FROM ai_prompt_template_revisions")
         }
-    assert versions == {"v29-ai2"}
+    assert versions == {"v29-ai3"}
 
 
 def test_an_unmodified_store_is_upgraded_once_and_an_edit_is_never_overwritten(
@@ -217,7 +217,7 @@ def test_an_unmodified_store_is_upgraded_once_and_an_edit_is_never_overwritten(
             )
         ]
     assert events == [
-        {"layer": "TASK", "field": "output", "origin": "RESET", "seed_version": "v29-ai2"}
+        {"layer": "TASK", "field": "output", "origin": "RESET", "seed_version": "v29-ai3"}
     ]
     view = container.prompt_registry.registry()
     entry = next(e for e in view.entries if e.key == BUNDLE)
@@ -268,7 +268,7 @@ def test_production_binds_the_name_task_and_reads_the_capability(config: AppConf
         tasks = container.enrichment._tasks
         assert tasks[BUNDLE] == PRODUCT_NAME_TASK
         # ADR-0028 T3: the SmartStore tag task composes the same bundle under its own id.
-        assert set(tasks) == {BUNDLE, "SMARTSTORE_TAGS_V1"}
+        assert set(tasks) == {BUNDLE, "SMARTSTORE_TAGS_V1", "SMARTSTORE_CATEGORY_V1"}
         assert tasks["SMARTSTORE_TAGS_V1"].prompt_key == BUNDLE
         view = client.get(
             "/api/v1/products/00000000-0000-0000-0000-000000000000/enrichment",
