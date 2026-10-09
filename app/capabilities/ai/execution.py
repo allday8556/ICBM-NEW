@@ -42,6 +42,12 @@ class Execution:
         return not self.outcome.ok and retryable(self.outcome.error_class)
 
 
+def unknown_provenance(identity: RequestedIdentity) -> AIExecutionProvenance:
+    """The provenance of a task no answer reported on (refused before any call, or with no
+    report): the requested identity, and unknown for everything only an answer could tell."""
+    return _unknown(identity)
+
+
 def _unknown(identity: RequestedIdentity) -> AIExecutionProvenance:
     """The provenance of a call whose answer reported nothing: what the request asked for, and
     ``None`` or ``UNKNOWN`` for everything only the answer could have told."""

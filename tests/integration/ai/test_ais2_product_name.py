@@ -167,11 +167,11 @@ def test_an_answer_without_the_envelope_is_a_failed_result(
 
 
 def _old_seed() -> dict[str, Any]:
-    """The seed as it was before ``v29-ai1``: every upgrade's replaced text, version ``v29``."""
+    """The seed as it was before ``v29-ai1``: the first upgrade's replaced text, version ``v29``."""
     seed = _REAL_SEED()
-    for upgrade in seed["upgrades"]:
-        family = "policies" if upgrade["key"] in seed["policies"] else "templates"
-        seed[family][upgrade["key"]]["content"][upgrade["field"]] = upgrade["previous"]
+    first = seed["upgrades"][0]
+    family = "policies" if first["key"] in seed["policies"] else "templates"
+    seed[family][first["key"]]["content"][first["field"]] = first["previous"]
     seed["seed_version"] = "v29"
     return seed
 
@@ -188,7 +188,7 @@ def test_a_fresh_store_is_seeded_upgraded_and_writes_no_audit(
             row[0]
             for row in raw.execute("SELECT DISTINCT seed_version FROM ai_prompt_template_revisions")
         }
-    assert versions == {"v29-ai1"}
+    assert versions == {"v29-ai2"}
 
 
 def test_an_unmodified_store_is_upgraded_once_and_an_edit_is_never_overwritten(
@@ -217,7 +217,7 @@ def test_an_unmodified_store_is_upgraded_once_and_an_edit_is_never_overwritten(
             )
         ]
     assert events == [
-        {"layer": "TASK", "field": "output", "origin": "RESET", "seed_version": "v29-ai1"}
+        {"layer": "TASK", "field": "output", "origin": "RESET", "seed_version": "v29-ai2"}
     ]
     view = container.prompt_registry.registry()
     entry = next(e for e in view.entries if e.key == BUNDLE)
@@ -265,7 +265,11 @@ def test_production_binds_the_name_task_and_reads_the_capability(config: AppConf
 
     with TestClient(create_app(config), base_url=LOCAL) as client:
         container: Container = client.app.state.container  # type: ignore[attr-defined]
-        assert container.enrichment._tasks == {BUNDLE: PRODUCT_NAME_TASK}
+        tasks = container.enrichment._tasks
+        assert tasks[BUNDLE] == PRODUCT_NAME_TASK
+        # ADR-0028 T3: the SmartStore tag task composes the same bundle under its own id.
+        assert set(tasks) == {BUNDLE, "SMARTSTORE_TAGS_V1"}
+        assert tasks["SMARTSTORE_TAGS_V1"].prompt_key == BUNDLE
         view = client.get(
             "/api/v1/products/00000000-0000-0000-0000-000000000000/enrichment",
             headers={"X-ICBM-Client": "pytest"},

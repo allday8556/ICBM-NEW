@@ -268,7 +268,8 @@ class PromptRegistryStore:
                     Origin.RESET,
                     actor=SEED_ACTOR,
                     correlation_id=correlation_id,
-                    details={"seed_version": upgrade.seed_version},
+                    # The text written is the newest seed, so the newest version names it.
+                    details={"seed_version": load_seed()["seed_version"]},
                 )
                 applied += 1
         return applied

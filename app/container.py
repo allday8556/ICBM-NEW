@@ -9,6 +9,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import integrations.suppliers as supplier_packages
+from app.capabilities.ai import platform_tags
 from app.capabilities.ai.composer import PromptComposer
 from app.capabilities.ai.execution import AIExecution
 from app.capabilities.ai.profiles import (
@@ -17,6 +18,7 @@ from app.capabilities.ai.profiles import (
     ProviderProfileService,
 )
 from app.capabilities.ai.prompts import PromptRegistryService, PromptRegistryStore
+from app.capabilities.ai.search_signal import NoSearchSignal
 from app.capabilities.audit.service import AuditLog
 from app.capabilities.jobs.diagnostic import FAILING_JOB
 from app.capabilities.jobs.policy import RetryPolicy
@@ -142,7 +144,7 @@ from app.stages.products.pricing_service import ProductPricingService
 from app.stages.products.readiness import ProductReadinessService
 from app.stages.products.service import ProductsService
 from app.stages.products.store import ProductFoundationStore
-from app.stages.products.tasks import PRODUCTION_TASKS
+from app.stages.products.tasks import PRODUCTION_TASKS, platform_tag_task
 from app.stages.register.authoring import RegistrationPreparationService
 from app.stages.register.authoring_revisions import AuthoringRevisionStore
 from app.stages.register.builder import RegistrationSnapshotBuilder
@@ -470,6 +472,8 @@ def build_container(
     profiled_provider = ProfiledProvider(profile_store, WindowsProcessProbe(), clock, secrets)
     ai_execution = AIExecution(profiled_provider)
     ai_provider = ProviderProfileService(profile_store, profiled_provider, clock)
+    # ADR-0028 §3: the SearchSignal port, provider-zero until a source has its own owner decision.
+    search_signal = NoSearchSignal()
     readiness = ReadinessService(
         db=db,
         worker=worker,
@@ -479,7 +483,11 @@ def build_container(
         clock=clock,
         head_revision=head_revision(),
         ownership=ownership,
-        capabilities=lambda: [*connect.capabilities(), ai_execution.capability()],
+        capabilities=lambda: [
+            *connect.capabilities(),
+            ai_execution.capability(),
+            search_signal.capability(),
+        ],
     )
 
     # COLLECT source truth: the content-addressed asset path and the immutable revisions over
@@ -662,6 +670,9 @@ def build_container(
     # The only bearer source for provider metadata reads as well as REGISTER execution. Reading it
     # never renews or commits a token and authorizes no mutation.
     committed_bearer = smartstore.committed_bearer
+    smartstore_tags = SmartStoreTagSource(
+        smartstore_caller or SmartStoreEndpointCaller(), committed_bearer
+    )
 
     # M6-E (ADR-0024): SmartStore listings ICBM did not create, adopted by the owner-declared
     # seller-code convention and proven by a read-back. REGISTER refuses a second listing of an
@@ -773,7 +784,21 @@ def build_container(
         composer=ai_composer,
         execution=ai_execution,
         # ADR-0027 AIS-2: the product-name stage's task, the first runnable one.
-        tasks=PRODUCTION_TASKS,
+        # ADR-0028 T3: the SmartStore tag task, over the two adopted tag reads and the port.
+        tasks=(
+            *PRODUCTION_TASKS,
+            platform_tag_task(
+                task_key=platform_tags.TAG_TASK_KEY,
+                prompt_key=platform_tags.BUNDLE_PROMPT_KEY,
+                marketplace="smartstore",
+                result_key=platform_tags.TAG_RESULT_KEY,
+                fact_fields=platform_tags.TAG_FACT_FIELDS,
+                schema_version=platform_tags.TAG_SCHEMA_VERSION,
+                context=platform_tags.SmartStoreTagContext(
+                    smartstore_tags, search_signal, clock.now
+                ),
+            ),
+        ),
     )
     registry.register(enrichment.job_definition())
     registration_preparations = RegistrationPreparationService(
@@ -1139,9 +1164,7 @@ def build_container(
         smartstore_addressbook=SmartStoreAddressBookSource(
             smartstore_caller or SmartStoreEndpointCaller(), committed_bearer
         ),
-        smartstore_tags=SmartStoreTagSource(
-            smartstore_caller or SmartStoreEndpointCaller(), committed_bearer
-        ),
+        smartstore_tags=smartstore_tags,
         registration_preflight=registration_preflight,
         registration_preparations=registration_preparations,
         registration_builder=registration_builder,

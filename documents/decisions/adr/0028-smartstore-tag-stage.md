@@ -140,6 +140,15 @@ The task is the v29 bundle `TASK_PRODUCT_RECOMMEND_BUNDLE_V1` with the result ke
 - A changed pool makes the result stale with the reason `platform`.
 - The restricted check is not in the fingerprint. It is a snapshot whose time is shown, and it is re-made before any future send.
 
+**Implementation note (2026-10-09, T3).**
+- **Its own id.** The tag task's enrichment id is `SMARTSTORE_TAGS_V1`. It composes the registry task `TASK_PRODUCT_RECOMMEND_BUNDLE_V1` (its `prompt_key`) and records the result key `tags`, so the target-free name result of the same bundle keeps its own subject (ADR-0027 §6).
+- **Reuse.** The pool and the signals can be gathered only by the job (§4, never inline).
+  - A request therefore always queues the tag task.
+  - The job gathers them. When the whole fingerprint, the gathered part included, equals the current result's, it records nothing and calls no AI. That is the reuse.
+  - A read derives staleness over the local inputs only and never reads the platform. The gathered part is recorded with the result as `context`, and the next job run compares it.
+- **Where the names live.** The marketplace's reads and names live in the AI capability (`app/capabilities/ai/platform_tags.py`) and the composition root. The PRODUCT DB owner stays marketplace-neutral (M4 product contract).
+- **The live test of §8 T3** needs the operating instance's SmartStore session, so it follows the owner's 8790 deploy.
+
 ## 5. The seed upgrade `v29-ai2`
 
 The bundle's `tags` output object gains the ADR-0026 §5 envelope, `"evidence":[]` and `"requires_review":false`, under the rules of ADR-0027 §6:
