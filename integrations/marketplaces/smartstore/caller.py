@@ -91,6 +91,12 @@ _NOTICE_TYPE = EndpointId.SMARTSTORE_NOTICE_TYPE_READ
 _CATEGORY_LIST = EndpointId.SMARTSTORE_CATEGORY_LIST
 _ADDRESSBOOK_LIST = EndpointId.SMARTSTORE_ADDRESSBOOK_LIST
 _ORDER_CHANGES = EndpointId.SMARTSTORE_ORDER_CHANGES
+_TAG_RECOMMEND = EndpointId.SMARTSTORE_TAG_RECOMMEND
+_TAG_RESTRICTED = EndpointId.SMARTSTORE_TAG_RESTRICTED
+# ADR-0028 §2: a keyword or a tag is a non-blank string of at most 50 characters; a check carries
+# 1 to 10 distinct tags.
+TAG_TEXT_MAX = 50
+TAG_CHECK_MAX = 10
 _ORDER_DETAILS = EndpointId.SMARTSTORE_ORDER_DETAILS
 # The documented request date-time (yyyy-MM-dd'T'HH:mm:ss.SSSXXX); ICBM always sends KST.
 _ORDER_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+09:00$")
@@ -201,6 +207,26 @@ class CategoryListRequest:
     credential_generation: int
     session_generation: int
     last: bool = True
+
+
+@dataclass(frozen=True)
+class TagRecommendRequest:
+    """Search the recommended tags of one keyword (ADR-0028 §2)."""
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    keyword: str
+
+
+@dataclass(frozen=True)
+class TagRestrictedRequest:
+    """Check 1–10 distinct tags against the restricted-tag list (ADR-0028 §2)."""
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    tags: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -322,6 +348,22 @@ class NoticeCatalogResponse:
 @dataclass(frozen=True)
 class CategoryListResponse:
     """The documented category array after deny-by-default field retention."""
+
+    retained: Mapping[str, object]
+    http_status: int
+
+
+@dataclass(frozen=True)
+class TagRecommendResponse:
+    """The recommended tags after retention: ``items`` of ``{code?, text}``, absent when none."""
+
+    retained: Mapping[str, object]
+    http_status: int
+
+
+@dataclass(frozen=True)
+class TagRestrictedResponse:
+    """The restricted-tag answers after retention: ``items`` of ``{tag, restricted}``."""
 
     retained: Mapping[str, object]
     http_status: int
@@ -463,6 +505,8 @@ def _generations(request: object) -> tuple[int | None, int | None]:
         | ImageUploadRequest
         | CategoryListRequest
         | AddressBookListRequest
+        | TagRecommendRequest
+        | TagRestrictedRequest
         | OrderChangesRequest
         | OrderDetailsRequest,
     ):
@@ -481,7 +525,19 @@ class _Wire:
     # A pre-encoded body, used by the JSON endpoints: the bytes are produced here, from the typed
     # document, so the media type of the wire is the endpoint contract's and nothing else.
     content: bytes | None = None
-    query: dict[str, str] = field(default_factory=dict)
+    # A list value is one key repeated, in order (ADR-0028 §2: ``tags=a&tags=b``).
+    query: dict[str, str | list[str]] = field(default_factory=dict)
+
+
+def _tag_text(value: object) -> bool:
+    """A keyword or a tag as ADR-0028 §2 sends it: a trimmed, non-blank string of at most 50
+    characters, with no control character."""
+    return (
+        isinstance(value, str)
+        and value == value.strip()
+        and 0 < len(value) <= TAG_TEXT_MAX
+        and value.isprintable()
+    )
 
 
 def _bearer(headers: dict[str, str], token: str, credentials: int, session: int) -> None:
@@ -539,6 +595,34 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
         )
         try:
             query = retained_query(contract, {"last": "true"})
+        except ValueError as exc:  # pragma: no cover - registry/caller contract drift
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION") from exc
+        return _Wire(contract.path, headers, {}, query=query)
+    if contract.endpoint_id is _TAG_RECOMMEND:
+        if not isinstance(request, TagRecommendRequest) or not _tag_text(request.keyword):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        try:
+            query = retained_query(contract, {"keyword": request.keyword})
+        except ValueError as exc:  # pragma: no cover - registry/caller contract drift
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION") from exc
+        return _Wire(contract.path, headers, {}, query=query)
+    if contract.endpoint_id is _TAG_RESTRICTED:
+        if (
+            not isinstance(request, TagRestrictedRequest)
+            or not isinstance(request.tags, tuple)
+            or not 1 <= len(request.tags) <= TAG_CHECK_MAX
+            or len(set(request.tags)) != len(request.tags)
+            or not all(_tag_text(tag) for tag in request.tags)
+        ):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        try:
+            query = retained_query(contract, {"tags": list(request.tags)})
         except ValueError as exc:  # pragma: no cover - registry/caller contract drift
             raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION") from exc
         return _Wire(contract.path, headers, {}, query=query)
@@ -809,6 +893,8 @@ _Result = (
     | NoticeCatalogResponse
     | CategoryListResponse
     | AddressBookListResponse
+    | TagRecommendResponse
+    | TagRestrictedResponse
     | OrderChangesResponse
     | OrderDetailsResponse
     | ProductSearchPage
@@ -830,6 +916,12 @@ def _result(contract: EndpointContract, request: object, body: object, status: i
     if contract.endpoint_id is _ADDRESSBOOK_LIST:
         assert isinstance(request, AddressBookListRequest)
         return AddressBookListResponse(retained=retain(contract, body), http_status=status)
+    if contract.endpoint_id is _TAG_RECOMMEND:
+        assert isinstance(request, TagRecommendRequest)
+        return TagRecommendResponse(retained=retain(contract, {"items": body}), http_status=status)
+    if contract.endpoint_id is _TAG_RESTRICTED:
+        assert isinstance(request, TagRestrictedRequest)
+        return TagRestrictedResponse(retained=retain(contract, {"items": body}), http_status=status)
     if contract.endpoint_id is _ORDER_CHANGES:
         assert isinstance(request, OrderChangesRequest)
         return OrderChangesResponse(
@@ -968,6 +1060,20 @@ class SmartStoreEndpointCaller:
         endpoint_id: Literal[EndpointId.SMARTSTORE_ADDRESSBOOK_LIST],
         request: AddressBookListRequest,
     ) -> AddressBookListResponse: ...
+
+    @overload
+    def call(
+        self,
+        endpoint_id: Literal[EndpointId.SMARTSTORE_TAG_RECOMMEND],
+        request: TagRecommendRequest,
+    ) -> TagRecommendResponse: ...
+
+    @overload
+    def call(
+        self,
+        endpoint_id: Literal[EndpointId.SMARTSTORE_TAG_RESTRICTED],
+        request: TagRestrictedRequest,
+    ) -> TagRestrictedResponse: ...
 
     @overload
     def call(

@@ -323,7 +323,7 @@ def test_the_smartstore_readme_names_exactly_the_adopted_endpoints() -> None:
     # the DELETE slice (ADR-0018 §3.5), the leaf-category read and the two notice reads
     # (notice coverage S0), the address-book read (Settings delivery policy), and the two M6-C
     # order reads
-    assert len(adopted) == 14, adopted
+    assert len(adopted) == 16, adopted
     boundary = _section(_read(smartstore / "README.md"), r"^2\. Current M2 execution boundary")
     named = boundary.split("Every other SmartStore endpoint")[0]
     assert set(re.findall(r"`(SMARTSTORE_[A-Z0-9_]+)`", named)) == adopted

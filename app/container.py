@@ -195,6 +195,7 @@ from integrations.marketplaces.smartstore.notice_catalog import SmartStoreNotice
 from integrations.marketplaces.smartstore.notice_schema import SmartStoreNoticeRules
 from integrations.marketplaces.smartstore.orders import SmartStoreOrderSource
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
+from integrations.marketplaces.smartstore.tags import SmartStoreTagSource
 from integrations.suppliers.base import SupplierDefinition, SupplierGateway
 from integrations.suppliers.collection import ImageRole as SupplierImageRole
 from integrations.suppliers.collection import SupplierCollection
@@ -278,6 +279,8 @@ class Container:
     category_catalog: CategoryCatalogService
     # Settings delivery policy: the seller's address book, read on request and never stored.
     smartstore_addressbook: SmartStoreAddressBookSource
+    # ADR-0028 T2: the two read-only tag reads, for the tag task (T3).
+    smartstore_tags: SmartStoreTagSource
     registration_preflight: RegistrationPreflightService
     registration_preparations: RegistrationPreparationService
     registration_builder: RegistrationSnapshotBuilder
@@ -1134,6 +1137,9 @@ def build_container(
         category_metadata=category_metadata,
         category_catalog=category_catalog,
         smartstore_addressbook=SmartStoreAddressBookSource(
+            smartstore_caller or SmartStoreEndpointCaller(), committed_bearer
+        ),
+        smartstore_tags=SmartStoreTagSource(
             smartstore_caller or SmartStoreEndpointCaller(), committed_bearer
         ),
         registration_preflight=registration_preflight,

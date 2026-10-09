@@ -96,6 +96,9 @@ M5_ADOPTED = frozenset(
         # M6-C (ADR-0023 §5, §6): the two read-only order reads.
         "SMARTSTORE_ORDER_CHANGES",
         "SMARTSTORE_ORDER_DETAILS",
+        # ADR-0028 T2: the two read-only tag reads of the tag stage.
+        "SMARTSTORE_TAG_RECOMMEND",
+        "SMARTSTORE_TAG_RESTRICTED",
     }
 )
 M5_UNPROVEN = frozenset(
@@ -106,7 +109,7 @@ M5_UNPROVEN = frozenset(
         "SMARTSTORE_STANDARD_OPTIONS",
     }
 )
-M5_MAPPING_REVISION = "m65-delivery-r1"
+M5_MAPPING_REVISION = "ai-tags-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:

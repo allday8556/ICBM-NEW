@@ -90,6 +90,10 @@ class EndpointId(StrEnum):
     # the product orders themselves by id. Neither is a write; both are read by OPERATE only.
     SMARTSTORE_ORDER_CHANGES = "SMARTSTORE_ORDER_CHANGES"
     SMARTSTORE_ORDER_DETAILS = "SMARTSTORE_ORDER_DETAILS"
+    # ADR-0028 T2 (owner decision 6072888750, Commerce API 2.90.1): the two read-only tag reads of
+    # the tag stage. Neither sends a tag; CREATE keeps tags frozen and unsent (AIT-01).
+    SMARTSTORE_TAG_RECOMMEND = "SMARTSTORE_TAG_RECOMMEND"
+    SMARTSTORE_TAG_RESTRICTED = "SMARTSTORE_TAG_RESTRICTED"
     SMARTSTORE_CATEGORY_READ = "SMARTSTORE_CATEGORY_READ"
     SMARTSTORE_PRODUCT_ATTRIBUTE_LIST = "SMARTSTORE_PRODUCT_ATTRIBUTE_LIST"
     SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES = "SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES"
@@ -319,6 +323,47 @@ def _int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+_INT64_MAX = 2**63 - 1
+# ADR-0028 §1 (#3710): the recommended-tag search answers at most 20 tags.
+TAG_RECOMMEND_MAX = 20
+
+
+def tag_recommend_succeeded(status: int, body: object) -> bool:
+    """HTTP 200 and the documented array of at most 20 ``{code?, text}``: ``text`` a non-blank
+    string, ``code``, when present, a JSON integer (never a ``bool``) in the int64 range."""
+    return (
+        status == 200
+        and isinstance(body, list)
+        and len(body) <= TAG_RECOMMEND_MAX
+        and all(
+            isinstance(item, dict)
+            and isinstance(item.get("text"), str)
+            and bool(item["text"].strip())
+            and (
+                item.get("code") is None
+                or (_int(item["code"]) and -_INT64_MAX - 1 <= item["code"] <= _INT64_MAX)
+            )
+            for item in body
+        )
+    )
+
+
+def tag_restricted_succeeded(status: int, body: object) -> bool:
+    """HTTP 200 and the documented array of ``{tag, restricted}``: a string ``tag`` and a boolean
+    ``restricted``. Whether every requested tag is answered exactly once is the tag source's check,
+    because a predicate never sees the request (ADR-0028 §2)."""
+    return (
+        status == 200
+        and isinstance(body, list)
+        and all(
+            isinstance(item, dict)
+            and isinstance(item.get("tag"), str)
+            and isinstance(item.get("restricted"), bool)
+            for item in body
+        )
+    )
+
+
 def _search_channel(entry: object) -> bool:
     return (
         isinstance(entry, dict)
@@ -458,6 +503,9 @@ _NOTICE_FIELDS = frozenset(
     }
 )
 _CATEGORY_FIELDS = frozenset({"wholeCategoryName", "id", "name", "last"})
+# ADR-0028 §2: only the tag pairs survive.
+_TAG_RECOMMEND_FIELDS = frozenset({"code", "text"})
+_TAG_RESTRICTED_FIELDS = frozenset({"tag", "restricted"})
 # Only the address book's identity, its operator label and its type survive: never the address,
 # the phone or any other personal or contact field of the entry.
 _ADDRESSBOOK_FIELDS = frozenset({"addressBooks", "addressBookNo", "name", "addressType"})
@@ -580,6 +628,41 @@ ADOPTED: Mapping[EndpointId, EndpointContract] = {
     # ---- Settings delivery policy (owner directive 2026-10-07): the seller's address book, read
     # so 출고지 and 반품·교환지 are chosen from the account instead of typed. A read, never mutation
     # authority; only the number, label and type survive.
+    # ---- ADR-0028 T2 (Commerce API 2.90.1, packet Issue #219 6072975577): the recommended-tag
+    # search and the restricted-tag check. Reads, never mutation authority; the 상품 group is the
+    # documentation grouping, confirmed by the first read (R0).
+    EndpointId.SMARTSTORE_TAG_RECOMMEND: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_TAG_RECOMMEND,
+        method=Method.GET,
+        path="/v2/tags/recommend-tags",
+        content_type=None,
+        requires_bearer=True,
+        connect_timeout_s=5.0,
+        read_timeout_s=10.0,
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({PRODUCT_GROUP}),
+        mutating=False,
+        success_predicate=tag_recommend_succeeded,
+        predicate_revision="ai-tag-recommend-r1",
+        safe_query_keys=frozenset({"keyword"}),
+        retained_response_fields=_TAG_RECOMMEND_FIELDS,
+    ),
+    EndpointId.SMARTSTORE_TAG_RESTRICTED: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_TAG_RESTRICTED,
+        method=Method.GET,
+        path="/v2/tags/restricted-tags",
+        content_type=None,
+        requires_bearer=True,
+        connect_timeout_s=5.0,
+        read_timeout_s=10.0,
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({PRODUCT_GROUP}),
+        mutating=False,
+        success_predicate=tag_restricted_succeeded,
+        predicate_revision="ai-tag-restricted-r1",
+        safe_query_keys=frozenset({"tags"}),
+        retained_response_fields=_TAG_RESTRICTED_FIELDS,
+    ),
     EndpointId.SMARTSTORE_ADDRESSBOOK_LIST: EndpointContract(
         endpoint_id=EndpointId.SMARTSTORE_ADDRESSBOOK_LIST,
         method=Method.GET,
@@ -840,7 +923,7 @@ def wire_identity(endpoint_id: EndpointId) -> tuple[str, str, str]:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m65-delivery-r1"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "ai-tags-r1"
 
 # ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
 # the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
@@ -881,6 +964,8 @@ MAPPING_FINGERPRINTS: Mapping[str, str] = {
     "m6-orders-r1": "9663d82d248cd480bb8113f7cd935d8cf91edeb9e44df0392a470fc2d383d058",
     # M6.5-B widens the order allow-list by the delivery members of ADR-0025 §6.
     "m65-delivery-r1": "31e823b13906eadd24c0ec018b64311954d6961d97ddd79566c1d13bafc1db05",
+    # ADR-0028 T2 adopts the two read-only tag reads (recommended tags, restricted-tag check).
+    "ai-tags-r1": "9645e40ac9cad4abff0398ee772806650ffa46de573406aaa4f3bc9ac7e9cf14",
 }
 
 

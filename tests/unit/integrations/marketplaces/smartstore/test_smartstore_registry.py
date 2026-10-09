@@ -63,6 +63,8 @@ def test_em13_1_the_runtime_registry_adopts_m2_connect_and_the_m5_contracts() ->
         EndpointId.SMARTSTORE_ADDRESSBOOK_LIST,
         EndpointId.SMARTSTORE_ORDER_CHANGES,
         EndpointId.SMARTSTORE_ORDER_DETAILS,
+        EndpointId.SMARTSTORE_TAG_RECOMMEND,
+        EndpointId.SMARTSTORE_TAG_RESTRICTED,
     }
     assert {e.value for e in NOT_ADOPTED} == STILL_NOT_ADOPTED
     assert set(ADOPTED) | NOT_ADOPTED == set(EndpointId)
@@ -392,7 +394,7 @@ def test_em14_8_a_malformed_account_response_fails_closed(status: int, body: obj
 
 def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
     # §5.3: a permission-relevant change without a revision bump fails here, in CI.
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m65-delivery-r1"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "ai-tags-r1"
     # Superseded revisions stay resolvable, so stored evidence still names a known mapping.
     assert set(MAPPING_FINGERPRINTS) == {
         "m2-connect-r1",
@@ -408,6 +410,7 @@ def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
         "settings-addressbook-r1",
         "m6-orders-r1",
         "m65-delivery-r1",
+        "ai-tags-r1",
     }
     assert MAPPING_FINGERPRINTS[SMARTSTORE_ENDPOINT_MAPPING_REVISION] == mapping_fingerprint()
     # The E1-E3 reconciliation moved no permission-relevant registry content, so m5-create-r2

@@ -82,6 +82,8 @@ ADR-0027 AIS-1 added the provider profile `profiles.py` and its model, the adapt
 `ui/web/js/components/ai-provider.js`, migration `0056`, one unit and one integration suite.
 ADR-0027 AIS-2 added the product-name task `app/stages/products/tasks.py`, the seed upgrade
 `v29-ai1`, the recommendation component `ui/web/js/components/ai-name.js` and two integration suites.
+ADR-0028 T2 added the read-only tag source `integrations/marketplaces/smartstore/tags.py` and
+one unit suite.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -132,16 +134,16 @@ payload or external call and leaves legacy Item economics unchanged.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 50 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 26 |  |
+| `integrations/` | 51 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 27 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 302 | tests |
+| `tests/` | 303 | tests |
 | `tests/contracts/` | 10 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 128 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 107 | unit tests by runtime owner |
+| `tests/unit/` | 108 | unit tests by runtime owner |
 | `ui/` | 65 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 56 | the served web client |
