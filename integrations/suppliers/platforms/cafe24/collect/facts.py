@@ -116,8 +116,8 @@ _AMOUNT = re.compile(r"(\d[\d,]*)\s*원?")
 # ADR-0032 §4 (the owner's rule, Issue #219 6086421199): a fee stated as a range, ``A원 ~ B원``,
 # is read as its highest amount.
 _RANGE = re.compile(r"(\d[\d,]*)\s*원?\s*[~∼〜]\s*(\d[\d,]*)\s*원")
-# A money amount the page states as such: digits followed by 원.
-_MONEY = re.compile(r"\d[\d,]*원")
+# A fee cell that states one fee and nothing else: an amount of won, and no condition.
+_ONLY_FEE = re.compile(r"\d[\d,]*원")
 _EVIDENCE_LIMIT = 200
 
 
@@ -334,10 +334,11 @@ def _shipping(rows: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Field
                 normalized=str(amount),
             ),
         )
-    elif amount is None or len(_MONEY.findall(fee[0][1].replace(" ", ""))) > 1:
-        # No amount, or more than one that is not a range: a condition or a choice, never a fee.
-        # It is not flattened into its first amount (ADR-0010 §7). KM통상's parser reads the
-        # first amount; the template states this difference (ADR-0030 §10).
+    elif amount is None or not _ONLY_FEE.fullmatch(fee[0][1].replace(" ", "")):
+        # A cell that is neither a range nor one amount and nothing else states a condition or a
+        # choice: a threshold or a free-over amount. It is never flattened into an amount it names
+        # (ADR-0010 §7). KM통상's parser reads the first amount; the template states this
+        # difference (ADR-0030 §10).
         return FieldFact(
             FieldStatus.REVIEW_REQUIRED,
             None,
