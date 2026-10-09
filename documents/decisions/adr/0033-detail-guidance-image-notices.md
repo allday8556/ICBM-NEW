@@ -4,7 +4,7 @@ Status: **ACCEPTED** 2026-10-10. This activates the Detail Guidance module plann
 
 Decision owners:
 - **Product direction:** the owner, in Issue #219 comment `6085853541` (2026-10-10):
-  - **Templates.** About three official templates.
+  - **Templates.** About three official templates; amended to five, with shipping presets, by `6087917430` (§11).
   - **Generation.** The operator types the notice text. ICBM reflects it automatically into each template as an **image**. The operator picks one of them, and it becomes the **top** notice; the same applies to the **bottom** notice, for delivery (배송) and C/S.
   - **Settings once, per-product override.** The notices are made once in settings and go into every product by default. A product may pick another template or text, or turn a notice off.
   - **Period notices are included.** A holiday, vacation or courier-cut-off notice applies only between its start and its end.
@@ -35,7 +35,7 @@ What it authorizes:
 What it does not authorize:
 - **No HTML notice.** Operator text never reaches `detailContent` as text; it reaches it only as the pixels of an ICBM-rendered image.
 - **No AI and no ICBM-authored wording.**
-  - ICBM writes no legal or policy wording (#61 §12).
+  - ICBM writes no legal or policy wording into a saved notice (#61 §12). The §11 presets are editable example text that reaches nothing until the operator saves it as their own.
   - ICBM inserts no policy value (shipping fee, return address and the like) into a notice.
   - A template's built-in headings are editable defaults only.
 - **No bulk update of registered listings** (#61 §13). A period that starts or ends changes only what a later registration freezes.
@@ -70,7 +70,8 @@ Date: 2026-10-10
 **Character rules.** Each line is trimmed. Control characters, and every character the bundled font cannot draw, are refused with `GUIDANCE_TEXT_INVALID`; nothing is silently dropped. These limits are ICBM's own layout limits, not provider limits (B-DETAIL D4).
 
 **Template.**
-- **`CLEAN`, `MODERN`, `WARM`.** These are the three official templates (#61 §9 named the candidates). They are distributed with the code.
+- **`CLEAN`, `MODERN`, `WARM`.** These are the three general official templates (#61 §9 named the candidates). They are distributed with the code.
+- **`DOMESTIC`, `OVERSEAS`.** These are the two shipping templates of §11, with a drawn truck or airplane mark. There are five official templates in all.
 - **Design.** A template fixes the canvas, colours, margins, font sizes, block layout and decoration. It adds no text of its own except the default headings, which the operator may change or clear.
 
 ## 2. The owner and its records
@@ -104,7 +105,7 @@ The new owner `app/capabilities/detail_guidance/` is marketplace-neutral. Follow
 - **Determinism.** The same `(content, template, renderer_version)` gives the same PNG bytes: fixed encoder parameters and no metadata, time or randomness.
   - The version is `guidance-renderer/v1`. A change of the font, the Pillow version or any template drawing bumps it.
   - A test pins the SHA-256 of one rendering of each template.
-- **Preview.** It renders the three templates for the typed content and stores nothing. It returns the PNGs to the page.
+- **Preview.** It renders the five templates for the typed content and stores nothing. It returns the PNGs to the page.
 
 ## 4. Settings: 설정 › 공통 › 상세페이지 공지
 
@@ -112,7 +113,8 @@ The new owner `app/capabilities/detail_guidance/` is marketplace-neutral. Follow
 
 **The standing notice:**
 - **Inputs.** Headings and lines. The bottom notice opens with two blocks headed `배송 안내` and `C/S 안내`.
-- **Preview.** The live preview shows the three templates side by side as the operator types.
+- **Preview.** The live preview shows the five templates side by side as the operator types.
+- **Presets.** `국내배송` and `해외배송` fill the inputs with the §11 example text, marked as an example to check against the seller's own conditions. Choosing a preset replaces the inputs (asking first when they were edited); choosing a template never does. A preset suggests its matching template, and the operator may pick any.
 - **Saving.** The operator picks one template, then saves. Saving renders and appends the revision (§2).
 - **Off.** It can be turned off.
 
@@ -135,7 +137,7 @@ The preparation revision gains `guidance`. It is server-validated plain JSON, wi
 - **`CUSTOM`.** `{template, blocks}` of this product's own standing notice. It replaces the store-wide standing notice, and period notices still apply. Saving the preparation renders it into `guidance_image_artifacts`.
 
 **The editor.** Its `상단 공지` and `하단 공지` groups show the resolved images in order, and offer `기본값 / 끄기 / 직접 작성`.
-- `직접 작성` shows the same three-template live preview as settings.
+- `직접 작성` shows the same five-template live preview and the same presets as settings.
 - The current inert placeholder `＋ 공지 추가 · 상·하단 공지는 준비 중` is replaced.
 
 ## 6. Resolution, staleness and the Snapshot
@@ -185,9 +187,9 @@ Each slice is its own PR, with the full suite, Gate 3, M0, `mypy`, ruff, the GPT
 
 | Slice | Scope | Risk |
 | --- | --- | --- |
-| **G1** | The renderer: the Pillow pin, the bundled font and its licence, the three templates, `render`, determinism tests. No DB, no API. | normal |
+| **G1** | The renderer: the Pillow pin, the bundled font and its licence, the five templates, the §11 presets as validated data, `render`, determinism tests. No DB, no API. | normal |
 | **G2** | The owner: its migration, the revision store with clock and audit, the guidance image store, the settings API (list, append, preview, image). | normal |
-| **G3** | The settings card of §4, with the live three-template preview. | normal |
+| **G3** | The settings card of §4, with the live five-template preview and the presets. | normal |
 | **G4** | REGISTER: the preparation `guidance` choice, the resolution, the fingerprint and preflight, the Snapshot pin, composition v3 stamping, and the editor's 상세페이지 step. | HIGH_RISK |
 | **G5** | The wire and the upload: `detail-renderer/v2`, the SmartStore projection, the grant's artifact set, the upload byte source, and the DRY_RUN acceptance of a top and bottom notice end to end. | HIGH_RISK |
 
@@ -205,6 +207,29 @@ The amendments below take effect only once G5 is accepted and landed. Until then
 - **ADR-0014 §19.** Detail Guidance is implemented by this ADR: composition v3 adds `TOP_GUIDANCE` and `BOTTOM_GUIDANCE` as image sections.
 - **B-DETAIL §2 D1 and §5.1.** The reserved `TOP_GUIDANCE`/`BOTTOM_GUIDANCE` become sections of content v3. `VIDEO` and `OPTION_TABLE` stay reserved.
 
+## 11. Amendment: shipping templates and presets (owner decision 2026-10-10, Issue #219 `6087917430`, corrected by `6087973685`)
+
+On the G1 preview the owner kept `CLEAN`, `MODERN` and `WARM` and asked for shipping templates. Asked which kind, the owner answered "3번으로하고 방금 국내배송도 전용디자인 만들수있으면 만들고..": both kinds below, for domestic and for overseas shipping.
+
+**Designs.** `DOMESTIC` (a truck mark) and `OVERSEAS` (an airplane mark).
+- The marks are drawn by the renderer from shapes. No image asset or icon font is added.
+- A mark is decoration, not text, so a template still adds no text of its own (§1).
+
+**Presets.** `국내배송` and `해외배송` are server-owned, versioned example contents. Each one is a top notice and a bottom notice, valid under §1.
+- **국내배송:** 당일발송; 배송 (courier, dispatch time, remote-area fee); 교환·반품; C/S.
+- **해외배송:**
+  - 해외배송 기간;
+  - 개인통관고유부호;
+  - 관부가세, with no fixed legal threshold or amount;
+  - 해외 발송 후 취소;
+  - 국제 반품 배송비;
+  - delays.
+- **Placeholders.** A seller-specific value, such as the courier, is a visible placeholder (`○○`) for the operator to replace.
+- **Choosing a preset.** Choosing `국내배송` or `해외배송` replaces the notice inputs with that preset's example text. When the operator has edited the inputs since they were last filled or saved, the page asks before it replaces them. Choosing another preset later replaces them again, the same way.
+- **Choosing a template.** Choosing a template (design) changes only the design and never replaces the text: the operator's text is shown in every template (§3, §4). A preset's matching template is only a suggestion.
+- **Saving.** A preset only fills the inputs. It is validated, rendered and saved exactly as typed text is (§2), and nothing reaches a product until the operator saves.
+- **Versions.** The presets carry a version (`guidance-presets/v1`). A saved revision records nothing of the preset it started from, because what is saved is the operator's text.
+
 ## Invariants
 
 - **DG-01.** A notice reaches `detailContent` only as an ICBM-rendered image, uploaded through the adopted image upload. No operator text, HTML, URL or markup reaches it.
@@ -214,6 +239,6 @@ The amendments below take effect only once G5 is accepted and landed. Until then
 - **DG-05.** The resolution is deterministic and in the candidate fingerprint. Any change makes a frozen Snapshot stale, and a frozen Snapshot is never edited.
 - **DG-06.** The Snapshot pins the resolved guidance and its asset identities, and holds no URL.
 - **DG-07.** An ASSET grant names exactly the Item images plus the guidance images, and an upload reads only ICBM's own stores.
-- **DG-08.** ICBM authors no wording and inserts no policy value. The `notice.*` owner is never read or written.
+- **DG-08.** ICBM inserts no wording or policy value into a saved notice; the §11 presets are editable examples only, and what is saved is the operator's text. The `notice.*` owner is never read or written.
 - **DG-09.** Text that cannot be drawn exactly is refused, never shrunk, cut or dropped.
 - **DG-10.** No LIVE, no bulk listing update, and no marketplace other than SmartStore.
