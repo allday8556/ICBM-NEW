@@ -2,9 +2,10 @@
 
 import logging
 import os
+import re
 import uuid
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 
@@ -338,6 +339,26 @@ class Container:
     phase_c_commands: PhaseCCommandStore
     phase_c_reads: PhaseCReadAccounting
     ownership: DataDirLease
+    # Each configured supplier's display name, by key (ADR-0030 §11 S2: the screens' lists).
+    supplier_names: Mapping[str, str] = field(default_factory=dict)
+
+
+def adoption_conventions() -> dict[str, str]:
+    """KM통상's convention and each site's owner-declared one (ADR-0024 §2, ADR-0030 §3). A site's
+    convention is used only in the ADR-0024 code form (letters, then the source product id) and
+    with a prefix of its own, so it can never match another supplier's listings."""
+    conventions = dict(ADOPTION_CONVENTIONS)
+    for key, site in sorted(SITES.items()):
+        convention = site.config.seller_code_convention
+        if convention is None:
+            continue
+        prefix = convention.removesuffix("{source_product_id}")
+        taken = {c.removesuffix("{source_product_id}").upper() for c in conventions.values()}
+        if not re.fullmatch(r"[A-Za-z]{2,8}", prefix) or prefix.upper() in taken:
+            logger.warning("seller-code convention of %s not used: %s", key, convention)
+            continue
+        conventions[key] = convention
+    return conventions
 
 
 def supplier_image_roles() -> dict[str, dict[str, ImageSlot]]:
@@ -721,14 +742,7 @@ def build_container(
         bound_items=_bound_items,
         registered_sources=_registered_sources,
         # ADR-0030 §3: a site's seller-code convention is the one its owner declared, if any.
-        conventions={
-            **ADOPTION_CONVENTIONS,
-            **{
-                key: site.config.seller_code_convention
-                for key, site in SITES.items()
-                if site.config.seller_code_convention is not None
-            },
-        },
+        conventions=adoption_conventions(),
     )
     # Gate 1 G1-A (ADR-0015 §2): the durable, append-only target policy of each canonical account,
     # saved from Settings. It is the production policy source: an account without a current
@@ -778,7 +792,7 @@ def build_container(
         # ADR-0031 §4, ADR-0030 §7: a forbidden or unread sales channel, or a RECON supplier.
         source_gates=SourceGates(
             product_store,
-            lambda key: key not in SITES or SITES[key].config.active,
+            lambda key: SITES[key].config.active if key in SITES else None,
         ),
     )
     # Gate 1 G1-D (ADR-0015 §5): a Draft from the operator's Product DB selection. It composes the
@@ -1279,6 +1293,7 @@ def build_container(
         phase_c_commands=PhaseCCommandStore(db, clock),
         phase_c_reads=phase_c_reads,
         ownership=ownership,
+        supplier_names={d.profile.supplier_key: d.profile.display_name for d in suppliers},
     )
 
 

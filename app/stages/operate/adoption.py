@@ -212,6 +212,10 @@ class AdoptionService:
 
     # ------------------------------------------------------------------ the adoption pass
 
+    def adoptable_suppliers(self) -> tuple[str, ...]:
+        """The suppliers with an owner-declared seller-code convention (ADR-0024 §2)."""
+        return tuple(sorted(self._conventions))
+
     def run(self, supplier_key: str, *, actor: str, correlation_id: str) -> AdoptionRun:
         """Try to adopt the listing of every source product of ``supplier_key`` with a single
         open-bound Item, in stable order. One pass at a time; a rate limit ends it."""

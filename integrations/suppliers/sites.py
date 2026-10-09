@@ -33,8 +33,9 @@ SITE_DIRECTORY = Path(__file__).resolve().parent / "sites"
 PLATFORM_DIRECTORY = Path(__file__).resolve().parent / "platforms"
 CAPTURE_POLICY_FILE = "browser_capture_policy.json"
 TEMPLATES: Mapping[str, PlatformTemplate] = MappingProxyType({CAFE24.platform: CAFE24})
-# Supplier keys that have their own package; a site may never take one.
+# Supplier keys that have their own package, and their storefront hosts; a site takes neither.
 PACKAGED_SUPPLIERS = frozenset({"kmretail"})
+PACKAGED_HOSTS = frozenset({"kmretail.co.kr"})
 
 
 @dataclass(frozen=True)
@@ -101,6 +102,7 @@ def bind_sites(
     bound: list[BoundSite] = []
     problems: list[str] = []
     paths = sorted(directory.glob("*.json")) if directory.is_dir() else []
+    hosts = set(PACKAGED_HOSTS)
     for path in paths:
         try:
             site = parse_site(path.read_bytes(), path.stem)
@@ -109,6 +111,10 @@ def bind_sites(
             continue
         if site.supplier_key in PACKAGED_SUPPLIERS:
             problems.append(f"{path.name}: {site.supplier_key} has its own package")
+            continue
+        if site.storefront_host in hosts:
+            # One host, one supplier: a capture is attributed by its host (ADR-0030 §6).
+            problems.append(f"{path.name}: storefront host {site.storefront_host} is taken")
             continue
         template = templates.get(site.platform)
         if template is None:
@@ -123,6 +129,7 @@ def bind_sites(
         except (OSError, ValueError) as exc:
             problems.append(f"{path.name}: {exc}")
             continue
+        hosts.add(site.storefront_host)
         bound.append(
             BoundSite(
                 config=site,

@@ -52,6 +52,12 @@ from app.stages.products.model import (
     precedence_status,
 )
 from app.stages.products.pricing import PriceBasis, PriceGuard
+from app.stages.products.source_gates import (
+    SOURCE_CHANNEL_FORBIDDEN,
+    SOURCE_CHANNEL_UNRESOLVED,
+    SOURCE_GATE_CODES,
+    SUPPLIER_NOT_ACTIVE,
+)
 from app.stages.register import sanitize
 from app.stages.register.detail import DetailPlan, DetailProfile, PlannedImage
 from app.stages.register.model import ListingShape, canonical_json, valid_listing_identity
@@ -171,13 +177,8 @@ LIVE_REGISTRATION_EXISTS: Final = "LIVE_REGISTRATION_EXISTS"
 # M6-E (ADR-0024 §5): a listing ICBM did not create but adopted already sells an Item of the unit.
 ADOPTED_LISTING_EXISTS: Final = "ADOPTED_LISTING_EXISTS"
 PROVIDER_DUPLICATE_FOUND: Final = "PROVIDER_DUPLICATE_FOUND"
-# ADR-0031 §4 and ADR-0030 §7: what an Item's source forbids about registering it.
-SOURCE_CHANNEL_FORBIDDEN: Final = "SOURCE_CHANNEL_FORBIDDEN"
-SOURCE_CHANNEL_UNRESOLVED: Final = "SOURCE_CHANNEL_UNRESOLVED"
-SUPPLIER_NOT_ACTIVE: Final = "SUPPLIER_NOT_ACTIVE"
-SOURCE_GATE_CODES: Final = frozenset(
-    {SOURCE_CHANNEL_FORBIDDEN, SOURCE_CHANNEL_UNRESOLVED, SUPPLIER_NOT_ACTIVE}
-)
+# ADR-0031 §4 and ADR-0030 §7: what an Item's source forbids about registering it. The codes are
+# the Product owner's (``app.stages.products.source_gates``), one definition in one place.
 PROVIDER_DUPLICATE_WEAK_SIGNAL: Final = "PROVIDER_DUPLICATE_WEAK_SIGNAL"
 DUPLICATE_EVIDENCE_MISSING: Final = "DUPLICATE_EVIDENCE_MISSING"
 DUPLICATE_EVIDENCE_INCONCLUSIVE: Final = "DUPLICATE_EVIDENCE_INCONCLUSIVE"
@@ -909,11 +910,12 @@ def _m4_reasons(unit: ResolvedUnit) -> list[Reason]:
 def _source_gate_reasons(unit: ResolvedUnit) -> list[Reason]:
     """ADR-0031 §4.1 and ADR-0030 §7: a source that forbids this marketplace, a restriction no rule
     could read, or a supplier still in reconnaissance blocks the unit. No override applies."""
-    return [
-        Reason(code, _B, item_id)
-        for item_id, code in sorted(set(unit.source_gates))
-        if code in SOURCE_GATE_CODES
-    ]
+    gates = sorted(set(unit.source_gates))
+    unknown = sorted({code for _item, code in gates} - SOURCE_GATE_CODES)
+    if unknown:
+        # A gate this evaluation does not know is never dropped: it would let the unit pass.
+        raise ValueError(f"unknown source gate codes: {unknown}")
+    return [Reason(code, _B, item_id) for item_id, code in gates]
 
 
 def _category_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Reason]:

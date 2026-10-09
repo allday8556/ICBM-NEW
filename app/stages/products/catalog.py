@@ -180,7 +180,12 @@ def _fact(key: str, reading: FieldReading | None) -> SourceFactView:
             value = reading.value.availability.value
         elif isinstance(reading.value, SalesChannelsValue):
             # The reading's scope and forbidden marketplaces; the page words the reading (§5).
-            value = ":".join((reading.value.scope.value, *reading.value.forbidden))
+            value = "|".join(
+                (
+                    ":".join((reading.value.scope.value, *reading.value.forbidden)),
+                    reading.value.policy_text,
+                )
+            )
     return SourceFactView(key=key, status=reading.status, value=value)
 
 

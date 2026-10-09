@@ -29,6 +29,11 @@ def listings(container: ContainerDep) -> dict[str, Any]:
         "interval_s": overview.interval_s,
         "last_run": None if overview.last_run is None else asdict(overview.last_run),
         "listings": [asdict(listing) for listing in overview.listings],
+        # ADR-0030 §11 S2: each supplier whose listings can be adopted, KM통상 and any site.
+        "adoptable_suppliers": [
+            {"supplier_key": key, "display_name": container.supplier_names.get(key, key)}
+            for key in container.adoptions.adoptable_suppliers()
+        ],
     }
 
 

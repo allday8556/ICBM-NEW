@@ -128,10 +128,11 @@ function valueText(valueJson) {
   // A tier is the source's own (quantity, total price) pair; it is never divided into a unit price.
   if (Array.isArray(value.tiers)) return clip(value.tiers.map((t) => `${t.quantity}개 ${won(t.total_price_krw)}`).join(' · '));
   if (typeof value.scope === 'string') {
-    if (value.scope === 'LISTED') {
-      return clip(value.forbidden.map((key) => `${MARKET_LABEL[key] ?? key} 판매 불가`).join(' · '));
-    }
-    return CHANNEL_SCOPE_LABEL[value.scope] ?? value.scope;
+    const reading =
+      value.scope === 'LISTED'
+        ? value.forbidden.map((key) => `${MARKET_LABEL[key] ?? key} 판매 불가`).join(' / ')
+        : CHANNEL_SCOPE_LABEL[value.scope] ?? value.scope;
+    return clip(`${reading} (공급사 문구: ${value.policy_text})`);
   }
   if (typeof value.policy_text === 'string') return clip(value.policy_text);
   if (typeof value.availability === 'string') return AVAILABILITY_LABEL[value.availability] ?? value.availability;
@@ -217,7 +218,15 @@ function fieldRows(field) {
     { 'data-field': field.key, 'data-status': field.status, 'data-level': field.level },
     h('td', {}, h('b', {}, label), ' ', h('span', { class: 'mini' }, LEVEL_LABEL[field.level] ?? field.level)),
     h('td', {}, statusChip(field.status)),
-    h('td', { 'data-role': 'field-value' }, field.status === 'CONFIRMED' ? valueText(field.value_json) : '—'),
+    h(
+      'td',
+      { 'data-role': 'field-value' },
+      field.status === 'CONFIRMED'
+        ? valueText(field.value_json)
+        : field.key === 'sales_channels' && field.status === 'ABSENT'
+          ? '판매채널 제한 없음'
+          : '—',
+    ),
     h('td', {}, toggle),
   );
   return [row];

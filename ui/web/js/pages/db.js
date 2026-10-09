@@ -81,12 +81,25 @@ const FACT_LABEL = {
 };
 // ADR-0031 §5: the supplier's sales-channel restriction, worded from the server's reading.
 const MARKET_LABEL = { smartstore: '스마트스토어', coupang: '쿠팡' };
+// The server's value is ``SCOPE[:market...]|the supplier's words``; one reading line per market.
 function channelWords(value) {
-  const [scope, ...forbidden] = String(value).split(':');
-  if (scope === 'ALL_ALLOWED') return '모든 마켓 판매 가능';
-  if (scope === 'CLOSED_MALL_ONLY') return '폐쇄몰 전용 (오픈마켓 판매 불가)';
-  if (scope === 'LISTED') return forbidden.map((key) => `${MARKET_LABEL[key] ?? key} 판매 불가`).join(' · ');
-  return value;
+  if (value === null || value === undefined) return chip('확인 필요', 'warn');
+  const [reading, ...words] = String(value).split('|');
+  const [scope, ...forbidden] = reading.split(':');
+  const lines =
+    scope === 'ALL_ALLOWED'
+      ? ['모든 마켓 판매 가능']
+      : scope === 'CLOSED_MALL_ONLY'
+        ? ['폐쇄몰 전용 (오픈마켓 판매 불가)']
+        : scope === 'LISTED'
+          ? forbidden.map((key) => `${MARKET_LABEL[key] ?? key} 판매 불가`)
+          : [reading];
+  return h(
+    'span',
+    { 'data-channel-scope': scope },
+    ...lines.flatMap((line, index) => (index ? [h('br'), line] : [line])),
+    words.length ? h('span', { class: 'mini' }, h('br'), `공급사 문구: ${words.join('|')}`) : null,
+  );
 }
 const STOCK_LABEL = { ON_SALE: '판매 중', SOLD_OUT: '품절', REVIEW_REQUIRED: '확인 필요' };
 const BINDING_LABEL = { BASE_PRODUCT: '기본 상품', SOURCE_OFFER: '수량 구성' };
