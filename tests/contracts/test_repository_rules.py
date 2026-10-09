@@ -2516,6 +2516,9 @@ SITE_KNOWLEDGE_IMPORTS = {
     # It is data, not machinery: a parser needs it to say what it read, and it carries no
     # database, job, asset store, transport or egress handle of any kind.
     "app.stages.collect.facts",
+    # ADR-0030 §3: a platform template reads a validated site configuration's plain values.
+    "integrations.suppliers.site_config",
+    "types",
 }
 # Issue #52 ruling 5702780630 P2: a supplier parser turns immutable documents into facts. It never
 # executes, retries, hashes, stores, persists or schedules anything — those stay in COLLECT core.
@@ -2568,6 +2571,9 @@ _COMMON_SUPPLIER_MODULES = {
     "integrations/suppliers/collection.py",
     "integrations/suppliers/extraction.py",
     "integrations/suppliers/registry.py",
+    # ADR-0030: the site-configuration schema and the binder that loads sites onto templates.
+    "integrations/suppliers/site_config.py",
+    "integrations/suppliers/sites.py",
 }
 
 
@@ -2686,6 +2692,11 @@ def test_every_collection_definition_pins_its_extraction_identity() -> None:
         if path.is_dir() and path.name not in {"transport", "__pycache__"}
     ]
     assert suppliers / "kmretail" in packages
+    # ADR-0030 §4: a platform template is pinned the same way as a supplier package.
+    templates = [path for path in (suppliers / "platforms").iterdir() if path.is_dir()]
+    templates = [path for path in templates if path.name != "__pycache__"]
+    assert suppliers / "platforms" / "cafe24" in templates
+    packages += templates
     problems = {package.name: manifest_problems(REPO_ROOT, package) for package in packages}
     assert {name: found for name, found in problems.items() if found} == {}
 
@@ -2711,9 +2722,12 @@ def test_a_supplier_parser_owns_nothing_but_reading() -> None:
     package = {
         path: tree
         for path, tree in _production_modules().items()
-        if path.startswith("integrations/suppliers/kmretail/")
+        if path.startswith(
+            ("integrations/suppliers/kmretail/", "integrations/suppliers/platforms/")
+        )
     }
     assert "integrations/suppliers/kmretail/collect/facts.py" in package
+    assert "integrations/suppliers/platforms/cafe24/collect/facts.py" in package
     assert "integrations/suppliers/kmretail/collect/identity.py" in package
     for path, tree in package.items():
         imported = _imported_modules(tree)
@@ -2789,6 +2803,33 @@ def test_one_extraction_identity_covers_the_whole_collect_package() -> None:
         path.relative_to(REPO_ROOT).as_posix() for path in (package / "collect").rglob("*.py")
     }
     assert modules == set(manifest.inputs), "every collect module is part of the identity"
+
+
+def test_a_platform_template_is_one_extraction_identity() -> None:
+    # ADR-0030 §4: a template's collect package is one identity, like a supplier package's, and
+    # its revision is the one the template declares and every site's revision starts with.
+    from integrations.suppliers.extraction import read_manifest
+    from integrations.suppliers.platforms.cafe24 import TEMPLATE
+    from integrations.suppliers.platforms.cafe24.collect import ROLE_RULES
+    from integrations.suppliers.platforms.cafe24.collect.revision import EXTRACTION_REVISION
+
+    package = REPO_ROOT / "integrations" / "suppliers" / "platforms" / "cafe24"
+    manifest = read_manifest(package / "extraction_identity.py")
+    assert EXTRACTION_REVISION == manifest.revision == TEMPLATE.revision
+    modules = {
+        path.relative_to(REPO_ROOT).as_posix() for path in (package / "collect").rglob("*.py")
+    }
+    assert modules == set(manifest.inputs), "every collect module is part of the identity"
+    assert len({rule.rule_id for rule in ROLE_RULES}) == len(ROLE_RULES), "rule ids are distinct"
+
+
+def test_a_site_is_configuration_and_never_code() -> None:
+    # ADR-0030 PT-01: the sites directory holds JSON site configurations and a README, nothing
+    # that could run.
+    sites = REPO_ROOT / "integrations" / "suppliers" / "sites"
+    assert sites.is_dir()
+    names = [path.name for path in sites.rglob("*") if "__pycache__" not in path.parts]
+    assert all(name.endswith(".json") or name == "README.md" for name in names), names
 
 
 def test_supplier_logs_and_audit_payloads_come_from_the_allowlist() -> None:

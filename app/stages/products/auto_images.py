@@ -68,7 +68,9 @@ AUTO_SELECTION_RULE_VERSION: Final = "image-auto-selection/v1"
 MAX_ADDITIONAL_IMAGES: Final = 9
 # The automatic QA's file checks.
 AUTO_QA_MEDIA_TYPES: Final = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
-AUTO_QA_MAX_BYTES: Final = 4 * 1024 * 1024
+# The byte bound follows the owner's per-image collection limit, 5 MiB for every supplier
+# (Issue #219 6086299406), so a collected image is never refused here.
+AUTO_QA_MAX_BYTES: Final = 5 * 1024 * 1024
 
 
 class ImageSlot(StrEnum):

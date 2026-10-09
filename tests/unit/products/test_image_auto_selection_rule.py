@@ -13,6 +13,7 @@ import pytest
 from app.container import supplier_image_roles
 from app.stages.collect.facts import ImageRole
 from app.stages.products.auto_images import (
+    AUTO_QA_MAX_BYTES,
     MAX_ADDITIONAL_IMAGES,
     AutoSelectionBlocked,
     ImageSlot,
@@ -178,7 +179,12 @@ def _asset(**overrides: object) -> Any:
         (_asset(), QaVerdict.PASS, ()),
         (None, QaVerdict.REVIEW_REQUIRED, ("AUTO_QA_BYTES_NOT_STORED",)),
         (_asset(mime_type="image/bmp"), QaVerdict.REVIEW_REQUIRED, ("AUTO_QA_MEDIA_TYPE",)),
-        (_asset(byte_size=5 * 1024 * 1024), QaVerdict.REVIEW_REQUIRED, ("AUTO_QA_BYTE_SIZE",)),
+        (_asset(byte_size=AUTO_QA_MAX_BYTES), QaVerdict.PASS, ()),
+        (
+            _asset(byte_size=AUTO_QA_MAX_BYTES + 1),
+            QaVerdict.REVIEW_REQUIRED,
+            ("AUTO_QA_BYTE_SIZE",),
+        ),
         (_asset(width=0), QaVerdict.REVIEW_REQUIRED, ("AUTO_QA_DIMENSIONS",)),
     ],
 )
