@@ -88,8 +88,13 @@ _EVIDENCE_LIMIT = 200
 # One amount as a page groups it: plain digits, or thousands separated by commas.
 _NUMBER = r"(\d{1,3}(?:,\d{3})+|\d+)"
 _PRICE_CELL = re.compile(_NUMBER + r"원?")
-_WON = re.compile(r"(?<![\d,])" + _NUMBER + r"원")
+# A price cell: one amount, then only a discount rate and a tax note, the words a price row adds
+# without changing what it states. Any other word (이상, 부터, a second amount) is a condition.
+_PRICE_WITH_NOTES = re.compile(
+    _NUMBER + r"원(?:\d{1,3}%)?(?:\(?(?:부가세|VAT)(?:포함|별도)\)?)?", re.IGNORECASE
+)
 _FEE_CELL = re.compile(_NUMBER + r"원")
+# A minimum is the least the reseller may charge, so "29,500원 이상" states exactly that minimum.
 _MINIMUM_CELL = re.compile(_NUMBER + r"원(?:이상)?")
 _FREE_WORDS = ("무료", "무료배송")
 # URL material: a scheme or a protocol-relative reference. It is never quoted and never stored.
@@ -210,14 +215,11 @@ def _name(
 
 
 def _price_amount(text: str) -> int | None:
-    """The one amount a price cell states: a bare number, or exactly one amount of won among other
-    words (a discount rate, a tax note). None when it states none or several."""
+    """The one amount a price cell states: a bare number, or one amount of won followed only by a
+    discount rate and a tax note. None for anything else, a condition such as 이상 included."""
     squashed = _squash(text)
-    bare = _PRICE_CELL.fullmatch(squashed)
-    if bare is not None:
-        return _amount(bare)
-    amounts = list(_WON.finditer(squashed))
-    return _amount(amounts[0]) if len(amounts) == 1 else None
+    stated = _PRICE_CELL.fullmatch(squashed) or _PRICE_WITH_NOTES.fullmatch(squashed)
+    return None if stated is None else _amount(stated)
 
 
 def _prices(

@@ -167,3 +167,21 @@ def test_a_page_without_the_option_container_never_proves_no_options() -> None:
     assert fields(page(body=BUY))["options"].status is FieldStatus.REVIEW_REQUIRED
     empty = page(body=BUY + '<div class="xans-product-option"></div>')
     assert fields(empty)["options"].status is FieldStatus.ABSENT
+
+
+@pytest.mark.parametrize(
+    ("cell", "amount"),
+    [
+        ("2,900원63% (부가세포함)", 2900),
+        ("5,000원 (VAT별도)", 5000),
+        ("10,000원 이상", None),
+        ("10,000원부터", None),
+        ("12,000원 → 9,900원", None),
+    ],
+)
+def test_a_price_cell_adds_only_a_rate_and_a_tax_note(cell: str, amount: int | None) -> None:
+    prices = fields(page(rows=row("판매가", cell)))["prices"]
+    if amount is None:
+        assert prices.status is FieldStatus.REVIEW_REQUIRED
+    else:
+        assert prices.value.prices[0].amount_krw == amount
