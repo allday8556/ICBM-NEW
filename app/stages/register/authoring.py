@@ -324,6 +324,7 @@ class EnrichmentApply:
 
 
 TAGS_FIELD: Final = "tags"
+CATEGORY_FIELD: Final = "category"
 # ADR-0028 §4: a tag set holds at most 10 tags.
 TAGS_MAX: Final = 10
 
@@ -370,7 +371,7 @@ def _field_of(inputs: AuthoredInputs, field: str) -> FieldValue | None:
 
 
 def _valid_field(field: str) -> bool:
-    if field in ("name", TAGS_FIELD):
+    if field in ("name", TAGS_FIELD, CATEGORY_FIELD):
         return True
     kind, dot, key = field.partition(".")
     return kind in ("attribute", "notice") and dot == "." and bool(key.strip())
@@ -508,6 +509,11 @@ class RegistrationPreparationService:
             )
         result = self._named_result(apply, current.marketplace_key, current.marketplace_account_id)
         value = (result.value or {}).get(apply.value_field)
+        selection = (
+            self._category_selection(result, current, value)
+            if apply.field == CATEGORY_FIELD
+            else None
+        )
         texts = _tag_texts(value) if apply.field == TAGS_FIELD else None
         if apply.field == TAGS_FIELD and texts is None:
             raise InputValidationError(
@@ -515,7 +521,7 @@ class RegistrationPreparationService:
                 "the result names no list of 1 to 10 distinct tags under that value field",
                 details={"value_field": apply.value_field},
             )
-        if apply.field != TAGS_FIELD and (
+        if apply.field not in (TAGS_FIELD, CATEGORY_FIELD) and (
             not isinstance(value, str | bool | int) or (isinstance(value, str) and not value)
         ):
             raise InputValidationError(
@@ -539,7 +545,19 @@ class RegistrationPreparationService:
                     details={"current_revision_no": now.current.revision_no},
                 )
             inputs = decode_inputs(now.current)
-            if texts is not None:
+            if selection is not None:
+                # ADR-0029 AIC-05: an operator-confirmed category is never overwritten.
+                if (
+                    inputs.category is not None
+                    and inputs.category.confirmation is CategoryConfirmation.OPERATOR_CONFIRMED
+                ):
+                    raise RegistrationConflictError(
+                        AI_APPLY_FIELD_LOCKED,
+                        "the category is confirmed; an AI category never overwrites it",
+                        details={"provenance": "OPERATOR_CONFIRMED"},
+                    )
+                applied = replace(inputs, category=selection)
+            elif texts is not None:
                 # A non-empty operator set is confirmed and locked, exactly like the name.
                 if inputs.listing.tags and inputs.listing.tags_provenance is None:
                     raise RegistrationConflictError(
@@ -595,6 +613,38 @@ class RegistrationPreparationService:
                 correlation_id=cid,
             )
             return revised
+
+    def _category_selection(
+        self, result: Any, current: PreparationRecord, value: object
+    ) -> CategorySelection:
+        """ADR-0029 §5: the AI category as an unconfirmed selection under the target's current
+        mapping revision. The result's taxonomy revision must be the target's current one."""
+        taxonomy = (result.value or {}).get("taxonomy_revision")
+        if not isinstance(value, str) or not value.strip() or not isinstance(taxonomy, str):
+            raise InputValidationError(
+                AI_APPLY_VALUE_INVALID,
+                "the result names no category id and taxonomy revision",
+            )
+        policy = self._preflight.target_policy(
+            current.marketplace_key, current.marketplace_account_id
+        )
+        if policy is None or policy.taxonomy_revision != taxonomy:
+            raise RegistrationConflictError(
+                AI_APPLY_RESULT_UNUSABLE,
+                "the category was recommended under another taxonomy than the target's current one",
+                details={
+                    "result_taxonomy_revision": taxonomy,
+                    "target_taxonomy_revision": (
+                        None if policy is None else policy.taxonomy_revision
+                    ),
+                },
+            )
+        return CategorySelection(
+            category_id=value,
+            mapping_revision=policy.category_mapping_revision,
+            taxonomy_revision=taxonomy,
+            confirmation=CategoryConfirmation.AI_SUGGESTION,
+        )
 
     def _named_result(
         self, apply: EnrichmentApply, marketplace_key: str, marketplace_account_id: str
