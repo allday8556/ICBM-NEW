@@ -40,7 +40,7 @@ from integrations.suppliers.collection import (
     SupplierCollection,
     UnresolvedIdentity,
 )
-from integrations.suppliers.platforms import PathForm, PlatformTemplate, SiteBinding
+from integrations.suppliers.platforms import PlatformTemplate, SiteBinding
 from integrations.suppliers.platforms.cafe24.collect import (
     DEFAULT_VOCABULARY,
     EXTRACTION_REVISION,
@@ -55,6 +55,12 @@ from integrations.suppliers.platforms.cafe24.collect.identity import (
     SourceIdentity as ParsedIdentity,
 )
 from integrations.suppliers.platforms.cafe24.collect.identity import _path_number
+from integrations.suppliers.platforms.cafe24.collect.profile import (
+    DEFAULT_LIMITS,
+    PATH_FORMS,
+    ROBOTS_PATH,
+    TERMS_PATH,
+)
 from integrations.suppliers.site_config import SiteConfig, SiteRegion
 
 __all__ = ["TEMPLATE", "authenticated", "bind", "login_required"]
@@ -62,8 +68,6 @@ __all__ = ["TEMPLATE", "authenticated", "bind", "login_required"]
 LOGIN_PATH = "/member/login.html"
 # 마이쇼핑: exists only for a signed-in member. Its contents are never read or kept.
 PROTECTED_TARGET = "/myshop/index.html"
-ROBOTS_PATH = "/robots.txt"
-TERMS_PATH = "/member/agreement.html"
 # Cafe24's secure-login host, which encrypts the login form for every shop on the platform.
 SECURE_LOGIN_HOST = "login2.cafe24ssl.com"
 
@@ -75,27 +79,6 @@ _LOGOUT_ACTION = "/exec/front/Member/logout/"
 # Informational only (never decide the verdict): recorded as signal names, never page content.
 _INFORMATIONAL = {"로그아웃": "logout_text", "/member/modify.html": "member_modify_link"}
 
-# The product path form Cafe24's search-friendly URLs use, with the listing segments an operator's
-# URL may carry after it. A site names a form; it never writes a pattern (ADR-0030 §3).
-PATH_FORMS: Mapping[str, PathForm] = MappingProxyType(
-    {"seo": PathForm(r"/product/[^/]+/\d+(?:/category/\d+)?(?:/display/\d+)?/?")}
-)
-# KM통상's frozen limits are the template defaults, with the owner's 5 MiB per image for every
-# supplier (Issue #219 6086299406). A site may lower them; raising one needs the owner's recorded
-# decision (ADR-0030 §3, PT-12).
-DEFAULT_LIMITS: Mapping[str, float] = MappingProxyType(
-    {
-        "max_image_refs": 30,
-        "max_image_bytes": 5 * 1024 * 1024,
-        "max_image_requests_per_run": 30,
-        "max_new_image_bytes_per_run": 24 * 1024 * 1024,
-        "same_product_interval_s": 60.0,
-        "max_discovered_links": 1000,
-        "max_queue_products": 500,
-        "min_queue_interval_s": 10.0,
-        "issue_ttl_s": 120.0,
-    }
-)
 REQUEST_POLICY = RequestPolicy(
     max_concurrency=1,
     minimum_request_interval_s=2.0,
@@ -122,6 +105,16 @@ LABEL_SLOTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "channel_forbid_coupang": DEFAULT_VOCABULARY.channel_forbid_coupang,
         "channel_forbid_smartstore": DEFAULT_VOCABULARY.channel_forbid_smartstore,
         "purchase_controls": DEFAULT_VOCABULARY.purchase_controls,
+        "title_suffix": DEFAULT_VOCABULARY.title_suffix,
+    }
+)
+# Which vocabulary field each region slot sets.
+REGION_FIELDS: Mapping[str, str] = MappingProxyType(
+    {
+        "detail": "detail_container",
+        "option": "option_container",
+        "detail_menu": "detail_menu",
+        "key_image": "key_image",
     }
 )
 # The regions a site may relocate, by slot, with the template's defaults.
@@ -137,17 +130,22 @@ CAPTURE_REVISION = "cafe24-capture-1"
 
 
 def login_required(response: ProbeResponse) -> Verdict:
-    """The target demands a login: redirect to it, denial, or the logged-off markers."""
+    """The target demands a login: a redirect to it, or the logged-off markers.
+
+    A status alone is never proof (ADR-0007 §4): a denial is recorded as a signal name and decides
+    nothing. KM통상's predicate also accepts 401/403 alone; the template does not.
+    """
     signals: list[str] = []
     if response.location and response.location.startswith("/member/login"):
         signals.append("redirect_to_login")
-    if response.status in (401, 403):
-        signals.append("access_denied")
     if _STATE_LOGOFF in response.body:
         signals.append("state_logoff")
     if _LOGIN_CHECK_REDIRECT in response.body:
         signals.append("login_check_redirect")
-    return bool(signals), tuple(signals)
+    proven = bool(signals)
+    if response.status in (401, 403):
+        signals.append("access_denied")
+    return proven, tuple(signals)
 
 
 def authenticated(response: ProbeResponse) -> Verdict:
@@ -171,7 +169,12 @@ def vocabulary(site: SiteConfig) -> Vocabulary:
         return defaults + tuple(word for word in extra if word not in defaults)
 
     def region(slot: str) -> str:
-        return site.region_overrides.get(slot, REGION_SLOTS[slot]).token
+        # A region the site relocates is matched as it declares it, ``#id`` or ``.class``; one it
+        # does not keeps the template's own token, read as KM통상 reads it.
+        chosen = site.region_overrides.get(slot)
+        if chosen is None:
+            return str(getattr(DEFAULT_VOCABULARY, REGION_FIELDS[slot]))
+        return f"{'#' if chosen.by == 'id' else '.'}{chosen.token}"
 
     return Vocabulary(
         name=words("name"),
@@ -191,6 +194,7 @@ def vocabulary(site: SiteConfig) -> Vocabulary:
         channel_forbid_coupang=words("channel_forbid_coupang"),
         channel_forbid_smartstore=words("channel_forbid_smartstore"),
         purchase_controls=words("purchase_controls"),
+        title_suffix=words("title_suffix"),
         option_container=region("option"),
         detail_container=region("detail"),
         detail_menu=region("detail_menu"),

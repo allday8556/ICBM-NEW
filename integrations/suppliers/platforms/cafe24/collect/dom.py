@@ -35,8 +35,20 @@ VOID_ELEMENTS = frozenset(
 )
 _UNTEXT = frozenset({"script", "style"})
 # A row or cell the storefront hides is still the page's own statement of a fact, but a hidden
-# purchase or sold-out control is not an offer to the reader.
-HIDDEN_MARKERS = ("displaynone", "display:none", "hidden")
+# purchase or sold-out control is not an offer to the reader. Hidden is read exactly: the
+# ``hidden`` attribute, a hiding class token, or a style that hides (spaces ignored). A style such
+# as ``overflow:hidden`` hides nothing.
+HIDDEN_CLASSES = frozenset({"displaynone", "hidden"})
+HIDDEN_STYLES = ("display:none", "visibility:hidden")
+
+
+def _hides(values: Mapping[str, str]) -> bool:
+    if "hidden" in values:
+        return True
+    if any(name.lower() in HIDDEN_CLASSES for name in values.get("class", "").split()):
+        return True
+    style = "".join(values.get("style", "").lower().split())
+    return any(marker in style for marker in HIDDEN_STYLES)
 
 
 def _collapse(words: Iterator[str]) -> str:
@@ -55,6 +67,11 @@ class Node:
     # The element's own contents in source order — its words and the elements written inside it.
     content: "list[str | Node]" = field(default_factory=list, repr=False)
     hidden: bool = False
+    # A control the page disables is no offer to the reader.
+    disabled: bool = False
+    # Whether the page closed this element with its own end tag. An element the page never closed
+    # stands over everything after it, so it never proves where its contents end.
+    closed: bool = False
 
     def _words(self, *, painted: bool, skip: tuple[str, ...]) -> Iterator[str]:
         for item in self.content:
@@ -104,10 +121,28 @@ class Node:
                 yield from item.descendants()
 
     def marks(self, token: str) -> bool:
+        """Whether the element carries ``token``: ``#name`` is exactly its id, ``.name`` exactly
+        one of its classes, and a bare token its id or a class that starts with it (KM통상's)."""
+        if token.startswith("#"):
+            return token[1:].lower() == self.element_id.lower()
+        if token.startswith("."):
+            return any(name.lower() == token[1:].lower() for name in self.classes)
         token = token.lower()
         return token == self.element_id.lower() or any(
             name.lower() == token or name.lower().startswith(token) for name in self.classes
         )
+
+    def marks_exactly(self, token: str) -> bool:
+        """Whether the element carries ``token`` exactly: ``#name`` its id, ``.name`` one of its
+        classes, and a bare token either."""
+        bare = token.lstrip("#.").lower()
+        by_id = bare == self.element_id.lower()
+        by_class = any(name.lower() == bare for name in self.classes)
+        if token.startswith("#"):
+            return by_id
+        if token.startswith("."):
+            return by_class
+        return by_id or by_class
 
     def within(self, token: str) -> bool:
         token = token.lower()
@@ -139,15 +174,14 @@ class _Reader(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {name: value or "" for name, value in attrs}
         classes = tuple(name for name in values.get("class", "").split() if name)
-        marked = f"{values.get('class', '')} {values.get('style', '')}".lower()
         node = Node(
             tag=tag,
             element_id=values.get("id", "").strip(),
             classes=classes,
             attributes=values,
             ancestors=self._ancestors(),
-            hidden=any(marker in marked for marker in HIDDEN_MARKERS)
-            or any(node.hidden for node in self._open),
+            hidden=_hides(values) or any(node.hidden for node in self._open),
+            disabled="disabled" in values or any(node.disabled for node in self._open),
         )
         self.nodes.append(node)
         if self._open:
@@ -164,6 +198,8 @@ class _Reader(HTMLParser):
             return
         for depth in range(len(self._open) - 1, -1, -1):
             if self._open[depth].tag == tag:
+                # Only this element was closed by the page; anything above it is unwound unclosed.
+                self._open[depth].closed = True
                 del self._open[depth:]
                 return
 

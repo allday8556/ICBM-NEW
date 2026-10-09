@@ -791,6 +791,13 @@ Owner decision 2026-10-09 (Issue #219 comment `6078048955`) starts the category 
 category recommendation chosen only from the official leaf-category catalog
 (`documents/decisions/adr/0029-smartstore-category-recommendation.md`). Attributes, standard options
 and notices keep their gate until their authoritative metadata contracts exist.
+Owner decision 2026-10-10 (Issue #219 comment `6085853541`) activates the Detail Guidance module
+planned in Issue #61 after the first vertical: store-wide top and bottom notices, standing and
+period, drawn by ICBM into images from five templates (three general, two shipping, with editable
+domestic and overseas example presets; `6087917430`), overridable per product, and placed in the
+SmartStore detail page through composition v3
+(`documents/decisions/adr/0033-detail-guidance-image-notices.md`). It is not AI, sends nothing
+LIVE, and updates no registered listing in bulk.
 
 For the positive-option/cross-market lane, after the current no-positive-option first vertical:
 

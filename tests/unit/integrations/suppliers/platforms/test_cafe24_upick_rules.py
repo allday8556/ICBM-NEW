@@ -38,6 +38,7 @@ WORDS = vocabulary(
             "channel_all_allowed": ["모든마켓 판매가능"],
             "channel_closed_only": ["폐쇄몰", "오픈마켓 판매불가"],
             "channel_forbid_coupang": ["쿠팡판매 불가"],
+            "title_suffix": ["- U-PICK B2B"],
         },
         region_overrides={"key_image": SiteRegion("class", "prdImg")},
     )

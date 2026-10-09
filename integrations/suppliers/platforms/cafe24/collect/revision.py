@@ -7,8 +7,9 @@ this revision joined with the site's own (``cafe24-1+<site revision>``), so a te
 advances every site on it.
 
 ``cafe24-1`` (2026-10-10): KM통상's ``kmretail-3`` rules, with the words and regions a site may vary
-read from its vocabulary, and one stated difference: a shipping-fee cell that states more than
-one amount is ``REVIEW_REQUIRED``, never its first amount (ADR-0010 §7).
+read from its vocabulary, its profile values (paths, and the owner's 5 MiB per image, Issue #219
+``6086299406``) in ``profile.py``, and the stated differences the ``facts`` module lists: wherever
+KM통상's parser reads a first value, a guess or nothing, the template fails closed.
 
 ``cafe24-2`` (2026-10-10, ADR-0031 and ADR-0032 after the U-PICK reconnaissance):
 - the sales-channel field, read from the site's own phrases;
