@@ -38,7 +38,8 @@ TAG_FACT_FIELDS: Final = (
     "options",
     "detail_description",
 )
-KEYWORDS_MAX: Final = 3
+KEYWORDS_MAX: Final = 5
+WORD_MIN_LENGTH: Final = 2
 KEYWORD_MAX_LENGTH: Final = 50
 POOL_MAX: Final = 60
 RECOMMENDED_MAX: Final = 10
@@ -46,7 +47,8 @@ AI_TAGS_NONE_USABLE: Final = "AI_TAGS_NONE_USABLE"
 
 _BRACKETED: Final = re.compile(r"[\[\(\{【〔<][^\]\)\}】〕>]*[\]\)\}】〕>]")
 _QUANTITY: Final = re.compile(
-    r"\d+(?:[.,]\d+)?\s*(?:ml|l|g|kg|mg|cm|mm|m|ea|개입|개|매|팩|입|정|포|병|캔|봉|박스|세트|p)"
+    r"\d+(?:[.,]\d+)?\s*(?:ml|l|g|kg|mg|cm|mm|m|ea|개입|개월|개|매|팩|입|정|포|병|캔|봉|박스|세트"
+    r"|캡슐|알|회분|일분|인분|장|롤|켤레|족|p)"
     r"(?![0-9A-Za-z가-힣])",
     re.IGNORECASE,
 )
@@ -82,12 +84,26 @@ def clean_name(name: str) -> str:
 
 
 def keywords(facts: Sequence[Mapping[str, Any]]) -> list[str]:
-    """At most 3 distinct queries from the confirmed facts: the cleaned name, the brand, the
-    first two words of the cleaned name; each trimmed to 50 characters. No fact, no query."""
+    """At most 5 distinct queries from the confirmed facts: the cleaned name, the brand, then the
+    cleaned name's own words (at least 2 characters, not a bare number), longest first; each
+    trimmed to 50 characters. No fact, no query.
+
+    ADR-0028 §4 implementation note (R0, Issue #219 6079478595): the platform's recommended-tag
+    search answers at most 20 tags per keyword, and a whole product name finds few of them, so
+    single words are asked as well."""
     name = confirmed_text(facts, "original_name")
     brand = confirmed_text(facts, "brand")
     cleaned = clean_name(name) if name else ""
-    candidates = [cleaned, brand or "", " ".join(cleaned.split()[:2])]
+    words = sorted(
+        (
+            word
+            for word in dict.fromkeys(cleaned.split())
+            if len(word) >= WORD_MIN_LENGTH and not word.replace(",", "").replace(".", "").isdigit()
+        ),
+        key=len,
+        reverse=True,
+    )
+    candidates = [cleaned, brand or "", *words]
     found: list[str] = []
     for candidate in candidates:
         keyword = candidate[:KEYWORD_MAX_LENGTH].strip()

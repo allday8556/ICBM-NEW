@@ -552,8 +552,14 @@ fingerprint. The permission attestation is not invalidated by it (owner decision
 
 **Runtime evidence.** `R0` is the first adopted read of each endpoint on the operating account,
 through ICBM's own caller, recording structure only. It confirms the `상품` group and that every
-asked tag is answered once. It is `PENDING`. Until it exists, a missing group surfaces as
-`GW.AUTHN`, and an unanswered tag stays not checked. Neither is ever read as success.
+asked tag is answered once. It is **recorded** in Issue #219 comment `6079478595` (`SOURCES.md`
+§5.10):
+- both reads answered HTTP 200 and passed their predicates, with no `GW.AUTHN`;
+- the recommendation was an array of `{code: integer, text}`;
+- the one asked tag was answered exactly once with a boolean `restricted`.
+
+A missing group still surfaces as `GW.AUTHN`, and an unanswered tag stays not checked. Neither is
+ever read as success.
 
 ---
 
