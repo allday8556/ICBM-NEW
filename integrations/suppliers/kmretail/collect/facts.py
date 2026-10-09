@@ -76,6 +76,9 @@ DETAIL_MENU = "dMenu"
 TIER_LABELS = ("수량별 가격", "수량별 할인", "수량 할인", "수량별")
 
 _AMOUNT = re.compile(r"(\d[\d,]*)\s*원?")
+# ADR-0032 §4 (the owner's rule, Issue #219 6086421199): a fee stated as a range, ``A원 ~ B원``,
+# is read as its highest amount.
+_RANGE = re.compile(r"(\d[\d,]*)\s*원?\s*[~∼〜]\s*(\d[\d,]*)\s*원")
 _EVIDENCE_LIMIT = 200
 
 
@@ -259,6 +262,21 @@ def _shipping(rows: Sequence[tuple[str, str, Node]]) -> FieldFact:
             (*evidence, Evidence(EvidenceKind.DOM_TEXT, "th:배송비 + td", FieldStatus.ABSENT)),
         )
     amount = _won(fee[0][1])
+    ranged = _RANGE.search(fee[0][1].replace(" ", ""))
+    if ranged is not None:
+        # The owner's rule: the highest amount of a stated range, the page's words kept.
+        bounds = [int(group.replace(",", "")) for group in ranged.groups()]
+        amount = max(bounds)
+        evidence = (
+            *evidence,
+            Evidence(
+                EvidenceKind.DOM_TEXT,
+                f"th:{fee[0][0]} + td",
+                FieldStatus.CONFIRMED,
+                observed=_quote(fee[0][1]),
+                normalized=str(amount),
+            ),
+        )
     if amount is None:
         return FieldFact(FieldStatus.REVIEW_REQUIRED, None, evidence)
     kind = ShippingKind.FREE if amount == 0 else ShippingKind.FIXED
@@ -447,4 +465,6 @@ def parse_fields(document: DocumentView) -> dict[str, FieldFact]:
         "origin": _text_row(rows, ORIGIN_LABELS),
         "notice": _absent("th:상품정보제공고시 + td"),
         "detail_description": _detail_description(nodes),
+        # ADR-0031 §3: KM통상's reconnaissance found no sales-channel statement.
+        "sales_channels": _absent("th:판매가능플랫폼 + td"),
     }

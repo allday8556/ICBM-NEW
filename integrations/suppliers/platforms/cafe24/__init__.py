@@ -112,6 +112,14 @@ LABEL_SLOTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "manufacturer": DEFAULT_VOCABULARY.manufacturer,
         "origin": DEFAULT_VOCABULARY.origin,
         "sold_out": DEFAULT_VOCABULARY.sold_out,
+        "purchase_price": DEFAULT_VOCABULARY.purchase_price,
+        "list_price": DEFAULT_VOCABULARY.list_price,
+        "sales_channel_row": DEFAULT_VOCABULARY.sales_channel_row,
+        "channel_all_allowed": DEFAULT_VOCABULARY.channel_all_allowed,
+        "channel_closed_only": DEFAULT_VOCABULARY.channel_closed_only,
+        "channel_forbid_coupang": DEFAULT_VOCABULARY.channel_forbid_coupang,
+        "channel_forbid_smartstore": DEFAULT_VOCABULARY.channel_forbid_smartstore,
+        "purchase_controls": DEFAULT_VOCABULARY.purchase_controls,
     }
 )
 # The regions a site may relocate, by slot, with the template's defaults.
@@ -120,6 +128,7 @@ REGION_SLOTS: Mapping[str, SiteRegion] = MappingProxyType(
         "detail": SiteRegion("id", DEFAULT_VOCABULARY.detail_container),
         "option": SiteRegion("class", DEFAULT_VOCABULARY.option_container),
         "detail_menu": SiteRegion("class", DEFAULT_VOCABULARY.detail_menu),
+        "key_image": SiteRegion("class", DEFAULT_VOCABULARY.key_image),
     }
 )
 CAPTURE_REVISION = "cafe24-capture-1"
@@ -172,9 +181,18 @@ def vocabulary(site: SiteConfig) -> Vocabulary:
         manufacturer=words("manufacturer"),
         origin=words("origin"),
         sold_out=words("sold_out"),
+        purchase_price=words("purchase_price"),
+        list_price=words("list_price"),
+        sales_channel_row=words("sales_channel_row"),
+        channel_all_allowed=words("channel_all_allowed"),
+        channel_closed_only=words("channel_closed_only"),
+        channel_forbid_coupang=words("channel_forbid_coupang"),
+        channel_forbid_smartstore=words("channel_forbid_smartstore"),
+        purchase_controls=words("purchase_controls"),
         option_container=region("option"),
         detail_container=region("detail"),
         detail_menu=region("detail_menu"),
+        key_image=region("key_image"),
     )
 
 

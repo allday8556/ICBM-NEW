@@ -132,13 +132,16 @@ def role_rules(words: Vocabulary = DEFAULT_VOCABULARY) -> tuple[RoleRule, ...]:
         RoleRule(
             "cafe24.primary.key_image",
             ImageRole.PRIMARY,
-            "keyImg",
+            words.key_image,
             ("xans-product-image",),
             reference="BigImage",
         ),
         # Everything else the representative image's container holds is the platform's furniture.
         RoleRule(
-            "cafe24.ui.key_image_furniture", ImageRole.UI_COMMON, "keyImg", ("xans-product-image",)
+            "cafe24.ui.key_image_furniture",
+            ImageRole.UI_COMMON,
+            words.key_image,
+            ("xans-product-image",),
         ),
         # The additional-image list of the same module.
         RoleRule("cafe24.thumbnail.additional", ImageRole.THUMBNAIL, "xans-product-addimage"),

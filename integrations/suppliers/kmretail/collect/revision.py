@@ -14,6 +14,10 @@ layout furniture; and the profile's per-image bound is 4 MiB.
 ``kmretail-3`` (2026-10-03, the user's rule): a minimum-price row that says the price is free
 (``자율``) states that there is no minimum, so the field is ``ABSENT`` like an unstated one; any
 other row without an amount stays ``REVIEW_REQUIRED``.
+
+``kmretail-4`` (2026-10-10, ADR-0031 and ADR-0032): the page states no sales-channel restriction
+(``sales_channels`` is ``ABSENT``), and a shipping fee stated as a range is read as its highest
+amount (the owner's rule, Issue #219 6086421199).
 """
 
-EXTRACTION_REVISION = "kmretail-3"
+EXTRACTION_REVISION = "kmretail-4"

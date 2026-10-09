@@ -226,7 +226,8 @@ class AtomicSKUEconomicsUnit:
             if prices_row is None or prices_row.status != FieldStatus.CONFIRMED.value
             else value_from_json("prices", prices_row.value_json)
         )
-        if not isinstance(prices, PricesValue) or len(prices.prices) != 1:
+        chosen = prices.purchase() if isinstance(prices, PricesValue) else None
+        if chosen is None:
             raise InputValidationError(
                 "PRODUCTS_ATOMIC_SKU_BASE_PRICE_UNRESOLVED",
                 "one exact confirmed base purchase price is required",
@@ -239,7 +240,7 @@ class AtomicSKUEconomicsUnit:
                 "PRODUCTS_ATOMIC_SKU_OPTION_DELTA_UNRESOLVED",
                 "the source configuration must state its option price delta explicitly",
             )
-        base_cost = prices.prices[0].amount_krw
+        base_cost = chosen.amount_krw
         purchase_cost = base_cost + configuration.additional_price_krw
         if purchase_cost < 0:
             raise InputValidationError(

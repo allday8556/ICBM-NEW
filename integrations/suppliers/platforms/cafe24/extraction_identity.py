@@ -4,7 +4,7 @@ The hashed set is every module of ``collect/``; this manifest is never part of i
 extraction identity joins this revision with its own and hashes this fingerprint with its file.
 """
 
-EXTRACTOR_REVISION = "cafe24-1"
+EXTRACTOR_REVISION = "cafe24-2"
 EXTRACTOR_INPUTS = (
     "integrations/suppliers/platforms/cafe24/collect/__init__.py",
     "integrations/suppliers/platforms/cafe24/collect/dom.py",
@@ -16,4 +16,4 @@ EXTRACTOR_INPUTS = (
 # A reader cannot recompute a SHA-256; the proof is mechanical:
 # tests/contracts/test_repository_rules.py recomputes this digest from EXTRACTOR_INPUTS, and the
 # merge guard requires that test green in the FULL CI of the exact HEAD.
-EXTRACTOR_FINGERPRINT = "4eb1086cf5df81c8601d48d9cd4810a4449f74fb5693d86836300e76bb5ef056"
+EXTRACTOR_FINGERPRINT = "7b4b87b68cc9b119f6f1735a9d69eba8d489bddebc3d530a3c44aa1d39838a14"

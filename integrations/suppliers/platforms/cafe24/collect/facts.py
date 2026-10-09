@@ -40,13 +40,17 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 from app.stages.collect.facts import (
+    SALES_CHANNEL_MARKETPLACES,
     Availability,
     Evidence,
     EvidenceKind,
     FieldFact,
     FieldStatus,
     MoneyValue,
+    PriceRole,
     PricesValue,
+    SalesChannelScope,
+    SalesChannelsValue,
     ShippingKind,
     ShippingValue,
     SourcePrice,
@@ -59,8 +63,6 @@ from integrations.suppliers.platforms.cafe24.collect.dom import Node, meta, read
 # The word a page writes in the minimum-price row when the reseller sets the price freely
 # (판매가 자율): the page states that there is no minimum. The user's rule of 2026-10-03.
 NO_MINIMUM_WORD = "자율"
-# Controls the reader can act on.
-PURCHASE_CONTROLS = ("btnBuy", "btnBasket", "btnCart")
 # The words a page would have to use to state a quantity tier. No accepted rule says how a Cafe24
 # skin lays one out, so a tier is never read into a value.
 TIER_LABELS = ("수량별 가격", "수량별 할인", "수량 할인", "수량별")
@@ -80,16 +82,40 @@ class Vocabulary:
     manufacturer: tuple[str, ...] = ("제조사",)
     origin: tuple[str, ...] = ("원산지",)
     sold_out: tuple[str, ...] = ("품절", "SOLD OUT", "SOLDOUT", "일시품절")
+    # ADR-0032 §2: the labels whose price is the purchase price, and those that are list prices.
+    # A template declares none; only a site's words give a price a role.
+    purchase_price: tuple[str, ...] = ()
+    list_price: tuple[str, ...] = ()
+    # ADR-0031 §3: the sales-channel row label and the phrases that read it. Empty by default: a
+    # row the site has not worded stays under review, never allowed.
+    sales_channel_row: tuple[str, ...] = ()
+    channel_all_allowed: tuple[str, ...] = ()
+    channel_closed_only: tuple[str, ...] = ()
+    channel_forbid_coupang: tuple[str, ...] = ()
+    channel_forbid_smartstore: tuple[str, ...] = ()
+    # Controls the reader can act on: the older skins' ids and the smart-design skins' own.
+    purchase_controls: tuple[str, ...] = (
+        "btnBuy",
+        "btnBasket",
+        "btnCart",
+        "actionBuy",
+        "actionCart",
+    )
     option_container: str = "xans-product-option"
     detail_container: str = "prdDetail"
     # The tab strip a skin repeats above every detail panel. Its words are navigation, so a
     # description block that holds nothing but images must not be read as if it stated them.
     detail_menu: str = "dMenu"
+    # The representative image's container inside the product image module.
+    key_image: str = "keyImg"
 
 
 DEFAULT_VOCABULARY = Vocabulary()
 
 _AMOUNT = re.compile(r"(\d[\d,]*)\s*원?")
+# ADR-0032 §4 (the owner's rule, Issue #219 6086421199): a fee stated as a range, ``A원 ~ B원``,
+# is read as its highest amount.
+_RANGE = re.compile(r"(\d[\d,]*)\s*원?\s*[~∼〜]\s*(\d[\d,]*)\s*원")
 _EVIDENCE_LIMIT = 200
 
 
@@ -153,6 +179,10 @@ def _name(
     stated = _labelled(rows, words.name)
     if not declared and not stated:
         return _absent("meta[og:title]")
+    if declared and stated and declared != stated[0][1] and declared.startswith(stated[0][1]):
+        # A skin that appends the shop's name to the declared title (U-PICK: "<name> - U-PICK
+        # B2B") states the product's own name in its 상품명 row; the suffix is not the name.
+        declared = ""
     text = declared or stated[0][1]
     evidence = [
         Evidence(
@@ -186,13 +216,21 @@ def _prices(
 ) -> FieldFact:
     prices: list[SourcePrice] = []
     evidence: list[Evidence] = []
-    for label, value, _cell in _labelled(rows, words.price):
+    labels = tuple(dict.fromkeys((*words.price, *words.purchase_price, *words.list_price)))
+    for label, value, _cell in _labelled(rows, labels):
         amount = _won(value)
         if amount is None:
             continue
         if any(price.label == label for price in prices):
             continue  # the same labelled price repeated in another table is one source price
-        prices.append(SourcePrice(label=label, amount_krw=amount))
+        role = (
+            PriceRole.PURCHASE
+            if label in words.purchase_price
+            else PriceRole.LIST
+            if label in words.list_price
+            else None
+        )
+        prices.append(SourcePrice(label=label, amount_krw=amount, role=role))
         evidence.append(
             Evidence(
                 EvidenceKind.DOM_TEXT,
@@ -279,6 +317,21 @@ def _shipping(rows: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Field
             (*evidence, Evidence(EvidenceKind.DOM_TEXT, fee_locator, FieldStatus.ABSENT)),
         )
     amount = _won(fee[0][1])
+    ranged = _RANGE.search(fee[0][1].replace(" ", ""))
+    if ranged is not None:
+        # The owner's rule: the highest amount of a stated range, the page's words kept.
+        bounds = [int(group.replace(",", "")) for group in ranged.groups()]
+        amount = max(bounds)
+        evidence = (
+            *evidence,
+            Evidence(
+                EvidenceKind.DOM_TEXT,
+                f"th:{fee[0][0]} + td",
+                FieldStatus.CONFIRMED,
+                observed=_quote(fee[0][1]),
+                normalized=str(amount),
+            ),
+        )
     if amount is None:
         return FieldFact(FieldStatus.REVIEW_REQUIRED, None, evidence)
     kind = ShippingKind.FREE if amount == 0 else ShippingKind.FIXED
@@ -294,7 +347,7 @@ def _stock(nodes: Sequence[Node], words: Vocabulary) -> FieldFact:
     controls = [
         node
         for node in nodes
-        if not node.hidden and any(node.marks(name) for name in PURCHASE_CONTROLS)
+        if not node.hidden and any(node.marks(name) for name in words.purchase_controls)
     ]
     sold_out = [
         node
@@ -433,6 +486,74 @@ def _detail_description(nodes: Sequence[Node], words: Vocabulary) -> FieldFact:
     )
 
 
+def _squash(text: str) -> str:
+    return "".join(text.split())
+
+
+def _sales_channels(
+    nodes: Sequence[Node], rows: Sequence[tuple[str, str, Node]], words: Vocabulary
+) -> FieldFact:
+    """ADR-0031 §3: what the page says about where the product may be resold.
+
+    Only the site's own phrases are read, in its sales-channel row and in the description text;
+    nothing is read from an image. A row no phrase reads, or phrases that contradict each other,
+    stay under review: an unread restriction is never an allowed one.
+    """
+    stated = _labelled(rows, words.sales_channel_row) if words.sales_channel_row else []
+    detail = [node for node in nodes if node.marks(words.detail_container)]
+    sources: list[tuple[str, str]] = [(f"th:{label} + td", value) for label, value, _ in stated]
+    if detail:
+        sources.append((f"#{words.detail_container}", detail[0].text_outside(words.detail_menu)))
+
+    def found(phrases: Sequence[str]) -> list[tuple[str, str, str]]:
+        return [
+            (locator, phrase, text)
+            for locator, text in sources
+            for phrase in phrases
+            if _squash(phrase) in _squash(text)
+        ]
+
+    allowed = found(words.channel_all_allowed)
+    closed = found(words.channel_closed_only)
+    forbids = {
+        "coupang": found(words.channel_forbid_coupang),
+        "smartstore": found(words.channel_forbid_smartstore),
+    }
+    assert set(forbids) <= SALES_CHANNEL_MARKETPLACES
+    restricting = closed + [hit for hits in forbids.values() for hit in hits]
+    matched = allowed + restricting
+    if not matched:
+        if stated:
+            return _review(f"th:{stated[0][0]} + td")
+        return _absent(f"th:{(words.sales_channel_row or ('판매가능플랫폼',))[0]} + td")
+    evidence_status = FieldStatus.REVIEW_REQUIRED if allowed and restricting else None
+    if evidence_status is None and stated and not any(hit[0].startswith("th:") for hit in matched):
+        # The row says something no phrase reads, even if the description says something else.
+        evidence_status = FieldStatus.REVIEW_REQUIRED
+    evidence = tuple(
+        Evidence(
+            EvidenceKind.DOM_TEXT,
+            locator,
+            evidence_status or FieldStatus.CONFIRMED,
+            observed=_quote(phrase),
+        )
+        for locator, phrase, _text in matched
+    )
+    if evidence_status is not None:
+        return FieldFact(FieldStatus.REVIEW_REQUIRED, None, evidence)
+    policy = _quote(" / ".join(dict.fromkeys(phrase for _locator, phrase, _text in matched)))
+    if closed:
+        value = SalesChannelsValue(scope=SalesChannelScope.CLOSED_MALL_ONLY, policy_text=policy)
+    elif restricting:
+        forbidden = tuple(sorted(key for key, hits in forbids.items() if hits))
+        value = SalesChannelsValue(
+            scope=SalesChannelScope.LISTED, forbidden=forbidden, policy_text=policy
+        )
+    else:
+        value = SalesChannelsValue(scope=SalesChannelScope.ALL_ALLOWED, policy_text=policy)
+    return FieldFact(FieldStatus.CONFIRMED, value, evidence)
+
+
 def _text_row(rows: Sequence[tuple[str, str, Node]], labels: Sequence[str]) -> FieldFact:
     stated = _labelled(rows, labels)
     if not stated:
@@ -471,4 +592,5 @@ def parse_fields(
         "origin": _text_row(rows, words.origin),
         "notice": _absent("th:상품정보제공고시 + td"),
         "detail_description": _detail_description(nodes, words),
+        "sales_channels": _sales_channels(nodes, rows, words),
     }
