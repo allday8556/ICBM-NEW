@@ -26,7 +26,7 @@ dependencies = [
     # secret as the salt (documents/contracts/platforms/smartstore/AUTH.md §4). Added for M2 PR-A.
     "bcrypt>=5.0",
     # Detail Guidance notice images: one deterministic renderer (ADR-0033 §3).
-    "pillow>=12.3,<13",
+    "pillow==12.3.0",
 ]
 
 [project.optional-dependencies]
