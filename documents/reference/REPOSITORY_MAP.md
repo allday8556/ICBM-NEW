@@ -143,9 +143,9 @@ payload or external call and leaves legacy Item economics unchanged.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 65 | adapters: suppliers and marketplaces |
+| `integrations/` | 66 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 28 |  |
-| `integrations/suppliers/` | 33 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
+| `integrations/suppliers/` | 34 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
 | `tests/` | 317 | tests |
 | `tests/contracts/` | 10 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 13 | test fixtures (byte-pinned) |

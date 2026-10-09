@@ -16,8 +16,9 @@ layout furniture; and the profile's per-image bound is 4 MiB.
 other row without an amount stays ``REVIEW_REQUIRED``.
 
 ``kmretail-4`` (2026-10-10, ADR-0031 and ADR-0032): the page states no sales-channel restriction
-(``sales_channels`` is ``ABSENT``), and a shipping fee stated as a range is read as its highest
-amount (the owner's rule, Issue #219 6086421199).
+(``sales_channels`` is ``ABSENT``); a shipping fee stated as a range is read as its highest amount
+(the owner's rule, Issue #219 6086421199); and the profile's per-image bound is 5 MiB (the owner's
+decision for every supplier, Issue #219 6086299406).
 """
 
 EXTRACTION_REVISION = "kmretail-4"

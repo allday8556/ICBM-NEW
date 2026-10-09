@@ -56,8 +56,8 @@ STOREFRONT_HOST = "kmretail.co.kr"
 IMAGE_HOSTS = frozenset({STOREFRONT_HOST, "onewbio.diskn.com"})
 # Observed: largest sampled image 1,437,349 bytes; 32 references, 13 of them product evidence;
 # the E3 real run met images over 2 MiB, and the user set 4 MiB (2026-10-03). The owner then set
-# 5 MiB for every supplier (Issue #219 6086299406, 2026-10-10), after a U-PICK description image
-# of about 4.4 MB. The limit is the profile's, not the parser's, so the extraction identity stays.
+# 5 MiB for every supplier (Issue #219 6086299406, 2026-10-10), after a U-PICK description image of
+# about 4.4 MB; as a semantic profile change (ADR-0010 §12) it advances the revision (kmretail-4).
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_IMAGE_REFS = 30
 MAX_IMAGE_REQUESTS_PER_RUN = 30

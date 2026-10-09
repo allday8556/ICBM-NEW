@@ -11,9 +11,10 @@ EXTRACTOR_INPUTS = (
     "integrations/suppliers/platforms/cafe24/collect/facts.py",
     "integrations/suppliers/platforms/cafe24/collect/identity.py",
     "integrations/suppliers/platforms/cafe24/collect/images.py",
+    "integrations/suppliers/platforms/cafe24/collect/profile.py",
     "integrations/suppliers/platforms/cafe24/collect/revision.py",
 )
 # A reader cannot recompute a SHA-256; the proof is mechanical:
 # tests/contracts/test_repository_rules.py recomputes this digest from EXTRACTOR_INPUTS, and the
 # merge guard requires that test green in the FULL CI of the exact HEAD.
-EXTRACTOR_FINGERPRINT = "4c4bf982fb098ea1ce5ff1def42d9f917ed9c6b44632914125dff216766aa384"
+EXTRACTOR_FINGERPRINT = "45210fdd7bfff12b39e62b1adc71b4407aa6061b4d789fb52161330be246cf2c"
