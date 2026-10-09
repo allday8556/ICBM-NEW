@@ -8,6 +8,7 @@ a recommendation fresh (dependency-scoped staleness).
 
 from typing import Final
 
+from app.capabilities.ai.task_context import TaskContextSource
 from app.stages.products.enrichment import ResultSchema, TaskDefinition
 
 PRODUCT_NAME_TASK: Final = TaskDefinition(
@@ -25,3 +26,27 @@ PRODUCT_NAME_TASK: Final = TaskDefinition(
 )
 
 PRODUCTION_TASKS: Final = (PRODUCT_NAME_TASK,)
+
+
+def platform_tag_task(
+    *,
+    task_key: str,
+    prompt_key: str,
+    marketplace: str,
+    result_key: str,
+    fact_fields: tuple[str, ...],
+    schema_version: str,
+    context: TaskContextSource,
+) -> TaskDefinition:
+    """ADR-0028 §4: a marketplace's tag task. It composes the bundle under its own enrichment id,
+    needs a target of that marketplace, and gathers the platform's candidates in the job; the
+    marketplace and its reads are the composition root's to name, never this owner's."""
+    return TaskDefinition(
+        task_key=task_key,
+        results={result_key: ResultSchema(("recommended",))},
+        fact_fields=fact_fields,
+        schema_version=schema_version,
+        prompt_key=prompt_key,
+        marketplace=marketplace,
+        context=context,
+    )

@@ -41,15 +41,22 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.capabilities.ai.composer import ComposedRequest, PromptComposer
-from app.capabilities.ai.execution import AIExecution, Execution
-from app.capabilities.ai.provider import RequestedIdentity, not_configured
+from app.capabilities.ai.execution import AIExecution, Execution, unknown_provenance
+from app.capabilities.ai.provider import (
+    ProviderOutcome,
+    RequestedIdentity,
+    not_configured,
+    retryable,
+)
 from app.capabilities.ai.registry import POLICY_BY_MARKETPLACE
+from app.capabilities.ai.task_context import TaskContext, TaskContextSource
 from app.capabilities.audit.models import AuditEventType, AuditOutcome
 from app.capabilities.audit.service import AuditEntry, AuditLog
 from app.capabilities.jobs.registry import JobContext, JobDefinition
 from app.capabilities.jobs.service import JobService
 from app.platform.core.clock import Clock
 from app.platform.core.errors import (
+    AppError,
     ErrorClass,
     InputValidationError,
     NotFoundError,
@@ -71,6 +78,7 @@ AI_TARGET_UNKNOWN: Final = "AI_TARGET_UNKNOWN"
 AI_TARGET_HAS_NO_POLICY: Final = "AI_TARGET_HAS_NO_POLICY"
 AI_OUTPUT_FIELD_MISSING: Final = "AI_OUTPUT_FIELD_MISSING"
 AI_OUTPUT_SCHEMA_INVALID: Final = "AI_OUTPUT_SCHEMA_INVALID"
+AI_TASK_NEEDS_TARGET: Final = "AI_TASK_NEEDS_TARGET"
 # The structured envelope every result object carries (ADR-0026 §5, Issue #30 refinement):
 # its evidence, its confidence in 0..1 and whether it requires review.
 ENVELOPE: Final = ("evidence", "confidence", "requires_review")
@@ -89,27 +97,42 @@ class ResultSchema:
 
 
 @dataclass(frozen=True)
+class Target:
+    marketplace_key: str
+    marketplace_account_id: str
+
+
+@dataclass(frozen=True)
 class TaskDefinition:
     """One runnable task: its registry task, its output schema by result key, the fact fields it
     depends on, and the version of its output schema.
 
     Each result key names one object of the output, recorded as its own state. The single key
-    ``result`` means the whole output is the one result object."""
+    ``result`` means the whole output is the one result object.
+
+    ADR-0028 §4 adds three optional parts:
+    - ``prompt_key``: the registry task it composes when that is not its own key (the tag task
+      composes the v29 bundle under its own enrichment id);
+    - ``marketplace``: the marketplace a request must target;
+    - ``context``: what the job gathers before the call (the platform's candidates, the signals)
+      and the filter it applies to the answer. Gathering reads a provider, so it runs in the job
+      only, never on a request or a read."""
 
     task_key: str
     results: Mapping[str, ResultSchema]
     fact_fields: tuple[str, ...]
     schema_version: str
+    prompt_key: str | None = None
+    marketplace: str | None = None
+    context: TaskContextSource | None = None
 
     @property
     def keys(self) -> tuple[str, ...]:
         return tuple(self.results)
 
-
-@dataclass(frozen=True)
-class Target:
-    marketplace_key: str
-    marketplace_account_id: str
+    @property
+    def composed_key(self) -> str:
+        return self.prompt_key or self.task_key
 
 
 def _canonical(value: Any) -> str:
@@ -306,12 +329,21 @@ class EnrichmentService:
             )
         tasks = [self._task(key) for key in request.tasks]
         target = self._target(request.target)
+        for task in tasks:
+            if task.marketplace and (target is None or target.marketplace_key != task.marketplace):
+                raise InputValidationError(
+                    AI_TASK_NEEDS_TARGET,
+                    f"{task.task_key} needs a {task.marketplace} target",
+                    details={"task": task.task_key, "marketplace": task.marketplace},
+                )
         decisions: list[TaskDecision] = []
         queued: list[str] = []
         with self._db.read() as session:
             for task in tasks:
                 inputs = self._inputs(task, product_group_id, target, identity)
-                fresh = all(
+                # A task with a gathered context can only be judged fresh by the job, which
+                # gathers it; a request never reads a provider (ADR-0028 §4).
+                fresh = task.context is None and all(
                     self._fresh(session, product_group_id, task, key, target, inputs.fingerprint)
                     for key in task.keys
                 )
@@ -352,7 +384,39 @@ class EnrichmentService:
         retry: Execution | None = None
         for task_key in ctx.payload["tasks"]:
             task = self._task(str(task_key))
-            inputs = self._inputs(task, product_group_id, target, identity)
+            gathered: TaskContext | None = None
+            if task.context is not None:
+                assert target is not None  # the request refused a missing target
+                local = self._inputs(task, product_group_id, target, identity)
+                try:
+                    gathered = task.context.gather(local.inputs["facts"], target)
+                except AppError as error:
+                    if retryable(error.error_class) and ctx.attempt_no < ctx.max_attempts:
+                        retry = Execution(
+                            request=local.composed,
+                            identity=identity,
+                            outcome=_refused_outcome(identity, error),
+                        )
+                        continue
+                    with self._db.read() as session:
+                        unsettled = [
+                            key
+                            for key in task.keys
+                            if not self._settled_by(
+                                session, product_group_id, task, key, target, ctx
+                            )
+                        ]
+                    if unsettled:
+                        execution = Execution(
+                            request=local.composed,
+                            identity=identity,
+                            outcome=_refused_outcome(identity, error),
+                        )
+                        self._record(
+                            ctx, product_group_id, task, unsettled, target, local, execution
+                        )
+                    continue
+            inputs = self._inputs(task, product_group_id, target, identity, gathered)
             with self._db.read() as session:
                 # A key this job already recorded, OK or FAILED, is settled: a retry of the job
                 # (only ever caused by a TRANSIENT or RATE_LIMITED task) never calls it again
@@ -373,7 +437,7 @@ class EnrichmentService:
                 # recorded are fresh and are skipped next time.
                 retry = execution
                 continue
-            self._record(ctx, product_group_id, task, needed, target, inputs, execution)
+            self._record(ctx, product_group_id, task, needed, target, inputs, execution, gathered)
         if retry is not None:
             cls = (
                 RateLimitedError
@@ -393,11 +457,13 @@ class EnrichmentService:
         target: Target | None,
         inputs: _Inputs,
         execution: Execution,
+        gathered: TaskContext | None = None,
     ) -> None:
         outcome = execution.outcome
         provenance = asdict(outcome.provenance)
         now = self._clock.now()
         statuses: dict[str, str] = {}
+        fields = {key: self._finished_fields(task, key, outcome, gathered) for key in keys}
         with self._db.write() as session:
             for key in keys:
                 row = ProductEnrichmentResult(
@@ -415,7 +481,7 @@ class EnrichmentService:
                     job_id=ctx.job_id,
                     correlation_id=ctx.correlation_id,
                     recorded_at=now,
-                    **_status_fields(task, key, outcome.ok, outcome.value, outcome),
+                    **fields[key],
                 )
                 self._store.record(session, row)
                 statuses[key] = row.status
@@ -440,6 +506,37 @@ class EnrichmentService:
                 ),
                 session=session,
             )
+
+    def _finished_fields(
+        self,
+        task: TaskDefinition,
+        key: str,
+        outcome: ProviderOutcome,
+        gathered: TaskContext | None,
+    ) -> dict[str, Any]:
+        """The recorded fields of one result key: the answer as it conforms, then, for a task
+        with a context, its deterministic filter (ADR-0028 §4 steps 5–6)."""
+        fields = _status_fields(task, key, outcome.ok, outcome.value, outcome)
+        if task.context is None or gathered is None or fields["status"] != "OK":
+            return fields
+        assert isinstance(outcome.value, dict)
+        part = outcome.value if task.keys == (SINGLE_RESULT,) else outcome.value[key]
+        try:
+            finished = task.context.finish(part, gathered)
+        except AppError as error:
+            return {**_FAILED, "error_class": error.error_class.value, "error_code": error.code}
+        if finished.part is None:
+            return {
+                **_FAILED,
+                "error_class": ErrorClass.VALIDATION.value,
+                "error_code": finished.error_code or AI_OUTPUT_SCHEMA_INVALID,
+            }
+        value = dict(outcome.value)
+        if task.keys == (SINGLE_RESULT,):
+            value = dict(finished.part)
+        else:
+            value[key] = dict(finished.part)
+        return _status_fields(task, key, True, value, outcome)
 
     # -------------------------------------------------------------- read
 
@@ -522,15 +619,17 @@ class EnrichmentService:
         product_group_id: str,
         target: Target | None,
         identity: RequestedIdentity,
+        gathered: TaskContext | None = None,
     ) -> _Inputs:
         read = list(self._facts(product_group_id, task.fact_fields))
         facts = [{"member": m["member"], "fields": m["fields"]} for m in read]
         composed = self._composer.compose(
-            task.task_key,
+            task.composed_key,
             {
                 "product_group_id": product_group_id,
                 "target": None if target is None else asdict(target),
                 "facts": facts,
+                **(dict(gathered.runtime) if gathered else {}),
             },
             policy_key=None if target is None else POLICY_BY_MARKETPLACE[target.marketplace_key],
             context={} if target is None else asdict(target),
@@ -542,6 +641,10 @@ class EnrichmentService:
             "provider": asdict(identity),
             "schema": task.schema_version,
         }
+        if gathered is not None:
+            # The gathered part (the platform's candidates, the signals) is in the fingerprint the
+            # job compares; a read never gathers, so its staleness covers the local parts only.
+            inputs["context"] = dict(gathered.inputs)
         # Recorded with the result for tracing, outside the fingerprint and the stale reasons.
         revisions = {m["member"]: m["revision_id"] for m in read}
         return _Inputs(
@@ -643,16 +746,29 @@ def _value_json(value: object) -> Any:
     return None if dump is None else dump(mode="json")
 
 
+_FAILED: Final = {
+    "status": "FAILED",
+    "value_json": None,
+    "evidence_json": None,
+    "confidence": None,
+    "requires_review": None,
+}
+
+
+def _refused_outcome(identity: RequestedIdentity, error: AppError) -> ProviderOutcome:
+    """The outcome of a task refused before any call: nothing was asked of the provider."""
+    return ProviderOutcome(
+        ok=False,
+        provenance=unknown_provenance(identity),
+        error_class=error.error_class,
+        error_code=error.code,
+    )
+
+
 def _status_fields(
     task: TaskDefinition, key: str, ok: bool, value: dict[str, Any] | None, outcome: Any
 ) -> dict[str, Any]:
-    failed = {
-        "status": "FAILED",
-        "value_json": None,
-        "evidence_json": None,
-        "confidence": None,
-        "requires_review": None,
-    }
+    failed = dict(_FAILED)
     if not ok or value is None:
         return {
             **failed,

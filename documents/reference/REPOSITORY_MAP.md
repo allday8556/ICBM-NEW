@@ -84,6 +84,9 @@ ADR-0027 AIS-2 added the product-name task `app/stages/products/tasks.py`, the s
 `v29-ai1`, the recommendation component `ui/web/js/components/ai-name.js` and two integration suites.
 ADR-0028 T2 added the read-only tag source `integrations/marketplaces/smartstore/tags.py` and
 one unit suite.
+ADR-0028 T3 added the tag task's context and filter `app/capabilities/ai/platform_tags.py`, the
+task-context types `task_context.py`, the provider-zero SearchSignal port `search_signal.py`, the
+seed upgrade `v29-ai2` and one integration suite.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -111,8 +114,8 @@ payload or external call and leaves legacy Item economics unchanged.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 332 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 54 | supporting capabilities: audit, jobs, review, live_safety, ai |
+| `app/` | 335 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 57 | supporting capabilities: audit, jobs, review, live_safety, ai |
 | `app/interface/` | 27 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 86 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 160 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
@@ -137,11 +140,11 @@ payload or external call and leaves legacy Item economics unchanged.
 | `integrations/` | 51 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 27 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 303 | tests |
+| `tests/` | 304 | tests |
 | `tests/contracts/` | 10 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 128 | integration tests by runtime owner |
+| `tests/integration/` | 129 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 108 | unit tests by runtime owner |
 | `ui/` | 65 | operator clients: the served web client and the capture extension |
