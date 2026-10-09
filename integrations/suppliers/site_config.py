@@ -217,14 +217,13 @@ def parse_site(raw: bytes, file_stem: str) -> SiteConfig:
     display_name = _word(document["display_name"], "display_name")
     platform = _text(document["platform"], _SLOT, "platform")
     base_url = document["base_url"]
-    if (
-        not isinstance(base_url, str)
-        or not base_url.startswith("https://")
-        or base_url.endswith("/")
-        or urlsplit(base_url).path
-        or urlsplit(base_url).query
-    ):
-        raise _fail("base_url is an https origin without a path or a trailing slash")
+    if not isinstance(base_url, str) or not base_url.startswith("https://"):
+        raise _fail("base_url is an https origin")
+    parts = urlsplit(base_url)
+    # PT-01: an origin and nothing else. Userinfo would carry a credential, and a port, path,
+    # query or fragment is not part of a storefront's origin.
+    if parts.netloc != parts.hostname or parts.path or parts.query or parts.fragment:
+        raise _fail("base_url is an https origin: no userinfo, port, path, query or fragment")
     storefront = _text(document["storefront_host"], _HOST, "storefront_host")
     if urlsplit(base_url).hostname != storefront:
         raise _fail("storefront_host is the host of base_url")
