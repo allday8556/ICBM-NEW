@@ -726,7 +726,8 @@ M0 Foundation                                   ACCEPTED 2026-09-13
 → M5 SmartStore REGISTER idempotency/reconcile/read-back  ACCEPTED 2026-10-07
 → M6 OPERATE read-back + stock + order ingest  ACCEPTED 2026-10-08 (ADR-0023)
 → M6.5 fulfillment record + tracking  ACCEPTED 2026-10-09 (ADR-0025)
-→ M7 FIRST VERTICAL two consecutive passes in fresh sessions  CURRENT
+→ M7 FIRST VERTICAL two consecutive passes in fresh sessions  ACCEPTED 2026-10-09
+→ M8 horizontal expansion (Phase 6, §9)  CURRENT
 ```
 
 Only after the first vertical is accepted does horizontal expansion begin.
