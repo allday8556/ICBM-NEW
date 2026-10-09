@@ -37,13 +37,15 @@ def platform_tag_task(
     fact_fields: tuple[str, ...],
     schema_version: str,
     context: TaskContextSource,
+    required: tuple[str, ...] = ("recommended",),
 ) -> TaskDefinition:
-    """ADR-0028 §4: a marketplace's tag task. It composes the bundle under its own enrichment id,
-    needs a target of that marketplace, and gathers the platform's candidates in the job; the
-    marketplace and its reads are the composition root's to name, never this owner's."""
+    """ADR-0028 §4 (tags) and ADR-0029 §1 (category): a marketplace's task. It composes the bundle
+    under its own enrichment id, needs a target of that marketplace, and gathers its candidates in
+    the job; the marketplace and its sources are the composition root's to name, never this
+    owner's. ``required`` is the result object's value fields."""
     return TaskDefinition(
         task_key=task_key,
-        results={result_key: ResultSchema(("recommended",))},
+        results={result_key: ResultSchema(required)},
         fact_fields=fact_fields,
         schema_version=schema_version,
         prompt_key=prompt_key,

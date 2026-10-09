@@ -89,6 +89,8 @@ task-context types `task_context.py`, the provider-zero SearchSignal port `searc
 seed upgrade `v29-ai2` and one integration suite.
 ADR-0028 T4 added the tag provenance and apply to the register owner, the component
 `ui/web/js/components/ai-tags.js` and two integration suites.
+ADR-0029 C2 added the category task's candidates and filter `app/capabilities/ai/platform_category.py`,
+the seed upgrade `v29-ai3` and one integration suite.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -116,8 +118,8 @@ payload or external call and leaves legacy Item economics unchanged.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 335 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 57 | supporting capabilities: audit, jobs, review, live_safety, ai |
+| `app/` | 336 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 58 | supporting capabilities: audit, jobs, review, live_safety, ai |
 | `app/interface/` | 27 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 86 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 160 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
@@ -142,11 +144,11 @@ payload or external call and leaves legacy Item economics unchanged.
 | `integrations/` | 51 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 27 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 307 | tests |
+| `tests/` | 308 | tests |
 | `tests/contracts/` | 10 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 131 | integration tests by runtime owner |
+| `tests/integration/` | 132 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 109 | unit tests by runtime owner |
 | `ui/` | 66 | operator clients: the served web client and the capture extension |

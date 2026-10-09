@@ -61,7 +61,7 @@ class TagReader(Protocol):
     def check(self, tags: tuple[str, ...]) -> dict[str, bool | None]: ...
 
 
-def _confirmed_text(facts: Sequence[Mapping[str, Any]], key: str) -> str | None:
+def confirmed_text(facts: Sequence[Mapping[str, Any]], key: str) -> str | None:
     for member in facts:
         reading = member.get("fields", {}).get(key)
         value = reading.get("value") if isinstance(reading, dict) else None
@@ -76,7 +76,7 @@ def _confirmed_text(facts: Sequence[Mapping[str, Any]], key: str) -> str | None:
     return None
 
 
-def _clean_name(name: str) -> str:
+def clean_name(name: str) -> str:
     cleaned = _QUANTITY.sub(" ", _BRACKETED.sub(" ", name))
     return _SPACES.sub(" ", cleaned).strip()
 
@@ -84,9 +84,9 @@ def _clean_name(name: str) -> str:
 def keywords(facts: Sequence[Mapping[str, Any]]) -> list[str]:
     """At most 3 distinct queries from the confirmed facts: the cleaned name, the brand, the
     first two words of the cleaned name; each trimmed to 50 characters. No fact, no query."""
-    name = _confirmed_text(facts, "original_name")
-    brand = _confirmed_text(facts, "brand")
-    cleaned = _clean_name(name) if name else ""
+    name = confirmed_text(facts, "original_name")
+    brand = confirmed_text(facts, "brand")
+    cleaned = clean_name(name) if name else ""
     candidates = [cleaned, brand or "", " ".join(cleaned.split()[:2])]
     found: list[str] = []
     for candidate in candidates:
@@ -144,8 +144,8 @@ class SmartStoreTagContext:
         excluded = {
             _normal(text)
             for text in (
-                _confirmed_text(context.facts, "original_name"),
-                _confirmed_text(context.facts, "brand"),
+                confirmed_text(context.facts, "original_name"),
+                confirmed_text(context.facts, "brand"),
             )
             if text
         }
