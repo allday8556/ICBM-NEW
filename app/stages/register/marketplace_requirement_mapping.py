@@ -16,7 +16,7 @@ from app.stages.products.common_option_store import (
 )
 from app.stages.register.category_metadata import (
     MarketplaceOptionRequirementView,
-    MetadataRevisionRecord,
+    MetadataRecord,
     content_of,
 )
 
@@ -96,22 +96,22 @@ class MarketplaceRequirementMappingResult:
 
 
 def adopted_requirement_metadata(
-    record: MetadataRevisionRecord,
-    *,
-    marketplace_key: str,
-    taxonomy_revision: str,
-    category_id: str,
-) -> ReviewedMarketplaceRequirementMetadata:
-    """Bind the exact durable category revision to its typed requirement content."""
+    record: MetadataRecord,
+) -> ReviewedMarketplaceRequirementMetadata | None:
+    """Read the adopted current revision without allowing caller-supplied scope rebinding."""
+
+    current = record.current
+    if current is None:
+        return None
 
     return ReviewedMarketplaceRequirementMetadata(
-        marketplace_key=marketplace_key,
-        taxonomy_revision=taxonomy_revision,
-        category_id=category_id,
-        metadata_revision_id=record.metadata_revision,
+        marketplace_key=record.marketplace_key,
+        taxonomy_revision=record.taxonomy_revision,
+        category_id=record.category_id,
+        metadata_revision_id=current.metadata_revision,
         adopted=True,
-        reviewed=record.reviewed,
-        requirements=tuple(content_of(record.content).option_requirements),
+        reviewed=current.reviewed,
+        requirements=tuple(content_of(current.content).option_requirements),
     )
 
 

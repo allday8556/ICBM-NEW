@@ -14,6 +14,8 @@ from app.stages.register.marketplace_requirement_mapping import (
     INTERPRETATION_REVIEW_REQUIRED,
     LISTING_COMPOSITION_QUANTITY,
     METADATA_MISSING,
+    METADATA_SCOPE_MISMATCH,
+    METADATA_UNADOPTED,
     SEPARATE_ROLE,
     UNIT_SEMANTICS_MISMATCH,
     MarketplaceRequirementMappingResult,
@@ -192,6 +194,18 @@ def test_missing_or_unreviewed_metadata_never_infers_a_mapping() -> None:
     assert missing.reasons[0].code == METADATA_MISSING
     assert unreviewed.state is RequirementMappingState.REVIEW_REQUIRED
     assert unreviewed.mappings == ()
+
+
+def test_unadopted_or_different_scope_metadata_never_maps() -> None:
+    unadopted = _map(replace(_metadata(), adopted=False))
+    different_marketplace = _map(replace(_metadata(), marketplace_key="smartstore"))
+
+    assert unadopted.state is RequirementMappingState.REVIEW_REQUIRED
+    assert unadopted.reasons[0].code == METADATA_UNADOPTED
+    assert unadopted.mappings == ()
+    assert different_marketplace.state is RequirementMappingState.REVIEW_REQUIRED
+    assert different_marketplace.reasons[0].code == METADATA_SCOPE_MISMATCH
+    assert different_marketplace.mappings == ()
 
 
 def test_empty_reviewed_requirements_leave_legacy_no_option_path_not_applicable() -> None:

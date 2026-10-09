@@ -265,17 +265,21 @@ def test_reviewed_marketplace_option_requirements_are_versioned_with_category_ev
     assert stored.current is not None and stored.current.metadata_revision == revision_id
     assert stored.content is not None
     assert stored.content.option_requirements[1].interpretation_state == "REVIEW_REQUIRED"
-    current = container.category_metadata._store.current(KNOWN, TAXONOMY, CATEGORY)
-    assert current is not None
-    assert current.content["content_version"] == "registration-category-metadata/v2"
-    adopted = adopted_requirement_metadata(
-        current,
-        marketplace_key=KNOWN,
-        taxonomy_revision=TAXONOMY,
-        category_id=CATEGORY,
-    )
+    record = container.category_metadata._store.record(KNOWN, TAXONOMY, CATEGORY)
+    assert record.current is not None
+    assert record.current.content["content_version"] == "registration-category-metadata/v2"
+    adopted = adopted_requirement_metadata(record)
+    assert adopted is not None
     assert adopted.metadata_revision_id == revision_id
+    assert (adopted.marketplace_key, adopted.taxonomy_revision, adopted.category_id) == (
+        KNOWN,
+        TAXONOMY,
+        CATEGORY,
+    )
     assert adopted.reviewed is True and len(adopted.requirements) == 2
+
+    missing = container.category_metadata._store.record(KNOWN, TAXONOMY, "category-without-current")
+    assert adopted_requirement_metadata(missing) is None
 
 
 def test_an_ai_suggestion_is_never_recorded_as_reviewed(
