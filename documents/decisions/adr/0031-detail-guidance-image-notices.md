@@ -1,4 +1,4 @@
-# ADR-0030 — Detail Guidance: the top and bottom notices of the detail page, as images rendered from templates
+# ADR-0031 — Detail Guidance: the top and bottom notices of the detail page, as images rendered from templates
 
 Status: **ACCEPTED** 2026-10-10. This activates the Detail Guidance module planned in Issue #61, after the first vertical (M7 accepted). It is the contract of every slice of §9. It lands before its code.
 
@@ -77,7 +77,7 @@ Date: 2026-10-10
 
 The new owner `app/capabilities/detail_guidance/` is marketplace-neutral. Following #61 §1, it never reads or writes `notice.*`.
 
-**`detail_guidance_revisions`** (append-only, migration `0058`):
+**`detail_guidance_revisions`** (append-only; one new migration, numbered when G2 lands):
 - **Identity.** `guidance_id` and `seq` (unique together), plus `placement`, `kind`, `template` and `content_json`.
 - **Status.** `enabled`. For `PERIOD`, `starts_at` and `ends_at` (UTC); a CHECK enforces `starts_at < ends_at`.
 - **Record.** `created_at` (the injected clock), `actor` and `image_sha256`.
@@ -186,7 +186,7 @@ Each slice is its own PR, with the full suite, Gate 3, M0, `mypy`, ruff, the GPT
 | Slice | Scope | Risk |
 | --- | --- | --- |
 | **G1** | The renderer: the Pillow pin, the bundled font and its licence, the three templates, `render`, determinism tests. No DB, no API. | normal |
-| **G2** | The owner: migration `0058`, the revision store with clock and audit, the guidance image store, the settings API (list, append, preview, image). | normal |
+| **G2** | The owner: its migration, the revision store with clock and audit, the guidance image store, the settings API (list, append, preview, image). | normal |
 | **G3** | The settings card of §4, with the live three-template preview. | normal |
 | **G4** | REGISTER: the preparation `guidance` choice, the resolution, the fingerprint and preflight, the Snapshot pin, composition v3 stamping, and the editor's 상세페이지 step. | HIGH_RISK |
 | **G5** | The wire and the upload: `detail-renderer/v2`, the SmartStore projection, the grant's artifact set, the upload byte source, and the DRY_RUN acceptance of a top and bottom notice end to end. | HIGH_RISK |

@@ -795,7 +795,7 @@ Owner decision 2026-10-10 (Issue #219 comment `6085853541`) activates the Detail
 planned in Issue #61 after the first vertical: store-wide top and bottom notices, standing and
 period, drawn by ICBM into images from three templates, overridable per product, and placed in the
 SmartStore detail page through composition v3
-(`documents/decisions/adr/0030-detail-guidance-image-notices.md`). It is not AI, sends nothing
+(`documents/decisions/adr/0031-detail-guidance-image-notices.md`). It is not AI, sends nothing
 LIVE, and updates no registered listing in bulk.
 
 For the positive-option/cross-market lane, after the current no-positive-option first vertical:
