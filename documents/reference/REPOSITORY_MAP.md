@@ -130,12 +130,12 @@ payload or external call and leaves legacy Item economics unchanged.
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 174 | all canonical and historical documents |
+| `documents/` | 175 | all canonical and historical documents |
 | `documents/acceptance/` | 69 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 9 | platform and UI contracts |
-| `documents/decisions/` | 31 | ADRs and architect review records |
+| `documents/decisions/` | 32 | ADRs and architect review records |
 | `documents/evidence/` | 30 | external provider evidence catalog |
 | `documents/reference/` | 3 | this map and the path migration map |
 | `documents/reviews/` | 4 | Claude proposal channel |
