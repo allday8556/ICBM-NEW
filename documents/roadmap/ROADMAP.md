@@ -793,7 +793,8 @@ category recommendation chosen only from the official leaf-category catalog
 and notices keep their gate until their authoritative metadata contracts exist.
 Owner decision 2026-10-10 (Issue #219 comment `6085853541`) activates the Detail Guidance module
 planned in Issue #61 after the first vertical: store-wide top and bottom notices, standing and
-period, drawn by ICBM into images from three templates, overridable per product, and placed in the
+period, drawn by ICBM into images from five templates (three general, two shipping, with editable
+domestic and overseas example presets; `6087917430`), overridable per product, and placed in the
 SmartStore detail page through composition v3
 (`documents/decisions/adr/0033-detail-guidance-image-notices.md`). It is not AI, sends nothing
 LIVE, and updates no registered listing in bulk.
