@@ -2558,6 +2558,8 @@ RAW_CLIENT_OWNERS = {
     "integrations/marketplaces/smartstore/transmission.py": "DNS-phase evidence type (socket)",
     "app/platform/core/egress.py": "resolves the granted hosts' addresses for the guard (socket)",
     "app/platform/core/ownership.py": "hostname for the diagnostic owner metadata (socket)",
+    # ADR-0027 §4: the one AI adapter, a loopback call to the operator's approved sidecar.
+    "integrations/ai/cliproxyapi.py": "the CLIProxyAPI sidecar adapter (loopback only)",
 }
 _COMMON_SUPPLIER_MODULES = {
     "integrations/suppliers/__init__.py",
@@ -2913,9 +2915,11 @@ def test_the_register_owner_imports_no_ai_module() -> None:
             )
 
 
-def test_the_container_binds_no_ai_provider() -> None:
+def test_the_container_binds_only_the_profiled_sidecar_provider() -> None:
+    """ADR-0027: the one binding is the profiled CLIProxyAPI sidecar; with no approved profile it
+    names no identity and sends nothing."""
     source = (REPO_ROOT / "app" / "container.py").read_text("utf-8")
-    assert "AIExecution(NoAIProvider())" in source
+    assert "AIExecution(profiled_provider)" in source
     providers = [
         node.name
         for path, tree in _production_modules().items()
@@ -2924,7 +2928,7 @@ def test_the_container_binds_no_ai_provider() -> None:
         and node.name.endswith("Provider")
         and path.startswith("app/capabilities/ai/")
     ]
-    assert providers == ["AIProvider", "NoAIProvider"]
+    assert sorted(providers) == ["AIProvider", "NoAIProvider", "ProfiledProvider"]
 
 
 # ADR-0017 P1 (Issue #110 5821999699): no dynamic-import or code-evaluation escape in the source
@@ -3789,6 +3793,11 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "ai_platform_policy_current",
         # ADR-0026 AIF-3: PRODUCT DB's structured enrichment results.
         "product_enrichment_results",
+        # ADR-0027 AIS-1: the AI provider profile and its call ledger.
+        "ai_provider_profiles",
+        "ai_provider_profile_revisions",
+        "ai_provider_profile_current",
+        "ai_provider_calls",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

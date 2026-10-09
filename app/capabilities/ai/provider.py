@@ -119,7 +119,12 @@ def not_configured() -> PolicyBlockedError:
 
 
 def capability(provider: AIProvider) -> CapabilityReport:
-    """The ``ai`` capability for readiness (ADR-0012 §9): never a core failure."""
+    """The ``ai`` capability for readiness (ADR-0012 §9): never a core failure. A provider that
+    reports its own state (the profiled sidecar, ADR-0027 §8) answers itself."""
+    own = getattr(provider, "capability_report", None)
+    if callable(own):
+        report: CapabilityReport = own()
+        return report
     identity = provider.requested_identity()
     if identity is None:
         return CapabilityReport(

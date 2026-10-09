@@ -16,6 +16,7 @@ import { withHelp } from '../core/help.js';
 import { markInert } from '../core/inert.js';
 import { platformTag } from '../core/platform.js';
 import { pageHead } from '../components/page-head.js';
+import { aiProviderPanel } from '../components/ai-provider.js';
 import { openPromptEditor, promptRegistry } from '../components/prompt-registry.js';
 import { capabilityProjection } from './settings/capability-projection.js';
 import { permissionAttestationPanel } from './settings/permission-attestation.js';
@@ -193,6 +194,7 @@ function renderItem(item, state) {
   if (item.categoryMetadata) return categoryMetadataPanel(item.categoryMetadata);
   if (item.usersTable) return usersTable();
   if (item.aiCapability) return aiCapabilityRow();
+  if (item.aiProvider) return aiProviderPanel();
   if (item.registry) return promptRegistry(item.registry);
   if (item.promptEditor) {
     const { label, ...context } = item.promptEditor;

@@ -188,8 +188,12 @@ CANONICAL_TABLES = (
     "ai_platform_policy_revisions",
     "ai_platform_policy_current",
     "product_enrichment_results",
+    "ai_provider_profiles",
+    "ai_provider_profile_revisions",
+    "ai_provider_profile_current",
+    "ai_provider_calls",
 )
-HEAD = "0055_ai_enrichment_results"
+HEAD = "0056_ai_provider_profile"
 
 
 def _url(path: Path) -> str:

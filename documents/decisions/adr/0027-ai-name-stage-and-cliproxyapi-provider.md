@@ -85,12 +85,27 @@ One profile store, `ai_provider_profiles`, with append-only revisions and a curr
 - `routing_config_version` = the approved routing identity;
 - `proxy_version` = the approved binary version and SHA-256.
 
+**Implementation note (2026-10-09, AIS-1): the requested identity's routing version** is one
+SHA-256 over the endpoint and the approved routing fingerprint, so a moved endpoint is a new identity
+and every earlier result stale, as this section requires.
+
+**Amendment (2026-10-09, AIS-1): the version, as applicable (ADR-0012 §2).** The CLIProxyAPI
+Windows image carries no version resource, and ICBM never runs the binary to ask it (AIS-05).
+- The approved executable identity is its path and SHA-256.
+- `proxy_version` carries that SHA-256, so any change of the file is a new identity and a stale
+  result.
+
 ## 3. Identity is verified on every call, fail-closed
 
 Before each call the adapter reads the process that is **actually serving** the endpoint's port, and compares that process's executable path, version and SHA-256 with the approved identity (ADR-0012 §2).
 - An open port or an answering endpoint is never proof.
-- A mismatch puts the capability in `VERSION_MISMATCH` and refuses the call before anything is sent.
-- So does an identity that cannot be read.
+- A mismatch puts the profile in `VERSION_MISMATCH` (`AI_EXECUTABLE_MISMATCH`) and refuses the call
+  before anything is sent, as `POLICY_BLOCKED` (ADR-0012 §8).
+- An identity that cannot be read is `UNAVAILABLE` and refused the same way: nothing serves the port
+  (`AI_EXECUTABLE_NOT_SERVING`), or the serving sidecar's configuration cannot be read
+  (`AI_ROUTING_UNREADABLE`).
+- A routing identity that differs is `ROUTING_CONFIG_MISMATCH` (`AI_ROUTING_MISMATCH`), never
+  collapsed into the binary mismatch (ADR-0012 §4).
 - The probe is an injectable port. The Windows implementation reads the TCP table and the process image. On any other platform the identity is unverifiable, so no call is made there.
 
 ## 4. The call
@@ -116,6 +131,8 @@ The operator's CLIProxyAPI fetches model catalogs and its management panel from 
 - it also records `disable-auto-update-panel: true`;
 - the Settings card shows whether the observed configuration matches.
 
+**Implementation note (2026-10-09, AIS-1).** The probe reads the sidecar's configuration only from an explicit, absolute `-config` (the last occurrence, as Go flags take it). A relative or default path resolves against the sidecar's own working directory, which cannot be read, so such a sidecar's routing is unreadable (`UNAVAILABLE`) and never approved. The routing fingerprint keeps the launch arguments in their order and hides only secret values.
+
 ICBM never edits the sidecar's files. The operator, or Track A in the live test with the owner's approval of `6067968983`, sets them.
 
 ## 6. The product-name task and the seed upgrade
@@ -138,9 +155,15 @@ The target-free subject is used, because the v29 bundle composes with the common
 
 **Settings › AI / Prompt › AI 공급자.**
 - The profile form: endpoint, model, key (written to the OS secret store), billing mode, daily cap.
-- The observed executable (path, version, SHA-256) beside the approved one, with an approve button. The same for the routing identity.
+- The observed executable (path, SHA-256) beside the approved one, with an approve button. The same for the routing identity.
 - The data-transfer approval.
-- The capability state: `NOT_CONFIGURED`, `READY`, `VERSION_MISMATCH`, `ROUTING_MISMATCH`, `UNREACHABLE` or `CAP_REACHED`.
+- The state, in ADR-0012's vocabulary:
+  - the runtime state: `NOT_CONFIGURED` until every approval exists, then `AVAILABLE`,
+    `VERSION_MISMATCH`, `ROUTING_CONFIG_MISMATCH` or `UNAVAILABLE` (ADR-0012 §8);
+  - the `ai` capability (ADR-0012 §9): `READY` only when the runtime is `AVAILABLE` and the cap is
+    not reached; `DEGRADED` with the reason code otherwise.
+- A reached daily cap is the profile's policy, not a sidecar state. The runtime stays `AVAILABLE`,
+  the capability is `DEGRADED` with `AI_DAILY_CAP_REACHED`, and a call is `POLICY_BLOCKED`.
 
 **통합DB detail, `✨ AI 추천`.** It is live when the `ai` capability is READY, and inert with its reason otherwise. It requests the product-name task, then shows:
 - the recommendation;

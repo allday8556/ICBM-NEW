@@ -11,8 +11,12 @@ from pathlib import Path
 import integrations.suppliers as supplier_packages
 from app.capabilities.ai.composer import PromptComposer
 from app.capabilities.ai.execution import AIExecution
+from app.capabilities.ai.profiles import (
+    ProfiledProvider,
+    ProfileStore,
+    ProviderProfileService,
+)
 from app.capabilities.ai.prompts import PromptRegistryService, PromptRegistryStore
-from app.capabilities.ai.provider import NoAIProvider
 from app.capabilities.audit.service import AuditLog
 from app.capabilities.jobs.diagnostic import FAILING_JOB
 from app.capabilities.jobs.policy import RetryPolicy
@@ -166,6 +170,7 @@ from app.stages.register.target_policy import (
     TargetPolicyStore,
     editable_surfaces,
 )
+from integrations.ai.sidecar import WindowsProcessProbe
 from integrations.marketplaces.identity import MARKETPLACE_IDENTITIES
 from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore import readback as smartstore_readback
@@ -266,6 +271,8 @@ class Container:
     # (NoAIProvider): the ai capability reads NOT_CONFIGURED and every execution is refused.
     ai_composer: PromptComposer
     ai_execution: AIExecution
+    # ADR-0027 AIS-1: the operator's CLIProxyAPI profile and its approvals.
+    ai_provider: ProviderProfileService
     category_metadata: CategoryMetadataService
     category_catalog: CategoryCatalogService
     # Settings delivery policy: the seller's address book, read on request and never stored.
@@ -453,7 +460,12 @@ def build_container(
     prompt_store = PromptRegistryStore(db, clock, audit)
     prompt_registry = PromptRegistryService(prompt_store)
     ai_composer = PromptComposer(prompt_store)
-    ai_execution = AIExecution(NoAIProvider())
+    # ADR-0027: the profiled CLIProxyAPI sidecar. With no approved profile it names no
+    # identity, so the ai capability reads NOT_CONFIGURED and nothing is ever sent.
+    profile_store = ProfileStore(db, clock, audit)
+    profiled_provider = ProfiledProvider(profile_store, WindowsProcessProbe(), clock, secrets)
+    ai_execution = AIExecution(profiled_provider)
+    ai_provider = ProviderProfileService(profile_store, profiled_provider, clock)
     readiness = ReadinessService(
         db=db,
         worker=worker,
@@ -1115,6 +1127,7 @@ def build_container(
         prompt_registry=prompt_registry,
         ai_composer=ai_composer,
         ai_execution=ai_execution,
+        ai_provider=ai_provider,
         category_metadata=category_metadata,
         category_catalog=category_catalog,
         smartstore_addressbook=SmartStoreAddressBookSource(

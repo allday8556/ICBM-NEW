@@ -91,6 +91,9 @@ class AuditEventType(StrEnum):
     # ADR-0026 AIF-4: an enrichment result applied to one Preparation field as AI_SUGGESTION
     # (result ids, sequence and fingerprint). Never the value.
     AI_ENRICHMENT_APPLIED = "AI_ENRICHMENT_APPLIED"
+    # ADR-0027 AIS-1: the AI provider profile configured or approved (executable, routing,
+    # data transfer). Paths, hashes, fingerprints and flags only; never a key.
+    AI_PROVIDER_PROFILE_REVISED = "AI_PROVIDER_PROFILE_REVISED"
     # Gate 1 G1-B (ADR-0015 §3): a revision of one marketplace × taxonomy × category's reviewed
     # metadata, appended by the server and made current. Key, identifiers, revision number, content
     # fingerprint and the review flag only — never a metadata value.

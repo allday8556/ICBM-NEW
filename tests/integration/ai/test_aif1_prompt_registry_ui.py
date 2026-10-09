@@ -164,3 +164,29 @@ def test_a_marketplace_policy_button_and_the_insight_agent_open_their_own_layer(
         )
     # Opening an editor reads; it never writes.
     assert writes == []
+
+
+def test_the_ai_provider_card_saves_a_profile_and_approves_only_what_is_served(
+    browser: Browser,  # noqa: F811
+    client: TestClient,  # noqa: F811
+) -> None:
+    """ADR-0027 AIS-1: the card reads the server's profile; with nothing serving the port, no
+    approval can be given and nothing is ready. The key is never asked for."""
+    writes: list[tuple[str, str]] = []
+    with _page(browser, client, writes, SETTINGS) as page:
+        card = page.locator("[data-role='ai-provider']")
+        state = card.locator("[data-role='ai-provider-state']")
+        state.wait_for(timeout=15_000)
+        assert state.get_attribute("data-status") == "NOT_CONFIGURED"
+        # The key field is a password field, disabled until a profile exists.
+        assert card.locator("input[type='password']").count() == 1
+        card.locator("input[name='endpoint']").fill("http://127.0.0.1:45998")
+        card.locator("[data-action='ai-provider-save']").click()
+        page.wait_for_function(
+            "() => document.querySelector('[data-role=ai-provider-state]')?.innerText"
+            ".startsWith('승인 필요')"
+        )
+        assert writes == [("POST", "/api/v1/ai/provider/profile")]
+        assert "실행 중이 아님" in card.inner_text()
+        assert card.locator("[data-action='ai-approve-executable']").is_disabled()
+        assert card.locator("[data-action='ai-approve-routing']").is_disabled()
