@@ -77,6 +77,12 @@ class Element:
     classes: frozenset[str]
 
     def marks(self, token: str) -> bool:
+        """``#name`` is exactly the id, ``.name`` exactly one class, and a bare token the id or a
+        class that starts with it (KM통상's reading)."""
+        if token.startswith("#"):
+            return token[1:].lower() == self.element_id.lower()
+        if token.startswith("."):
+            return any(name.lower() == token[1:].lower() for name in self.classes)
         token = token.lower()
         return token == self.element_id.lower() or any(
             token == name.lower() or name.lower().startswith(token) for name in self.classes
@@ -145,6 +151,9 @@ def role_rules(words: Vocabulary = DEFAULT_VOCABULARY) -> tuple[RoleRule, ...]:
         ),
         # The additional-image list of the same module.
         RoleRule("cafe24.thumbnail.additional", ImageRole.THUMBNAIL, "xans-product-addimage"),
+        # The detail tab strip a skin repeats inside the description block is navigation; as the
+        # innermost container it decides before the description itself.
+        RoleRule("cafe24.ui.detail_menu", ImageRole.UI_COMMON, words.detail_menu),
         # The ordered description sequence, lazy-loaded or not.
         RoleRule("cafe24.detail.prd_detail", ImageRole.DETAIL, words.detail_container),
         # The product action area's photo slide: product imagery, but not the representative one.

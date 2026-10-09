@@ -94,6 +94,8 @@ def test_a_minimal_site_parses() -> None:
         ({"region_overrides": {"detail": {"by": "id", "token": "a b"}}}, "example"),
         ({"limits": {"max_image_bytes": 1.5}}, "example"),
         ({"limits": {"max_image_bytes": 0}}, "example"),
+        ({"limits": {"same_product_interval_s": float("inf")}}, "example"),
+        ({"limits": {"min_queue_interval_s": float("nan")}}, "example"),
         ({"limits": {"unknown": 1}}, "example"),
         ({"seller_code_convention": "UP-{name}"}, "example"),
         ({"recon_record": "../secrets.md"}, "example"),
@@ -159,7 +161,7 @@ def test_a_raised_limit_needs_the_owner_s_decision(tmp_path: Path) -> None:
     _write(
         tmp_path,
         "example",
-        encoded(limits={"max_image_refs": 40}, limit_decision="Issue 219 comment 1"),
+        encoded(limits={"max_image_refs": 40}, limit_decision="Issue #219 6086299406"),
     )
     (only,), problems = bind_sites(tmp_path)
     assert problems == ()
