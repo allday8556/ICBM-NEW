@@ -114,7 +114,7 @@ The new owner `app/capabilities/detail_guidance/` is marketplace-neutral. Follow
 **The standing notice:**
 - **Inputs.** Headings and lines. The bottom notice opens with two blocks headed `배송 안내` and `C/S 안내`.
 - **Preview.** The live preview shows the five templates side by side as the operator types.
-- **Presets.** `국내배송` and `해외배송` fill the inputs with the §11 example text, marked as an example to check against the seller's own conditions. Choosing a preset suggests its matching template; the operator may pick any.
+- **Presets.** `국내배송` and `해외배송` fill the inputs with the §11 example text, marked as an example to check against the seller's own conditions. Choosing a preset replaces the inputs (asking first when they were edited); choosing a template never does. A preset suggests its matching template, and the operator may pick any.
 - **Saving.** The operator picks one template, then saves. Saving renders and appends the revision (§2).
 - **Off.** It can be turned off.
 
@@ -207,9 +207,9 @@ The amendments below take effect only once G5 is accepted and landed. Until then
 - **ADR-0014 §19.** Detail Guidance is implemented by this ADR: composition v3 adds `TOP_GUIDANCE` and `BOTTOM_GUIDANCE` as image sections.
 - **B-DETAIL §2 D1 and §5.1.** The reserved `TOP_GUIDANCE`/`BOTTOM_GUIDANCE` become sections of content v3. `VIDEO` and `OPTION_TABLE` stay reserved.
 
-## 11. Amendment: shipping templates and presets (owner decision 2026-10-10, Issue #219 `6087917430`)
+## 11. Amendment: shipping templates and presets (owner decision 2026-10-10, Issue #219 `6087917430`, corrected by `6087973685`)
 
-On the G1 preview the owner kept `CLEAN`, `MODERN` and `WARM` and asked for shipping templates. Asked which kind, the owner chose both kinds below, for domestic and for overseas shipping.
+On the G1 preview the owner kept `CLEAN`, `MODERN` and `WARM` and asked for shipping templates. Asked which kind, the owner answered "3번으로하고 방금 국내배송도 전용디자인 만들수있으면 만들고..": both kinds below, for domestic and for overseas shipping.
 
 **Designs.** `DOMESTIC` (a truck mark) and `OVERSEAS` (an airplane mark).
 - The marks are drawn by the renderer from shapes. No image asset or icon font is added.
@@ -225,6 +225,8 @@ On the G1 preview the owner kept `CLEAN`, `MODERN` and `WARM` and asked for ship
   - 국제 반품 배송비;
   - delays.
 - **Placeholders.** A seller-specific value, such as the courier, is a visible placeholder (`○○`) for the operator to replace.
+- **Choosing a preset.** Choosing `국내배송` or `해외배송` replaces the notice inputs with that preset's example text. When the operator has edited the inputs since they were last filled or saved, the page asks before it replaces them. Choosing another preset later replaces them again, the same way.
+- **Choosing a template.** Choosing a template (design) changes only the design and never replaces the text: the operator's text is shown in every template (§3, §4). A preset's matching template is only a suggestion.
 - **Saving.** A preset only fills the inputs. It is validated, rendered and saved exactly as typed text is (§2), and nothing reaches a product until the operator saves.
 - **Versions.** The presets carry a version (`guidance-presets/v1`). A saved revision records nothing of the preset it started from, because what is saved is the operator's text.
 
