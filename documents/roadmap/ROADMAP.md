@@ -775,6 +775,17 @@ approves its binary, the transfer of product data through the operator's existin
 subscription billing, under `documents/decisions/adr/0027-ai-name-stage-and-cliproxyapi-provider.md`.
 Tags and SearchSignal, category, options and notices, Coupang, 11st, bulk AI and Shopping Insight
 keep this order and the first-vertical gate.
+Owner decision 2026-10-09 (Issue #219 comment `6072888750`) extends the exception again, to the rest
+of this stage in its order:
+1. the tag/search-signal candidates;
+2. their official-evidence review;
+3. read-only endpoint adoption only where sufficient;
+4. the SearchSignal port and `recommended_tags`;
+5. category, options and notices, only when their authoritative metadata contracts exist.
+
+The contract is `documents/decisions/adr/0028-smartstore-tag-stage.md`: contract-first, DRY_RUN, no
+tag sent to the marketplace, and no external search-signal source without its own owner decision.
+Coupang, 11st, bulk AI and Shopping Insight keep this order and the first-vertical gate.
 
 For the positive-option/cross-market lane, after the current no-positive-option first vertical:
 
