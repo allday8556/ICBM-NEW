@@ -1,9 +1,10 @@
 """ADR-0026 AIF-3: PRODUCT DB's structured enrichment results, their fingerprint, reuse and
 derived staleness, and the ``enrich.tasks`` job.
 
-Production binds no AI provider and defines no task: every request is refused before anything is
-written. The owner's behaviour with a provider is proven with the deterministic fake of the AIF-2
-suite and a task definition that exists only in this test (the bundle task's four result keys).
+Without an approved provider profile every request is refused before anything is written. The
+owner's behaviour with a provider is proven with the deterministic fake of the AIF-2 suite and a
+task definition that exists only in this test (the bundle task's four result keys); the production
+product-name task is AIS-2's (``test_ais2_product_name.py``).
 """
 
 import json
@@ -350,7 +351,16 @@ def test_the_routes_read_results_and_refuse_a_request_with_no_provider(config: A
         group = str(result.product_group_id)
         read = served.get(f"/api/v1/products/{group}/enrichment", headers=headers)
         assert read.status_code == 200
-        assert read.json() == {"product_group_id": group, "ai_configured": False, "results": []}
+        assert read.json() == {
+            "product_group_id": group,
+            "ai_configured": False,
+            "ai_capability": {
+                "key": "ai",
+                "status": "NOT_CONFIGURED",
+                "detail": "no AI provider is configured",
+            },
+            "results": [],
+        }
         refused = served.post(
             f"/api/v1/products/{group}/enrichment",
             headers=headers,

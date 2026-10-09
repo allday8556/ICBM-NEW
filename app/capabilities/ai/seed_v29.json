@@ -1,5 +1,5 @@
 {
- "seed_version": "v29",
+ "seed_version": "v29-ai1",
  "source": "design/prototypes/icbm_redesign_test_v29_final.html",
  "templates": {
   "ICBM_GLOBAL_RULES_V2": {
@@ -59,7 +59,7 @@
     "mode": "PRODUCT_RECOMMEND_BUNDLE",
     "prompt": "GOAL\n선택 상품에 대해 상품명, 태그, 카테고리, 옵션 정규화 후보를 한 번에 제안한다.\n\nRULES\n1. PRODUCT_FACTS만 사실로 사용한다.\n2. TREND_DATA는 직접 관련성이 있는 경우만 보조적으로 사용한다.\n3. 상품명은 자연스러운 한국어와 검색성을 함께 고려한다.\n4. 카테고리는 제공된 categoryId 후보 안에서만 선택한다.\n5. 옵션/SKU 원자 구조를 보존한다.\n6. 현재값/추천값/이유/신뢰도를 함께 반환한다.",
     "variables": "product_id\noriginal_name\nbrand\nmanufacturer\norigin\ncategory_candidates[]\nspecifications\noptions[]\ndetail_facts\nocr_facts\ntrend_keywords[]",
-    "output": "{\n  \"product_id\":\"\",\n  \"product_name\":{\"current\":\"\",\"recommended\":\"\",\"used_keywords\":[],\"confidence\":0},\n  \"tags\":{\"recommended\":[],\"confidence\":0},\n  \"category\":{\"category_id\":\"\",\"confidence\":0,\"requires_review\":false},\n  \"options\":{\"normalized\":[],\"source_sku_count\":0,\"result_sku_count\":0,\"requires_review\":false},\n  \"warnings\":[]\n}"
+    "output": "{\n  \"product_id\":\"\",\n  \"product_name\":{\"current\":\"\",\"recommended\":\"\",\"used_keywords\":[],\"confidence\":0,\"evidence\":[],\"requires_review\":false},\n  \"tags\":{\"recommended\":[],\"confidence\":0},\n  \"category\":{\"category_id\":\"\",\"confidence\":0,\"requires_review\":false},\n  \"options\":{\"normalized\":[],\"source_sku_count\":0,\"result_sku_count\":0,\"requires_review\":false},\n  \"warnings\":[]\n}"
    }
   },
   "TASK_CATEGORY_REMATCH_V1": {
@@ -201,5 +201,13 @@
     "prompt": "PLATFORM_POLICY\n특정 플랫폼이 아직 결정되지 않은 분석/쇼핑인사이트 작업에 사용한다.\n\nPRIORITY\n플랫폼 공식 데이터/정책 > ICBM ProductFacts > 플랫폼 자체 추천 기능 > 검색 데이터 > AI 판단.\n\nRULES\n1. 플랫폼이 결정되면 반드시 해당 플랫폼 전용 Policy로 교체한다.\n2. 검색/트렌드 데이터는 상품 사실을 변경하는 근거가 아니다.\n3. 추천은 후보이며 플랫폼 등록 전에 실제 플랫폼 정책 검증을 수행한다."
    }
   }
- }
+ },
+ "upgrades": [
+  {
+   "seed_version": "v29-ai1",
+   "key": "TASK_PRODUCT_RECOMMEND_BUNDLE_V1",
+   "field": "output",
+   "previous": "{\n  \"product_id\":\"\",\n  \"product_name\":{\"current\":\"\",\"recommended\":\"\",\"used_keywords\":[],\"confidence\":0},\n  \"tags\":{\"recommended\":[],\"confidence\":0},\n  \"category\":{\"category_id\":\"\",\"confidence\":0,\"requires_review\":false},\n  \"options\":{\"normalized\":[],\"source_sku_count\":0,\"result_sku_count\":0,\"requires_review\":false},\n  \"warnings\":[]\n}"
+  }
+ ]
 }

@@ -293,7 +293,7 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
 - **Cards.** v29's five cards: `전체상품 / 등록가능 / 확인필요 / 품절 / 금지상품`. `전체상품` is the server's `products_total`; the other four have no owner yet and read `데이터 없음`.
 - **Filter row.**
   - The search field and `검색` keep their server search.
-  - v29's `카테고리 / 플랫폼 / 공급처 / 가격기준` filters and `✨ AI 추천` are inert.
+  - v29's `카테고리 / 플랫폼 / 공급처 / 가격기준` filters and the toolbar's bulk `✨ AI 추천` are inert. Bulk AI keeps its own stage (ADR-0027).
 - **List columns.**
   - The columns are v29's: `상품명 / 공급처 / 원가 / 배송비 / 최저판매가 / 가격기준 / 네이버 / 쿠팡 / 11번가 / 상태 / 등록유형`.
   - The name cell keeps the Product's id, member and Item counts, membership revision and creation time on its second line.
@@ -301,7 +301,12 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
 - **Detail panel.**
   - The title shows the representative image through the bound Item's own image read, the member's confirmed name, the id and the status.
   - v29's groups follow: `브랜드` from the member's facts; `카테고리 / 카테고리 추천 신뢰도 / 가격 정보 / 채널별 판매가 / 마진율 / 태그 / AI 상태` read `데이터 없음`.
-  - `✨ AI 추천` and `상세 편집` are inert.
+  - **`AI 상품명 추천` (ADR-0027 AIS-2).**
+    - The group holds `✨ AI 추천` and the Product's target-free `product_name` result, as the enrichment owner reads it: the recommendation, its confidence, `검토 필요`, `최신` or `입력 바뀜 · <reasons>`, and the model that answered.
+    - The button is live only while the `ai` capability is READY. Otherwise it is inert with the capability's reason.
+    - A press asks the product-name task once. The server reuses a result whose inputs are unchanged; otherwise the panel reads the owner again until a newer result is recorded.
+    - It applies nothing.
+  - `상세 편집` is inert.
   - The membership, the members' facts, the Items, the review items, the target check and the Draft form follow as before.
 
 ### 등록관리
@@ -333,7 +338,11 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
   - The choice sends nothing. The chosen work opens `#/register-editor?draft=&unit=&items=&mode=` in a new tab, without the application's sidebar and top bar.
   - A unit's ref moves when it is authored and again when it is frozen. The editor follows the one unit of the Draft that holds the same Items. Two units holding them are never guessed between.
 - **Six steps.** Phase 1 places the register page's own pieces by step and adds no route:
-  1. `기본정보`: the main image, the platform tabs (the target marketplace only; the others are inert), the category and the name.
+  1. `기본정보`: the main image, the platform tabs (the target marketplace only; the others are inert), the category, the name and `AI 상품명 추천`.
+     - `AI 상품명 추천` shows the same recommendation panel as 통합DB.
+     - `AI 추천 적용` applies the exact result revision shown to the name as `AI_SUGGESTION`, against the Preparation revision read (ADR-0026 §7).
+     - It is enabled only for a fresh OK result, on a saved Preparation whose name holds no confirmed value. A confirmed name is never overwritten.
+     - `AI 추천 적용됨 · 저장하면 확인됩니다` marks an applied name. The operator's own save makes it `OPERATOR_CONFIRMED`.
   2. `대표이미지`: the Item image editor. The bulk `배경 이미지 제거 / 리사이즈 / 이미지 편집 / 이미지 자동번역` are inert. `자동 선택 다시 실행` is the image owner's own.
   3. `옵션·가격`: the repin and the Items table. The price facts no read states read `데이터 없음`, and the option tools are inert.
   4. `상품정보고시`: the category requirements and their fields.

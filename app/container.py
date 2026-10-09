@@ -142,6 +142,7 @@ from app.stages.products.pricing_service import ProductPricingService
 from app.stages.products.readiness import ProductReadinessService
 from app.stages.products.service import ProductsService
 from app.stages.products.store import ProductFoundationStore
+from app.stages.products.tasks import PRODUCTION_TASKS
 from app.stages.register.authoring import RegistrationPreparationService
 from app.stages.register.authoring_revisions import AuthoringRevisionStore
 from app.stages.register.builder import RegistrationSnapshotBuilder
@@ -768,6 +769,8 @@ def build_container(
         accounts=accounts,
         composer=ai_composer,
         execution=ai_execution,
+        # ADR-0027 AIS-2: the product-name stage's task, the first runnable one.
+        tasks=PRODUCTION_TASKS,
     )
     registry.register(enrichment.job_definition())
     registration_preparations = RegistrationPreparationService(

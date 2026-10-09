@@ -1,11 +1,18 @@
 """The PromptTemplate and PlatformPolicy stores and the Settings registry over them (ADR-0026 §3).
 
 The registry is the v29 prototype's (``registry.CATALOG``). Each entry's text lives only in its
-store: revision 1 is the prototype's text (``seed_v29.json``), which the application writes when it
-starts on a database that lacks it, and every later revision is an operator's save of one field, or
-a reset of one field to the seed. A save names the revision it was read from
+store: revision 1 is the newest seed's text (``seed_v29.json``), which the application writes when
+it starts on a database that lacks it, and every later revision is an operator's save of one
+field, or a reset of one field to the seed. A save names the revision it was read from
 (``expected_current_revision``); a save that would change nothing is refused; every save is audited
 by identity and fingerprint, never by its text (AIF-04).
+
+**Seed upgrades (ADR-0027 §6, AIS-07).** A seed version after ``v29`` names, per field, the text it
+replaces. On startup an existing store is upgraded only where the field still holds exactly that
+text: a ``RESET`` revision by ``system:seed``, audited with the seed version. An operator's edit is
+never overwritten. An entry's 기본값 is the newest seed: revision 1 with every upgrade whose
+replaced text it holds applied, so a reset restores the newest seed and ``modified_fields``
+compares with it.
 
 The composition is the prototype's own preview layout. Here it is shown with the runtime-data
 placeholder only; filling it, and adding the platform limits a policy references, is AIF-2.
@@ -15,9 +22,10 @@ import hashlib
 import json
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
+from functools import cache
 from pathlib import Path
 from typing import Any, Final, Literal
 
@@ -55,8 +63,9 @@ AI_PROMPT_UNCHANGED: Final = "AI_PROMPT_UNCHANGED"
 AI_PROMPT_PREVIEW_INVALID: Final = "AI_PROMPT_PREVIEW_INVALID"
 
 MAX_TEXT: Final = 20_000
-# The v29 prototype's texts, verbatim: the seed of every registry entry (ADR-0026 §3.1). It is only
-# ever written into the stores, as revision 1; runtime reads the stores, never this file.
+# The v29 prototype's texts, verbatim, with the versioned seed upgrades applied: the seed of every
+# registry entry (ADR-0026 §3.1). It is only ever written into the stores, as revision 1 or as a
+# seed upgrade; runtime reads the stores, and the upgrades only to know an entry's newest seed.
 SEED_FILE: Final = Path(__file__).with_name("seed_v29.json")
 SEED_ACTOR: Final = "system:seed"
 RUNTIME_PLACEHOLDER: Final = "{실행 시 ICBM 실제 데이터가 여기에 주입됩니다.}"
@@ -142,6 +151,43 @@ def load_seed() -> dict[str, Any]:
     return seed
 
 
+@dataclass(frozen=True)
+class SeedUpgrade:
+    seed_version: str
+    key: str
+    field: str
+    previous: str
+    text: str
+
+
+@cache
+def seed_upgrades() -> tuple[SeedUpgrade, ...]:
+    """The seed's upgrades in order, each with the text it replaces and the newest text."""
+    seed = load_seed()
+    upgrades = []
+    for item in seed.get("upgrades", ()):
+        family = "policies" if item["key"] in seed["policies"] else "templates"
+        upgrades.append(
+            SeedUpgrade(
+                seed_version=item["seed_version"],
+                key=item["key"],
+                field=item["field"],
+                previous=item["previous"],
+                text=seed[family][item["key"]]["content"][item["field"]],
+            )
+        )
+    return tuple(upgrades)
+
+
+def newest_seed(key: str, content: Mapping[str, str]) -> dict[str, str]:
+    """Revision 1's content with every upgrade whose replaced text it holds applied."""
+    upgraded = dict(content)
+    for upgrade in seed_upgrades():
+        if upgrade.key == key and upgraded.get(upgrade.field) == upgrade.previous:
+            upgraded[upgrade.field] = upgrade.text
+    return upgraded
+
+
 class PromptRegistryStore:
     """The only production writer of the six registry tables."""
 
@@ -200,6 +246,33 @@ class PromptRegistryStore:
                 written += 1
         return written
 
+    def upgrade_seeds(self, *, correlation_id: str) -> int:
+        """Apply every seed upgrade to the entries whose field still holds exactly the text it
+        replaces, each as an audited ``RESET`` revision by ``system:seed``, and return how many were
+        applied. An operator's edit is never overwritten, and a restart applies nothing again."""
+        applied = 0
+        for upgrade in seed_upgrades():
+            catalog = _catalog(upgrade.key)
+            family = _family(catalog)
+            with self._db.write() as session:
+                record = _entry(session, family, upgrade.key)
+                if record.current.content.get(upgrade.field) != upgrade.previous:
+                    continue
+                self._append(
+                    session,
+                    family,
+                    catalog,
+                    record,
+                    upgrade.field,
+                    {**record.current.content, upgrade.field: upgrade.text},
+                    Origin.RESET,
+                    actor=SEED_ACTOR,
+                    correlation_id=correlation_id,
+                    details={"seed_version": upgrade.seed_version},
+                )
+                applied += 1
+        return applied
+
     def entry(self, key: str) -> EntryRecord:
         catalog = _catalog(key)
         family = _family(catalog)
@@ -236,7 +309,6 @@ class PromptRegistryStore:
                 details={"field": field},
             )
         family = _family(catalog)
-        now = self._clock.now()
         with self._db.write() as session:
             record = _entry(session, family, key)
             current = record.current
@@ -249,64 +321,99 @@ class PromptRegistryStore:
             origin = Origin.OPERATOR if text is not None else Origin.RESET
             value = text if text is not None else record.seed.content[field]
             content = {**current.content, field: value}
-            digest = fingerprint(content)
-            if digest == current.content_fingerprint:
+            if fingerprint(content) == current.content_fingerprint:
                 raise PromptRegistryConflictError(
                     AI_PROMPT_UNCHANGED,
                     "the text is identical to the current revision",
                     details={"current_revision": current.revision_id},
                 )
-            number = 1 + int(
-                session.scalar(
-                    select(func.coalesce(func.max(family.revisions.revision_no), 0)).where(
-                        getattr(family.revisions, family.key) == key
-                    )
-                )
-                or 0
-            )
-            row = family.revisions(
-                revision_id=str(uuid.uuid4()),
-                revision_no=number,
-                content_json=canonical_json(content),
-                content_fingerprint=digest,
-                origin=origin.value,
-                seed_version=None,
-                authored_by=actor,
+            return self._append(
+                session,
+                family,
+                catalog,
+                record,
+                field,
+                content,
+                origin,
+                actor=actor,
                 correlation_id=correlation_id,
-                authored_at=now,
-                **{family.key: key},
             )
-            session.add(row)
-            session.flush()
-            pointer = session.get(family.current, key)
-            assert pointer is not None  # _entry above proved it exists
-            pointer.revision_id = row.revision_id
-            pointer.moved_by = actor
-            pointer.correlation_id = correlation_id
-            pointer.moved_at = now
-            session.flush()
-            self._audit.append(
-                AuditEntry(
-                    event_type=family.event,
-                    action=f"AI_{family.name.upper()}_{origin.value}",
-                    actor=actor,
-                    outcome=AuditOutcome.RECORDED,
-                    target_ref=key,
-                    before={
-                        "revision": current.revision_id,
-                        "content_fingerprint": current.content_fingerprint,
-                    },
-                    after={
-                        "revision": row.revision_id,
-                        "revision_no": number,
-                        "content_fingerprint": digest,
-                    },
-                    details={"layer": catalog.layer.value, "field": field, "origin": origin.value},
-                    correlation_id=correlation_id,
-                ),
-                session=session,
+
+    def _append(
+        self,
+        session: Session,
+        family: _Family,
+        catalog: CatalogEntry,
+        record: EntryRecord,
+        field: str,
+        content: Mapping[str, str],
+        origin: Origin,
+        *,
+        actor: str,
+        correlation_id: str,
+        details: Mapping[str, str] | None = None,
+    ) -> RevisionRecord:
+        """Append one revision of ``content`` as the entry's current one, audited."""
+        key = record.key
+        current = record.current
+        now = self._clock.now()
+        digest = fingerprint(content)
+        number = 1 + int(
+            session.scalar(
+                select(func.coalesce(func.max(family.revisions.revision_no), 0)).where(
+                    getattr(family.revisions, family.key) == key
+                )
             )
-            return _record(row)
+            or 0
+        )
+        row = family.revisions(
+            revision_id=str(uuid.uuid4()),
+            revision_no=number,
+            content_json=canonical_json(content),
+            content_fingerprint=digest,
+            origin=origin.value,
+            seed_version=None,
+            authored_by=actor,
+            correlation_id=correlation_id,
+            authored_at=now,
+            **{family.key: key},
+        )
+        session.add(row)
+        session.flush()
+        pointer = session.get(family.current, key)
+        assert pointer is not None  # _entry above proved it exists
+        pointer.revision_id = row.revision_id
+        pointer.moved_by = actor
+        pointer.correlation_id = correlation_id
+        pointer.moved_at = now
+        session.flush()
+        self._audit.append(
+            AuditEntry(
+                event_type=family.event,
+                action=f"AI_{family.name.upper()}_{origin.value}",
+                actor=actor,
+                outcome=AuditOutcome.RECORDED,
+                target_ref=key,
+                before={
+                    "revision": current.revision_id,
+                    "content_fingerprint": current.content_fingerprint,
+                },
+                after={
+                    "revision": row.revision_id,
+                    "revision_no": number,
+                    "content_fingerprint": digest,
+                },
+                details={
+                    "layer": catalog.layer.value,
+                    "field": field,
+                    "origin": origin.value,
+                    **(details or {}),
+                },
+                correlation_id=correlation_id,
+            ),
+            session=session,
+        )
+        return _record(row)
 
 
 def _catalog(key: str) -> CatalogEntry:
@@ -327,7 +434,13 @@ def _entry(session: Session, family: _Family, key: str) -> EntryRecord:
         raise NotFoundError(AI_PROMPT_UNKNOWN, f"the store holds no entry named {key}")
     history = tuple(_record(row) for row in rows)
     current = next(record for record in history if record.revision_id == pointer.revision_id)
-    seed = next(record for record in history if record.origin is Origin.SEED)
+    first = next(record for record in history if record.origin is Origin.SEED)
+    content = newest_seed(key, first.content)
+    seed = (
+        first
+        if content == first.content
+        else replace(first, content=content, content_fingerprint=fingerprint(content))
+    )
     return EntryRecord(key, current, seed, history)
 
 
@@ -394,7 +507,7 @@ class EntryView(BaseModel):
     role_key: str | None
     editable_fields: list[str]
     content: dict[str, str]
-    # The fields whose current text differs from the v29 seed (the prototype's 사용자 수정본).
+    # The fields whose current text differs from the newest seed (the prototype's 사용자 수정본).
     modified_fields: list[str]
     current: RevisionView
     history: list[RevisionView]
@@ -437,8 +550,10 @@ class PromptRegistryService:
         self._store = store
 
     def seed_on_startup(self) -> int:
-        """The application's startup pass: the v29 seed of every entry the stores lack."""
-        return self._store.seed_missing(correlation_id="startup-ai-prompt-seed")
+        """The application's startup pass: the newest seed of every entry the stores lack, then
+        the seed upgrades of the entries that still hold the text an upgrade replaces."""
+        written = self._store.seed_missing(correlation_id="startup-ai-prompt-seed")
+        return written + self._store.upgrade_seeds(correlation_id="startup-ai-prompt-seed")
 
     def registry(self) -> RegistryView:
         return RegistryView(entries=[_view(record) for record in self._store.entries()])
