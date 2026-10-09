@@ -47,6 +47,7 @@ from app.stages.collect.facts import (
     FieldFact,
     FieldStatus,
     MoneyValue,
+    OptionsValue,
     PriceRole,
     PricesValue,
     SalesChannelScope,
@@ -392,9 +393,12 @@ def _stock(nodes: Sequence[Node], words: Vocabulary) -> FieldFact:
 def _options(nodes: Sequence[Node], words: Vocabulary) -> FieldFact:
     """The choices the page offers, or why they cannot be recorded as a value.
 
-    This storefront writes the option container on every product, so the container alone says
-    nothing. A product that has an axis to choose states it as a ``select``; a product without one
-    writes none, and that is a stated absence, not a doubt.
+    A Cafe24 skin writes the option container on every product. A product that has an axis to
+    choose states it inside the container as a ``select``; a product without one writes none. A
+    container with no axis therefore proves the product has no option control, and the field is
+    ``CONFIRMED`` with zero axes (ADR-0010 §7), not ``ABSENT``. KM통상's parser reads that case as
+    ``ABSENT``; the template does not repeat it (ADR-0030 §10, a stated difference). A page with no
+    option container proves nothing and stays ``ABSENT``.
 
     When axes *are* stated, the evidence keeps each axis and its values separately and in the
     order the page wrote them — a different count, grade or weight stays a different value — but
@@ -411,7 +415,18 @@ def _options(nodes: Sequence[Node], words: Vocabulary) -> FieldFact:
         if node.tag == "select" and any(child.tag == "option" for child in node.descendants())
     ]
     if not axes:
-        return _absent(f"*.{marker} select")
+        return FieldFact(
+            FieldStatus.CONFIRMED,
+            OptionsValue(axes=()),
+            (
+                Evidence(
+                    EvidenceKind.CONTROL_STATE,
+                    f"*.{marker}",
+                    FieldStatus.CONFIRMED,
+                    observed="no option axis",
+                ),
+            ),
+        )
     evidence = tuple(
         Evidence(
             EvidenceKind.DOM_TEXT,
