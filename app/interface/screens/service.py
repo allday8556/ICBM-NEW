@@ -143,6 +143,7 @@ class ScreenService:
                 registration_error=_count_view(review[ReviewKind.REGISTRATION_ERROR]),
                 fulfillment=_count_view(review[ReviewKind.FULFILLMENT]),
             ),
+            orders_awaiting_dispatch=self._operate.awaiting_dispatch(),
         )
 
     def collect(self) -> CollectView:

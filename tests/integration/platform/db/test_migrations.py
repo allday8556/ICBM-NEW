@@ -192,8 +192,10 @@ CANONICAL_TABLES = (
     "ai_provider_profile_revisions",
     "ai_provider_profile_current",
     "ai_provider_calls",
+    "live_grant_dispatch_bindings",
+    "operate_dispatch_attempts",
 )
-HEAD = "0056_ai_provider_profile"
+HEAD = "0057_m65_dispatch_stage"
 
 
 def _url(path: Path) -> str:

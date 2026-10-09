@@ -358,6 +358,11 @@ that slice's:
   read-back or any other evidence; it never deletes local data; and the mode, the grant and the
   brake each stay one layer — none of them authorizes a deletion by itself.
 
+> **Amendment note (M6.5-C, owner directions Issue #219 `6053008136`).** ADR-0025 §5 adds a fourth
+> mutation stage, `DISPATCH`: the shipment of one fulfillable product order, built exactly as this
+> DELETE stage is (an exact grant of budget 1, the attempt opened before any byte, `UNKNOWN` never
+> resent) with one more layer, the attested 주문 판매자 group. It changes nothing above.
+
 ### 4. The protected-write brake — the kill switch (D4)
 
 #### 4.1 The brake

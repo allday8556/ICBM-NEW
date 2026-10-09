@@ -94,6 +94,9 @@ class EndpointId(StrEnum):
     # the tag stage. Neither sends a tag; CREATE keeps tags frozen and unsent (AIT-01).
     SMARTSTORE_TAG_RECOMMEND = "SMARTSTORE_TAG_RECOMMEND"
     SMARTSTORE_TAG_RESTRICTED = "SMARTSTORE_TAG_RESTRICTED"
+    # M6.5-C (ADR-0025 §5.1): the dispatch of one product order — a marketplace mutation, sent only
+    # through the DISPATCH stage of the send-time safety stack.
+    SMARTSTORE_ORDER_DISPATCH = "SMARTSTORE_ORDER_DISPATCH"
     SMARTSTORE_CATEGORY_READ = "SMARTSTORE_CATEGORY_READ"
     SMARTSTORE_PRODUCT_ATTRIBUTE_LIST = "SMARTSTORE_PRODUCT_ATTRIBUTE_LIST"
     SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES = "SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES"
@@ -292,6 +295,27 @@ def order_details_succeeded(status: int, body: object) -> bool:
         and (entry.get("order") is None or isinstance(entry.get("order"), dict))
         and (entry.get("delivery") is None or isinstance(entry.get("delivery"), dict))
         for entry in data
+    )
+
+
+def order_dispatch_succeeded(status: int, body: object) -> bool:
+    """HTTP 200 and the documented (성공/실패) 상품 주문 처리 내역 (Commerce API 2.90.1, packet
+    Issue #219 6053086881 A): a ``data`` object whose ``successProductOrderIds`` is an array of
+    strings and whose ``failProductOrderInfos`` is an array of objects naming a string
+    ``productOrderId``, each when present. Whether *this* product order succeeded is read from
+    those lists by the caller; an answer that names it in neither is never a proven dispatch."""
+    if status != 200 or not isinstance(body, dict):
+        return False
+    data = body.get("data")
+    if not isinstance(data, dict):
+        return False
+    success = data.get("successProductOrderIds", [])
+    failures = data.get("failProductOrderInfos", [])
+    return (
+        isinstance(success, list)
+        and all(isinstance(value, str) and value for value in success)
+        and isinstance(failures, list)
+        and all(_text_member(entry, "productOrderId", required=True) for entry in failures)
     )
 
 
@@ -808,6 +832,26 @@ ADOPTED: Mapping[EndpointId, EndpointContract] = {
         success_predicate=product_delete_succeeded,
         predicate_revision="m5-delete-r1",
     ),
+    # ---- M6.5-C (ADR-0025 §5.1; packet Issue #219 6053086881 A). One product order per call,
+    # delivery method DELIVERY only. A dispatch is a mutation: execution, the brake, the exact
+    # DISPATCH grant and the send-time stack decide, and an UNKNOWN is never resent. Nothing of
+    # the response is retained: the caller states only whether this product order was listed as a
+    # success or a failure, and the failure's documented code.
+    EndpointId.SMARTSTORE_ORDER_DISPATCH: EndpointContract(
+        endpoint_id=EndpointId.SMARTSTORE_ORDER_DISPATCH,
+        method=Method.POST,
+        path="/v1/pay-order/seller/product-orders/dispatch",
+        content_type="application/json",
+        requires_bearer=True,
+        # ICBM policy, never a provider fact: the bounds of the other adopted mutations.
+        connect_timeout_s=5.0,
+        read_timeout_s=30.0,
+        redirect=RedirectPolicy.NO_FOLLOW,
+        required_groups=frozenset({ORDER_GROUP}),
+        mutating=True,
+        success_predicate=order_dispatch_succeeded,
+        predicate_revision="m65-dispatch-r1",
+    ),
     # ---- Notice coverage S0 (owner directive 2026-10-03): the two official 상품정보제공고시 reads,
     # read only to capture the provider's notice schema. A read, never a mutation.
     EndpointId.SMARTSTORE_NOTICE_TYPES: EndpointContract(
@@ -923,7 +967,7 @@ def wire_identity(endpoint_id: EndpointId) -> tuple[str, str, str]:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "ai-tags-r1"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m65-dispatch-r1"
 
 # ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
 # the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
@@ -966,6 +1010,8 @@ MAPPING_FINGERPRINTS: Mapping[str, str] = {
     "m65-delivery-r1": "31e823b13906eadd24c0ec018b64311954d6961d97ddd79566c1d13bafc1db05",
     # ADR-0028 T2 adopts the two read-only tag reads (recommended tags, restricted-tag check).
     "ai-tags-r1": "9645e40ac9cad4abff0398ee772806650ffa46de573406aaa4f3bc9ac7e9cf14",
+    # M6.5-C adopts the order dispatch (ADR-0025 §5.1), a mutation of the 주문 판매자 group.
+    "m65-dispatch-r1": "ff7a27e0f8e0fb5bdcc3103a92630ec3c2cd6e9a550e5bb5c5f97af601813322",
 }
 
 

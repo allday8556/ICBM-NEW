@@ -42,6 +42,8 @@ REPLAY_KEY_VERSION: Final = "asset-replay-key/v1"
 ASSET_ENDPOINT_GROUP: Final = "product_image_upload"
 # The DELETE stage (ADR-0018 §3.5): removing one listing ICBM itself registered and confirmed.
 DELETE_ENDPOINT_GROUP: Final = "product_deletion"
+# The DISPATCH stage (ADR-0025 §5): the shipment of one fulfillable product order.
+DISPATCH_ENDPOINT_GROUP: Final = "order_dispatch"
 
 # Server-owned bounds the implementing slice fixes (ADR-0018 §13). A grant is short-lived and
 # small: a canary is one unit, and a CREATE grant authorizes exactly one attempt (G3-27).
@@ -50,6 +52,8 @@ MAX_ASSET_BUDGET: Final = 10
 CREATE_BUDGET: Final = 1
 # A DELETE grant authorizes exactly one attempt for one confirmed registration (§3.5).
 DELETE_BUDGET: Final = 1
+# A DISPATCH grant authorizes exactly one attempt for one product order (ADR-0025 §5).
+DISPATCH_BUDGET: Final = 1
 
 
 class MutationStage(StrEnum):
@@ -58,6 +62,9 @@ class MutationStage(StrEnum):
     # §3.5: the removal of one ICBM-confirmed listing. Never part of a canary's ASSET -> CREATE
     # order, and it has no restore drill, eligibility review or residual-risk proof of its own.
     DELETE = "DELETE"
+    # ADR-0025 §5: the dispatch of one fulfillable product order. Like DELETE, never part of a
+    # canary and with no restore drill, eligibility review or residual-risk proof of its own.
+    DISPATCH = "DISPATCH"
 
 
 class GrantState(StrEnum):
@@ -126,6 +133,8 @@ class Layer(StrEnum):
     EXECUTION_SCOPE = "EXECUTION_SCOPE"
     # The send-time truth fence: no owner write since the stage gate was evaluated (§4.3).
     SEND_TIME_TRUTH = "SEND_TIME_TRUTH"
+    # ADR-0025 §5: the operator-attested API group the stage's endpoint needs (주문 판매자).
+    PERMISSION_ATTESTED = "PERMISSION_ATTESTED"
 
 
 # Why a layer refuses. Codes only.
@@ -157,6 +166,7 @@ CONTENT_DIGEST_MISMATCH: Final = "LIVE_ASSET_CONTENT_DIGEST_MISMATCH"
 SCOPE_NOT_ACTIVE: Final = "LIVE_CREATE_EXECUTION_SCOPE_NOT_ACTIVE"
 TRUTH_MOVED: Final = "LIVE_SEND_TIME_TRUTH_MOVED"
 CREATE_STAGE_GATE_NOT_READY: Final = "LIVE_CREATE_STAGE_GATE_NOT_READY"
+ORDER_GROUP_NOT_ATTESTED: Final = "LIVE_ORDER_GROUP_NOT_ATTESTED"
 
 
 class ProofVerdict(StrEnum):

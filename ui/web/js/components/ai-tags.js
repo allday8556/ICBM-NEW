@@ -9,20 +9,11 @@
 // connection; the server reads the platform in its job, never here. No tag is ever sent to the
 // marketplace (ADR-0028 AIT-01).
 
-import { ApiError, getJson, sendJson } from '../core/api.js';
 import { h } from '../core/dom.js';
-import { markInert } from '../core/inert.js';
-import { toast } from '../core/toast.js';
-import { enrichmentUrl } from './ai-name.js';
-import { stateText } from './ai-provider.js';
+import { boundSmartStoreTarget as boundTarget, targetedPanel, targetedResult } from './ai-targeted.js';
 
 export const TAG_TASK = 'SMARTSTORE_TAGS_V1';
 export const TAG_RESULT = 'tags';
-const DRAFT_TARGETS = '/api/v1/register/draft-targets';
-const OPERATOR = 'operator';
-const POLL_MS = 2000;
-const POLL_LIMIT = 90;
-
 const SOURCE_COPY = { PLATFORM: '네이버 추천', AI_DIRECT: 'AI 직접' };
 const REMOVED_COPY = {
   restricted: '제한 태그',
@@ -41,28 +32,12 @@ const ERROR_COPY = {
   AI_OUTPUT_SCHEMA_INVALID: 'AI 답변이 결과 형식을 지키지 않았습니다',
 };
 
-function errorCopy(error) {
-  if (error instanceof ApiError) return ERROR_COPY[error.error?.code] ?? error.message;
-  return String(error);
-}
-
-// The SmartStore account bound to the connection now, or null (the server checks again).
 export async function boundSmartStoreTarget() {
-  const listed = await getJson(DRAFT_TARGETS);
-  const target = listed.targets.find((candidate) => candidate.marketplace_key === 'smartstore' && candidate.binding === 'BOUND');
-  return target ? { marketplace_key: target.marketplace_key, marketplace_account_id: target.marketplace_account_id } : null;
+  return boundTarget();
 }
 
 export function tagResult(view, target) {
-  return (
-    view.results.find(
-      (result) =>
-        result.task_key === TAG_TASK &&
-        result.result_key === TAG_RESULT &&
-        result.target?.marketplace_key === target.marketplace_key &&
-        result.target?.marketplace_account_id === target.marketplace_account_id,
-    ) ?? null
-  );
+  return targetedResult(view, TAG_TASK, TAG_RESULT, target);
 }
 
 export function tagRecommendation(result) {
@@ -113,84 +88,16 @@ export function tagRecommendation(result) {
 // `✨ AI 태그 추천` with the recommendation under it. `target` is a SmartStore account, or null to
 // use the account bound to the connection. `onResult(result, target)` hears every read.
 export function aiTagsPanel(productGroupId, target = null, { onResult } = {}) {
-  const body = h('div', { class: 'ai-tags-body' }, h('span', { class: 'mini' }, '불러오는 중…'));
-  const button = h('button', { type: 'button', class: 'btn ai-btn', 'data-action': 'ai-tags-request' }, '✨ AI 태그 추천');
-  const host = h('div', { class: 'ai-tags', 'data-role': 'ai-tags', 'data-product': productGroupId }, button, body);
-  let account = target;
-  let busy = false;
-
-  function show(view) {
-    const ready = view.ai_capability?.status === 'READY' && account !== null;
-    button.dataset.ready = ready ? 'true' : 'false';
-    if (ready) {
-      delete button.dataset.inert;
-      button.removeAttribute('aria-disabled');
-    } else if (account === null) {
-      markInert(button, 'AI 태그 추천 · 연결된 스마트스토어 판매 계정이 없습니다');
-    } else {
-      markInert(button, `AI 태그 추천 · ${stateText(view.ai_capability ?? {})}`);
-    }
-    const result = account ? tagResult(view, account) : null;
-    body.replaceChildren(account ? tagRecommendation(result) : h('div', { class: 'mini no-data' }, '연결된 스마트스토어 판매 계정이 없습니다'));
-    onResult?.(result, account);
-    return result;
-  }
-
-  async function read() {
-    return show(await getJson(enrichmentUrl(productGroupId)));
-  }
-
-  button.addEventListener('click', async () => {
-    if (busy || button.dataset.ready !== 'true') return;
-    busy = true;
-    button.disabled = true;
-    try {
-      const before = tagResult(await getJson(enrichmentUrl(productGroupId)), account)?.sequence ?? 0;
-      const sent = await sendJson('POST', enrichmentUrl(productGroupId), { actor: OPERATOR, tasks: [TAG_TASK], target: account });
-      const jobId = sent.job_id;
-      body.replaceChildren(h('span', { class: 'mini', 'data-role': 'ai-tags-running' }, '네이버 추천 태그를 읽고 AI가 고르는 중…'));
-      for (let attempt = 0; attempt < POLL_LIMIT; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-        const view = await getJson(enrichmentUrl(productGroupId));
-        const result = tagResult(view, account);
-        const settled = await jobSettled(jobId);
-        if ((result?.sequence ?? 0) > before || settled) {
-          show(view);
-          toast(
-            (result?.sequence ?? 0) > before
-              ? result.status === 'OK'
-                ? '태그 추천을 받았습니다'
-                : '태그 추천에 실패했습니다'
-              : '입력이 그대로라 이전 추천을 그대로 씁니다',
-          );
-          return;
-        }
-      }
-      toast('태그 추천이 아직 끝나지 않았습니다', '잠시 후 다시 열어 확인하세요.');
-      await read();
-    } catch (error) {
-      toast('AI 태그 추천을 요청하지 못했습니다', errorCopy(error));
-      await read().catch(() => {});
-    } finally {
-      busy = false;
-      button.disabled = false;
-    }
+  return targetedPanel({
+    productGroupId,
+    target,
+    task: TAG_TASK,
+    resultKey: TAG_RESULT,
+    role: 'ai-tags',
+    label: 'AI 태그 추천',
+    running: '네이버 추천 태그를 읽고 AI가 고르는 중…',
+    render: tagRecommendation,
+    errorCopy: ERROR_COPY,
+    onResult,
   });
-
-  // A job that found its inputs unchanged records nothing (ADR-0028 §4 note): the panel stops
-  // waiting once the request's own job has ended.
-  async function jobSettled(jobId) {
-    if (!jobId) return true;
-    const job = await getJson(`/api/v1/system/jobs/${encodeURIComponent(jobId)}`).catch(() => null);
-    return job !== null && ['SUCCEEDED', 'DEAD'].includes(job.state);
-  }
-
-  (async () => {
-    if (account === null) account = await boundSmartStoreTarget().catch(() => null);
-    await read();
-  })().catch((error) => {
-    markInert(button, 'AI 태그 추천 · 상태를 읽지 못했습니다');
-    body.replaceChildren(h('div', { class: 'note' }, `태그 추천을 읽지 못했습니다 · ${errorCopy(error)}`));
-  });
-  return host;
 }

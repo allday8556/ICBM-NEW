@@ -32,6 +32,7 @@ from app.platform.core.safe_payload import safe_payload
 from app.stages.connect.marketplace.capability import RemoteOutcome
 from integrations.marketplaces.smartstore import classify
 from integrations.marketplaces.smartstore.classify import Classification
+from integrations.marketplaces.smartstore.delivery_companies import DELIVERY_COMPANIES
 from integrations.marketplaces.smartstore.product import (
     CreateDocument,
     WireContractError,
@@ -98,6 +99,11 @@ _TAG_RESTRICTED = EndpointId.SMARTSTORE_TAG_RESTRICTED
 TAG_TEXT_MAX = 50
 TAG_CHECK_MAX = 10
 _ORDER_DETAILS = EndpointId.SMARTSTORE_ORDER_DETAILS
+_ORDER_DISPATCH = EndpointId.SMARTSTORE_ORDER_DISPATCH
+# ADR-0025 §4, §5.1: the one documented delivery method a first-vertical dispatch sends, and the
+# ICBM shape of a tracking number (the reference states only a size).
+_DISPATCH_METHOD = "DELIVERY"
+_TRACKING_NUMBER = re.compile(r"^[0-9A-Za-z-]{1,50}$")
 # The documented request date-time (yyyy-MM-dd'T'HH:mm:ss.SSSXXX); ICBM always sends KST.
 _ORDER_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+09:00$")
 # ``moreSequence`` is only ever echoed from the provider's own ``more``; printable, no space.
@@ -266,6 +272,21 @@ class OrderDetailsRequest:
 
 
 @dataclass(frozen=True)
+class OrderDispatchRequest:
+    """Dispatch one product order (M6.5-C; ADR-0025 §5.1): one ``dispatchProductOrders`` element
+    with delivery method ``DELIVERY``, a documented carrier code, the tracking number and the
+    dispatch time in KST. The bearer exists only for this call."""
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    product_order_id: str
+    delivery_company_code: str
+    tracking_number: str
+    dispatch_date: str
+
+
+@dataclass(frozen=True)
 class ProductCreateRequest:
     """Register one product through the adopted ``POST /v2/products`` (CREATE adoption slice).
 
@@ -385,6 +406,18 @@ class OrderChangesResponse:
     retained: Mapping[str, object]
     http_status: int
     empty_window: bool = False
+
+
+@dataclass(frozen=True)
+class OrderDispatchResponse:
+    """How the documented 200 answer listed the one product order sent (ADR-0025 §5): ``SUCCESS``
+    when only ``successProductOrderIds`` names it, ``FAIL`` when only ``failProductOrderInfos``
+    does (with that entry's documented code), ``NONE`` otherwise. Nothing else is kept."""
+
+    product_order_id: str
+    listed: str
+    fail_code: str | None
+    http_status: int
 
 
 @dataclass(frozen=True)
@@ -508,7 +541,8 @@ def _generations(request: object) -> tuple[int | None, int | None]:
         | TagRecommendRequest
         | TagRestrictedRequest
         | OrderChangesRequest
-        | OrderDetailsRequest,
+        | OrderDetailsRequest
+        | OrderDispatchRequest,
     ):
         return request.credential_generation, request.session_generation
     return None, None
@@ -689,6 +723,33 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
         content = json.dumps(
             {"productOrderIds": list(ids)}, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
+        return _Wire(contract.path, headers, {}, content=content)
+    if contract.endpoint_id is _ORDER_DISPATCH:
+        if (
+            not isinstance(request, OrderDispatchRequest)
+            or not _matches(_ORDER_ID, request.product_order_id)
+            or request.delivery_company_code not in DELIVERY_COMPANIES
+            or not _matches(_TRACKING_NUMBER, request.tracking_number)
+            or not _matches(_ORDER_TIME, request.dispatch_date)
+        ):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        assert contract.content_type is not None
+        headers["Content-Type"] = contract.content_type
+        document = {
+            "dispatchProductOrders": [
+                {
+                    "productOrderId": request.product_order_id,
+                    "deliveryMethod": _DISPATCH_METHOD,
+                    "deliveryCompanyCode": request.delivery_company_code,
+                    "trackingNumber": request.tracking_number,
+                    "dispatchDate": request.dispatch_date,
+                }
+            ]
+        }
+        content = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return _Wire(contract.path, headers, {}, content=content)
     if contract.endpoint_id in _PRODUCT_READS:
         if not isinstance(request, ProductReadRequest):
@@ -897,6 +958,7 @@ _Result = (
     | TagRestrictedResponse
     | OrderChangesResponse
     | OrderDetailsResponse
+    | OrderDispatchResponse
     | ProductSearchPage
     | ImageUploadResponse
 )
@@ -934,6 +996,9 @@ def _result(contract: EndpointContract, request: object, body: object, status: i
         return OrderDetailsResponse(
             retained=retain(contract, _order_scope(body)), http_status=status
         )
+    if contract.endpoint_id is _ORDER_DISPATCH:
+        assert isinstance(request, OrderDispatchRequest)
+        return _dispatch_listing(request.product_order_id, body, status)
     if contract.endpoint_id is _CATEGORY_LIST:
         assert isinstance(request, CategoryListRequest)
         return CategoryListResponse(
@@ -983,6 +1048,25 @@ def _result(contract: EndpointContract, request: object, body: object, status: i
         credential_generation=request.credential_generation,
         session_generation=request.session_generation,
     )
+
+
+def _dispatch_listing(product_order_id: str, body: object, status: int) -> OrderDispatchResponse:
+    """Where the documented dispatch answer lists the one product order sent (ADR-0025 §5)."""
+    data = body.get("data") if isinstance(body, dict) else None
+    data = data if isinstance(data, dict) else {}
+    success = product_order_id in (data.get("successProductOrderIds") or [])
+    failures = [
+        entry
+        for entry in data.get("failProductOrderInfos") or []
+        if isinstance(entry, dict) and entry.get("productOrderId") == product_order_id
+    ]
+    if success and not failures:
+        return OrderDispatchResponse(product_order_id, "SUCCESS", None, status)
+    if failures and not success:
+        return OrderDispatchResponse(
+            product_order_id, "FAIL", _marker(failures[0].get("code")), status
+        )
+    return OrderDispatchResponse(product_order_id, "NONE", None, status)
 
 
 class SmartStoreEndpointCaller:
@@ -1088,6 +1172,13 @@ class SmartStoreEndpointCaller:
         endpoint_id: Literal[EndpointId.SMARTSTORE_ORDER_DETAILS],
         request: OrderDetailsRequest,
     ) -> OrderDetailsResponse: ...
+
+    @overload
+    def call(
+        self,
+        endpoint_id: Literal[EndpointId.SMARTSTORE_ORDER_DISPATCH],
+        request: OrderDispatchRequest,
+    ) -> OrderDispatchResponse: ...
 
     @overload
     def call(self, endpoint_id: object, request: object) -> _Result: ...

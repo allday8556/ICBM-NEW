@@ -1,5 +1,6 @@
-"""OPERATE routes (M6, ADR-0023; M6.5, ADR-0025). Nothing here writes to the marketplace or a
-supplier: the supplier order is placed by hand and only recorded."""
+"""OPERATE routes (M6, ADR-0023; M6.5, ADR-0025). Nothing here writes to a supplier: the
+supplier order is placed by hand and only recorded. The one marketplace write, 발송처리, runs only
+through the DISPATCH stage of the send-time safety stack (ADR-0025 §5)."""
 
 import asyncio
 from dataclasses import asdict
@@ -135,8 +136,39 @@ def carriers(container: ContainerDep) -> dict[str, Any]:
 
 @router.get("/orders/{product_order_id}/fulfillment")
 def order_fulfillment(product_order_id: str, container: ContainerDep) -> dict[str, Any]:
-    """One order's fulfillment: its canonical identity, supplier order, tracking and history."""
-    return asdict(container.fulfillment.view(product_order_id))
+    """One order's fulfillment: its canonical identity, supplier order, tracking and history, and
+    its dispatch attempts (ADR-0025 §5)."""
+    return asdict(container.fulfillment.view(product_order_id)) | {
+        "dispatch_attempts": [
+            asdict(attempt) for attempt in container.dispatches.attempts(product_order_id)
+        ]
+    }
+
+
+@router.post("/orders/{product_order_id}/dispatch")
+async def dispatch_order(product_order_id: str, container: ContainerDep) -> dict[str, Any]:
+    """발송처리: one dispatch through the send-time safety stack (ADR-0025 §5). Without LIVE, the
+    released brake, the exact DISPATCH grant and every other layer it is refused and nothing is
+    sent; the refusal names every layer that refused."""
+    attempt = await asyncio.to_thread(
+        container.dispatches.dispatch,
+        product_order_id,
+        actor="operator",
+        correlation_id=new_correlation_id(),
+    )
+    return asdict(attempt)
+
+
+@router.post("/orders/{product_order_id}/dispatch/verify")
+async def verify_dispatch(product_order_id: str, container: ContainerDep) -> dict[str, Any]:
+    """Read the order back and record what it shows about its latest sent dispatch, once."""
+    attempt = await asyncio.to_thread(
+        container.dispatches.verify,
+        product_order_id,
+        actor="operator",
+        correlation_id=new_correlation_id(),
+    )
+    return {"attempt": None if attempt is None else asdict(attempt)}
 
 
 @router.put("/orders/{product_order_id}/supplier-order")

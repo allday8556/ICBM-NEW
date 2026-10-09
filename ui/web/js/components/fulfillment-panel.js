@@ -1,8 +1,9 @@
-// M6.5 (ADR-0025 §3, §4, §8): one order's fulfillment. The operator orders from the supplier by
-// hand — 배송지 복사 opens the shipping record through the audited route and copies it — then
+// M6.5 (ADR-0025 §3, §4, §5, §8): one order's fulfillment. The operator orders from the supplier
+// by hand — 배송지 복사 opens the shipping record through the audited route and copies it — then
 // records the supplier's order number and the purchase amount, and types the carrier and tracking
 // number in. Every save sends the revision it read; a stale one is refused and the panel reloads.
-// Nothing here writes to the marketplace or to a supplier.
+// 발송처리 asks the server for the one marketplace write: the send-time safety stack decides, and a
+// refusal names every layer that still blocks it. Nothing here writes to a supplier.
 
 import { ApiError, getJson, sendJson } from '../core/api.js';
 import { h } from '../core/dom.js';
@@ -20,8 +21,41 @@ export const FULFILLMENT_STATE = {
   AWAITING_SUPPLIER_ORDER: ['공급사 주문 전', 'warn'],
   SUPPLIER_ORDERED: ['공급사 주문됨', 'info'],
   TRACKING_CAPTURED: ['송장 입력됨', 'good'],
+  DISPATCHING: ['발송처리 중', 'info'],
+  DISPATCH_SENT: ['발송처리 완료', 'good'],
+  DISPATCH_REJECTED: ['발송처리 거절', 'bad'],
+  DISPATCH_UNKNOWN: ['발송처리 확인 필요', 'warn'],
+  DISPATCH_CONFLICT: ['송장 불일치', 'bad'],
   DISPATCHED: ['발송됨', 'info'],
   DELIVERED: ['배송완료', 'good'],
+};
+const ATTEMPT = {
+  STARTED: '전송 중',
+  APPLIED_PROVEN: '네이버 처리 완료',
+  REJECTED: '네이버가 거절',
+  NOT_APPLIED_PROVEN: '전송되지 않음',
+  UNKNOWN: '결과 불명 — 다시 보내지 않음',
+};
+const VERIFICATION = {
+  DISPATCH_CONFIRMED: '다시 읽어 확인됨',
+  UNDISPATCHED: '미발송 확인 — 다시 승인 가능',
+  CONFLICT: '다른 송장이 등록됨',
+};
+// The send-time layers (ADR-0018 §4.3; ADR-0025 §5) a refusal names.
+const LAYER = {
+  EXECUTION_MODE: 'LIVE 모드 아님',
+  PROTECTED_WRITE_BRAKE: '쓰기 브레이크 잠김',
+  GRANT: '이 주문의 발송 승인 없음',
+  ENDPOINT_ADOPTED: '발송 API 미채택',
+  EVIDENCE_RETENTION: '증거 보존 미증명',
+  PERMISSION_ATTESTED: '주문 판매자 권한 미확인',
+};
+const DISPATCH_REASON = {
+  OPERATE_DISPATCH_TRACKING_MISSING: '송장을 먼저 입력하세요.',
+  OPERATE_DISPATCH_BLOCKED: '이 주문은 이미 발송처리를 보냈습니다. 결과가 불명이면 판매자센터에서 확인하세요.',
+  OPERATE_DISPATCH_METHOD_UNSUPPORTED: '택배 배송 주문만 발송처리할 수 있습니다.',
+  OPERATE_ORDER_ALREADY_DISPATCHED: '네이버에 이미 송장이 등록된 주문입니다.',
+  OPERATE_DISPATCH_ACCOUNT_UNBOUND: '스마트스토어 계정 연결이 필요합니다.',
 };
 // ADR-0025 §6: the documented deliveryStatus enumeration (packet D).
 const DELIVERY = {
@@ -161,6 +195,64 @@ function deliveryReadback(view) {
   );
 }
 
+function dispatchStep(view, attempts, onDone) {
+  const send = h('button', { type: 'button', class: 'btn blue', 'data-action': 'dispatch-order' }, '발송처리');
+  const note = h('div', { class: 'mini', 'data-role': 'dispatch-blockers' });
+  send.addEventListener('click', async () => {
+    send.disabled = true;
+    try {
+      const attempt = await sendJson('POST', `${ORDERS}/${encodeURIComponent(view.product_order_id)}/dispatch`, {});
+      toast('발송처리', `${ATTEMPT[attempt.state] ?? attempt.state}${attempt.verification ? ` · ${VERIFICATION[attempt.verification] ?? attempt.verification}` : ''}`);
+      onDone();
+    } catch (error) {
+      const layers = error instanceof ApiError ? error.error?.details?.layers ?? [] : [];
+      const reason = error instanceof ApiError ? DISPATCH_REASON[error.error?.code] : null;
+      note.replaceChildren(
+        layers.length
+          ? `보내지 않았습니다 · ${layers.map((layer) => LAYER[layer.layer] ?? layer.layer).join(', ')}`
+          : reason ?? `보내지 않았습니다 · ${message(error)}`,
+      );
+      send.disabled = false;
+    }
+  });
+  const latest = attempts.at(-1);
+  const verify = latest && !latest.verification && ['APPLIED_PROVEN', 'REJECTED', 'UNKNOWN'].includes(latest.state)
+    ? h('button', { type: 'button', class: 'btn', 'data-action': 'verify-dispatch' }, '결과 다시 확인')
+    : null;
+  verify?.addEventListener('click', async () => {
+    verify.disabled = true;
+    try {
+      await sendJson('POST', `${ORDERS}/${encodeURIComponent(view.product_order_id)}/dispatch/verify`, {});
+      onDone();
+    } catch (error) {
+      toast('발송처리', message(error));
+      verify.disabled = false;
+    }
+  });
+  return h(
+    'div',
+    { class: 'fulfillment-step', 'data-step': 'dispatch' },
+    h('b', {}, '3. 발송처리'),
+    send,
+    verify,
+    h('span', { class: 'mini' }, '네이버에 택배사·송장을 등록합니다. LIVE 승인이 있을 때만 전송됩니다.'),
+    note,
+    attempts.length
+      ? h(
+          'ul',
+          { class: 'mini', 'data-role': 'dispatch-attempts' },
+          ...attempts.map((attempt) =>
+            h(
+              'li',
+              {},
+              `${attempt.attempt_no}회차 · ${dotDateTime(attempt.started_at)} · 송장 ${attempt.tracking_number} · ${ATTEMPT[attempt.state] ?? attempt.state}${attempt.fail_code ? ` (${attempt.fail_code})` : ''}${attempt.verification ? ` · ${VERIFICATION[attempt.verification] ?? attempt.verification}` : ''}`,
+            ),
+          ),
+        )
+      : null,
+  );
+}
+
 function history(view) {
   if (!view.history.length) return null;
   return h(
@@ -203,6 +295,7 @@ export function fulfillmentPanel(order, onChanged) {
       };
       const steps = [head, deliveryReadback(current), h('div', { class: 'supplier-head-row' }, copy, h('span', { class: 'mini' }, '공급사 주문서에 붙여넣을 배송지를 복사합니다 (열람 기록이 남습니다).')), supplierOrderForm(current, saved)];
       if (current.revision) steps.push(trackingForm(current, await carriers(), saved));
+      if (current.tracking_number) steps.push(dispatchStep(current, current.dispatch_attempts ?? [], () => saved(null)));
       steps.push(history(current));
       box.replaceChildren(...steps.filter(Boolean));
     } catch (error) {

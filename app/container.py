@@ -31,7 +31,7 @@ from app.capabilities.live_safety.assets import (
     PreparationCandidateGate,
     PreparedUploadAssets,
 )
-from app.capabilities.live_safety.authority import LiveAuthorityService
+from app.capabilities.live_safety.authority import DispatchUnit, LiveAuthorityService
 from app.capabilities.live_safety.drill import DrillPaths, RestoreDrillService
 from app.capabilities.live_safety.eligibility import CanaryEligibilityService
 from app.capabilities.live_safety.gates import CanaryStageReadiness
@@ -103,7 +103,7 @@ from app.stages.collect.runs import CollectionRunStore
 from app.stages.collect.service import CollectService
 from app.stages.collect.sourceassets import SourceAssetRecorder
 from app.stages.collect.synthetic import SyntheticTestProductService
-from app.stages.connect.accounts import MarketplaceAccountStore
+from app.stages.connect.accounts import AccountBinding, MarketplaceAccountStore
 from app.stages.connect.credentials import SupplierCredentialStore
 from app.stages.connect.marketplace.attestation import ApiGroup
 from app.stages.connect.marketplace.attestation_service import PermissionAttestationService
@@ -119,6 +119,7 @@ from app.stages.connect.sessions import (
 from app.stages.connect.smartstore.keeper import SmartStoreSessionKeeper
 from app.stages.connect.smartstore.service import SmartStoreConnectService
 from app.stages.operate.adoption import AdoptionService
+from app.stages.operate.dispatch import DispatchService, dispatch_unit
 from app.stages.operate.fulfillment import FulfillmentService
 from app.stages.operate.listing import ListingSyncScheduler, ListingSyncService
 from app.stages.operate.orders import OrderSyncScheduler, OrderSyncService, ShippingCipher
@@ -185,6 +186,7 @@ from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
 from integrations.marketplaces.smartstore.category import SmartStoreCategoryCatalogSource
 from integrations.marketplaces.smartstore.deletion import SmartStoreDeleteSender
 from integrations.marketplaces.smartstore.delivery_companies import DELIVERY_COMPANIES
+from integrations.marketplaces.smartstore.dispatch import SmartStoreDispatchSender
 from integrations.marketplaces.smartstore.execution import MARKETPLACE_KEY as SMARTSTORE_KEY
 from integrations.marketplaces.smartstore.execution import (
     SmartStoreCreateSender,
@@ -309,6 +311,8 @@ class Container:
     order_sync_scheduler: OrderSyncScheduler
     # M6.5 (ADR-0025 §3, §4): the supplier order placed by hand and its tracking.
     fulfillment: FulfillmentService
+    # M6.5-C (ADR-0025 §5): the DISPATCH stage's attempt owner.
+    dispatches: DispatchService
     notice_catalog: SmartStoreNoticeCatalog
     restore_drills: RestoreDrillService
     retention: RetentionProofService
@@ -868,8 +872,27 @@ def build_container(
     safety_stack = SafetyStack(
         store=live_store, mode=execution_mode, proofs=stage_proofs, clock=clock
     )
+
+    def _bound_account(marketplace_key: str) -> str | None:
+        """The one canonical account of the marketplace bound to its committed identity."""
+        for record in accounts.accounts(marketplace_key):
+            if (
+                accounts.binding(marketplace_key, record.marketplace_account_id)
+                is AccountBinding.BOUND
+            ):
+                return record.marketplace_account_id
+        return None
+
+    def _dispatch_unit(product_order_id: str) -> DispatchUnit:
+        with db.read() as session:
+            return dispatch_unit(session, product_order_id, account_of=_bound_account)
+
     live_authority = LiveAuthorityService(
-        store=live_store, registrations=registrations, preparations=registration_preparations
+        store=live_store,
+        registrations=registrations,
+        preparations=registration_preparations,
+        # ADR-0025 §5: the Fulfillment owner states which product order a DISPATCH grant binds.
+        dispatch_units=_dispatch_unit,
     )
     # ROADMAP §14 item 4: the one canonical bearer source of every SmartStore REGISTER seam.
     registration_execution = RegistrationExecutionService(
@@ -1101,6 +1124,26 @@ def build_container(
         # ADR-0025 §4: the documented SmartStore delivery-company codes.
         carriers=DELIVERY_COMPANIES,
     )
+    # ADR-0025 §5 (M6.5-C): the dispatch of one product order through the send-time safety stack,
+    # verified by the adopted order read. A bearer permits nothing: M0_DRY_RUN_ONLY, the brake,
+    # the exact DISPATCH grant and every other layer still refuse until the owner approves one.
+    dispatches = DispatchService(
+        db=db,
+        clock=clock,
+        audit=audit,
+        sender=SmartStoreDispatchSender(
+            caller=smartstore_caller or SmartStoreEndpointCaller(),
+            bearer=committed_bearer,
+        ),
+        authority=safety_stack,
+        reader=SmartStoreOrderSource(
+            smartstore_caller or SmartStoreEndpointCaller(), committed_bearer
+        ),
+        order_group_attested=lambda: (
+            ApiGroup.ORDER_SELLER in permission_attestation.attested_groups("smartstore")
+        ),
+        account_of=_bound_account,
+    )
     screens = ScreenService(
         clock=clock,
         operator_name=config.operator_name,
@@ -1110,7 +1153,9 @@ def build_container(
         products=products,
         register=register_service,
         operate=OperateService(
-            order_count=order_sync.order_count, order_capability=order_sync.capability
+            order_count=order_sync.order_count,
+            order_capability=order_sync.capability,
+            awaiting_dispatch=fulfillment.awaiting_dispatch_count,
         ),
         review=ReviewService(ReviewCounts(review_items, review_reconciler)),
         execution_mode=execution_mode,
@@ -1125,6 +1170,7 @@ def build_container(
         adoptions=adoptions,
         order_sync_scheduler=OrderSyncScheduler(order_sync),
         fulfillment=fulfillment,
+        dispatches=dispatches,
         listing_sync_scheduler=ListingSyncScheduler(listing_sync),
         auto_images=auto_images,
         common_images=common_images,

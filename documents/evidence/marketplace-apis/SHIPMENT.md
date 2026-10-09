@@ -21,6 +21,7 @@
 - **Group:** order-seller APIs require API group `주문 판매자` (`NAVER-P1-ORDERSELLER-GROUP-1093`, `OFFICIAL_SUPPORT`); the group of this specific endpoint is not separately captured.
 - **Missing:** method/path, request keys (courier/invoice fields), limits, success/response, errors, idempotency, timeout semantics.
 - **ICBM:** not registered in `ENDPOINT_MATRIX.md` §4 → `NOT_ADOPTED`; runtime `UNVERIFIED`.
+- **Amendment (M6.5-C, 2026-10-08):** the dispatch is captured at `2.90.1` (`SOURCES.md` §5.8, `NAVER-P0-DISPATCH-DELIVERY-2901`): `POST /v1/pay-order/seller/product-orders/dispatch`, the body, the 30-order limit, the per-order success and fail lists, the error codes and the carrier and method enumerations. It is `ADOPTED` as `SMARTSTORE_ORDER_DISPATCH` (`ENDPOINT_MATRIX.md` §4.1.5; ADR-0025 §5), one order per call and only through the DISPATCH stage. Still not stated: the group on the page, the dispatchable statuses, the `dispatchDate` range, re-dispatch behaviour and idempotency. Runtime stays `UNVERIFIED` until a real dispatch.
 
 ## Coupang
 

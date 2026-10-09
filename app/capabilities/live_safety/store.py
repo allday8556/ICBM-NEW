@@ -39,6 +39,8 @@ from app.capabilities.live_safety.model import (
     CREATE_BUDGET,
     DELETE_BUDGET,
     DELETE_ENDPOINT_GROUP,
+    DISPATCH_BUDGET,
+    DISPATCH_ENDPOINT_GROUP,
     FENCING_UPLOAD_STATES,
     MAX_ASSET_BUDGET,
     MAX_GRANT_WINDOW_S,
@@ -59,6 +61,7 @@ from app.capabilities.live_safety.models import (
     AssetUploadAttempt,
     CanaryEligibilityRecord,
     LiveGrant,
+    LiveGrantDispatchBinding,
     ProtectedWriteBrake,
     ResidualRiskAcceptance,
     RestoreDrill,
@@ -142,6 +145,16 @@ class GrantRecord:
             and self.not_before <= now < self.expires_at
             and self.budget_used < self.budget_max
         )
+
+
+@dataclass(frozen=True)
+class DispatchBinding:
+    """The exact unit of one DISPATCH grant (ADR-0025 §5)."""
+
+    product_order_id: str
+    supplier_order_revision: int
+    carrier_code: str
+    tracking_number: str
 
 
 @dataclass(frozen=True)
@@ -388,6 +401,56 @@ class LiveUnit:
             intent_id=intent_id,
         )
         return _grant_record(row)
+
+    def issue_dispatch_grant(
+        self,
+        *,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        binding: DispatchBinding,
+        not_before: datetime,
+        expires_at: datetime,
+        approved_by: str,
+        authorization_ref: str,
+        correlation_id: str,
+    ) -> GrantRecord:
+        """A DISPATCH grant (ADR-0025 §5): one attempt to dispatch the exact product order with
+        the exact carrier and tracking number of one supplier order revision. Which order may be
+        dispatched is the Fulfillment owner's check; the binding is written in this same unit."""
+        row = self._new_grant(
+            MutationStage.DISPATCH,
+            marketplace_key,
+            marketplace_account_id,
+            endpoint_group=DISPATCH_ENDPOINT_GROUP,
+            budget=DISPATCH_BUDGET,
+            not_before=not_before,
+            expires_at=expires_at,
+            approved_by=approved_by,
+            authorization_ref=authorization_ref,
+            correlation_id=correlation_id,
+        )
+        self.session.add(
+            LiveGrantDispatchBinding(
+                grant_id=row.grant_id,
+                product_order_id=binding.product_order_id,
+                supplier_order_revision=binding.supplier_order_revision,
+                carrier_code=binding.carrier_code,
+                tracking_number=binding.tracking_number,
+            )
+        )
+        self.session.flush()
+        return _grant_record(row)
+
+    def dispatch_binding(self, grant_id: str) -> DispatchBinding | None:
+        row = self.session.get(LiveGrantDispatchBinding, grant_id)
+        if row is None:
+            return None
+        return DispatchBinding(
+            product_order_id=row.product_order_id,
+            supplier_order_revision=row.supplier_order_revision,
+            carrier_code=row.carrier_code,
+            tracking_number=row.tracking_number,
+        )
 
     def _new_grant(
         self,

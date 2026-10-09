@@ -117,6 +117,7 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | `SMARTSTORE_ADDRESSBOOK_LIST` | `ADOPTED` | Settings delivery policy (owner directive 2026-10-07) | `GET` | `/v1/seller/addressbooks-for-page` with `page` | The seller's 출고지 / 반품·교환지 numbers for the target policy; only `addressBookNo`, `name`, `addressType` are retained, never an address or contact | `OWN_STORE_SELF` | `판매자정보` | No; read-only, never stored, no LIVE authority |
 | `SMARTSTORE_ORDER_CHANGES` | `ADOPTED` | M6-C order reads (ADR-0023 §5, §6) | `GET` | `/v1/pay-order/seller/product-orders/last-changed-statuses` | Which product orders changed in a time window (§4.1.4) | `OWN_STORE_SELF` | `주문 판매자` | No; read-only |
 | `SMARTSTORE_ORDER_DETAILS` | `ADOPTED` | M6-C order reads (ADR-0023 §5, §6) | `POST` | `/v1/pay-order/seller/product-orders/query` | The product orders by id, inside the ADR-0023 §7 allow-list (§4.1.4) | `OWN_STORE_SELF` | `주문 판매자` | No; a query by ids, read-only |
+| `SMARTSTORE_ORDER_DISPATCH` | `ADOPTED` | M6.5-C dispatch (ADR-0025 §5, §5.1) | `POST` | `/v1/pay-order/seller/product-orders/dispatch` | Dispatch one fulfillable product order with its carrier and tracking number (§4.1.5) | `OWN_STORE_SELF` | `주문 판매자` | Yes; adoption is not LIVE authority — only the DISPATCH stage of the send-time safety stack sends it, one order per call, and an `UNKNOWN` is never resent |
 | `SMARTSTORE_CATEGORY_READ` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/categories/{categoryId}` | Category validation | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_LIST` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/product-attributes/attributes` | Attribute discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_PRODUCT_ATTRIBUTE_VALUES` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/product-attributes/attribute-values` | Attribute-value discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
@@ -453,6 +454,30 @@ fingerprint. Method, path, request, predicates and every other row are unchanged
 (`app/stages/operate/orders.py`) through `SmartStoreOrderSource`, with the CONNECT owner's committed
 bearer; without a proven current committed session nothing is read. Neither read writes the
 marketplace (M6-01), and no order data leaves the local data root (M6-11).
+
+### 4.1.5 Order dispatch adoption (M6.5-C; ADR-0025 §5, §5.1)
+
+**Amendment note, not a rewrite.** The `SMARTSTORE_ORDER_DISPATCH` row is added to §4 as
+`ADOPTED`, and the mapping revision is bumped to `m65-dispatch-r1` with its own fingerprint in the
+same change. The slice touched **its own endpoint only**: every other row of §4 is unchanged.
+Evidence: `SOURCES.md` §5.8 (`NAVER-P0-DISPATCH-DELIVERY-2901`, Commerce API `2.90.1`).
+
+| Field | `SMARTSTORE_ORDER_DISPATCH` |
+| --- | --- |
+| Auth | `Authorization: Bearer {token}`, `AUTH_MODE=SELF`, group `주문 판매자` (the reference files the page under 주문 > 발주/발송 처리 and names no group; the first runtime answer is recorded as `R0`) |
+| Method / path | `POST /v1/pay-order/seller/product-orders/dispatch` |
+| Request | `application/json` body `{"dispatchProductOrders": [{productOrderId, deliveryMethod, deliveryCompanyCode, trackingNumber, dispatchDate}]}` with **exactly one** element; `deliveryMethod` is `DELIVERY`; `deliveryCompanyCode` is one of the documented codes (ADR-0025 §4); `trackingNumber` is 1–50 digits, Latin letters or hyphens (ICBM policy); `dispatchDate` is KST `yyyy-MM-dd'T'HH:mm:ss.SSS+09:00`. Anything else is refused before any transport |
+| Timeouts / redirect | connect `5s`, read `30s`; `NO_FOLLOW` |
+| Success predicate | HTTP 200 and a `data` object whose `successProductOrderIds` (when present) is an array of strings and whose `failProductOrderInfos` (when present) is an array of objects naming a string `productOrderId` (`m65-dispatch-r1`) |
+| Outcome | A documented answer is read **for this order only**: listed only in `successProductOrderIds` → `APPLIED_PROVEN`; only in `failProductOrderInfos` → `REJECTED` with its documented code; neither or both → `UNKNOWN`. A local refusal or a transmission-precluded failure → `NOT_APPLIED_PROVEN`; everything else after the handoff (a 4xx, a 5xx, a `429`, a redirect, a timeout, an undocumented 200) → `UNKNOWN`, never resent |
+| Retained fields | none; the caller hands on only how the answer listed the order and the failure's code |
+| Verification | the adopted `SMARTSTORE_ORDER_DETAILS` read's `delivery` members (§4.1.4 amendment): the attempt's carrier and tracking confirm it; another tracking is `CONFLICT`; no tracking with the order still `PAYED` shows only a `REJECTED` attempt undispatched |
+| Evidence | `documents/evidence/marketplace-apis/SHIPMENT.md` and `TRACKING.md` § SmartStore |
+
+Adoption is never authority: a dispatch runs only through `DispatchService` and the send-time
+stack (ADR-0025 §5), for one product order, under its exact DISPATCH grant (`icbm live
+issue-dispatch-grant`), inside a bounded LIVE window with the brake released, evidence retention
+proven and the 주문 판매자 group attested.
 
 ### 4.2 CREATE request/response evidence — evidence only, not adoption (`SOURCES.md` §5.2, release 2.89.0)
 
