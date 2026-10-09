@@ -2,6 +2,7 @@
 
 *.png binary
 *.jpg binary
+*.ttf binary
 
 # Approved UI prototypes are fingerprinted byte-for-byte (documents/contracts/ui/UI_SOURCE_OF_TRUTH.md).
 # Never convert their line endings on checkout.

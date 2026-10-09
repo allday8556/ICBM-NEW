@@ -24,6 +24,7 @@ Database             SQLite WAL (local single-user v1)
 Frontend             canonical standalone HTML/CSS/vanilla JS → ES modules
 HTTP                 httpx
 Browser automation   Playwright Chromium when required
+Images               Pillow, for the Detail Guidance notice renderer only (ADR-0033)
 Jobs                 durable DB-backed queue/scheduler; one worker owner initially
 Secrets              OS-native secure credential store via keyring/Windows protection
 Deployment            local Windows process; loopback-only by default
