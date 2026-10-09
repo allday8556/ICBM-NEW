@@ -90,6 +90,8 @@ class Vocabulary:
 DEFAULT_VOCABULARY = Vocabulary()
 
 _AMOUNT = re.compile(r"(\d[\d,]*)\s*원?")
+# A money amount the page states as such: digits followed by 원.
+_MONEY = re.compile(r"\d[\d,]*원")
 _EVIDENCE_LIMIT = 200
 
 
@@ -279,8 +281,23 @@ def _shipping(rows: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Field
             (*evidence, Evidence(EvidenceKind.DOM_TEXT, fee_locator, FieldStatus.ABSENT)),
         )
     amount = _won(fee[0][1])
-    if amount is None:
-        return FieldFact(FieldStatus.REVIEW_REQUIRED, None, evidence)
+    if amount is None or len(_MONEY.findall(fee[0][1].replace(" ", ""))) > 1:
+        # No amount, or more than one: a condition or a choice, never a fee. It is not flattened
+        # into its first amount (ADR-0010 §7). KM통상's parser reads the first amount; the template
+        # states this difference (ADR-0030 §10).
+        return FieldFact(
+            FieldStatus.REVIEW_REQUIRED,
+            None,
+            (
+                *evidence,
+                Evidence(
+                    EvidenceKind.DOM_TEXT,
+                    fee_locator,
+                    FieldStatus.REVIEW_REQUIRED,
+                    observed=_quote(fee[0][1]),
+                ),
+            ),
+        )
     kind = ShippingKind.FREE if amount == 0 else ShippingKind.FIXED
     value = ShippingValue(
         kind=kind,
