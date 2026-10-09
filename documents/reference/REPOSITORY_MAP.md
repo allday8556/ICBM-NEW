@@ -91,8 +91,10 @@ ADR-0028 T4 added the tag provenance and apply to the register owner, the compon
 `ui/web/js/components/ai-tags.js` and two integration suites.
 ADR-0029 C2 added the category task's candidates and filter `app/capabilities/ai/platform_category.py`,
 the seed upgrade `v29-ai3` and one integration suite.
-ADR-0029 C3 added the category apply to the register owner, the components
-`ui/web/js/components/ai-category.js` and `ai-targeted.js`, and two integration suites.
+ADR-0029 C3a moved the SmartStore-targeted recommendation panel into the shared component
+`ui/web/js/components/ai-targeted.js`; the tag panel uses it.
+ADR-0029 C3 added the category apply to the register owner, the component
+`ui/web/js/components/ai-category.js` (on the shared panel) and two integration suites.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -132,8 +134,8 @@ payload or external call and leaves legacy Item economics unchanged.
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 172 | all canonical and historical documents |
-| `documents/acceptance/` | 67 | acceptance records (milestones, gates, adaptive, issues) |
+| `documents/` | 174 | all canonical and historical documents |
+| `documents/acceptance/` | 69 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 9 | platform and UI contracts |
