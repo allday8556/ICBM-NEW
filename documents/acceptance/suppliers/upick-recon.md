@@ -1,7 +1,7 @@
 # U-PICK — reconnaissance record (ADR-0030 §8.1)
 
 - **Site:** U-PICK B2B, `https://upickb2b.com`. Platform: Cafe24.
-- **Owner go-ahead:** Issue #219 `6086058056` (2026-10-10).
+- **Owner go-ahead:** Issue #219 `6090189930`. Asked in chat to sign in to U-PICK for this reconnaissance, the owner signed in and replied "로그인완료했어" (2026-10-10). This followed the reconnaissance approval recorded for 건강산 in `6086058056`.
 - **Date:** 2026-10-10.
 - **Who signed in:** the owner, in the desktop app's built-in browser. The agent typed no credential and read no credential store.
 - **Fixtures:** `tests/fixtures/suppliers/upick/4954.html` and `4082.html`. They are reduced to the product module and the description block, with scripts, hidden inputs and inline lazy-load placeholders removed. No member-identifying text was present or kept. No order or member page was kept.
