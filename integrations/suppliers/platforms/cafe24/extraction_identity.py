@@ -16,4 +16,4 @@ EXTRACTOR_INPUTS = (
 # A reader cannot recompute a SHA-256; the proof is mechanical:
 # tests/contracts/test_repository_rules.py recomputes this digest from EXTRACTOR_INPUTS, and the
 # merge guard requires that test green in the FULL CI of the exact HEAD.
-EXTRACTOR_FINGERPRINT = "5f07c236fc2196c0e4b7bacdb193bbb31a1a86b1fd64be8763d91872dea48542"
+EXTRACTOR_FINGERPRINT = "bca4e4e65fb77ba60e86394a1ff0904051b6cc94a1f854885d43b2741b80d77f"

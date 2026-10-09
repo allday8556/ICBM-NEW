@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from app.stages.collect.facts import FieldStatus, OptionsValue
+from app.stages.collect.facts import FieldStatus
 from integrations.suppliers.kmretail.collect import classify_images as km_classify
 from integrations.suppliers.kmretail.collect import parse_fields as km_fields
 from integrations.suppliers.kmretail.collect import resolve as km_resolve
@@ -82,18 +82,7 @@ def test_the_template_reads_every_km_document_as_km_does(body: str) -> None:
     ours, theirs = resolve(view, URL), km_resolve(view, URL)
     # Each package has its own identity types, so they are compared by kind and content.
     assert (type(ours).__name__, asdict(ours)) == (type(theirs).__name__, asdict(theirs))
-    ours_fields, km = parse_fields(view), km_fields(view)
-    assert {k: v for k, v in ours_fields.items() if k != "options"} == {
-        k: v for k, v in km.items() if k != "options"
-    }
-    # The one stated difference (ADR-0030 §10): a container without an axis proves zero axes.
-    if km["options"].status is FieldStatus.ABSENT and km["options"].evidence[0].locator.endswith(
-        " select"
-    ):
-        assert ours_fields["options"].status is FieldStatus.CONFIRMED
-        assert ours_fields["options"].value == OptionsValue(axes=())
-    else:
-        assert ours_fields["options"] == km["options"]
+    assert parse_fields(view) == km_fields(view)
 
 
 @pytest.mark.parametrize(
