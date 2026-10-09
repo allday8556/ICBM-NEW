@@ -786,6 +786,10 @@ of this stage in its order:
 The contract is `documents/decisions/adr/0028-smartstore-tag-stage.md`: contract-first, DRY_RUN, no
 tag sent to the marketplace, and no external search-signal source without its own owner decision.
 Coupang, 11st, bulk AI and Shopping Insight keep this order and the first-vertical gate.
+Owner decision 2026-10-09 (Issue #219 comment `6078048955`) starts the category item: the AI
+category recommendation chosen only from the official leaf-category catalog
+(`documents/decisions/adr/0029-smartstore-category-recommendation.md`). Attributes, standard options
+and notices keep their gate until their authoritative metadata contracts exist.
 
 For the positive-option/cross-market lane, after the current no-positive-option first vertical:
 
