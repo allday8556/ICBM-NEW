@@ -13,6 +13,7 @@ platform accepts is the template's own declaration, checked when a site is bound
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -188,7 +189,12 @@ def _limits(value: Any) -> Mapping[str, float]:
         raise _fail(f"limits names only {sorted(LIMIT_KEYS)}")
     limits: dict[str, float] = {}
     for key, number in value.items():
-        if isinstance(number, bool) or not isinstance(number, int | float) or number <= 0:
+        if (
+            isinstance(number, bool)
+            or not isinstance(number, int | float)
+            or not math.isfinite(number)
+            or number <= 0
+        ):
             raise _fail(f"limit {key} is a positive number")
         if key not in INTERVAL_LIMITS and not isinstance(number, int):
             raise _fail(f"limit {key} is a whole number")

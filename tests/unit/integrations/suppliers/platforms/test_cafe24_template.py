@@ -211,3 +211,11 @@ def test_a_shipping_method_without_a_fee_is_held_for_review_coherently() -> None
     shipping = fields["shipping"]
     assert shipping.status is FieldStatus.REVIEW_REQUIRED
     assert FieldStatus.REVIEW_REQUIRED in {e.status for e in shipping.evidence}
+
+
+def test_a_long_description_is_kept_whole() -> None:
+    words = "설명 " * 300
+    body = page(body=BUY + f'<div id="prdDetail"><p>{words}</p></div>')
+    fact = parse_fields(document(body))["detail_description"]
+    assert fact.value.text == words.strip()
+    assert len(fact.evidence[0].observed) <= 200

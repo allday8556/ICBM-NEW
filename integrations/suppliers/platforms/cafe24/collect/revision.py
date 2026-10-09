@@ -8,14 +8,15 @@ advances every site on it.
 
 ``cafe24-1`` (2026-10-10): KM통상's ``kmretail-3`` rules, with the words and regions a site may vary
 read from its vocabulary, its profile values (paths and the owner's 5 MiB per image, Issue #219
-``6086299406``) in ``profile.py``, and two stated differences:
+``6086299406``) in ``profile.py``, and these stated differences:
 - a shipping-fee cell that is not exactly one amount of won is ``REVIEW_REQUIRED``, never an amount
   it names (ADR-0010 §7);
 - an active purchase control decides ``ON_SALE`` even beside sold-out words (ADR-0010 §10);
 - declarations of one fact that disagree (the declared title and the 상품명 row, two rows of one
   label, one price label with two amounts) are ``REVIEW_REQUIRED``, never the first one read;
 - a page that shows a product-information notice holds ``notice`` for review instead of reporting
-  it absent unread.
+  it absent unread;
+- a text field's value is the page's whole text; only its evidence quote is bounded.
 """
 
 EXTRACTION_REVISION = "cafe24-1"

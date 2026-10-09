@@ -481,7 +481,9 @@ def _detail_description(nodes: Sequence[Node], words: Vocabulary) -> FieldFact:
         return _review(f"#{detail}")
     return FieldFact(
         FieldStatus.CONFIRMED,
-        TextValue(text=_quote(text)),
+        # The whole description is the value; only the evidence quote is bounded. KM통상's parser
+        # keeps the first 200 characters; the template states this difference (ADR-0030 §10).
+        TextValue(text=text),
         (
             Evidence(
                 EvidenceKind.PRODUCT_HTML_FRAGMENT,
@@ -522,7 +524,7 @@ def _text_row(rows: Sequence[tuple[str, str, Node]], labels: Sequence[str]) -> F
     label, value, _ = stated[0]
     return FieldFact(
         FieldStatus.CONFIRMED,
-        TextValue(text=_quote(value)),
+        TextValue(text=value),
         (
             Evidence(
                 EvidenceKind.DOM_TEXT,
