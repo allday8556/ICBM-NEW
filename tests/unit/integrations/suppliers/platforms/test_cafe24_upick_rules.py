@@ -1,6 +1,6 @@
 """The Cafe24 template on U-PICK's reconnaissance captures (ADR-0030 §8.1, ADR-0031, ADR-0032).
 
-The two captures are the owner-approved reconnaissance of 2026-10-10 (Issue #219 `6086058056`),
+The two captures are the owner-approved reconnaissance of 2026-10-10 (Issue #219 `6090189930`),
 reduced to the product module and scrubbed of member text: 4954 on sale, 4082 sold out. The
 vocabulary is the one U-PICK's site configuration will declare. No supplier is contacted.
 """
