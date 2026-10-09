@@ -83,9 +83,14 @@ def test_the_template_reads_every_km_document_as_km_does(body: str) -> None:
     # Each package has its own identity types, so they are compared by kind and content.
     assert (type(ours).__name__, asdict(ours)) == (type(theirs).__name__, asdict(theirs))
     ours_fields, km = parse_fields(view), km_fields(view)
-    assert {k: v for k, v in ours_fields.items() if k != "shipping"} == {
-        k: v for k, v in km.items() if k != "shipping"
+    differing = {"shipping", "stock"}
+    assert {k: v for k, v in ours_fields.items() if k not in differing} == {
+        k: v for k, v in km.items() if k not in differing
     }
+    # Stated difference (ADR-0010 §10): an active control decides ON_SALE beside sold-out words.
+    if ours_fields["stock"] != km["stock"]:
+        assert km["stock"].status is FieldStatus.REVIEW_REQUIRED
+        assert ours_fields["stock"].status in (FieldStatus.CONFIRMED, FieldStatus.REVIEW_REQUIRED)
     # The one stated difference (ADR-0030 §10): a fee cell that is not exactly one amount is
     # REVIEW_REQUIRED, with evidence that says so, where KM통상 reads its first amount.
     if ours_fields["shipping"] != km["shipping"]:
@@ -169,3 +174,12 @@ def test_a_fee_cell_with_a_condition_is_never_flattened_into_its_first_amount() 
         parse_fields(document(page(rows=row("배송비", "3,000원"), body=BUY)))["shipping"].status
         is FieldStatus.CONFIRMED
     )
+
+
+def test_an_active_purchase_control_decides_on_sale_beside_sold_out_words() -> None:
+    # ADR-0010 §10: BUY/CART active is ON_SALE; sold-out words beside it are not authoritative.
+    stock = parse_fields(document(page(body=BUY + SOLD_OUT)))["stock"]
+    assert stock.status is FieldStatus.CONFIRMED
+    assert stock.value.availability.value == "ON_SALE"
+    neither = parse_fields(document(page()))["stock"]
+    assert neither.status is FieldStatus.REVIEW_REQUIRED

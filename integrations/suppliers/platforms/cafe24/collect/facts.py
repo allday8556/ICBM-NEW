@@ -339,19 +339,25 @@ def _stock(nodes: Sequence[Node], words: Vocabulary) -> FieldFact:
         )
         for node in sold_out[:3]
     ]
-    if controls and not sold_out:
-        availability = Availability.ON_SALE
-    elif sold_out and not controls:
-        availability = Availability.SOLD_OUT
-    else:
-        # Both, or neither: the page does not say plainly enough to record a state.
+    # ADR-0010 §10: an active BUY/CART control decides ON_SALE, and sold-out words beside it are
+    # not authoritative; SOLD OUT decides only with no active purchase path. KM통상's parser holds
+    # both together under review; the template states this difference (ADR-0030 §10).
+    if controls:
         return FieldFact(
-            FieldStatus.REVIEW_REQUIRED,
-            None,
-            tuple(evidence)
-            or (Evidence(EvidenceKind.CONTROL_STATE, "span#btnBuy", FieldStatus.ABSENT),),
+            FieldStatus.CONFIRMED,
+            StockValue(availability=Availability.ON_SALE),
+            tuple(evidence[: len(controls[:3])]),
         )
-    return FieldFact(FieldStatus.CONFIRMED, StockValue(availability=availability), tuple(evidence))
+    if sold_out:
+        return FieldFact(
+            FieldStatus.CONFIRMED, StockValue(availability=Availability.SOLD_OUT), tuple(evidence)
+        )
+    # Neither: the page does not say plainly enough to record a state.
+    return FieldFact(
+        FieldStatus.REVIEW_REQUIRED,
+        None,
+        (Evidence(EvidenceKind.CONTROL_STATE, "purchase control", FieldStatus.REVIEW_REQUIRED),),
+    )
 
 
 def _options(nodes: Sequence[Node], words: Vocabulary) -> FieldFact:
