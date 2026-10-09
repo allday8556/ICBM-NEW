@@ -125,8 +125,8 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | `SMARTSTORE_NOTICE_TYPE_READ` | `ADOPTED` | Notice coverage S0 (owner directive 2026-10-03) | `GET` | `/v1/products-for-provided-notice/{productInfoProvidedNoticeType}` | One type's official content fields (`productInfoProvidedNoticeContents[]`: `fieldType`, `fieldName`, `fieldDescription`, `fieldAddDescription`, `fieldMaxLength`), read only to capture the provider notice schema | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_PRODUCT_SEARCH` | `ADOPTED` | M5 SEARCH positive-only reconcile slice | `POST` | `/v1/products/search` | Positive-only reconcile lookup — never duplicate absence, never a CREATE authorization (§4.1.2) | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_PRODUCT_DELETE_V2` | `ADOPTED` | DELETE slice (ADR-0018 §3.5) | `DELETE` | `/v2/products/origin-products/{originProductNo}` | Delete one ICBM-confirmed origin product (§4.1.3) | `OWN_STORE_SELF` | `상품` | Yes; destructive. Only an `ACTIVE` ICBM-confirmed registration, under its exact DELETE grant, inside a bounded LIVE window with the brake released; an `UNKNOWN` is never resent |
-| `SMARTSTORE_TAG_RECOMMEND` | `NOT_ADOPTED` | ADR-0028 tag stage candidate (owner decision `6072888750`) | `GET` | `/v2/tags/recommend-tags` | Recommended-tag search by one keyword, at most 20 `{code, text}` (§4.3) | `OWN_STORE_SELF` | `상품` (documentation grouping; `R0` at adoption) | No; read-only |
-| `SMARTSTORE_TAG_RESTRICTED` | `NOT_ADOPTED` | ADR-0028 tag stage candidate (owner decision `6072888750`) | `GET` | `/v2/tags/restricted-tags` | Restricted-tag check of 1–10 tags, `{tag, restricted}` each (§4.3) | `OWN_STORE_SELF` | `상품` (documentation grouping; `R0` at adoption) | No; read-only |
+| `SMARTSTORE_TAG_RECOMMEND` | `ADOPTED` | ADR-0028 T2 read adoption (owner decision `6072888750`) | `GET` | `/v2/tags/recommend-tags` | Recommended-tag search by one keyword, at most 20 `{code, text}` (§4.3) | `OWN_STORE_SELF` | `상품` (documentation grouping; `R0` at adoption) | No; read-only |
+| `SMARTSTORE_TAG_RESTRICTED` | `ADOPTED` | ADR-0028 T2 read adoption (owner decision `6072888750`) | `GET` | `/v2/tags/restricted-tags` | Restricted-tag check of 1–10 tags, `{tag, restricted}` each (§4.3) | `OWN_STORE_SELF` | `상품` (documentation grouping; `R0` at adoption) | No; read-only |
 
 The remaining M5 rows are planning metadata only. Presence does not imply eventual adoption.
 
@@ -536,6 +536,24 @@ invention:
 Adoption itself is the separate ADR-0028 T2 slice, with mapping revision `ai-tags-r1`. Neither row
 is a mutation, and neither sends a tag: the CREATE contract keeps tags frozen and unsent (§4.1.1,
 ADR-0028 AIT-01).
+
+**Amendment note (ADR-0028 T2): both rows are `ADOPTED`.** This is a note, not a rewrite. The
+registry pins this contract, and the mapping revision moves to `ai-tags-r1` with its own
+fingerprint. The permission attestation is not invalidated by it (owner decision `6055670693`).
+
+| Field | `SMARTSTORE_TAG_RECOMMEND` | `SMARTSTORE_TAG_RESTRICTED` |
+| --- | --- | --- |
+| Request | exactly `keyword`: a trimmed, printable, non-blank string of at most 50 characters | `tags` repeated in order, 1–10 distinct, each a trimmed, printable, non-blank string of at most 50 characters; anything else is refused before any transport |
+| Group / mode / timeouts | `상품` / `OWN_STORE_SELF` / connect 5 s, read 10 s | the same |
+| Success predicate | HTTP 200 and a JSON array of at most 20 objects, each with a non-blank string `text` and, when present, a `code` that is a JSON integer (never a `bool`) in the int64 range (`ai-tag-recommend-r1`) | HTTP 200 and a JSON array of objects, each with a string `tag` and a boolean `restricted` (`ai-tag-restricted-r1`) |
+| After the predicate | the tag source keeps each distinct `text` with its `code` | the tag source (`integrations/marketplaces/smartstore/tags.py`) refuses an answer for a tag that was not asked. A tag that is not answered exactly once is **not checked** (`None`), never "not restricted" (ADR-0028 AIT-03) |
+| Retention | `code`, `text` only | `tag`, `restricted` only |
+| Redirect / retry | never followed / none; a `429` is `RATE_LIMITED` (ERRORS.md) | the same |
+
+**Runtime evidence.** `R0` is the first adopted read of each endpoint on the operating account,
+through ICBM's own caller, recording structure only. It confirms the `상품` group and that every
+asked tag is answered once. It is `PENDING`. Until it exists, a missing group surfaces as
+`GW.AUTHN`, and an unanswered tag stays not checked. Neither is ever read as success.
 
 ---
 
