@@ -7,7 +7,8 @@ this revision joined with the site's own (``cafe24-1+<site revision>``), so a te
 advances every site on it.
 
 ``cafe24-1`` (2026-10-10): KM통상's ``kmretail-3`` rules, with the words and regions a site may vary
-read from its vocabulary.
+read from its vocabulary, and one stated difference: a shipping-fee cell that states more than
+one amount is ``REVIEW_REQUIRED``, never its first amount (ADR-0010 §7).
 
 ``cafe24-2`` (2026-10-10, ADR-0031 and ADR-0032 after the U-PICK reconnaissance):
 - the sales-channel field, read from the site's own phrases;

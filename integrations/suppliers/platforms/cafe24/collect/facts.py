@@ -116,6 +116,8 @@ _AMOUNT = re.compile(r"(\d[\d,]*)\s*원?")
 # ADR-0032 §4 (the owner's rule, Issue #219 6086421199): a fee stated as a range, ``A원 ~ B원``,
 # is read as its highest amount.
 _RANGE = re.compile(r"(\d[\d,]*)\s*원?\s*[~∼〜]\s*(\d[\d,]*)\s*원")
+# A money amount the page states as such: digits followed by 원.
+_MONEY = re.compile(r"\d[\d,]*원")
 _EVIDENCE_LIMIT = 200
 
 
@@ -319,21 +321,36 @@ def _shipping(rows: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Field
     amount = _won(fee[0][1])
     ranged = _RANGE.search(fee[0][1].replace(" ", ""))
     if ranged is not None:
-        # The owner's rule: the highest amount of a stated range, the page's words kept.
+        # ADR-0032 §4, the owner's rule: the highest amount of a stated range, its words kept.
         bounds = [int(group.replace(",", "")) for group in ranged.groups()]
         amount = max(bounds)
         evidence = (
             *evidence,
             Evidence(
                 EvidenceKind.DOM_TEXT,
-                f"th:{fee[0][0]} + td",
+                fee_locator,
                 FieldStatus.CONFIRMED,
                 observed=_quote(fee[0][1]),
                 normalized=str(amount),
             ),
         )
-    if amount is None:
-        return FieldFact(FieldStatus.REVIEW_REQUIRED, None, evidence)
+    elif amount is None or len(_MONEY.findall(fee[0][1].replace(" ", ""))) > 1:
+        # No amount, or more than one that is not a range: a condition or a choice, never a fee.
+        # It is not flattened into its first amount (ADR-0010 §7). KM통상's parser reads the
+        # first amount; the template states this difference (ADR-0030 §10).
+        return FieldFact(
+            FieldStatus.REVIEW_REQUIRED,
+            None,
+            (
+                *evidence,
+                Evidence(
+                    EvidenceKind.DOM_TEXT,
+                    fee_locator,
+                    FieldStatus.REVIEW_REQUIRED,
+                    observed=_quote(fee[0][1]),
+                ),
+            ),
+        )
     kind = ShippingKind.FREE if amount == 0 else ShippingKind.FIXED
     value = ShippingValue(
         kind=kind,
