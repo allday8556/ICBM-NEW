@@ -27,6 +27,7 @@ import { markInert } from '../core/inert.js';
 import { marketplaceLabel } from '../core/platform.js';
 import { toast } from '../core/toast.js';
 import { aiNamePanel } from '../components/ai-name.js';
+import { aiTagsPanel } from '../components/ai-tags.js';
 import { pageHead } from '../components/page-head.js';
 import { emptyState, errorState, unsupportedState } from '../components/states.js';
 import { reviewItemsBlock } from '../components/review-items.js';
@@ -311,7 +312,13 @@ function v29Groups(detail) {
     ),
     h('div', { class: 'detail-group', 'data-role': 'detail-prices' }, h('h4', {}, '가격 정보'), ...['도매가', '배송비', '원가', '가격기준'].map(noDataKv)),
     h('div', { class: 'detail-group', 'data-role': 'detail-channels' }, h('h4', {}, '채널별 판매가 / 마진율'), ...['네이버', '쿠팡', '11번가'].map(noDataKv)),
-    h('div', { class: 'detail-group', 'data-role': 'detail-tags' }, h('h4', {}, '태그 / AI 상태'), h('div', { class: 'mini no-data' }, NO_DATA)),
+    // ADR-0028 T4: the SmartStore tag recommendation of the account bound to the connection.
+    h(
+      'div',
+      { class: 'detail-group', 'data-role': 'detail-tags' },
+      h('h4', {}, '태그 / AI 상태'),
+      detail ? aiTagsPanel(detail.product.product_group_id) : h('div', { class: 'mini no-data' }, NO_DATA),
+    ),
     // ADR-0027 AIS-2: the product-name recommendation, live while the ai capability is READY.
     h(
       'div',

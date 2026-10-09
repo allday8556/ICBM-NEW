@@ -125,6 +125,12 @@ def encode_inputs(inputs: AuthoredInputs) -> PreparationInputs:
         "listing": {
             "name": None if listing.name is None else encode_field(listing.name),
             "tags": sorted(listing.tags),
+            # Only an AI set names its provenance, so every operator revision encodes as before.
+            **(
+                {"tags_provenance": listing.tags_provenance.value}
+                if listing.tags and listing.tags_provenance is not None
+                else {}
+            ),
             "attributes": {k: encode_field(v) for k, v in sorted(listing.attributes.items())},
             "notices": {k: encode_field(v) for k, v in sorted(listing.notices.items())},
             "options": {
@@ -215,6 +221,9 @@ def decode_inputs(revision: PreparationRevisionRecord) -> AuthoredInputs:
         listing=ListingValues(
             name=None if listing["name"] is None else decode_field(listing["name"]),
             tags=frozenset(listing["tags"]),
+            tags_provenance=(
+                Provenance(listing["tags_provenance"]) if listing.get("tags_provenance") else None
+            ),
             attributes={k: decode_field(v) for k, v in listing["attributes"].items()},
             notices={k: decode_field(v) for k, v in listing["notices"].items()},
             options={item: dict(values) for item, values in listing["options"].items()},
@@ -314,6 +323,32 @@ class EnrichmentApply:
     expected_revision_no: int
 
 
+TAGS_FIELD: Final = "tags"
+# ADR-0028 §4: a tag set holds at most 10 tags.
+TAGS_MAX: Final = 10
+
+
+def _with_tags(inputs: AuthoredInputs, texts: tuple[str, ...]) -> AuthoredInputs:
+    listing = replace(
+        inputs.listing, tags=frozenset(texts), tags_provenance=Provenance.AI_SUGGESTION
+    )
+    return replace(inputs, listing=listing)
+
+
+def _tag_texts(value: object) -> tuple[str, ...] | None:
+    """The texts of a tag result's ``recommended`` list: 1–10 distinct non-blank strings; a
+    platform tag's code stays with the result, never in the Preparation (ADR-0028 §6)."""
+    if not isinstance(value, list) or not 1 <= len(value) <= TAGS_MAX:
+        return None
+    texts: list[str] = []
+    for item in value:
+        text = item.get("text") if isinstance(item, dict) else None
+        if not isinstance(text, str) or not text.strip() or text in texts:
+            return None
+        texts.append(text)
+    return tuple(texts)
+
+
 def _with_field(inputs: AuthoredInputs, field: str, value: FieldValue) -> AuthoredInputs:
     listing = inputs.listing
     if field == "name":
@@ -335,7 +370,7 @@ def _field_of(inputs: AuthoredInputs, field: str) -> FieldValue | None:
 
 
 def _valid_field(field: str) -> bool:
-    if field == "name":
+    if field in ("name", TAGS_FIELD):
         return True
     kind, dot, key = field.partition(".")
     return kind in ("attribute", "notice") and dot == "." and bool(key.strip())
@@ -473,7 +508,16 @@ class RegistrationPreparationService:
             )
         result = self._named_result(apply, current.marketplace_key, current.marketplace_account_id)
         value = (result.value or {}).get(apply.value_field)
-        if not isinstance(value, str | bool | int) or (isinstance(value, str) and not value):
+        texts = _tag_texts(value) if apply.field == TAGS_FIELD else None
+        if apply.field == TAGS_FIELD and texts is None:
+            raise InputValidationError(
+                AI_APPLY_VALUE_INVALID,
+                "the result names no list of 1 to 10 distinct tags under that value field",
+                details={"value_field": apply.value_field},
+            )
+        if apply.field != TAGS_FIELD and (
+            not isinstance(value, str | bool | int) or (isinstance(value, str) and not value)
+        ):
             raise InputValidationError(
                 AI_APPLY_VALUE_INVALID,
                 "the result names no text, boolean or integer under that value field",
@@ -495,23 +539,34 @@ class RegistrationPreparationService:
                     details={"current_revision_no": now.current.revision_no},
                 )
             inputs = decode_inputs(now.current)
-            existing = _field_of(inputs, apply.field)
-            if existing is not None and existing.provenance in SATISFYING:
-                raise RegistrationConflictError(
-                    AI_APPLY_FIELD_LOCKED,
-                    "the field holds a confirmed value; an AI value never overwrites it",
-                    details={"provenance": existing.provenance.value},
+            if texts is not None:
+                # A non-empty operator set is confirmed and locked, exactly like the name.
+                if inputs.listing.tags and inputs.listing.tags_provenance is None:
+                    raise RegistrationConflictError(
+                        AI_APPLY_FIELD_LOCKED,
+                        "the tags are the operator's own; an AI set never overwrites them",
+                        details={"provenance": "OPERATOR_CONFIRMED"},
+                    )
+                applied = _with_tags(inputs, texts)
+            else:
+                existing = _field_of(inputs, apply.field)
+                if existing is not None and existing.provenance in SATISFYING:
+                    raise RegistrationConflictError(
+                        AI_APPLY_FIELD_LOCKED,
+                        "the field holds a confirmed value; an AI value never overwrites it",
+                        details={"provenance": existing.provenance.value},
+                    )
+                # Proved a non-empty text, boolean or integer above, before the unit of work.
+                assert isinstance(value, str | bool | int)
+                applied = _with_field(
+                    inputs,
+                    apply.field,
+                    FieldValue(value=value, provenance=Provenance.AI_SUGGESTION),
                 )
             revised = unit.revise_preparation(
                 preparation_id,
                 item_ids=now.current.item_ids,
-                inputs=encode_inputs(
-                    _with_field(
-                        inputs,
-                        apply.field,
-                        FieldValue(value=value, provenance=Provenance.AI_SUGGESTION),
-                    )
-                ),
+                inputs=encode_inputs(applied),
                 authored_by=actor,
                 correlation_id=cid,
             )

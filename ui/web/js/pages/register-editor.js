@@ -20,6 +20,7 @@ import { closeModal, openModal } from '../core/modal.js';
 import { platformTag } from '../core/platform.js';
 import { toast } from '../core/toast.js';
 import { NAME_RESULT, NAME_TASK, aiNamePanel } from '../components/ai-name.js';
+import { TAG_RESULT, TAG_TASK, aiTagsPanel } from '../components/ai-tags.js';
 import { itemImagesEditor } from '../components/item-images.js';
 import { emptyState } from '../components/states.js';
 import {
@@ -212,13 +213,81 @@ function aiNameBlock(unit, reload) {
   );
 }
 
-function tagsBlock(unit) {
-  const tags = unit.authored?.inputs?.tags ?? [];
+const TAGS_APPLY_COPY = {
+  ...APPLY_COPY,
+  AI_APPLY_FIELD_LOCKED: '확인된 태그는 AI 값으로 덮어쓰지 않습니다.',
+  AI_APPLY_VALUE_INVALID: '추천에 쓸 수 있는 태그가 없습니다.',
+};
+
+// ADR-0028 §6–§7 (T4): the unit's tags, and for a SmartStore unit the account's tag recommendation
+// with `AI 태그 적용` — the exact result revision shown, as one AI_SUGGESTION set. The operator's
+// own save confirms the set; a confirmed, non-empty set is never overwritten. No tag is sent to
+// the marketplace (AIT-01). Tag editing itself stays inert.
+function tagsBlock(unit, reload) {
+  const authored = unit.authored;
+  const tags = authored?.inputs?.tags ?? [];
+  const applied = authored?.inputs?.tags_provenance === 'AI_SUGGESTION';
+  const current = h(
+    'div',
+    { class: 'tags' },
+    ...(tags.length ? tags.map((tag) => h('span', { class: 'tag' }, `#${tag}`)) : [h('span', { class: 'no-data' }, NO_DATA)]),
+    pending('태그 편집', '태그 편집은 준비 중'),
+  );
+  const productGroupId = unit.items[0]?.product_group_id;
+  if (unit.marketplace_key !== 'smartstore' || !productGroupId) {
+    return h('div', { class: 'field', 'data-role': 'editor-tags' }, h('label', {}, '태그 / 검색어'), current);
+  }
+  const locked = tags.length > 0 && !applied;
+  const apply = h('button', { type: 'button', class: 'btn blue', 'data-action': 'ai-tags-apply', disabled: true }, 'AI 태그 적용');
+  const why = h('span', { class: 'mini', 'data-role': 'ai-tags-apply-why' });
+  let shown = null;
+  const target = { marketplace_key: unit.marketplace_key, marketplace_account_id: unit.marketplace_account_id };
+  const panel = aiTagsPanel(productGroupId, target, {
+    onResult: (result) => {
+      shown = result;
+      const usable = Boolean(authored && !locked && result?.status === 'OK' && !result.stale && result.value?.recommended?.length);
+      apply.disabled = !usable;
+      why.textContent = !authored
+        ? '먼저 준비 내용을 저장하면 적용할 수 있습니다.'
+        : locked
+          ? '확인된 태그가 있어 AI 값으로 덮어쓰지 않습니다.'
+          : result?.stale
+            ? '추천 이후 입력이 바뀌었습니다. 다시 추천받으세요.'
+            : usable
+              ? '적용하면 저장한 내용 기준으로 다시 불러옵니다. 저장하지 않은 입력은 사라집니다.'
+              : '';
+    },
+  });
+  apply.addEventListener('click', async () => {
+    if (apply.disabled || !shown) return;
+    apply.disabled = true;
+    try {
+      await sendJson('POST', `/api/v1/register/preparations/${authored.preparation_id}/apply-enrichment`, {
+        actor: OPERATOR,
+        expected_revision_no: authored.revision_no,
+        field: 'tags',
+        product_group_id: productGroupId,
+        task_key: TAG_TASK,
+        result_key: TAG_RESULT,
+        result_targeted: true,
+        result_sequence: shown.sequence,
+        value_field: 'recommended',
+      });
+      toast('AI 추천 태그를 적용했습니다', '저장하면 확인된 태그가 됩니다. 마켓으로 보내지는 않습니다.');
+      reload();
+    } catch (error) {
+      const code = error instanceof ApiError ? error.error?.code : null;
+      toast('적용하지 못했습니다', TAGS_APPLY_COPY[code] ?? (error instanceof ApiError ? error.message : String(error)));
+      apply.disabled = false;
+    }
+  });
   return h(
     'div',
     { class: 'field', 'data-role': 'editor-tags' },
     h('label', {}, '태그 / 검색어'),
-    h('div', { class: 'tags' }, ...(tags.length ? tags.map((tag) => h('span', { class: 'tag' }, `#${tag}`)) : [h('span', { class: 'no-data' }, NO_DATA)]), pending('태그 편집', '태그 편집은 준비 중')),
+    current,
+    applied ? h('span', { class: 'chip warn', 'data-role': 'ai-tags-applied' }, 'AI 태그 적용됨 · 저장하면 확인됩니다') : null,
+    h('div', { class: 'ai-tags-field', 'data-role': 'editor-ai-tags' }, panel, h('div', { class: 'row' }, apply, why)),
   );
 }
 
@@ -275,7 +344,7 @@ function editor(unit, ctx, labels, mode, step) {
       h('div', { class: 'hero' }, mainImage(unit), h('div', { class: 'stack' }, h('div', { class: 'row' }, pending('수집 이미지에서 선택'), pending('업로드'), pending('이미지 편집')), h('span', { class: 'mini' }, '메인 이미지는 대표이미지 단계의 대표 이미지입니다.'))),
       platformTabs(unit),
       ...(parts ? [parts.head, parts.category, parts.name, aiNameBlock(unit, reload)] : readOnlyInputs(unit)),
-      tagsBlock(unit),
+      tagsBlock(unit, reload),
     ),
     pane(
       2,

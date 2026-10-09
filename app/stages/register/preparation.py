@@ -298,6 +298,10 @@ class ListingValues:
 
     name: FieldValue | None = None
     tags: frozenset[str] = frozenset()
+    # ADR-0028 §6: the provenance of the tag set as a whole. ``None`` is the operator's own (or an
+    # empty set); ``AI_SUGGESTION`` is written only by the apply and never satisfies until the
+    # operator's save confirms it.
+    tags_provenance: Provenance | None = None
     attributes: Mapping[str, FieldValue] = field(default_factory=dict)
     notices: Mapping[str, FieldValue] = field(default_factory=dict)
     # Item id → option dimension → option value. Display values only: never an identity.
@@ -1022,6 +1026,13 @@ def _listing_reasons(request: PreflightRequest, metadata: CategoryMetadata | Non
             and len(name.value) > metadata.name_max_length
         ):
             reasons.append(Reason(LISTING_NAME_TOO_LONG, _R, "name"))
+    # ADR-0028 §6: an AI tag set is unconfirmed until the operator's own save (ADR-0014 §18).
+    if (
+        listing.tags
+        and listing.tags_provenance is not None
+        and listing.tags_provenance not in SATISFYING
+    ):
+        reasons.append(Reason(FIELD_AI_SUGGESTION_UNCONFIRMED, _R, "tags"))
     if metadata is None:
         return reasons
     reasons.extend(

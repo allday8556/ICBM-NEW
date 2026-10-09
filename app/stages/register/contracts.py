@@ -272,6 +272,9 @@ class AuthoredInputsView(BaseModel):
     category: CategoryChoiceView | None = None
     name: FieldValueView | None = None
     tags: tuple[str, ...] = ()
+    # ADR-0028 §6: read back only (``AI_SUGGESTION`` after an apply, else ``None``); a write never
+    # sets it — the operator's own save confirms the tags.
+    tags_provenance: str | None = None
     attributes: dict[str, FieldValueView] = {}
     notices: dict[str, FieldValueView] = {}
     # Item id → option dimension → option value. Display values only, never an identity.

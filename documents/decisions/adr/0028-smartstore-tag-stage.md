@@ -178,6 +178,8 @@ Track A implements this in the register owner, as for AIF-4, with a handoff note
   - `✨ AI 추천` also asks the tag task when a SmartStore target is chosen.
 - **Editor › 기본정보.** The tag block shows the recommendation and `AI 태그 적용`, which follows the name's apply rules. Tag editing stays inert.
 
+**Implementation note (2026-10-09, T4).** The `태그 / AI 상태` group carries its own `✨ AI 태그 추천`. A name request therefore never reads the platform, and the tag request names the account bound to the connection (the T3 binding check).
+
 ## 8. Implementation order
 
 Each slice is its own PR under the Track A loop.
