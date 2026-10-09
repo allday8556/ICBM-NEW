@@ -216,6 +216,11 @@ Each needs a new or extended template, under a reviewed PR that cites this ADR. 
 
 ### 10. KM통상
 
+> **Amendment note (2026-10-10, owner decisions).**
+> - The owner set the per-image byte limit to 5 MiB for every supplier, KM통상 included (Issue #219 `6086299406`). It is a profile limit, not a parser rule. KM통상's extraction revision and source identities are unchanged by it.
+> - ADR-0031 C1 and ADR-0032 P1 later advance KM통상's parser to `kmretail-4`, by their own decisions.
+> - PT-10 is read with these owner decisions.
+
 KM통상 keeps its own package, its revision `kmretail-3` and its 40 source identities. Its adopted listings, its common-image decisions (Issue #219 §1, 2026-10-03) and its seller-code convention `KM{source_product_id}` keep their supplier key `kmretail`.
 
 The `cafe24` template is proven against KM통상's retained captures as a fixture test: the same identities, and the same facts or a stated difference. A later slice may move KM통상 onto the template only if every retained capture yields identical identities and facts. That move is optional and is not part of M8.
