@@ -76,7 +76,17 @@ const FACT_LABEL = {
   manufacturer: '제조사',
   origin: '원산지',
   stock: '재고',
+  sales_channels: '판매채널',
 };
+// ADR-0031 §5: the supplier's sales-channel restriction, worded from the server's reading.
+const MARKET_LABEL = { smartstore: '스마트스토어', coupang: '쿠팡' };
+function channelWords(value) {
+  const [scope, ...forbidden] = String(value).split(':');
+  if (scope === 'ALL_ALLOWED') return '모든 마켓 판매 가능';
+  if (scope === 'CLOSED_MALL_ONLY') return '폐쇄몰 전용 (오픈마켓 판매 불가)';
+  if (scope === 'LISTED') return forbidden.map((key) => `${MARKET_LABEL[key] ?? key} 판매 불가`).join(' · ');
+  return value;
+}
 const STOCK_LABEL = { ON_SALE: '판매 중', SOLD_OUT: '품절', REVIEW_REQUIRED: '확인 필요' };
 const BINDING_LABEL = { BASE_PRODUCT: '기본 상품', SOURCE_OFFER: '수량 구성' };
 const STATUS_LABEL = { ABSENT: '없음', REVIEW_REQUIRED: '확인 필요' };
@@ -130,9 +140,11 @@ function short(id) {
 // One source fact as its member's current revision states it: a value only when CONFIRMED.
 function factValue(fact) {
   if (!fact || fact.status === null) return chip('기록 없음');
+  if (fact.key === 'sales_channels' && fact.status === 'ABSENT') return '판매채널 제한 없음';
   if (fact.status !== 'CONFIRMED') {
     return chip(STATUS_LABEL[fact.status] ?? fact.status, fact.status === 'REVIEW_REQUIRED' ? 'warn' : null);
   }
+  if (fact.key === 'sales_channels') return channelWords(fact.value);
   return fact.key === 'stock' ? STOCK_LABEL[fact.value] ?? fact.value : fact.value;
 }
 

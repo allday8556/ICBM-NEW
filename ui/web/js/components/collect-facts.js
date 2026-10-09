@@ -39,6 +39,13 @@ const FIELD_LABEL = {
   origin: '원산지',
   notice: '상품정보고시',
   detail_description: '상세설명',
+  sales_channels: '판매채널',
+};
+// ADR-0031 §5: a supplier's sales-channel restriction, in Korean.
+const MARKET_LABEL = { smartstore: '스마트스토어', coupang: '쿠팡' };
+const CHANNEL_SCOPE_LABEL = {
+  ALL_ALLOWED: '모든 마켓 판매 가능',
+  CLOSED_MALL_ONLY: '폐쇄몰 전용 (오픈마켓 판매 불가)',
 };
 const LEVEL_LABEL = { CORE: '필수', COVERAGE: '보조' };
 const STATUS = {
@@ -120,6 +127,12 @@ function valueText(valueJson) {
   if (typeof value.amount_krw === 'number') return `${value.label ?? ''} ${won(value.amount_krw)}`.trim();
   // A tier is the source's own (quantity, total price) pair; it is never divided into a unit price.
   if (Array.isArray(value.tiers)) return clip(value.tiers.map((t) => `${t.quantity}개 ${won(t.total_price_krw)}`).join(' · '));
+  if (typeof value.scope === 'string') {
+    if (value.scope === 'LISTED') {
+      return clip(value.forbidden.map((key) => `${MARKET_LABEL[key] ?? key} 판매 불가`).join(' · '));
+    }
+    return CHANNEL_SCOPE_LABEL[value.scope] ?? value.scope;
+  }
   if (typeof value.policy_text === 'string') return clip(value.policy_text);
   if (typeof value.availability === 'string') return AVAILABILITY_LABEL[value.availability] ?? value.availability;
   if (Array.isArray(value.axes)) {
