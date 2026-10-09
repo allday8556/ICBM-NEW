@@ -968,6 +968,8 @@ Before any real marketplace write, and independently of endpoint adoption:
 
 The implemented source and pricing schema is **KRW-only** (`documents/architecture/ARCHITECTURE.md` §6). A second-currency supplier such as 1688 or Rakuten first needs a currency and FX-snapshot schema extension decided in an ADR. No such extension is authorized, and no migration for it may be written before that decision.
 
+> **Amendment note (2026-10-10, M8; ADR-0030).** A supplier on a storefront platform that has a reviewed template (`cafe24`, `godomall`) is onboarded through that template and one reviewed site configuration, with no supplier-specific parser code (`documents/decisions/adr/0030-m8-platform-template-supplier-collector.md`; owner direction Issue #219 `6085702239`). Each site's real reads still need the owner's go-ahead for that site. The paragraph below is unchanged: the Adaptive route of ADR-0017 stays deferred and unauthorized.
+
 A second supplier is meant to be onboarded through the Adaptive Collector (Issue #110, `documents/decisions/adr/0017-adaptive-collector-profile-extraction-and-shadow-validation.md`): a validated profile instead of a new supplier-specific parser. That contract authorizes no implementation by itself; its Phase B prototype, production slices and KM통상 shadow Phase C each need their own authorization, and its second-supplier Phase D stays deferred until the first vertical closes (`CLAUDE.md` §12).
 
 **Extension-primary COLLECT transport** (Issue #126, `documents/decisions/adr/0019-extension-primary-collection-transport.md`, architect decision `5844537419`):
