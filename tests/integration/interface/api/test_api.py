@@ -70,7 +70,7 @@ def test_every_screen_contract_reports_empty(client: TestClient, screen: str, re
     assert response.status_code == 200
     meta = response.json()["meta"]
     assert meta == meta | {"screen": screen, "state": "EMPTY", "empty_reason": reason}
-    assert meta["milestone"] == "M6.5"
+    assert meta["milestone"] == "M7"
 
 
 def test_the_orders_screen_states_no_count_before_an_order_read_succeeded(
@@ -141,7 +141,7 @@ def test_settings_contract_has_no_connections_and_is_read_only(client: TestClien
 
 def test_shell_contract_serves_marketplace_identity_assets(client: TestClient) -> None:
     shell = client.get("/api/v1/shell").json()
-    assert shell["milestone"] == "M6.5"
+    assert shell["milestone"] == "M7"
     assert shell["execution_mode"] == "DRY_RUN"
     keys = [m["key"] for m in shell["marketplaces"]]
     assert keys == ["smartstore", "coupang", "st11", "gmarket", "auction"]
