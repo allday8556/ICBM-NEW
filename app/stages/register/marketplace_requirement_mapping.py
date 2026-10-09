@@ -15,6 +15,7 @@ from app.stages.products.common_option_store import (
     CommonSalesOptionRevisionRecord,
 )
 from app.stages.register.category_metadata import (
+    CONFIRMED_PROVIDER_REQUIREDNESS,
     MarketplaceOptionRequirementView,
     MetadataRecord,
     content_of,
@@ -196,6 +197,8 @@ def _map_requirement(
         requirement.interpretation_state != "CONFIRMED"
         or requirement.requiredness is None
         or requirement.semantic_key is None
+        or requirement.requiredness
+        != CONFIRMED_PROVIDER_REQUIREDNESS.get(requirement.provider_requiredness)
     ):
         reasons.append(
             RequirementMappingReason(INTERPRETATION_REVIEW_REQUIRED, requirement.provider_rule_key)

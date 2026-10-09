@@ -77,6 +77,13 @@ CONTENT_VERSION_V1: Final = "registration-category-metadata/v1"
 CONTENT_VERSION: Final = "registration-category-metadata/v2"
 MAX_RULES: Final = 200
 
+# The only provider requiredness values whose canonical meaning is established by the adopted
+# C-P3 evidence.  Any other raw enum, or a contradictory normalized value, remains review-only.
+CONFIRMED_PROVIDER_REQUIREDNESS: Final[Mapping[str, str]] = {
+    "MANDATORY": "REQUIRED",
+    "OPTIONAL": "OPTIONAL",
+}
+
 CATEGORY_METADATA_INVALID: Final = "CATEGORY_METADATA_INVALID"
 CATEGORY_METADATA_UNSAFE_CONTENT: Final = "CATEGORY_METADATA_UNSAFE_CONTENT"
 CATEGORY_METADATA_AI_NOT_REVIEWABLE: Final = "CATEGORY_METADATA_AI_NOT_REVIEWABLE"
@@ -355,11 +362,15 @@ def encode_content(
             semantic_key = _identifier(semantic_key, f"{field}.semantic_key")
             if semantic_key.lower() != semantic_key:
                 raise _invalid("semantic_key must be lowercase", f"{field}.semantic_key")
+        confirmed_requiredness = CONFIRMED_PROVIDER_REQUIREDNESS.get(provider_requiredness)
         if requirement.interpretation_state == "CONFIRMED" and (
-            requirement.requiredness is None or semantic_key is None
+            requirement.requiredness is None
+            or semantic_key is None
+            or requirement.requiredness != confirmed_requiredness
         ):
             raise _invalid(
-                "a confirmed interpretation requires requiredness and semantic_key",
+                "a confirmed interpretation requires known, consistent requiredness and"
+                " semantic_key",
                 field,
             )
         if requirement.value_semantics == "SELLING_BUNDLE_QUANTITY" and semantic_key not in (

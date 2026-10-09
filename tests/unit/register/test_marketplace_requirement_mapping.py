@@ -3,6 +3,8 @@
 from dataclasses import replace
 from datetime import UTC, datetime
 
+import pytest
+
 from app.stages.products.common_option_store import (
     CommonSalesOptionAxisRecord,
     CommonSalesOptionRevisionRecord,
@@ -153,6 +155,29 @@ def test_unknown_or_contradictory_requiredness_remains_review_required() -> None
         requiredness=None,
         semantic_key=None,
         interpretation_state="REVIEW_REQUIRED",
+    )
+
+    mapping = _map(_metadata(requirement)).mappings[0]
+
+    assert mapping.state is RequirementMappingState.REVIEW_REQUIRED
+    assert mapping.reasons[0].code == INTERPRETATION_REVIEW_REQUIRED
+
+
+@pytest.mark.parametrize(
+    ("provider_requiredness", "requiredness"),
+    (
+        ("MANDATORY_OR_OPTIONAL_DEPENDING_ON_GROUP", "REQUIRED"),
+        ("MANDATORY", "OPTIONAL"),
+        ("OPTIONAL", "REQUIRED"),
+    ),
+)
+def test_falsely_confirmed_unknown_or_contradictory_requiredness_fails_closed(
+    provider_requiredness: str, requiredness: str
+) -> None:
+    requirement = _requirement(
+        provider_requiredness=provider_requiredness,
+        requiredness=requiredness,
+        interpretation_state="CONFIRMED",
     )
 
     mapping = _map(_metadata(requirement)).mappings[0]

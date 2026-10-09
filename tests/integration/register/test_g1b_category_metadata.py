@@ -282,6 +282,43 @@ def test_reviewed_marketplace_option_requirements_are_versioned_with_category_ev
     assert adopted_requirement_metadata(missing) is None
 
 
+@pytest.mark.parametrize(
+    ("provider_requiredness", "requiredness"),
+    (
+        ("MANDATORY_OR_OPTIONAL", "REQUIRED"),
+        ("MANDATORY", "OPTIONAL"),
+        ("OPTIONAL", "REQUIRED"),
+    ),
+)
+def test_confirmed_requirement_refuses_unknown_or_contradictory_requiredness(
+    api: TestClient,
+    container: Container,
+    config: AppConfig,
+    provider_requiredness: str,
+    requiredness: str,
+) -> None:
+    requirement = {
+        "provider_rule_key": "COUNT_PER_UNIT",
+        "provider_label": "수량",
+        "role": "PURCHASE_OPTION",
+        "provider_requiredness": provider_requiredness,
+        "requiredness": requiredness,
+        "provider_semantics": "count inside one sellable unit",
+        "semantic_key": "unit_count",
+        "value_semantics": "COUNT_PER_UNIT",
+        "basic_unit": "tablet",
+        "usable_units": ["tablet"],
+        "allowed_values": [],
+        "interpretation_state": "CONFIRMED",
+    }
+
+    refused = save(api, body(option_requirements=[requirement]))
+
+    assert refused.status_code == 422
+    assert refused.json()["error"]["code"] == "CATEGORY_METADATA_INVALID"
+    assert counts(config) == _none() and events(container) == []
+
+
 def test_an_ai_suggestion_is_never_recorded_as_reviewed(
     api: TestClient, container: Container, config: AppConfig
 ) -> None:
