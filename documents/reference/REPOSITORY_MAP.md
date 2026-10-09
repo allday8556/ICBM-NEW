@@ -145,7 +145,7 @@ payload or external call and leaves legacy Item economics unchanged.
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
 | `integrations/` | 52 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 28 |  |
-| `integrations/suppliers/` | 20 |  |
+| `integrations/suppliers/` | 20 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
 | `tests/` | 311 | tests |
 | `tests/contracts/` | 10 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |

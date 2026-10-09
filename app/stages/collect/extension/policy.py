@@ -262,14 +262,19 @@ class CapturePolicySource:
     its own shape before it names a path, so it can never leave that directory.
     """
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, sites: Mapping[str, bytes] | None = None) -> None:
         self._root = root
+        # ADR-0030 §4: a configured site's policy is derived from its platform template's and
+        # served from those bytes; it has no file of its own.
+        self._sites = dict(sites or {})
 
     def load(self, supplier_key: str) -> BrowserCapturePolicy:
         if not _SUPPLIER_KEY.fullmatch(supplier_key):
             raise _policy_refused(
                 "CAPTURE_POLICY_ABSENT", "no capture policy exists for that supplier"
             )
+        if supplier_key in self._sites:
+            return parse_policy(self._sites[supplier_key], supplier_key)
         path = self._root / supplier_key / POLICY_FILE
         try:
             raw = path.read_bytes()

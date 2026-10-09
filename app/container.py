@@ -207,7 +207,8 @@ from integrations.suppliers.extraction import supplier_manifest
 from integrations.suppliers.kmretail import PROFILE as KM_PROFILE
 from integrations.suppliers.kmretail.collect.images import OG_IMAGE_RULE as KM_OG_IMAGE_RULE
 from integrations.suppliers.kmretail.collect.images import ROLE_RULES as KM_ROLE_RULES
-from integrations.suppliers.registry import COLLECTIONS, SUPPLIERS
+from integrations.suppliers.registry import COLLECTIONS, SITE_PROBLEMS, SITES, SUPPLIERS
+from integrations.suppliers.sites import capture_policy_bytes
 from integrations.suppliers.transport.collection import DeferredCollectionGateway
 from integrations.suppliers.transport.gateway import PolicedSupplierGateway
 
@@ -618,7 +619,10 @@ def build_container(
         clock=clock,
         jobs=jobs,
         runs=runs,
-        policies=CapturePolicySource(capture_policy_root or SUPPLIER_PACKAGES),
+        policies=CapturePolicySource(
+            capture_policy_root or SUPPLIER_PACKAGES,
+            sites={key: capture_policy_bytes(site) for key, site in SITES.items()},
+        ),
         buffer=CaptureBuffer(),
         final_scan=_server_final_scan,
         # The buffer is a handoff inside one process (ADR-0002 Option A; ruling 5906712259 N-1).
@@ -1266,10 +1270,19 @@ def _registered(collections: Sequence[SupplierCollection]) -> Iterator[Registere
     A revision records the rules that produced it, so a supplier whose image-role rules and
     manifest disagree is refused here rather than storing a revision under a stale identity.
     """
+    for problem in SITE_PROBLEMS:
+        # ADR-0030 §3: an invalid site file leaves that site out and stops nothing else.
+        logger.warning("supplier site configuration not offered: %s", problem)
     for collection in collections:
-        manifest = supplier_manifest(collection.supplier_key)
+        site = SITES.get(collection.supplier_key)
+        if site is not None and site.collection is collection:
+            # ADR-0030 §4: a site's identity is (template revision, site revision).
+            revision, fingerprint = site.extractor_revision, site.extractor_fingerprint
+        else:
+            manifest = supplier_manifest(collection.supplier_key)
+            revision, fingerprint = manifest.revision, manifest.fingerprint
         yield RegisteredCollection(
             collection=collection,
-            extractor_revision=manifest.revision,
-            extractor_fingerprint=manifest.fingerprint,
+            extractor_revision=revision,
+            extractor_fingerprint=fingerprint,
         )
