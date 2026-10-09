@@ -91,6 +91,8 @@ class EditableSurface(StrEnum):
     REGISTRATION_TARGET_POLICY = "REGISTRATION_TARGET_POLICY"
     # Gate 1 G1-B (ADR-0015 §3): the operator-reviewed category metadata.
     REGISTRATION_CATEGORY_METADATA = "REGISTRATION_CATEGORY_METADATA"
+    # ADR-0026 AIF-1: the AI Prompt Registry (PromptTemplate and PlatformPolicy stores).
+    AI_PROMPT_REGISTRY = "AI_PROMPT_REGISTRY"
 
 
 # ------------------------------------------------------------------ the application contract
@@ -749,8 +751,9 @@ def _revision_view(record: PolicyRevisionRecord, *, current: bool) -> TargetPoli
 
 
 def editable_surfaces() -> Sequence[EditableSurface]:
-    """The Settings surfaces this application accepts a save for (ADR-0015 §2, §3)."""
+    """The Settings surfaces this application accepts a save for (ADR-0015 §2, §3; ADR-0026 §8)."""
     return (
         EditableSurface.REGISTRATION_TARGET_POLICY,
         EditableSurface.REGISTRATION_CATEGORY_METADATA,
+        EditableSurface.AI_PROMPT_REGISTRY,
     )

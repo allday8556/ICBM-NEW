@@ -81,6 +81,19 @@ class AuditEventType(StrEnum):
     # by the server and made current. Scope, identifiers, revision numbers and the content
     # fingerprint only — never a policy value, which lives in the revision row.
     REGISTRATION_TARGET_POLICY_REVISED = "REGISTRATION_TARGET_POLICY_REVISED"
+    # ADR-0026 AIF-1: a PromptTemplate or PlatformPolicy revision (an operator save or reset).
+    # Keys, fields, revision ids and fingerprints only, never prompt text.
+    AI_PROMPT_TEMPLATE_REVISED = "AI_PROMPT_TEMPLATE_REVISED"
+    AI_PLATFORM_POLICY_REVISED = "AI_PLATFORM_POLICY_REVISED"
+    # ADR-0026 AIF-3: the results of one task run recorded (statuses, fingerprint, models,
+    # billing mode, error code). Never a value, a prompt or a fact.
+    AI_ENRICHMENT_RESULT_RECORDED = "AI_ENRICHMENT_RESULT_RECORDED"
+    # ADR-0026 AIF-4: an enrichment result applied to one Preparation field as AI_SUGGESTION
+    # (result ids, sequence and fingerprint). Never the value.
+    AI_ENRICHMENT_APPLIED = "AI_ENRICHMENT_APPLIED"
+    # ADR-0027 AIS-1: the AI provider profile configured or approved (executable, routing,
+    # data transfer). Paths, hashes, fingerprints and flags only; never a key.
+    AI_PROVIDER_PROFILE_REVISED = "AI_PROVIDER_PROFILE_REVISED"
     # Gate 1 G1-B (ADR-0015 §3): a revision of one marketplace × taxonomy × category's reviewed
     # metadata, appended by the server and made current. Key, identifiers, revision number, content
     # fingerprint and the review flag only — never a metadata value.

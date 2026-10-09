@@ -57,9 +57,12 @@ def retain(contract: EndpointContract, body: object) -> dict[str, Any]:
     return dict(kept) if isinstance(kept, dict) else {}
 
 
-def retained_query(contract: EndpointContract, query: Mapping[str, str]) -> dict[str, str]:
+def retained_query(
+    contract: EndpointContract, query: Mapping[str, str | list[str]]
+) -> dict[str, str | list[str]]:
     """The query this endpoint may send. A key outside the allow-list is a local contract
-    violation, never a silently dropped parameter: the caller refuses the request."""
+    violation, never a silently dropped parameter: the caller refuses the request. A list value is
+    one key repeated, in order (``tags=a&tags=b``; ADR-0028 §2)."""
     unsafe = sorted(set(query) - contract.safe_query_keys)
     if unsafe:
         raise ValueError(f"{contract.endpoint_id.value} may not send query keys: {unsafe}")

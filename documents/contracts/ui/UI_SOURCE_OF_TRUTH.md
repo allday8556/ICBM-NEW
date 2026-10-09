@@ -293,15 +293,27 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
 - **Cards.** v29's five cards: `전체상품 / 등록가능 / 확인필요 / 품절 / 금지상품`. `전체상품` is the server's `products_total`; the other four have no owner yet and read `데이터 없음`.
 - **Filter row.**
   - The search field and `검색` keep their server search.
-  - v29's `카테고리 / 플랫폼 / 공급처 / 가격기준` filters and `✨ AI 추천` are inert.
+  - v29's `카테고리 / 플랫폼 / 공급처 / 가격기준` filters and the toolbar's bulk `✨ AI 추천` are inert. Bulk AI keeps its own stage (ADR-0027).
 - **List columns.**
   - The columns are v29's: `상품명 / 공급처 / 원가 / 배송비 / 최저판매가 / 가격기준 / 네이버 / 쿠팡 / 11번가 / 상태 / 등록유형`.
   - The name cell keeps the Product's id, member and Item counts, membership revision and creation time on its second line.
   - The supplier and the status come from the row. The price columns and `등록유형` read `데이터 없음`.
 - **Detail panel.**
   - The title shows the representative image through the bound Item's own image read, the member's confirmed name, the id and the status.
-  - v29's groups follow: `브랜드` from the member's facts; `카테고리 / 카테고리 추천 신뢰도 / 가격 정보 / 채널별 판매가 / 마진율 / 태그 / AI 상태` read `데이터 없음`.
-  - `✨ AI 추천` and `상세 편집` are inert.
+  - v29's groups follow: `브랜드` from the member's facts; `카테고리 / 카테고리 추천 신뢰도 / 가격 정보 / 채널별 판매가 / 마진율` read `데이터 없음`.
+  - **`태그 / AI 상태` (ADR-0028 T4).** The group shows the product's `SMARTSTORE_TAGS_V1` `tags` result for the SmartStore account bound to the connection (read from `/register/draft-targets`):
+    - each tag with its source, `네이버 추천` or `AI 직접`;
+    - what the filter removed and why;
+    - when the restricted check ran;
+    - `검토 필요`, `최신` or `입력 바뀜`, and the model.
+    
+    Its own `✨ AI 태그 추천` is live only while the `ai` capability is READY and such an account exists; otherwise it is inert with the reason. The platform is read by the server's job, never by the page. No tag is ever sent to the marketplace.
+  - **`AI 상품명 추천` (ADR-0027 AIS-2).**
+    - The group holds `✨ AI 추천` and the Product's target-free `product_name` result, as the enrichment owner reads it: the recommendation, its confidence, `검토 필요`, `최신` or `입력 바뀜 · <reasons>`, and the model that answered.
+    - The button is live only while the `ai` capability is READY. Otherwise it is inert with the capability's reason.
+    - A press asks the product-name task once. The server reuses a result whose inputs are unchanged; otherwise the panel reads the owner again until a newer result is recorded.
+    - It applies nothing.
+  - `상세 편집` is inert.
   - The membership, the members' facts, the Items, the review items, the target check and the Draft form follow as before.
 
 ### 등록관리
@@ -333,7 +345,16 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
   - The choice sends nothing. The chosen work opens `#/register-editor?draft=&unit=&items=&mode=` in a new tab, without the application's sidebar and top bar.
   - A unit's ref moves when it is authored and again when it is frozen. The editor follows the one unit of the Draft that holds the same Items. Two units holding them are never guessed between.
 - **Six steps.** Phase 1 places the register page's own pieces by step and adds no route:
-  1. `기본정보`: the main image, the platform tabs (the target marketplace only; the others are inert), the category and the name.
+  1. `기본정보`: the main image, the platform tabs (the target marketplace only; the others are inert), the category, the name, `AI 상품명 추천` and the tags.
+     - For a SmartStore unit, the tag block shows the unit account's tag recommendation (the 통합DB panel) and `AI 태그 적용`.
+     - `AI 태그 적용` applies the exact result revision as one `AI_SUGGESTION` set of texts (ADR-0028 §6).
+     - It is enabled only for a fresh OK result, on a saved Preparation with no confirmed tags. A confirmed set is never overwritten.
+     - `AI 태그 적용됨 · 저장하면 확인됩니다` marks an applied set, and the operator's save confirms it.
+     - Tag editing stays inert.
+     - `AI 상품명 추천` shows the same recommendation panel as 통합DB.
+     - `AI 추천 적용` applies the exact result revision shown to the name as `AI_SUGGESTION`, against the Preparation revision read (ADR-0026 §7).
+     - It is enabled only for a fresh OK result, on a saved Preparation whose name holds no confirmed value. A confirmed name is never overwritten.
+     - `AI 추천 적용됨 · 저장하면 확인됩니다` marks an applied name. The operator's own save makes it `OPERATOR_CONFIRMED`.
   2. `대표이미지`: the Item image editor. The bulk `배경 이미지 제거 / 리사이즈 / 이미지 편집 / 이미지 자동번역` are inert. `자동 선택 다시 실행` is the image owner's own.
   3. `옵션·가격`: the repin and the Items table. The price facts no read states read `데이터 없음`, and the option tools are inert.
   4. `상품정보고시`: the category requirements and their fields.
@@ -349,6 +370,24 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
 - **AI controls are inert placeholders.** This covers `배경 이미지 제거` and `이미지 자동번역` in 대표이미지 and `이미지 자동번역` in 상세페이지, under owner decision 2026-10-08 (Issue #219 comment `6054956408`; ROADMAP, Issue #127). Each keeps its approved position, disabled and marked 준비 중, and sends nothing. It becomes active only with its server owner.
 - **Edit mode is read-only.** No contract yet edits a registered listing on the marketplace. `상품수정` shows the registered unit's contents and says so. A unit with a Snapshot or an Intent is never authored in the editor.
 - **The register page is unchanged.** Every section the Gate 3 surface reads stays on `#/register`.
+
+### 설정 › AI / Prompt (ADR-0026 AIF-1)
+
+- **AI Prompt Registry.** The card keeps v29's four sections: 공통 규칙, 역할, 플랫폼 정책 and 작업.
+  - Each entry reads its current revision from the server's PromptTemplate or PlatformPolicy store and shows it as `v{n} · 기본값` or `v{n} · 사용자 수정본`.
+  - Clicking an entry opens the v29 layered prompt editor on that entry's role × policy × task.
+- **Editor.** The editor has v29's seven tabs: 공통 규칙, 역할 Role, 플랫폼 Policy, 작업 Task, 출력 형식, 입력 변수 and 조립 미리보기.
+  - The state chip reads 기본값, 사용자 수정본 or 저장되지 않은 변경.
+  - `현재 계층 저장` and `↺ 현재 계층 초기화` write one revision of the current tab only.
+  - The preview is the server's composition of the saved layers.
+- **Other entry points.** Each marketplace tab's `Policy 편집` button opens its platform policy. AI 쇼핑 인사이트's `✨ Shopping Insight Agent 설정` opens its role and task. Both only edit prompts.
+- **AI 공급자 row.** The "AI 기본 설정" card shows a row that reads the readiness `ai` capability (ADR-0026 AIF-2). With no provider it reads `미설정 · AI 공급자 없음`.
+- **외부 검색 신호 (ADR-0028 §3).** The card also shows the `search_signal` capability as readiness reports it: `연결된 출처 없음` while the port is provider-zero.
+- **AI 공급자 card (ADR-0027 AIS-1).** The card holds the operator's CLIProxyAPI profile: a loopback endpoint, the owner's model (`gpt-5.6-sol`, shown read-only; any other is refused), the billing mode and the daily call cap. Moving the endpoint or the model withdraws the data-transfer approval.
+  - It shows the approved executable and routing identity beside what is actually serving now. Each approve button names what is served now and is a protected, audited server action.
+  - It holds the data-transfer approval, today's calls and the capability state (`연결됨`, `승인 필요 · …`, or the mismatch reason).
+  - The ICBM-dedicated client key is typed once into a password field. The server writes it to the OS secret store, and it is never shown again: the card shows only `저장됨 · <time>` or `없음`.
+- **Still inert.** The "AI 기본 설정" toggles stay inert placeholders until their stage.
 
 ## Supplier common images (A-NEXT2a, owner decision 2026-10-04 option 1, Issue #231)
 

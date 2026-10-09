@@ -4,9 +4,9 @@
 // 확인 (M2 PR-C, its own permission-attestation contract), the SmartStore capability projection
 // (M2 PR-D, CAPABILITY_MAPPING §14.11), read from the capability read API, the SmartStore
 // operator actions (M2 PR-E, instructions §8A), after each of which that truth is re-read, and
-// the registration target policy (Gate 1 G1-A, ADR-0015 §2) and the operator-reviewed category
-// metadata (Gate 1 G1-B, ADR-0015 §3): the surfaces the server lists in `editable_surfaces`, each
-// saved through its own contract. What the save bar says comes from those server fields, never
+// the registration target policy (Gate 1 G1-A, ADR-0015 §2), the operator-reviewed category
+// metadata (Gate 1 G1-B, ADR-0015 §3) and the AI Prompt Registry (ADR-0026 AIF-1): the surfaces
+// the server lists in `editable_surfaces`, each saved through its own contract. What the save bar says comes from those server fields, never
 // from this page.
 
 import { getJson } from '../core/api.js';
@@ -16,6 +16,8 @@ import { withHelp } from '../core/help.js';
 import { markInert } from '../core/inert.js';
 import { platformTag } from '../core/platform.js';
 import { pageHead } from '../components/page-head.js';
+import { aiProviderPanel } from '../components/ai-provider.js';
+import { openPromptEditor, promptRegistry } from '../components/prompt-registry.js';
 import { capabilityProjection } from './settings/capability-projection.js';
 import { permissionAttestationPanel } from './settings/permission-attestation.js';
 import { API_STATUS_LABEL, CONNECTION_LABEL, PLATFORM_TABS, SUBTABS } from './settings/settings-schema.js';
@@ -24,6 +26,7 @@ import { categoryMetadataPanel } from './settings/category-metadata.js';
 import { targetPolicyPanel } from './settings/target-policy.js';
 
 const ENDPOINT = '/api/v1/screens/settings';
+const READINESS = '/api/ready';
 const CAPABILITIES = '/api/v1/connect/marketplaces/capabilities';
 const CAPABILITY = (key) => `/api/v1/connect/marketplaces/${key}/capability`;
 
@@ -55,6 +58,7 @@ const TITLE = '설정';
 const SURFACE_LABEL = {
   REGISTRATION_TARGET_POLICY: '등록 대상 정책 (마켓 탭 › 등록 정책)',
   REGISTRATION_CATEGORY_METADATA: '카테고리 메타데이터 (마켓 탭 › 상품 / 카테고리)',
+  AI_PROMPT_REGISTRY: 'AI Prompt Registry (공통 › AI / Prompt)',
 };
 
 function saveScope(view) {
@@ -121,6 +125,26 @@ function connectionChip(key, state) {
   return h('span', { class: 'chip warn' }, '확인 불가');
 }
 
+// ADR-0026 AIF-2: the ai capability as readiness reports it. No AI provider is configured, so it
+// reads 미설정; this row only shows the server's state.
+function aiCapabilityRow() {
+  const chip = h('span', { class: 'chip', 'data-role': 'ai-capability' }, '확인 중');
+  getJson(READINESS)
+    .then((view) => view.capabilities.find((item) => item.key === 'ai'))
+    .catch(() => null)
+    .then((ai) => {
+      if (!ai) {
+        chip.textContent = '확인 불가';
+        chip.className = 'chip warn';
+        return;
+      }
+      chip.dataset.status = ai.status;
+      chip.textContent = ai.status === 'READY' ? '연결됨' : '미설정 · AI 공급자 없음';
+      chip.className = ai.status === 'READY' ? 'chip good' : 'chip';
+    });
+  return h('div', { class: 'kv' }, h('span', {}, 'AI 공급자'), chip);
+}
+
 function usersTable() {
   return h(
     'table',
@@ -128,51 +152,6 @@ function usersTable() {
     h('thead', {}, h('tr', {}, h('th', {}, '이름'), h('th', {}, '권한'), h('th', {}, '상태'))),
     h('tbody', {}, h('tr', {}, h('td', { class: 'table-empty', colspan: '3' }, '등록된 사용자가 없습니다 · v1은 로컬 단일 운영자'))),
   );
-}
-
-function registryItem(name, help, withEm) {
-  return markInert(
-    h('div', { class: 'registry-item' }, withHelp(h('b', {}, name), help), withEm ? h('em', {}, 'M0 · 미연결') : null),
-    name,
-  );
-}
-
-function registrySection(title, help, action, grid) {
-  return h(
-    'div',
-    { class: 'registry-section' },
-    h('div', { class: 'registry-head' }, h('div', {}, withHelp(h('b', {}, title), help)), action),
-    grid,
-  );
-}
-
-function registry(data) {
-  return [
-    registrySection(
-      '1. 공통 규칙 · Global Rules',
-      '모든 AI 기능에 공통 적용되는 사실성·검증·승인 정책',
-      button('공통 규칙 편집', 'ai'),
-      null,
-    ),
-    registrySection(
-      '2. 역할 · Role Profiles',
-      '업무별 AI의 전문 역할과 판단 우선순위',
-      null,
-      h('div', { class: 'registry-grid roles' }, data.roles.map(([name, help]) => registryItem(name, help, true))),
-    ),
-    registrySection(
-      '3. 플랫폼 정책 · Platform Policy',
-      '플랫폼 공식 데이터·SEO·추천 API 사용 우선순위',
-      null,
-      h('div', { class: 'registry-grid policies' }, data.policies.map(([name, help]) => registryItem(name, help, true))),
-    ),
-    registrySection(
-      '4. 작업 · Task Prompts',
-      '실행 버튼에 따라 TASK_MODE를 선택',
-      null,
-      h('div', { class: 'registry-grid tasks' }, data.tasks.map(([name, help]) => registryItem(name, help, false))),
-    ),
-  ];
 }
 
 function renderItem(item, state) {
@@ -214,7 +193,17 @@ function renderItem(item, state) {
   if (item.targetPolicy) return targetPolicyPanel(item.targetPolicy, item.section ?? 'policy');
   if (item.categoryMetadata) return categoryMetadataPanel(item.categoryMetadata);
   if (item.usersTable) return usersTable();
-  if (item.registry) return registry(item.registry);
+  if (item.aiCapability) return aiCapabilityRow();
+  if (item.aiProvider) return aiProviderPanel();
+  if (item.registry) return promptRegistry(item.registry);
+  if (item.promptEditor) {
+    const { label, ...context } = item.promptEditor;
+    return h(
+      'button',
+      { type: 'button', class: 'btn ai', 'data-prompt-key': context.policy, onclick: () => openPromptEditor({ ...context, layer: 'policy' }) },
+      label,
+    );
+  }
   return null;
 }
 

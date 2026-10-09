@@ -36,6 +36,7 @@ from app.stages.connect.marketplace.capability import (
     WriteStatus,
 )
 from app.stages.register.authoring import (
+    EnrichmentApply,
     RegistrationPreparationService,
     decode_inputs,
     inputs_from_view,
@@ -583,6 +584,20 @@ class RegisterService:
             actor=actor,
             correlation_id=correlation_id,
             revisions=submitted_view_revisions(inputs),
+        )
+        return _preparation_view(record)
+
+    def apply_enrichment(
+        self,
+        preparation_id: str,
+        apply: EnrichmentApply,
+        *,
+        actor: str,
+        correlation_id: str,
+    ) -> PreparationView:
+        """ADR-0026 AIF-4: one enrichment result applied to one field as AI_SUGGESTION."""
+        record = self._require_authoring().apply_enrichment(
+            preparation_id, apply, actor=actor, correlation_id=correlation_id
         )
         return _preparation_view(record)
 
@@ -1533,6 +1548,9 @@ def _preparation_view(record: PreparationRecord) -> PreparationView:
             ),
             name=None if listing.name is None else _field_view(listing.name),
             tags=tuple(sorted(listing.tags)),
+            tags_provenance=(
+                None if listing.tags_provenance is None else listing.tags_provenance.value
+            ),
             attributes={key: _field_view(value) for key, value in listing.attributes.items()},
             notices={key: _field_view(value) for key, value in listing.notices.items()},
             options={item: dict(values) for item, values in listing.options.items()},

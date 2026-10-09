@@ -683,6 +683,9 @@ def test_only_the_category_list_may_send_its_documented_query_key() -> None:
     documented = {
         EndpointId.SMARTSTORE_CATEGORY_LIST: frozenset({"last"}),
         EndpointId.SMARTSTORE_ADDRESSBOOK_LIST: frozenset({"page"}),
+        # ADR-0028 §2: the tag search sends one keyword; the restricted check repeats ``tags``.
+        EndpointId.SMARTSTORE_TAG_RECOMMEND: frozenset({"keyword"}),
+        EndpointId.SMARTSTORE_TAG_RESTRICTED: frozenset({"tags"}),
         EndpointId.SMARTSTORE_ORDER_CHANGES: frozenset(
             {"lastChangedFrom", "lastChangedTo", "moreSequence", "limitCount"}
         ),

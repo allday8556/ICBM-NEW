@@ -322,8 +322,8 @@ def test_the_smartstore_readme_names_exactly_the_adopted_endpoints() -> None:
     # M2's two, PR-D's two read-backs, IMAGE UPLOAD, the CREATE and the SEARCH adoption slices,
     # the DELETE slice (ADR-0018 §3.5), the leaf-category read and the two notice reads
     # (notice coverage S0), the address-book read (Settings delivery policy), the two M6-C
-    # order reads and the M6.5-C dispatch (ADR-0025 §5.1)
-    assert len(adopted) == 15, adopted
+    # order reads, the two ADR-0028 tag reads and the M6.5-C dispatch (ADR-0025 §5.1)
+    assert len(adopted) == 17, adopted
     boundary = _section(_read(smartstore / "README.md"), r"^2\. Current M2 execution boundary")
     named = boundary.split("Every other SmartStore endpoint")[0]
     assert set(re.findall(r"`(SMARTSTORE_[A-Z0-9_]+)`", named)) == adopted
@@ -2559,6 +2559,8 @@ RAW_CLIENT_OWNERS = {
     "integrations/marketplaces/smartstore/transmission.py": "DNS-phase evidence type (socket)",
     "app/platform/core/egress.py": "resolves the granted hosts' addresses for the guard (socket)",
     "app/platform/core/ownership.py": "hostname for the diagnostic owner metadata (socket)",
+    # ADR-0027 §4: the one AI adapter, a loopback call to the operator's approved sidecar.
+    "integrations/ai/cliproxyapi.py": "the CLIProxyAPI sidecar adapter (loopback only)",
 }
 _COMMON_SUPPLIER_MODULES = {
     "integrations/suppliers/__init__.py",
@@ -2850,6 +2852,10 @@ SOURCE_TRUTH_FORBIDDEN = (
     "azure.cognitiveservices",
     # app.ai is a reserved AI namespace that has never existed; it is not a moved package.
     "app.ai",
+    # ADR-0026 (AIF-02): the AI capability, its prompt registry and later its provider port.
+    "app.capabilities.ai",
+    # ADR-0026 (AIF-02): PRODUCT DB's enrichment owner and its job.
+    "app.stages.products.enrichment",
     "integrations.ai",
     "integrations.marketplaces",
     "app.stages.connect.marketplace",
@@ -2866,6 +2872,64 @@ def test_collect_source_truth_path_imports_no_ai_ocr_or_marketplace_code() -> No
         for name in _imported_modules(tree):
             forbidden = [f for f in SOURCE_TRUTH_FORBIDDEN if name == f or name.startswith(f"{f}.")]
             assert not forbidden, f"{path}: {name}"
+
+
+# ADR-0026 AIF-11 (ADR-0012 consequences): no AI vendor SDK is imported anywhere in production code
+# until the owner decides the provider, model, key, cost cap and data transfer. The port's only
+# binding is NoAIProvider.
+AI_VENDOR_SDKS = (
+    "anthropic",
+    "openai",
+    "google.generativeai",
+    "google.genai",
+    "vertexai",
+    "cohere",
+    "mistralai",
+    "groq",
+    "ollama",
+    "litellm",
+    "langchain",
+    "llama_index",
+)
+
+
+def test_no_production_module_imports_an_ai_vendor_sdk() -> None:
+    modules = _production_modules()
+    assert "app/capabilities/ai/provider.py" in modules
+    for path, tree in modules.items():
+        for name in _imported_modules(tree):
+            vendor = [f for f in AI_VENDOR_SDKS if name == f or name.startswith(f"{f}.")]
+            assert not vendor, f"{path}: {name}"
+
+
+def test_the_register_owner_imports_no_ai_module() -> None:
+    """ADR-0026 AIF-4: the register owner reads enrichment results only through the read the
+    composition root hands it, so an acceptance run that loads the register owners loads no AI
+    module (the harness guards forbid them)."""
+    forbidden = ("app.capabilities.ai", "app.stages.products.enrichment")
+    for path, tree in _production_modules().items():
+        if not path.startswith("app/stages/register/"):
+            continue
+        for name in _imported_modules(tree):
+            assert not any(name == f or name.startswith(f"{f}.") for f in forbidden), (
+                f"{path}: {name}"
+            )
+
+
+def test_the_container_binds_only_the_profiled_sidecar_provider() -> None:
+    """ADR-0027: the one binding is the profiled CLIProxyAPI sidecar; with no approved profile it
+    names no identity and sends nothing."""
+    source = (REPO_ROOT / "app" / "container.py").read_text("utf-8")
+    assert "AIExecution(profiled_provider)" in source
+    providers = [
+        node.name
+        for path, tree in _production_modules().items()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef)
+        and node.name.endswith("Provider")
+        and path.startswith("app/capabilities/ai/")
+    ]
+    assert sorted(providers) == ["AIProvider", "NoAIProvider", "ProfiledProvider"]
 
 
 # ADR-0017 P1 (Issue #110 5821999699): no dynamic-import or code-evaluation escape in the source
@@ -3721,6 +3785,20 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "operate_order_adoption_links",
         "operate_supplier_orders",
         "operate_supplier_order_history",
+        # ADR-0026 AIF-1: the PromptTemplate and PlatformPolicy stores.
+        "ai_prompt_templates",
+        "ai_prompt_template_revisions",
+        "ai_prompt_template_current",
+        "ai_platform_policies",
+        "ai_platform_policy_revisions",
+        "ai_platform_policy_current",
+        # ADR-0026 AIF-3: PRODUCT DB's structured enrichment results.
+        "product_enrichment_results",
+        # ADR-0027 AIS-1: the AI provider profile and its call ledger.
+        "ai_provider_profiles",
+        "ai_provider_profile_revisions",
+        "ai_provider_profile_current",
+        "ai_provider_calls",
         "live_grant_dispatch_bindings",
         "operate_dispatch_attempts",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over

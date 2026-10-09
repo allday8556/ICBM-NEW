@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 from app.interface.api.deps import ContainerDep
 from app.platform.core.correlation import get_correlation_id, new_correlation_id
+from app.stages.register.authoring import EnrichmentApply
 from app.stages.register.canary import CanaryReadinessView
 from app.stages.register.contracts import (
     ActionResult,
@@ -76,6 +77,23 @@ class UpdatePreparationRequest(BaseModel):
     item_ids: list[str] = Field(min_length=1, max_length=50)
     actor: str = Field(min_length=2, max_length=64)
     inputs: AuthoredInputsView
+
+
+class ApplyEnrichmentRequest(BaseModel):
+    """ADR-0026 AIF-4: apply one enrichment result to one field as AI_SUGGESTION, against the
+    Preparation revision the operator read. A confirmed value is never overwritten."""
+
+    actor: str = Field(min_length=2, max_length=64)
+    expected_revision_no: int = Field(ge=1)
+    field: str = Field(min_length=1, max_length=120)
+    product_group_id: str = Field(min_length=1, max_length=36)
+    task_key: str = Field(min_length=1, max_length=64)
+    result_key: str = Field(min_length=1, max_length=64)
+    # The result subject: this Preparation's own target, or the target-free one.
+    result_targeted: bool
+    # The exact enrichment result revision the operator saw.
+    result_sequence: int = Field(ge=1)
+    value_field: str = Field(min_length=1, max_length=64)
 
 
 class FreezeRequest(BaseModel):
@@ -188,6 +206,27 @@ def authoring_metadata(
     container: ContainerDep, draft_id: str, category_id: str
 ) -> AuthoringMetadataView:
     return container.register.authoring_metadata(draft_id, category_id)
+
+
+@router.post("/preparations/{preparation_id}/apply-enrichment")
+def apply_enrichment(
+    container: ContainerDep, preparation_id: str, request: ApplyEnrichmentRequest
+) -> PreparationView:
+    return container.register.apply_enrichment(
+        preparation_id,
+        EnrichmentApply(
+            field=request.field,
+            product_group_id=request.product_group_id,
+            task_key=request.task_key,
+            result_key=request.result_key,
+            result_targeted=request.result_targeted,
+            result_sequence=request.result_sequence,
+            value_field=request.value_field,
+            expected_revision_no=request.expected_revision_no,
+        ),
+        actor=request.actor,
+        correlation_id=_correlation(),
+    )
 
 
 @router.post("/preparations/{preparation_id}")

@@ -67,6 +67,28 @@ The supplier common-image screen (A-NEXT2a, Issue #231) added the 수집관리 c
 `ui/web/js/components/common-images.js`.
 The registration editor (owner decision 2026-10-08, phase 1) added the 등록관리 page
 `ui/web/js/pages/register-editor.js` and one integration suite.
+The AI authoring foundation's AIF-1 (ADR-0026) added the AI capability `app/capabilities/ai/` (the v29 prompt
+registry catalog and its seed `seed_v29.json`, the PromptTemplate and PlatformPolicy stores and their
+models), the routes
+`app/interface/api/routes/ai.py`, migration `0054`, the Settings component
+`ui/web/js/components/prompt-registry.js` and two integration suites under `tests/integration/ai/`.
+AIF-2 added the provider port `provider.py`, the request `composer.py` and `execution.py` to
+`app/capabilities/ai/`, and one integration suite.
+AIF-3 added PRODUCT DB's enrichment owner `app/stages/products/enrichment.py` and its model, the
+routes `app/interface/api/routes/enrichment.py`, migration `0055` and one integration suite.
+AIF-4 added the Preparation's AI apply command (in the register owner) and one integration suite.
+ADR-0027 AIS-1 added the provider profile `profiles.py` and its model, the adapters
+`integrations/ai/` (the CLIProxyAPI call and the serving-process probe), the Settings component
+`ui/web/js/components/ai-provider.js`, migration `0056`, one unit and one integration suite.
+ADR-0027 AIS-2 added the product-name task `app/stages/products/tasks.py`, the seed upgrade
+`v29-ai1`, the recommendation component `ui/web/js/components/ai-name.js` and two integration suites.
+ADR-0028 T2 added the read-only tag source `integrations/marketplaces/smartstore/tags.py` and
+one unit suite.
+ADR-0028 T3 added the tag task's context and filter `app/capabilities/ai/platform_tags.py`, the
+task-context types `task_context.py`, the provider-zero SearchSignal port `search_signal.py`, the
+seed upgrade `v29-ai2` and one integration suite.
+ADR-0028 T4 added the tag provenance and apply to the register owner, the component
+`ui/web/js/components/ai-tags.js` and two integration suites.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -94,11 +116,19 @@ payload or external call and leaves legacy Item economics unchanged.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 317 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 44 | supporting capabilities: audit, jobs, review, live_safety |
-| `app/interface/` | 25 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 84 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 159 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+<<<<<<< HEAD
+| `app/` | 338 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 57 | supporting capabilities: audit, jobs, review, live_safety |
+| `app/interface/` | 27 | operator surfaces: HTTP api, screens, cli |
+| `app/platform/` | 87 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 162 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+=======
+| `app/` | 338 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 57 | supporting capabilities: audit, jobs, review, live_safety, ai |
+| `app/interface/` | 27 | operator surfaces: HTTP api, screens, cli |
+| `app/platform/` | 87 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 162 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+>>>>>>> origin/main
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -106,27 +136,41 @@ payload or external call and leaves legacy Item economics unchanged.
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 169 | all canonical and historical documents |
+| `documents/` | 172 | all canonical and historical documents |
 | `documents/acceptance/` | 67 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 9 | platform and UI contracts |
-| `documents/decisions/` | 28 | ADRs and architect review records |
+| `documents/decisions/` | 31 | ADRs and architect review records |
 | `documents/evidence/` | 30 | external provider evidence catalog |
 | `documents/reference/` | 3 | this map and the path migration map |
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 48 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 27 |  |
+<<<<<<< HEAD
+| `integrations/` | 52 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 28 |  |
 | `integrations/suppliers/` | 20 |  |
-| `tests/` | 293 | tests |
+| `tests/` | 309 | tests |
 | `tests/contracts/` | 10 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 120 | integration tests by runtime owner |
+| `tests/integration/` | 132 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 106 | unit tests by runtime owner |
-| `ui/` | 62 | operator clients: the served web client and the capture extension |
+| `tests/unit/` | 110 | unit tests by runtime owner |
+| `ui/` | 66 | operator clients: the served web client and the capture extension |
+=======
+| `integrations/` | 52 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 28 |  |
+| `integrations/suppliers/` | 20 |  |
+| `tests/` | 309 | tests |
+| `tests/contracts/` | 10 | repository-rule and document-contract tests |
+| `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
+| `tests/harness/` | 30 | tests of the acceptance harnesses |
+| `tests/integration/` | 132 | integration tests by runtime owner |
+| `tests/support/` | 14 | shared test support |
+| `tests/unit/` | 110 | unit tests by runtime owner |
+| `ui/` | 66 | operator clients: the served web client and the capture extension |
+>>>>>>> origin/main
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 53 | the served web client |
+| `ui/web/` | 57 | the served web client |

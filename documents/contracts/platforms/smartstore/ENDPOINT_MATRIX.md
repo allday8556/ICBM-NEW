@@ -126,6 +126,8 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | `SMARTSTORE_NOTICE_TYPE_READ` | `ADOPTED` | Notice coverage S0 (owner directive 2026-10-03) | `GET` | `/v1/products-for-provided-notice/{productInfoProvidedNoticeType}` | One type's official content fields (`productInfoProvidedNoticeContents[]`: `fieldType`, `fieldName`, `fieldDescription`, `fieldAddDescription`, `fieldMaxLength`), read only to capture the provider notice schema | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_PRODUCT_SEARCH` | `ADOPTED` | M5 SEARCH positive-only reconcile slice | `POST` | `/v1/products/search` | Positive-only reconcile lookup — never duplicate absence, never a CREATE authorization (§4.1.2) | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_PRODUCT_DELETE_V2` | `ADOPTED` | DELETE slice (ADR-0018 §3.5) | `DELETE` | `/v2/products/origin-products/{originProductNo}` | Delete one ICBM-confirmed origin product (§4.1.3) | `OWN_STORE_SELF` | `상품` | Yes; destructive. Only an `ACTIVE` ICBM-confirmed registration, under its exact DELETE grant, inside a bounded LIVE window with the brake released; an `UNKNOWN` is never resent |
+| `SMARTSTORE_TAG_RECOMMEND` | `ADOPTED` | ADR-0028 T2 read adoption (owner decision `6072888750`) | `GET` | `/v2/tags/recommend-tags` | Recommended-tag search by one keyword, at most 20 `{code, text}` (§4.3) | `OWN_STORE_SELF` | `상품` (documentation grouping; `R0` at adoption) | No; read-only |
+| `SMARTSTORE_TAG_RESTRICTED` | `ADOPTED` | ADR-0028 T2 read adoption (owner decision `6072888750`) | `GET` | `/v2/tags/restricted-tags` | Restricted-tag check of 1–10 tags, `{tag, restricted}` each (§4.3) | `OWN_STORE_SELF` | `상품` (documentation grouping; `R0` at adoption) | No; read-only |
 
 The remaining M5 rows are planning metadata only. Presence does not imply eventual adoption.
 
@@ -529,6 +531,54 @@ The code-side gap text for this row was in `integrations/marketplaces/smartstore
 `ADOPTION_GAPS`; the CREATE adoption slice removed it together with freezing the adopted contract
 (§4.1.1). This evidence record itself is unchanged by that: it states what the provider documents,
 and the fail-closed items above are still fail-closed in the adopted projection, as named gaps.
+
+### 4.3 Tag candidates and their official-evidence review (ADR-0028 §1, release 2.90.1)
+
+**Registration.** Owner decision `6072888750` moves the ROADMAP §12 tag stage forward. The two read
+candidates are registered `NOT_ADOPTED` in §4. They are evidence only: neither is in the registry,
+and neither is callable. The source is the 2.90.1 research packet in Issue #219 comment `6072975577`
+(`SOURCES.md` §5.9), with the official support answers #3710, #3711, #676 and #1610 (`SOURCES.md` §6).
+
+| Item | `SMARTSTORE_TAG_RECOMMEND` | `SMARTSTORE_TAG_RESTRICTED` |
+| --- | --- | --- |
+| Documented request | `keyword` (string, required) | `tags` (string array, required) |
+| Documented `200` | array of `{code: int64 (optional), text: string (required)}` | array of `{tag: string, restricted: boolean}` |
+| Documented errors | `308`, `400`, `401`, `403`, `404`, `500` with `code`, `message`, `invalidInputs[]`, `timestamp`; `429` `GW.RATE_LIMIT` from the global limits | the same |
+| Support evidence | at most 20, the same 20 as 스마트스토어센터; no pagination and none planned (#3710) | `true` = unusable in `sellerTags.text`, so a create or update fails; `false` is not a guarantee; re-check before every send (#3711) |
+| Not documented | the API group (only the 상품 › 태그 grouping), a keyword length, a rate | the API group, the `tags` serialization, a maximum count, a rate |
+
+**Not a candidate.** `GET /v2/tags/category-recommend-tags` was discontinued on 2023-05-17 (#676).
+
+**Verdict: `SUFFICIENT` for read-only adoption of both rows** (§16 items 1, 6 and 7 are documented;
+the rest are frozen by ADR-0028 §2). The undocumented items are closed by fail-closed rules, not by
+invention:
+- at most 10 tags per restricted check, sent as repeated `tags` parameters;
+- a tag left unanswered is "not checked", never "not restricted";
+- a keyword is at most 50 characters;
+- the group is confirmed by the first adopted read (`R0`), because a missing group is `GW.AUTHN`
+  (`NAVER-P1-PRODUCT-GROUP-1835`).
+
+Adoption itself is the separate ADR-0028 T2 slice, with mapping revision `ai-tags-r1`. Neither row
+is a mutation, and neither sends a tag: the CREATE contract keeps tags frozen and unsent (§4.1.1,
+ADR-0028 AIT-01).
+
+**Amendment note (ADR-0028 T2): both rows are `ADOPTED`.** This is a note, not a rewrite. The
+registry pins this contract, and the mapping revision moves to `ai-tags-r1` with its own
+fingerprint. The permission attestation is not invalidated by it (owner decision `6055670693`).
+
+| Field | `SMARTSTORE_TAG_RECOMMEND` | `SMARTSTORE_TAG_RESTRICTED` |
+| --- | --- | --- |
+| Request | exactly `keyword`: a trimmed, printable, non-blank string of at most 50 characters | `tags` repeated in order, 1–10 distinct, each a trimmed, printable, non-blank string of at most 50 characters; anything else is refused before any transport |
+| Group / mode / timeouts | `상품` / `OWN_STORE_SELF` / connect 5 s, read 10 s | the same |
+| Success predicate | HTTP 200 and a JSON array of at most 20 objects, each with a non-blank string `text` and, when present, a `code` that is a JSON integer (never a `bool`) in the int64 range (`ai-tag-recommend-r1`) | HTTP 200 and a JSON array of objects, each with a string `tag` and a boolean `restricted` (`ai-tag-restricted-r1`) |
+| After the predicate | the tag source keeps each distinct `text` with its `code` | the tag source (`integrations/marketplaces/smartstore/tags.py`) refuses an answer for a tag that was not asked. A tag that is not answered exactly once is **not checked** (`None`), never "not restricted" (ADR-0028 AIT-03) |
+| Retention | `code`, `text` only | `tag`, `restricted` only |
+| Redirect / retry | never followed / none; a `429` is `RATE_LIMITED` (ERRORS.md) | the same |
+
+**Runtime evidence.** `R0` is the first adopted read of each endpoint on the operating account,
+through ICBM's own caller, recording structure only. It confirms the `상품` group and that every
+asked tag is answered once. It is `PENDING`. Until it exists, a missing group surfaces as
+`GW.AUTHN`, and an unanswered tag stays not checked. Neither is ever read as success.
 
 ---
 

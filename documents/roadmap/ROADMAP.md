@@ -768,6 +768,28 @@ is accepted, in parallel with M6.5. It is provider-zero, under its contract
 `documents/decisions/adr/0026-ai-authoring-foundation.md`. A real AI provider call, the provider and
 model, a credential, a cost cap, a transfer of product data to an external AI and AI_INITIAL timing
 each still need the owner's decision. The later stages keep this order and this gate.
+Owner decision 2026-10-09 (Issue #219 comment `6067968983`) extends the exception to the first item
+of the next stage, the SmartStore product-name AI (`recommended_name`), and to the first real
+provider: the operator's local CLIProxyAPI sidecar, connected through the ADR-0012 port. The owner
+approves its binary, the transfer of product data through the operator's existing logins and
+subscription billing, under `documents/decisions/adr/0027-ai-name-stage-and-cliproxyapi-provider.md`.
+Tags and SearchSignal, category, options and notices, Coupang, 11st, bulk AI and Shopping Insight
+keep this order and the first-vertical gate.
+Owner decision 2026-10-09 (Issue #219 comment `6072888750`) extends the exception again, to the rest
+of this stage in its order:
+1. the tag/search-signal candidates;
+2. their official-evidence review;
+3. read-only endpoint adoption only where sufficient;
+4. the SearchSignal port and `recommended_tags`;
+5. category, options and notices, only when their authoritative metadata contracts exist.
+
+The contract is `documents/decisions/adr/0028-smartstore-tag-stage.md`: contract-first, DRY_RUN, no
+tag sent to the marketplace, and no external search-signal source without its own owner decision.
+Coupang, 11st, bulk AI and Shopping Insight keep this order and the first-vertical gate.
+Owner decision 2026-10-09 (Issue #219 comment `6078048955`) starts the category item: the AI
+category recommendation chosen only from the official leaf-category catalog
+(`documents/decisions/adr/0029-smartstore-category-recommendation.md`). Attributes, standard options
+and notices keep their gate until their authoritative metadata contracts exist.
 
 For the positive-option/cross-market lane, after the current no-positive-option first vertical:
 

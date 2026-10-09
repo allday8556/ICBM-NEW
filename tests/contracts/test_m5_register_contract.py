@@ -96,6 +96,9 @@ M5_ADOPTED = frozenset(
         # M6-C (ADR-0023 §5, §6): the two read-only order reads.
         "SMARTSTORE_ORDER_CHANGES",
         "SMARTSTORE_ORDER_DETAILS",
+        # ADR-0028 T2: the two read-only tag reads of the tag stage.
+        "SMARTSTORE_TAG_RECOMMEND",
+        "SMARTSTORE_TAG_RESTRICTED",
         # M6.5-C (ADR-0025 §5.1): the dispatch of one product order, a mutation.
         "SMARTSTORE_ORDER_DISPATCH",
     }
@@ -252,8 +255,14 @@ M6_ADOPTED_LISTINGS = "0051_m6_adopted_listings"
 M65_SUPPLIER_ORDERS = "0052_m65_supplier_orders"
 # M6.5-B (ADR-0025 §6): the order's delivery read-back columns.
 M65_DELIVERY_READBACK = "0053_m65_delivery_readback"
+# ADR-0026 AIF-1: the PromptTemplate and PlatformPolicy stores (seeded by the application).
+AI_PROMPT_REGISTRY = "0054_ai_prompt_registry"
+# ADR-0026 AIF-3: PRODUCT DB's structured enrichment results.
+AI_ENRICHMENT_RESULTS = "0055_ai_enrichment_results"
+# ADR-0027 AIS-1: the AI provider profile and its call ledger.
+AI_PROVIDER_PROFILE = "0056_ai_provider_profile"
 # M6.5-C (ADR-0025 §5): the DISPATCH stage, its grant bindings and the dispatch attempts.
-M65_DISPATCH_STAGE = "0054_m65_dispatch_stage"
+M65_DISPATCH_STAGE = "0057_m65_dispatch_stage"
 SCHEMA_HEAD = M65_DISPATCH_STAGE
 AFTER_M5 = (
     "0021_g2_review_items",
@@ -289,6 +298,9 @@ AFTER_M5 = (
     M6_ADOPTED_LISTINGS,
     M65_SUPPLIER_ORDERS,
     M65_DELIVERY_READBACK,
+    AI_PROMPT_REGISTRY,
+    AI_ENRICHMENT_RESULTS,
+    AI_PROVIDER_PROFILE,
     M65_DISPATCH_STAGE,
 )
 REGISTRATION_STATE = re.compile(

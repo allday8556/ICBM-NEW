@@ -21,7 +21,7 @@ copy of a preparation revision, never the authoring truth, and nothing here need
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Final, Protocol
 
 from sqlalchemy.exc import IntegrityError
 
@@ -45,7 +45,7 @@ from app.stages.register.model import (
     sanitized_digest,
 )
 from app.stages.register.payload import build_payload
-from app.stages.register.policy import Provenance
+from app.stages.register.policy import SATISFYING, Provenance
 from app.stages.register.preflight import RegistrationPreflightService
 from app.stages.register.preparation import (
     CategoryConfirmation,
@@ -125,6 +125,12 @@ def encode_inputs(inputs: AuthoredInputs) -> PreparationInputs:
         "listing": {
             "name": None if listing.name is None else encode_field(listing.name),
             "tags": sorted(listing.tags),
+            # Only an AI set names its provenance, so every operator revision encodes as before.
+            **(
+                {"tags_provenance": listing.tags_provenance.value}
+                if listing.tags and listing.tags_provenance is not None
+                else {}
+            ),
             "attributes": {k: encode_field(v) for k, v in sorted(listing.attributes.items())},
             "notices": {k: encode_field(v) for k, v in sorted(listing.notices.items())},
             "options": {
@@ -215,6 +221,9 @@ def decode_inputs(revision: PreparationRevisionRecord) -> AuthoredInputs:
         listing=ListingValues(
             name=None if listing["name"] is None else decode_field(listing["name"]),
             tags=frozenset(listing["tags"]),
+            tags_provenance=(
+                Provenance(listing["tags_provenance"]) if listing.get("tags_provenance") else None
+            ),
             attributes={k: decode_field(v) for k, v in listing["attributes"].items()},
             notices={k: decode_field(v) for k, v in listing["notices"].items()},
             options={item: dict(values) for item, values in listing["options"].items()},
@@ -252,6 +261,121 @@ def preflight_request(
     )
 
 
+class AppliedResult(Protocol):
+    """What an apply reads of one enrichment result (PRODUCT DB's ``ResultView``)."""
+
+    @property
+    def status(self) -> str: ...
+    @property
+    def stale(self) -> bool: ...
+    @property
+    def stale_reasons(self) -> list[str]: ...
+    @property
+    def value(self) -> dict[str, Any] | None: ...
+    @property
+    def sequence(self) -> int: ...
+    @property
+    def input_fingerprint(self) -> str: ...
+
+
+class EnrichmentResultSource(Protocol):
+    """PRODUCT DB's enrichment owner, as an apply reads it. The register owner never imports the
+    AI capability or the enrichment owner: the composition root hands it this read (ADR-0026
+    AIF-02: an acceptance run that loads the register owners loads no AI module)."""
+
+    def current_result(
+        self,
+        product_group_id: str,
+        task_key: str,
+        result_key: str,
+        marketplace_key: str | None,
+        marketplace_account_id: str | None,
+    ) -> AppliedResult | None: ...
+
+
+AI_APPLY_FIELD_INVALID: Final = "AI_APPLY_FIELD_INVALID"
+AI_APPLY_FIELD_LOCKED: Final = "AI_APPLY_FIELD_LOCKED"
+AI_APPLY_REVISION_CHANGED: Final = "AI_APPLY_REVISION_CHANGED"
+AI_APPLY_RESULT_FOREIGN: Final = "AI_APPLY_RESULT_FOREIGN"
+AI_APPLY_RESULT_UNUSABLE: Final = "AI_APPLY_RESULT_UNUSABLE"
+AI_APPLY_RESULT_CHANGED: Final = "AI_APPLY_RESULT_CHANGED"
+AI_APPLY_VALUE_INVALID: Final = "AI_APPLY_VALUE_INVALID"
+
+
+@dataclass(frozen=True)
+class EnrichmentApply:
+    """One enrichment result applied to one Preparation field (ADR-0026 §7; AIF-4).
+
+    ``field`` is ``name``, ``attribute.<key>`` or ``notice.<key>``: a field whose value carries a
+    provenance. The result subject is named whole: its product, task and result key, and
+    ``result_targeted`` (the result of this Preparation's own target, or the target-free one).
+    ``result_sequence`` names the exact revision the operator saw, and ``value_field`` the scalar
+    of its value that becomes the field's value.
+    ``expected_revision_no`` is the Preparation revision the operator read."""
+
+    field: str
+    product_group_id: str
+    task_key: str
+    result_key: str
+    result_targeted: bool
+    result_sequence: int
+    value_field: str
+    expected_revision_no: int
+
+
+TAGS_FIELD: Final = "tags"
+# ADR-0028 §4: a tag set holds at most 10 tags.
+TAGS_MAX: Final = 10
+
+
+def _with_tags(inputs: AuthoredInputs, texts: tuple[str, ...]) -> AuthoredInputs:
+    listing = replace(
+        inputs.listing, tags=frozenset(texts), tags_provenance=Provenance.AI_SUGGESTION
+    )
+    return replace(inputs, listing=listing)
+
+
+def _tag_texts(value: object) -> tuple[str, ...] | None:
+    """The texts of a tag result's ``recommended`` list: 1–10 distinct non-blank strings; a
+    platform tag's code stays with the result, never in the Preparation (ADR-0028 §6)."""
+    if not isinstance(value, list) or not 1 <= len(value) <= TAGS_MAX:
+        return None
+    texts: list[str] = []
+    for item in value:
+        text = item.get("text") if isinstance(item, dict) else None
+        if not isinstance(text, str) or not text.strip() or text in texts:
+            return None
+        texts.append(text)
+    return tuple(texts)
+
+
+def _with_field(inputs: AuthoredInputs, field: str, value: FieldValue) -> AuthoredInputs:
+    listing = inputs.listing
+    if field == "name":
+        return replace(inputs, listing=replace(listing, name=value))
+    kind, _, key = field.partition(".")
+    if kind == "attribute":
+        return replace(
+            inputs, listing=replace(listing, attributes={**listing.attributes, key: value})
+        )
+    return replace(inputs, listing=replace(listing, notices={**listing.notices, key: value}))
+
+
+def _field_of(inputs: AuthoredInputs, field: str) -> FieldValue | None:
+    listing = inputs.listing
+    if field == "name":
+        return listing.name
+    kind, _, key = field.partition(".")
+    return (listing.attributes if kind == "attribute" else listing.notices).get(key)
+
+
+def _valid_field(field: str) -> bool:
+    if field in ("name", TAGS_FIELD):
+        return True
+    kind, dot, key = field.partition(".")
+    return kind in ("attribute", "notice") and dot == "." and bool(key.strip())
+
+
 class RegistrationPreparationService:
     """Create, revise, read and evaluate a preparation, and freeze the unit it prepares."""
 
@@ -263,7 +387,9 @@ class RegistrationPreparationService:
         builder: RegistrationSnapshotBuilder,
         duplicate_lookup: DuplicateLookupSource | None = None,
         prepared_assets: PreparedAssetSource | None = None,
+        enrichment: EnrichmentResultSource | None = None,
     ) -> None:
+        self._enrichment = enrichment
         self._registrations = registrations
         self._preflight = preflight
         self._builder = builder
@@ -341,6 +467,167 @@ class RegistrationPreparationService:
                 authored_by=actor,
                 correlation_id=self._correlation(correlation_id),
             )
+
+    def apply_enrichment(
+        self,
+        preparation_id: str,
+        apply: EnrichmentApply,
+        *,
+        actor: str,
+        correlation_id: str | None = None,
+    ) -> PreparationRecord:
+        """ADR-0026 §7 (AIF-4): append one revision whose ``apply.field`` is the enrichment
+        result's value with provenance ``AI_SUGGESTION``, or change nothing.
+
+        It is refused when:
+        - the field is locked: its value is ``OPERATOR_CONFIRMED`` or ``SOURCE_FACT``, and an AI
+          value never overwrites it;
+        - the Preparation moved past the revision the operator read: it is skipped, never
+          overwritten;
+        - the result is not this unit's product's, not this target's, not current, not ``OK`` or
+          stale.
+
+        The value never satisfies a required field: ``AI_SUGGESTION`` stays
+        ``FIELD_AI_SUGGESTION_UNCONFIRMED`` until the operator confirms it (ADR-0014 §18)."""
+        if not _valid_field(apply.field):
+            raise InputValidationError(
+                AI_APPLY_FIELD_INVALID,
+                "an enrichment result is applied to name, attribute.<key> or notice.<key>",
+                details={"field": apply.field},
+            )
+        current = self.preparation(preparation_id)
+        draft = self._registrations.draft(current.draft_id)
+        products = {
+            item.product_group_id
+            for item in (draft.items if draft is not None else ())
+            if item.item_id in current.current.item_ids
+        }
+        if apply.product_group_id not in products:
+            raise InputValidationError(
+                AI_APPLY_RESULT_FOREIGN, "the result is not of a product this unit prepares"
+            )
+        result = self._named_result(apply, current.marketplace_key, current.marketplace_account_id)
+        value = (result.value or {}).get(apply.value_field)
+        texts = _tag_texts(value) if apply.field == TAGS_FIELD else None
+        if apply.field == TAGS_FIELD and texts is None:
+            raise InputValidationError(
+                AI_APPLY_VALUE_INVALID,
+                "the result names no list of 1 to 10 distinct tags under that value field",
+                details={"value_field": apply.value_field},
+            )
+        if apply.field != TAGS_FIELD and (
+            not isinstance(value, str | bool | int) or (isinstance(value, str) and not value)
+        ):
+            raise InputValidationError(
+                AI_APPLY_VALUE_INVALID,
+                "the result names no text, boolean or integer under that value field",
+                details={"value_field": apply.value_field},
+            )
+        cid = self._correlation(correlation_id)
+        with self._registrations.transaction() as unit:
+            # Read again in the unit of work that writes: the lock and the revision check are both
+            # decided on what is current now (Canonical §7.7: lock and optimistic concurrency).
+            now = unit.preparation(preparation_id)
+            if now is None:
+                raise NotFoundError(
+                    "REGISTER_PREPARATION_NOT_FOUND", "the preparation does not exist"
+                )
+            if now.current.revision_no != apply.expected_revision_no:
+                raise RegistrationConflictError(
+                    AI_APPLY_REVISION_CHANGED,
+                    "the preparation changed since it was read; it was skipped, not overwritten",
+                    details={"current_revision_no": now.current.revision_no},
+                )
+            inputs = decode_inputs(now.current)
+            if texts is not None:
+                # A non-empty operator set is confirmed and locked, exactly like the name.
+                if inputs.listing.tags and inputs.listing.tags_provenance is None:
+                    raise RegistrationConflictError(
+                        AI_APPLY_FIELD_LOCKED,
+                        "the tags are the operator's own; an AI set never overwrites them",
+                        details={"provenance": "OPERATOR_CONFIRMED"},
+                    )
+                applied = _with_tags(inputs, texts)
+            else:
+                existing = _field_of(inputs, apply.field)
+                if existing is not None and existing.provenance in SATISFYING:
+                    raise RegistrationConflictError(
+                        AI_APPLY_FIELD_LOCKED,
+                        "the field holds a confirmed value; an AI value never overwrites it",
+                        details={"provenance": existing.provenance.value},
+                    )
+                # Proved a non-empty text, boolean or integer above, before the unit of work.
+                assert isinstance(value, str | bool | int)
+                applied = _with_field(
+                    inputs,
+                    apply.field,
+                    FieldValue(value=value, provenance=Provenance.AI_SUGGESTION),
+                )
+            revised = unit.revise_preparation(
+                preparation_id,
+                item_ids=now.current.item_ids,
+                inputs=encode_inputs(applied),
+                authored_by=actor,
+                correlation_id=cid,
+            )
+            # The revision above holds the database's write lock, so no result can be recorded
+            # until this unit of work ends: the named result is checked again under it, and any
+            # change since the first check refuses the whole apply (nothing is written).
+            again = self._named_result(apply, now.marketplace_key, now.marketplace_account_id)
+            if again.value != result.value:
+                raise RegistrationConflictError(
+                    AI_APPLY_RESULT_CHANGED,
+                    "the named result changed while it was applied",
+                    details={"result_sequence": again.sequence},
+                )
+            unit.note_enrichment_applied(
+                preparation_id,
+                revision_no=revised.current.revision_no,
+                field=apply.field,
+                enrichment={
+                    "product_group_id": apply.product_group_id,
+                    "task_key": apply.task_key,
+                    "result_key": apply.result_key,
+                    "result_sequence": result.sequence,
+                    "input_fingerprint": result.input_fingerprint,
+                },
+                actor=actor,
+                correlation_id=cid,
+            )
+            return revised
+
+    def _named_result(
+        self, apply: EnrichmentApply, marketplace_key: str, marketplace_account_id: str
+    ) -> AppliedResult:
+        """The exact result revision the operator named, if it is still the current, fresh OK
+        result of exactly that subject; refused otherwise."""
+        result = (
+            None
+            if self._enrichment is None
+            else self._enrichment.current_result(
+                apply.product_group_id,
+                apply.task_key,
+                apply.result_key,
+                marketplace_key if apply.result_targeted else None,
+                marketplace_account_id if apply.result_targeted else None,
+            )
+        )
+        if result is None or result.status != "OK" or result.stale or result.value is None:
+            raise RegistrationConflictError(
+                AI_APPLY_RESULT_UNUSABLE,
+                "only a current, fresh OK result of this target is applied",
+                details={
+                    "status": None if result is None else result.status,
+                    "stale_reasons": [] if result is None else result.stale_reasons,
+                },
+            )
+        if result.sequence != apply.result_sequence:
+            raise RegistrationConflictError(
+                AI_APPLY_RESULT_CHANGED,
+                "the named result is no longer the current one; review the newer result first",
+                details={"result_sequence": result.sequence},
+            )
+        return result
 
     def preparation(self, preparation_id: str) -> PreparationRecord:
         found = self._registrations.preparation(preparation_id)

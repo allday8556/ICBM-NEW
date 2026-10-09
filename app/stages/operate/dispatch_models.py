@@ -1,4 +1,4 @@
-"""The M6.5-C dispatch attempts (ADR-0025 §5; migration 0054)."""
+"""The M6.5-C dispatch attempts (ADR-0025 §5; migration 0057)."""
 
 from datetime import datetime
 from typing import Final

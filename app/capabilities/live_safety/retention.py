@@ -48,7 +48,7 @@ from app.stages.register.sanitize import SANITIZER_RULES_VERSION
 # v5: the canary-eligibility owner (ADR-0018 §5.1, migration 0033) joins the protected tables.
 # v6: the residual-risk acceptance proof (ADR-0018 §6.1, migration 0036) joins them.
 # v7: the deletion-attempt owner (ADR-0018 §3.5, migration 0037) joins them.
-# v8: the DISPATCH grant bindings and the dispatch-attempt owner (ADR-0025 §5, migration 0054).
+# v8: the DISPATCH grant bindings and the dispatch-attempt owner (ADR-0025 §5, migration 0057).
 RETENTION_CHECKS_VERSION: Final = "evidence-retention-checks/v8"
 
 # Every table whose rows are canary evidence or the chain a restore proof compares (§7, §8).

@@ -65,6 +65,11 @@ FORBIDDEN_MODULES = (
     "azure.cognitiveservices",
     # app.ai is a reserved AI namespace that has never existed; it is not a moved package.
     "app.ai",
+    # ADR-0026: the AI capability. Its ORM models load with the schema aggregate; its prompt
+    # registry and every later AI module are forbidden one by one.
+    "app.capabilities.ai.prompts",
+    "app.capabilities.ai.registry",
+    "app.stages.products.enrichment",
     "integrations.ai",
     "integrations.marketplaces",
     "app.stages.connect.marketplace.service",

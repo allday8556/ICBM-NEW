@@ -1,5 +1,7 @@
 """Aggregates every ORM model so Alembic sees the complete canonical schema."""
 
+from app.capabilities.ai import profile_models as _ai_profile_models  # noqa: F401
+from app.capabilities.ai import prompt_models as _ai_prompt_models  # noqa: F401
 from app.capabilities.audit import models as _audit_models  # noqa: F401
 from app.capabilities.jobs import models as _job_models  # noqa: F401
 from app.capabilities.live_safety import models as _live_models  # noqa: F401
@@ -30,6 +32,7 @@ from app.stages.products import (
     common_option_mapping_models as _common_option_mapping_models,  # noqa: F401
 )
 from app.stages.products import common_option_models as _common_option_models  # noqa: F401
+from app.stages.products import enrichment_models as _enrichment_models  # noqa: F401
 from app.stages.products import image_models as _image_models  # noqa: F401
 from app.stages.products import models as _product_models  # noqa: F401
 from app.stages.register import authoring_revisions as _authoring_revisions  # noqa: F401

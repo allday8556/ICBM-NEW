@@ -9,8 +9,8 @@ unit of a DISPATCH grant, and the dispatch-attempt owner.
 - ``operate_dispatch_attempts``: one row per dispatch attempt, opened ``STARTED`` and ended once,
   verified at most once; never deleted. No attempt is opened while another blocks the order.
 
-Revision ID: 0054_m65_dispatch_stage
-Revises: 0053_m65_delivery_readback
+Revision ID: 0057_m65_dispatch_stage
+Revises: 0056_ai_provider_profile
 Create Date: 2026-10-08
 """
 
@@ -20,13 +20,13 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0054_m65_dispatch_stage"
-down_revision: str | None = "0053_m65_delivery_readback"
+revision: str = "0057_m65_dispatch_stage"
+down_revision: str | None = "0056_ai_provider_profile"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 GRANTS = "live_grants"
-SAVED = "_live_grants_0054"
+SAVED = "_live_grants_0057"
 BINDINGS = "live_grant_dispatch_bindings"
 ATTEMPTS = "operate_dispatch_attempts"
 

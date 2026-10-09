@@ -222,7 +222,7 @@ Each step is its own PR (batched where small), audited, with CI.
    - **Implementation note (M65-C):**
      - **Adoption:** `SMARTSTORE_ORDER_DISPATCH` (`ENDPOINT_MATRIX.md` §4.1.5), mapping revision `m65-dispatch-r1`. The caller hands on only how the documented answer listed the order.
      - **Stage:** `MutationStage.DISPATCH` (budget 1, endpoint group `order_dispatch`).
-     - **Storage:** migration `0054`.
+     - **Storage:** migration `0057`.
        - It rebuilds `live_grants` with the new stage, as 0037 did for DELETE.
        - `live_grant_dispatch_bindings` holds a DISPATCH grant's exact unit: the product order, the supplier order revision, the carrier and the tracking number. It is append-only, and only a DISPATCH grant may own a row.
        - `operate_dispatch_attempts` is the attempt owner. Triggers refuse an insert while an attempt blocks the order, refuse a rewritten identity, a second ending or a second verification, and refuse every delete.

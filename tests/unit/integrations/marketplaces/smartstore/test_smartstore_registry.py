@@ -63,6 +63,8 @@ def test_em13_1_the_runtime_registry_adopts_m2_connect_and_the_m5_contracts() ->
         EndpointId.SMARTSTORE_ADDRESSBOOK_LIST,
         EndpointId.SMARTSTORE_ORDER_CHANGES,
         EndpointId.SMARTSTORE_ORDER_DETAILS,
+        EndpointId.SMARTSTORE_TAG_RECOMMEND,
+        EndpointId.SMARTSTORE_TAG_RESTRICTED,
         EndpointId.SMARTSTORE_ORDER_DISPATCH,
     }
     assert {e.value for e in NOT_ADOPTED} == STILL_NOT_ADOPTED
@@ -418,6 +420,7 @@ def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
         "settings-addressbook-r1",
         "m6-orders-r1",
         "m65-delivery-r1",
+        "ai-tags-r1",
         "m65-dispatch-r1",
     }
     assert MAPPING_FINGERPRINTS[SMARTSTORE_ENDPOINT_MAPPING_REVISION] == mapping_fingerprint()

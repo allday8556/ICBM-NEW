@@ -199,7 +199,7 @@ class LiveGrant(Base):
 
 
 class LiveGrantDispatchBinding(Base):
-    """The exact unit of one DISPATCH grant (ADR-0025 §5; migration 0054): one product order, the
+    """The exact unit of one DISPATCH grant (ADR-0025 §5; migration 0057): one product order, the
     supplier order revision whose carrier and tracking number it may send. Written with its grant
     in the same unit; append-only (triggers)."""
 
