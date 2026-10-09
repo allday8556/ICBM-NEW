@@ -17,6 +17,8 @@ nothing at all. These are its stated differences (ADR-0030 §10), and each is fa
 - The description is read only from a description block the page closed. Its whole text is the
   value, and page text that carries URL material is held for review rather than stored.
 - A notice the page shows is held for review. It is never reported absent without looking.
+- Options are ``ABSENT`` only when the page writes its option container with no axis in it; a page
+  without the container is held for review.
 
 It reads; it never fetches, stores, hashes, persists or retries. A field the page does not state is
 ``ABSENT``. A field whose evidence is present but cannot be read from the document alone is
@@ -414,6 +416,10 @@ def _options(nodes: Sequence[Node], words: Vocabulary) -> FieldFact:
         for node in container.descendants()
         if node.tag == "select" and any(child.tag == "option" for child in node.descendants())
     ]
+    if not containers:
+        # No option container at all: a skin writes one on every product, so its absence means an
+        # incomplete or foreign page, never proof of "no options". KM통상 reads it ``ABSENT``.
+        return _review(locator)
     if not axes:
         return _absent(locator)
     return _review(

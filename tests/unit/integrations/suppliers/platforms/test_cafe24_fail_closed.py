@@ -161,3 +161,9 @@ def test_tab_strip_images_inside_the_description_are_layout() -> None:
     roles = {c.url.rsplit("/", 1)[-1]: c.role for c in classify_images(body, URL)}
     assert roles["tab.gif"] is ImageRole.UI_COMMON
     assert roles["d.jpg"] is ImageRole.DETAIL
+
+
+def test_a_page_without_the_option_container_never_proves_no_options() -> None:
+    assert fields(page(body=BUY))["options"].status is FieldStatus.REVIEW_REQUIRED
+    empty = page(body=BUY + '<div class="xans-product-option"></div>')
+    assert fields(empty)["options"].status is FieldStatus.ABSENT

@@ -1,9 +1,11 @@
 """The Cafe24 template against KM통상's parser (ADR-0030 §4, §10).
 
-The template is derived from KM통상's parser, so with the default vocabulary it must read every
-document KM통상's own tests use exactly as KM통상's parser does: the same identities, the same facts
-and evidence, and the same image roles in the same order (only the rule names say ``cafe24``).
-Every fixture is written here or is an existing synthetic fixture; no supplier is contacted.
+The template is derived from KM통상's parser, so on every document KM통상's own tests use it must
+read the same identities and assign the same image roles in the same order (only the rule names
+say ``cafe24``). For each fact it must give the same status and value, or a stated difference that
+fails closed (the ``facts`` module lists them). Evidence is not compared: the template writes its
+own locators. Every fixture is written here or is an existing synthetic one; no supplier is
+contacted.
 """
 
 from dataclasses import asdict
