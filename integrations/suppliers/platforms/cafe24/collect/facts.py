@@ -47,7 +47,6 @@ from app.stages.collect.facts import (
     FieldFact,
     FieldStatus,
     MoneyValue,
-    OptionsValue,
     PriceRole,
     PricesValue,
     SalesChannelScope,
@@ -117,6 +116,8 @@ _AMOUNT = re.compile(r"(\d[\d,]*)\s*원?")
 # ADR-0032 §4 (the owner's rule, Issue #219 6086421199): a fee stated as a range, ``A원 ~ B원``,
 # is read as its highest amount.
 _RANGE = re.compile(r"(\d[\d,]*)\s*원?\s*[~∼〜]\s*(\d[\d,]*)\s*원")
+# A money amount the page states as such: digits followed by 원.
+_MONEY = re.compile(r"\d[\d,]*원")
 _EVIDENCE_LIMIT = 200
 
 
@@ -320,21 +321,36 @@ def _shipping(rows: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Field
     amount = _won(fee[0][1])
     ranged = _RANGE.search(fee[0][1].replace(" ", ""))
     if ranged is not None:
-        # The owner's rule: the highest amount of a stated range, the page's words kept.
+        # ADR-0032 §4, the owner's rule: the highest amount of a stated range, its words kept.
         bounds = [int(group.replace(",", "")) for group in ranged.groups()]
         amount = max(bounds)
         evidence = (
             *evidence,
             Evidence(
                 EvidenceKind.DOM_TEXT,
-                f"th:{fee[0][0]} + td",
+                fee_locator,
                 FieldStatus.CONFIRMED,
                 observed=_quote(fee[0][1]),
                 normalized=str(amount),
             ),
         )
-    if amount is None:
-        return FieldFact(FieldStatus.REVIEW_REQUIRED, None, evidence)
+    elif amount is None or len(_MONEY.findall(fee[0][1].replace(" ", ""))) > 1:
+        # No amount, or more than one that is not a range: a condition or a choice, never a fee.
+        # It is not flattened into its first amount (ADR-0010 §7). KM통상's parser reads the
+        # first amount; the template states this difference (ADR-0030 §10).
+        return FieldFact(
+            FieldStatus.REVIEW_REQUIRED,
+            None,
+            (
+                *evidence,
+                Evidence(
+                    EvidenceKind.DOM_TEXT,
+                    fee_locator,
+                    FieldStatus.REVIEW_REQUIRED,
+                    observed=_quote(fee[0][1]),
+                ),
+            ),
+        )
     kind = ShippingKind.FREE if amount == 0 else ShippingKind.FIXED
     value = ShippingValue(
         kind=kind,
@@ -393,12 +409,11 @@ def _stock(nodes: Sequence[Node], words: Vocabulary) -> FieldFact:
 def _options(nodes: Sequence[Node], words: Vocabulary) -> FieldFact:
     """The choices the page offers, or why they cannot be recorded as a value.
 
-    A Cafe24 skin writes the option container on every product. A product that has an axis to
-    choose states it inside the container as a ``select``; a product without one writes none. A
-    container with no axis therefore proves the product has no option control, and the field is
-    ``CONFIRMED`` with zero axes (ADR-0010 §7), not ``ABSENT``. KM통상's parser reads that case as
-    ``ABSENT``; the template does not repeat it (ADR-0030 §10, a stated difference). A page with no
-    option container proves nothing and stays ``ABSENT``.
+    A Cafe24 skin writes the option container on every product, so the container alone says
+    nothing. A product that has an axis to choose states it as a ``select``; a product without one
+    writes none, and that is a stated absence, not a doubt. ``ABSENT`` is the reading the canonical
+    Product DB takes as proof of "no options" (ADR-0013 ruling B, the default single-unit
+    composition), and KM통상's parser gives the same reading (ADR-0030 §2).
 
     When axes *are* stated, the evidence keeps each axis and its values separately and in the
     order the page wrote them — a different count, grade or weight stays a different value — but
@@ -415,18 +430,7 @@ def _options(nodes: Sequence[Node], words: Vocabulary) -> FieldFact:
         if node.tag == "select" and any(child.tag == "option" for child in node.descendants())
     ]
     if not axes:
-        return FieldFact(
-            FieldStatus.CONFIRMED,
-            OptionsValue(axes=()),
-            (
-                Evidence(
-                    EvidenceKind.CONTROL_STATE,
-                    f"*.{marker}",
-                    FieldStatus.CONFIRMED,
-                    observed="no option axis",
-                ),
-            ),
-        )
+        return _absent(f"*.{marker} select")
     evidence = tuple(
         Evidence(
             EvidenceKind.DOM_TEXT,

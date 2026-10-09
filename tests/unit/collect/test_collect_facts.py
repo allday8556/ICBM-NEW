@@ -90,6 +90,8 @@ def test_registry_splits_core_and_source_coverage_facts() -> None:
         "origin",
         "notice",
         "detail_description",
+        # ADR-0031 §2.
+        "sales_channels",
     }
 
 

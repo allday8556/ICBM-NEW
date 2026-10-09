@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from app.stages.collect.facts import FieldStatus, OptionsValue
+from app.stages.collect.facts import FieldStatus
 from integrations.suppliers.kmretail.collect import classify_images as km_classify
 from integrations.suppliers.kmretail.collect import parse_fields as km_fields
 from integrations.suppliers.kmretail.collect import resolve as km_resolve
@@ -83,17 +83,15 @@ def test_the_template_reads_every_km_document_as_km_does(body: str) -> None:
     # Each package has its own identity types, so they are compared by kind and content.
     assert (type(ours).__name__, asdict(ours)) == (type(theirs).__name__, asdict(theirs))
     ours_fields, km = parse_fields(view), km_fields(view)
-    assert {k: v for k, v in ours_fields.items() if k != "options"} == {
-        k: v for k, v in km.items() if k != "options"
+    assert {k: v for k, v in ours_fields.items() if k != "shipping"} == {
+        k: v for k, v in km.items() if k != "shipping"
     }
-    # The one stated difference (ADR-0030 §10): a container without an axis proves zero axes.
-    if km["options"].status is FieldStatus.ABSENT and km["options"].evidence[0].locator.endswith(
-        " select"
-    ):
-        assert ours_fields["options"].status is FieldStatus.CONFIRMED
-        assert ours_fields["options"].value == OptionsValue(axes=())
-    else:
-        assert ours_fields["options"] == km["options"]
+    # The one stated difference (ADR-0030 §10): a fee cell that does not state exactly one amount
+    # is REVIEW_REQUIRED, with evidence that says so, where KM통상 reads its first amount.
+    if ours_fields["shipping"] != km["shipping"]:
+        assert ours_fields["shipping"].status is FieldStatus.REVIEW_REQUIRED
+        assert ours_fields["shipping"].value is None
+        assert FieldStatus.REVIEW_REQUIRED in {e.status for e in ours_fields["shipping"].evidence}
 
 
 @pytest.mark.parametrize(
@@ -159,3 +157,15 @@ def test_connect_predicates_are_km_s() -> None:
             )
             assert authenticated(response) == km_authenticated(response)
             assert login_required(response) == km_login_required(response)
+
+
+def test_a_fee_cell_with_a_condition_is_never_flattened_into_its_first_amount() -> None:
+    # ADR-0010 §7; the one stated difference from KM통상's parser (ADR-0030 §10).
+    body = page(rows=row("배송비", "3,000원 (50,000원 이상 구매 시 무료)"), body=BUY)
+    shipping = parse_fields(document(body))["shipping"]
+    assert shipping.status is FieldStatus.REVIEW_REQUIRED
+    assert shipping.value is None
+    assert (
+        parse_fields(document(page(rows=row("배송비", "3,000원"), body=BUY)))["shipping"].status
+        is FieldStatus.CONFIRMED
+    )

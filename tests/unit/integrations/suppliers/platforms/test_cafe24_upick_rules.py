@@ -140,11 +140,10 @@ def test_the_representative_image_is_the_prd_img_big_image() -> None:
     assert ImageRole.DETAIL in roles.values()
 
 
-def test_options_are_confirmed_with_zero_axes() -> None:
+def test_an_empty_option_container_states_no_options() -> None:
+    # ADR-0013 ruling B: ABSENT is the Product DB's proof of "no options".
     view, _ = capture("4954")
-    options = parse_fields(view, WORDS)["options"]
-    assert options.status is FieldStatus.CONFIRMED
-    assert options.value.axes == ()
+    assert parse_fields(view, WORDS)["options"].status is FieldStatus.ABSENT
 
 
 @pytest.mark.parametrize(
