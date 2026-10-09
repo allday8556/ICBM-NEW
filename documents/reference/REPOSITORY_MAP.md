@@ -116,19 +116,11 @@ payload or external call and leaves legacy Item economics unchanged.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-<<<<<<< HEAD
-| `app/` | 338 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 57 | supporting capabilities: audit, jobs, review, live_safety |
-| `app/interface/` | 27 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 87 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 162 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
-=======
 | `app/` | 338 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 57 | supporting capabilities: audit, jobs, review, live_safety, ai |
 | `app/interface/` | 27 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 87 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 162 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
->>>>>>> origin/main
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -147,7 +139,6 @@ payload or external call and leaves legacy Item economics unchanged.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-<<<<<<< HEAD
 | `integrations/` | 52 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 28 |  |
 | `integrations/suppliers/` | 20 |  |
@@ -159,18 +150,5 @@ payload or external call and leaves legacy Item economics unchanged.
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 110 | unit tests by runtime owner |
 | `ui/` | 66 | operator clients: the served web client and the capture extension |
-=======
-| `integrations/` | 52 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 28 |  |
-| `integrations/suppliers/` | 20 |  |
-| `tests/` | 309 | tests |
-| `tests/contracts/` | 10 | repository-rule and document-contract tests |
-| `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
-| `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 132 | integration tests by runtime owner |
-| `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 110 | unit tests by runtime owner |
-| `ui/` | 66 | operator clients: the served web client and the capture extension |
->>>>>>> origin/main
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 57 | the served web client |
