@@ -91,6 +91,8 @@ ADR-0028 T4 added the tag provenance and apply to the register owner, the compon
 `ui/web/js/components/ai-tags.js` and two integration suites.
 ADR-0029 C2 added the category task's candidates and filter `app/capabilities/ai/platform_category.py`,
 the seed upgrade `v29-ai3` and one integration suite.
+ADR-0029 C3a moved the SmartStore-targeted recommendation panel into the shared component
+`ui/web/js/components/ai-targeted.js`; the tag panel uses it.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -151,6 +153,6 @@ payload or external call and leaves legacy Item economics unchanged.
 | `tests/integration/` | 134 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 110 | unit tests by runtime owner |
-| `ui/` | 66 | operator clients: the served web client and the capture extension |
+| `ui/` | 67 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 57 | the served web client |
+| `ui/web/` | 58 | the served web client |
