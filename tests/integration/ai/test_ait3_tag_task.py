@@ -135,9 +135,19 @@ def test_keywords_come_from_the_confirmed_facts_only() -> None:
             fields["brand"] = {"status": "ABSENT", "value": {"text": brand}}
         return [{"member": "m", "fields": fields}]
 
+    # The cleaned name, then its own words longest first (ADR-0028 §4 note, R0 6079478595).
     assert keywords(facts("[특가] 국산 참기름 (300ml) 2개 세트 선물", None)) == [
         "국산 참기름 세트 선물",
-        "국산 참기름",
+        "참기름",
+        "국산",
+        "세트",
+        "선물",
+    ]
+    assert keywords(facts("[어바틀] 멀티비타민 앤 미네랄 맥스 90캡슐", None)) == [
+        "멀티비타민 앤 미네랄 맥스",
+        "멀티비타민",
+        "미네랄",
+        "맥스",
     ]
     assert keywords(facts(None, "브랜드")) == []  # an unconfirmed brand is no fact
     assert keywords(facts("x" * 80, None)) == ["x" * 50]
