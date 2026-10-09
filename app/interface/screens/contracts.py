@@ -97,6 +97,8 @@ class DashboardView(BaseModel):
     marketplaces_connected: int
     products_total: int
     review_counts: ReviewCounts
+    # ADR-0025 §8: 발송 대기, or None while the Orders owner is not connected (never a false zero).
+    orders_awaiting_dispatch: int | None = None
 
 
 class CollectView(BaseModel):

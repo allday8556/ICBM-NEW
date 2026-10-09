@@ -219,6 +219,20 @@ Each step is its own PR (batched where small), audited, with CI.
      - **Fulfillment:** a fulfillable order whose read shows a tracking number is `DISPATCHED`. It is `DELIVERED` once the delivery state is `DELIVERY_COMPLETION` or the order status is `DELIVERED` or `PURCHASE_DECIDED`. The view says whether the read tracking is the one captured (`tracking_matches`) and shows the wrong-tracking flag.
      - **Screen:** 주문관리 shows the read tracking in the status column and a "네이버 배송 정보" line in the panel.
 3. **M65-C:** the dispatch adoption (§5.1) and the DISPATCH stage (§5): the grant command, the attempt owner, the send-time admission, the verification and the "발송처리" action.
+   - **Implementation note (M65-C):**
+     - **Adoption:** `SMARTSTORE_ORDER_DISPATCH` (`ENDPOINT_MATRIX.md` §4.1.5), mapping revision `m65-dispatch-r1`. The caller hands on only how the documented answer listed the order.
+     - **Stage:** `MutationStage.DISPATCH` (budget 1, endpoint group `order_dispatch`).
+     - **Storage:** migration `0057`.
+       - It rebuilds `live_grants` with the new stage, as 0037 did for DELETE.
+       - `live_grant_dispatch_bindings` holds a DISPATCH grant's exact unit: the product order, the supplier order revision, the carrier and the tracking number. It is append-only, and only a DISPATCH grant may own a row.
+       - `operate_dispatch_attempts` is the attempt owner. Triggers refuse an insert while an attempt blocks the order, refuse a rewritten identity, a second ending or a second verification, and refuse every delete.
+     - **Retention:** both tables are protected evidence (`evidence-retention-checks/v8`).
+     - **Admission:** `SafetyStack.admit_dispatch` checks DELETE's layers plus the attested 주문 판매자 group (`Layer.PERMISSION_ATTESTED`).
+     - **Service:** `DispatchService.dispatch` and `.verify`.
+     - **Grant:** `LiveAuthorityService.issue_dispatch_grant`, through `icbm live issue-dispatch-grant --product-order-id`. The Fulfillment owner states the unit (`dispatch_unit`), and a refusal records nothing.
+     - **Tracking freeze:** while an attempt blocks the order, its tracking cannot change (`OPERATE_TRACKING_FROZEN`).
+     - **Routes:** `POST /api/v1/operate/orders/{id}/dispatch` and `/dispatch/verify`. The fulfillment view carries the attempts.
+     - **Screen:** the 처리 panel's "3. 발송처리" step names every layer that still refuses, and the dashboard shows 발송 대기 while the Orders owner is connected.
 4. **M6.5 acceptance:** on the exact merged main, recorded in `documents/acceptance/milestones/M6.5.md`.
 
 ## 10. Acceptance (ROADMAP Phase 5)

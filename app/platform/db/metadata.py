@@ -18,6 +18,7 @@ from app.stages.connect import models as _connect_models  # noqa: F401
 from app.stages.connect.marketplace import models as _marketplace_models  # noqa: F401
 from app.stages.connect.smartstore import models as _smartstore_models  # noqa: F401
 from app.stages.operate import adoption_models as _operate_adoption_models  # noqa: F401
+from app.stages.operate import dispatch_models as _operate_dispatch_models  # noqa: F401
 from app.stages.operate import fulfillment_models as _operate_fulfillment_models  # noqa: F401
 from app.stages.operate import listing_models as _operate_listing_models  # noqa: F401
 from app.stages.operate import order_models as _operate_order_models  # noqa: F401

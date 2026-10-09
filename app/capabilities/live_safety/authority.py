@@ -16,12 +16,18 @@ validates each named identity against its own owner before the store records it:
   deletion attempt that is in flight, applied, or unresolved — so a deletion whose outcome is
   unknown is never authorized again until a read-back proves the listing still there.
 
+- a DISPATCH grant (ADR-0025 §5) names a product order the Fulfillment owner finds
+  dispatchable now — fulfillable, awaiting shipment, with a recorded supplier order and captured
+  tracking, and no dispatch in flight, applied, unknown, confirmed or in conflict — and binds that
+  supplier order revision's carrier and tracking number.
+
 There is no confirmation-prose parameter anywhere: the durable grant keeps only safe identities,
 the approver and the authorization reference (G3-23). A grant changes nothing else: no adoption,
 capability, readiness, preflight, ComplianceGate, provider truth, write status or ReviewItem.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
@@ -29,6 +35,7 @@ from app.capabilities.live_safety.model import MutationStage
 from app.capabilities.live_safety.store import (
     ArtifactRef,
     BrakeRecord,
+    DispatchBinding,
     GrantRecord,
     LiveAuthorityStore,
 )
@@ -47,6 +54,15 @@ class CandidateEvaluator(Protocol):
     def stage_candidate(self, preparation_id: str) -> PreflightResult: ...
 
 
+@dataclass(frozen=True)
+class DispatchUnit:
+    """A product order the Fulfillment owner finds dispatchable now (ADR-0025 §5)."""
+
+    marketplace_key: str
+    marketplace_account_id: str
+    binding: DispatchBinding
+
+
 def _grant_refusal(code: str, message: str, **details: object) -> InputValidationError:
     return InputValidationError(code, message, details=dict(details))
 
@@ -58,10 +74,13 @@ class LiveAuthorityService:
         store: LiveAuthorityStore,
         registrations: RegistrationStore,
         preparations: CandidateEvaluator,
+        dispatch_units: Callable[[str], DispatchUnit] | None = None,
     ) -> None:
         self._store = store
         self._registrations = registrations
         self._preparations = preparations
+        # ADR-0025 §5: the Fulfillment owner's statement of a dispatchable product order.
+        self._dispatch_units = dispatch_units
 
     # ------------------------------------------------------------------ grants (§3)
 
@@ -213,6 +232,35 @@ class LiveAuthorityService:
                 marketplace_account_id=registration.marketplace_account_id,
                 registration_snapshot_id=registration.registration_snapshot_id,
                 intent_id=registration.intent_id,
+                not_before=not_before,
+                expires_at=expires_at,
+                approved_by=approved_by,
+                authorization_ref=authorization_ref,
+                correlation_id=correlation_id,
+            )
+
+    def issue_dispatch_grant(
+        self,
+        *,
+        product_order_id: str,
+        not_before: datetime,
+        expires_at: datetime,
+        approved_by: str,
+        authorization_ref: str,
+        correlation_id: str,
+    ) -> GrantRecord:
+        """ADR-0025 §5: the order's own owner states what may be dispatched; a refusal records
+        nothing."""
+        if self._dispatch_units is None:
+            raise InputValidationError(
+                "LIVE_GRANT_DISPATCH_NOT_WIRED", "no fulfillment owner states a dispatch unit"
+            )
+        unit = self._dispatch_units(product_order_id)
+        with self._store.transaction() as live:
+            return live.issue_dispatch_grant(
+                marketplace_key=unit.marketplace_key,
+                marketplace_account_id=unit.marketplace_account_id,
+                binding=unit.binding,
                 not_before=not_before,
                 expires_at=expires_at,
                 approved_by=approved_by,
