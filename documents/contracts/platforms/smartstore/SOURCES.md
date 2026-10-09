@@ -424,6 +424,12 @@ such a member and never sends the string.
 | --- | --- | --- | --- | --- |
 | `NAVER-P0-TAGS-2901` | Issue #219 comment 6072975577. This is the research packet of the 2.90.1 documentation dated 2026-10-07: `[상품] 추천 태그 검색 목록 조회` — https://apicenter.commerce.naver.com/docs/commerce-api/current/get-recommend-tags-product — `[상품] 제한 태그 여부 조회` — https://apicenter.commerce.naver.com/docs/commerce-api/current/is-restrict-tags-product — and the create-product `sellerTags` schema, with the 제약 사항 page. Read 2026-10-09 through an independent web reader, because apicenter is unreachable from the Track A host | the two methods and paths; `keyword` and `tags` as the required queries; the `{code, text}` and `{tag, restricted}` arrays and their types; the shared error schema and statuses; OAuth bearer with no scopes; the global `429` `GW.RATE_LIMIT`; the `sellerTags` `{code?, text}` shape, its code-must-match-text rule and the `<= 4000` note. NOT STATED: the API group beyond the 상품 › 태그 grouping, the `tags` serialization or maximum count, a keyword length, a rate | ADR-0028 §1–§2; `ENDPOINT_MATRIX.md` §4, §4.3 | Commerce API version, or any tag request/response schema change |
 
+### 5.10 Tag-read runtime evidence (`R0`, 2026-10-09)
+
+| Source ID | Locator | Claims supported | Used by | Re-review trigger |
+| --- | --- | --- | --- | --- |
+| `SMARTSTORE-R0-TAG-READS` | Issue #219 comment 6079478595 (the two adopted tag reads run through ICBM's own caller on the operating account for one synthetic test product, structure only, no value recorded) | both reads answer HTTP 200 and pass `ai-tag-recommend-r1` and `ai-tag-restricted-r1`; the 상품 group is granted to the application (no `GW.AUTHN`); the recommendation is an array of `{code: integer, text}`; the restricted check answers each asked tag once with a boolean | `ENDPOINT_MATRIX.md` §4.3; ADR-0028 §1 and the §4 keyword note | a change of either answer's shape, or a group change |
+
 ## 6. NAVER official technical-support sources (`P1` / `SUPPORT_DISCUSSION`)
 
 These sources are point-in-time official support evidence. They may later be edited, hidden, deleted, or superseded.
