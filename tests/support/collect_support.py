@@ -81,6 +81,8 @@ def base_fields() -> dict[str, FieldFact]:
             NoticeValue(items=(NoticeItem(label="용량", text="350ml"),)), ".notice"
         ),
         "detail_description": confirmed(TextValue(text="상세 설명"), ".detail"),
+        # ADR-0031 §2: a synthetic page states no sales-channel restriction.
+        "sales_channels": absent(".sales-channels"),
     }
 
 

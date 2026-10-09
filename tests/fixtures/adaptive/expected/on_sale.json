@@ -12,7 +12,8 @@
     "manufacturer": {"status": "CONFIRMED", "value": {"text": "합성식품공사"}},
     "origin": {"status": "CONFIRMED", "value": {"text": "국산"}},
     "notice": {"status": "CONFIRMED", "value": {"items": [{"label": "제조원", "text": "합성식품공사"}, {"label": "원산지", "text": "국산"}]}},
-    "detail_description": {"status": "CONFIRMED", "value": {"text": "아침에 한 포씩 드세요."}}
+    "detail_description": {"status": "CONFIRMED", "value": {"text": "아침에 한 포씩 드세요."}},
+    "sales_channels": {"status": "ABSENT", "value": null}
   },
   "images": [
     ["REPRESENTATIVE", 0, "/goods/sm-5001/cover.jpg"],

@@ -139,6 +139,8 @@ def fields(facts: Facts) -> dict[str, FieldFact]:
         "origin": _absent(".m4-origin"),
         "notice": _absent(".m4-notice"),
         "detail_description": _absent(".m4-detail"),
+        # ADR-0031 §2: a synthetic product states no sales-channel restriction.
+        "sales_channels": _absent(".m4-sales-channels"),
     }
 
 
