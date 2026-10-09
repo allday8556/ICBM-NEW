@@ -9,7 +9,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import integrations.suppliers as supplier_packages
-from app.capabilities.ai import platform_tags
+from app.capabilities.ai import platform_category, platform_tags
 from app.capabilities.ai.composer import PromptComposer
 from app.capabilities.ai.execution import AIExecution
 from app.capabilities.ai.profiles import (
@@ -797,6 +797,19 @@ def build_container(
                 context=platform_tags.SmartStoreTagContext(
                     smartstore_tags, search_signal, clock.now
                 ),
+            ),
+            # ADR-0029 C2: the category task, candidates from the durable official catalog only.
+            platform_tag_task(
+                task_key=platform_category.CATEGORY_TASK_KEY,
+                prompt_key=platform_tags.BUNDLE_PROMPT_KEY,
+                marketplace="smartstore",
+                result_key=platform_category.CATEGORY_RESULT_KEY,
+                fact_fields=platform_category.CATEGORY_FACT_FIELDS,
+                schema_version=platform_category.CATEGORY_SCHEMA_VERSION,
+                context=platform_category.SmartStoreCategoryContext(
+                    category_catalog_store, "smartstore"
+                ),
+                required=("category_id",),
             ),
         ),
     )

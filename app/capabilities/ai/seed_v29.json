@@ -1,5 +1,5 @@
 {
- "seed_version": "v29-ai2",
+ "seed_version": "v29-ai3",
  "source": "design/prototypes/icbm_redesign_test_v29_final.html",
  "templates": {
   "ICBM_GLOBAL_RULES_V2": {
@@ -59,7 +59,7 @@
     "mode": "PRODUCT_RECOMMEND_BUNDLE",
     "prompt": "GOAL\n선택 상품에 대해 상품명, 태그, 카테고리, 옵션 정규화 후보를 한 번에 제안한다.\n\nRULES\n1. PRODUCT_FACTS만 사실로 사용한다.\n2. TREND_DATA는 직접 관련성이 있는 경우만 보조적으로 사용한다.\n3. 상품명은 자연스러운 한국어와 검색성을 함께 고려한다.\n4. 카테고리는 제공된 categoryId 후보 안에서만 선택한다.\n5. 옵션/SKU 원자 구조를 보존한다.\n6. 현재값/추천값/이유/신뢰도를 함께 반환한다.",
     "variables": "product_id\noriginal_name\nbrand\nmanufacturer\norigin\ncategory_candidates[]\nspecifications\noptions[]\ndetail_facts\nocr_facts\ntrend_keywords[]",
-    "output": "{\n  \"product_id\":\"\",\n  \"product_name\":{\"current\":\"\",\"recommended\":\"\",\"used_keywords\":[],\"confidence\":0,\"evidence\":[],\"requires_review\":false},\n  \"tags\":{\"recommended\":[],\"confidence\":0,\"evidence\":[],\"requires_review\":false},\n  \"category\":{\"category_id\":\"\",\"confidence\":0,\"requires_review\":false},\n  \"options\":{\"normalized\":[],\"source_sku_count\":0,\"result_sku_count\":0,\"requires_review\":false},\n  \"warnings\":[]\n}"
+    "output": "{\n  \"product_id\":\"\",\n  \"product_name\":{\"current\":\"\",\"recommended\":\"\",\"used_keywords\":[],\"confidence\":0,\"evidence\":[],\"requires_review\":false},\n  \"tags\":{\"recommended\":[],\"confidence\":0,\"evidence\":[],\"requires_review\":false},\n  \"category\":{\"category_id\":\"\",\"confidence\":0,\"requires_review\":false,\"evidence\":[]},\n  \"options\":{\"normalized\":[],\"source_sku_count\":0,\"result_sku_count\":0,\"requires_review\":false},\n  \"warnings\":[]\n}"
    }
   },
   "TASK_CATEGORY_REMATCH_V1": {
@@ -214,6 +214,12 @@
    "key": "TASK_PRODUCT_RECOMMEND_BUNDLE_V1",
    "field": "output",
    "previous": "{\n  \"product_id\":\"\",\n  \"product_name\":{\"current\":\"\",\"recommended\":\"\",\"used_keywords\":[],\"confidence\":0,\"evidence\":[],\"requires_review\":false},\n  \"tags\":{\"recommended\":[],\"confidence\":0},\n  \"category\":{\"category_id\":\"\",\"confidence\":0,\"requires_review\":false},\n  \"options\":{\"normalized\":[],\"source_sku_count\":0,\"result_sku_count\":0,\"requires_review\":false},\n  \"warnings\":[]\n}"
+  },
+  {
+   "seed_version": "v29-ai3",
+   "key": "TASK_PRODUCT_RECOMMEND_BUNDLE_V1",
+   "field": "output",
+   "previous": "{\n  \"product_id\":\"\",\n  \"product_name\":{\"current\":\"\",\"recommended\":\"\",\"used_keywords\":[],\"confidence\":0,\"evidence\":[],\"requires_review\":false},\n  \"tags\":{\"recommended\":[],\"confidence\":0,\"evidence\":[],\"requires_review\":false},\n  \"category\":{\"category_id\":\"\",\"confidence\":0,\"requires_review\":false},\n  \"options\":{\"normalized\":[],\"source_sku_count\":0,\"result_sku_count\":0,\"requires_review\":false},\n  \"warnings\":[]\n}"
   }
  ]
 }

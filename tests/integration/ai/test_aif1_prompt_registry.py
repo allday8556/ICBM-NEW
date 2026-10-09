@@ -113,11 +113,15 @@ def test_the_registry_is_the_v29_prototypes_and_its_seed_is_the_prototypes_text(
             "TASK_REGISTRY", BUNDLE, field
         )
     # The bundle's output is the prototype's, with the envelope on product_name (v29-ai1,
-    # ADR-0027 §6) and on tags (v29-ai2, ADR-0028 §5) only.
+    # ADR-0027 §6), on tags (v29-ai2, ADR-0028 §5) and on category (v29-ai3, ADR-0029 §4) only.
     envelope = '"confidence":0,"evidence":[],"requires_review":false},'
     assert entries[BUNDLE]["content"]["output"] == _prototype_literal(
         "TASK_REGISTRY", BUNDLE, "output"
-    ).replace('"confidence":0},', envelope, 2)
+    ).replace('"confidence":0},', envelope, 2).replace(
+        '"confidence":0,"requires_review":false}',
+        '"confidence":0,"requires_review":false,"evidence":[]}',
+        1,
+    )
     assert entries[BUNDLE]["content"]["mode"] == "PRODUCT_RECOMMEND_BUNDLE"
     assert entries[BUNDLE]["role_key"] == "ROLE_PRODUCT_MD_V1"
     assert entries[BUNDLE]["screen"] == "통합DB"
@@ -331,12 +335,12 @@ def test_a_migrated_database_starts_empty_and_the_application_seeds_it_once(
         origins = raw.execute(
             "SELECT DISTINCT origin, seed_version, authored_by FROM ai_prompt_template_revisions"
         ).fetchall()
-    assert origins == [("SEED", "v29-ai2", "system:seed")]
+    assert origins == [("SEED", "v29-ai3", "system:seed")]
 
 
 def test_the_seed_file_is_the_catalog(client: TestClient) -> None:
     seed = load_seed()
-    assert seed["seed_version"] == "v29-ai2"
+    assert seed["seed_version"] == "v29-ai3"
     assert {**seed["templates"], **seed["policies"]}.keys() == {entry.key for entry in CATALOG}
     for entry in CATALOG:
         if entry.layer is Layer.POLICY:
