@@ -153,6 +153,10 @@ class AuditEventType(StrEnum):
     ORDER_TRACKING_CAPTURED = "ORDER_TRACKING_CAPTURED"
     # M6.5-C (ADR-0025 §5): one dispatch attempt opened, ended or verified. Ids and codes only.
     ORDER_DISPATCH_RECORDED = "ORDER_DISPATCH_RECORDED"
+    # ADR-0033 G2: one Detail Guidance revision appended (a save, a turn-off or an early end).
+    # Identity, placement, kind, sequence, template, flag, period, fingerprint and image hash only;
+    # never the notice text, which lives in the revision row.
+    DETAIL_GUIDANCE_REVISED = "DETAIL_GUIDANCE_REVISED"
 
 
 class AuditOutcome(StrEnum):

@@ -21,6 +21,9 @@ from app.capabilities.ai.profiles import (
 from app.capabilities.ai.prompts import PromptRegistryService, PromptRegistryStore
 from app.capabilities.ai.search_signal import NoSearchSignal
 from app.capabilities.audit.service import AuditLog
+from app.capabilities.detail_guidance.image_store import GuidanceImageStore
+from app.capabilities.detail_guidance.service import DetailGuidanceService
+from app.capabilities.detail_guidance.store import DetailGuidanceStore
 from app.capabilities.jobs.diagnostic import FAILING_JOB
 from app.capabilities.jobs.policy import RetryPolicy
 from app.capabilities.jobs.registry import JobDefinition, JobRegistry
@@ -283,6 +286,8 @@ class Container:
     ai_execution: AIExecution
     # ADR-0027 AIS-1: the operator's CLIProxyAPI profile and its approvals.
     ai_provider: ProviderProfileService
+    # ADR-0033 G2: Settings' 상세페이지 공지 — the Detail Guidance owner and its image store.
+    detail_guidance: DetailGuidanceService
     category_metadata: CategoryMetadataService
     category_catalog: CategoryCatalogService
     # Settings delivery policy: the seller's address book, read on request and never stored.
@@ -502,6 +507,10 @@ def build_container(
     profiled_provider = ProfiledProvider(profile_store, WindowsProcessProbe(), clock, secrets)
     ai_execution = AIExecution(profiled_provider)
     ai_provider = ProviderProfileService(profile_store, profiled_provider, clock)
+    # ADR-0033 G2: the Detail Guidance owner, its revisions and its content-addressed images.
+    detail_guidance = DetailGuidanceService(
+        DetailGuidanceStore(db, clock, audit, GuidanceImageStore(config.guidance_images_dir))
+    )
     # ADR-0028 §3: the SearchSignal port, provider-zero until a source has its own owner decision.
     search_signal = NoSearchSignal()
     readiness = ReadinessService(
@@ -1254,6 +1263,7 @@ def build_container(
         ai_composer=ai_composer,
         ai_execution=ai_execution,
         ai_provider=ai_provider,
+        detail_guidance=detail_guidance,
         category_metadata=category_metadata,
         category_catalog=category_catalog,
         smartstore_addressbook=SmartStoreAddressBookSource(

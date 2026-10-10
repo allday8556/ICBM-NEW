@@ -263,7 +263,9 @@ AI_ENRICHMENT_RESULTS = "0055_ai_enrichment_results"
 AI_PROVIDER_PROFILE = "0056_ai_provider_profile"
 # M6.5-C (ADR-0025 §5): the DISPATCH stage, its grant bindings and the dispatch attempts.
 M65_DISPATCH_STAGE = "0057_m65_dispatch_stage"
-SCHEMA_HEAD = M65_DISPATCH_STAGE
+# ADR-0033 G2: the Detail Guidance owner, its image artifacts and revisions.
+DETAIL_GUIDANCE = "0058_detail_guidance"
+SCHEMA_HEAD = DETAIL_GUIDANCE
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -302,6 +304,7 @@ AFTER_M5 = (
     AI_ENRICHMENT_RESULTS,
     AI_PROVIDER_PROFILE,
     M65_DISPATCH_STAGE,
+    DETAIL_GUIDANCE,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

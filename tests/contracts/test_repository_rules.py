@@ -2164,6 +2164,27 @@ def test_every_reviewed_writer_of_preflight_truth_appends_to_the_audit_log() -> 
         assert audited, writer
 
 
+# ADR-0033 §2 (G2): the Detail Guidance owner is the one constructor of its three models, in the
+# PREFLIGHT_TRUTH_WRITERS pattern, and every write it makes appends an audit event.
+DETAIL_GUIDANCE_WRITER = "app/capabilities/detail_guidance/store.py"
+DETAIL_GUIDANCE_MODELS = ("DetailGuidance", "GuidanceImageArtifact", "DetailGuidanceRevision")
+
+
+def test_the_detail_guidance_owner_is_the_one_writer_of_its_models() -> None:
+    constructed: dict[str, set[str]] = {}
+    modules = _production_modules()
+    for path, tree in modules.items():
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in DETAIL_GUIDANCE_MODELS
+            ):
+                constructed.setdefault(node.func.id, set()).add(path)
+    assert constructed == {name: {DETAIL_GUIDANCE_WRITER} for name in DETAIL_GUIDANCE_MODELS}
+    assert _calls(modules[DETAIL_GUIDANCE_WRITER], "append")
+
+
 def test_the_drill_writes_only_into_the_fresh_root_it_validated() -> None:
     """ADR-0018 §7: the one writable connection is opened by the drill run, after the root was
     validated as fresh and outside the active data root."""
@@ -3849,6 +3870,11 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "ai_provider_calls",
         "live_grant_dispatch_bindings",
         "operate_dispatch_attempts",
+        # ADR-0033 G2: the Detail Guidance owner — notice identities, rendered images
+        # and append-only revisions.
+        "detail_guidances",
+        "guidance_image_artifacts",
+        "detail_guidance_revisions",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.
