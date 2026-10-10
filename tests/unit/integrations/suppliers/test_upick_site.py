@@ -8,6 +8,8 @@ Issue #219 `6097181737`). No supplier is contacted.
 
 from pathlib import Path
 
+import pytest
+
 from app.stages.collect.facts import (
     Availability,
     FieldStatus,
@@ -195,3 +197,28 @@ def test_4837_an_invisible_description_is_never_confirmed_and_the_surcharge_is_k
     assert (shipping.value.kind, shipping.value.fee_krw) == (ShippingKind.FIXED, 3000)
     assert "추가배송비 제주도 3,000원/도서산간 5,000원 추가" in shipping.value.policy_text
     assert fields["sales_channels"].value.scope is SalesChannelScope.ALL_ALLOWED
+
+
+# Every channel row value U-PICK showed in reconnaissance and in acceptance run 1. Under ADR-0035
+# NR-03 every word of a row that is not wholly allowed must be read, so each must stay readable.
+OBSERVED_CHANNEL_ROWS = {
+    "모든마켓 판매가능": (SalesChannelScope.ALL_ALLOWED, ()),
+    "모든마켓 판매 가능": (SalesChannelScope.ALL_ALLOWED, ()),
+    "폐쇄몰": (SalesChannelScope.CLOSED_MALL_ONLY, ()),
+    "폐쇄몰 전용/오픈마켓 판매불가": (SalesChannelScope.CLOSED_MALL_ONLY, ()),
+    "폐쇄몰 전용 / 오픈마켓 판매 금지": (SalesChannelScope.CLOSED_MALL_ONLY, ()),
+    "모든마켓 판매가능/쿠팡,토스 판매금지": (SalesChannelScope.LISTED, ("coupang",)),
+}
+
+
+@pytest.mark.parametrize("row_value", OBSERVED_CHANNEL_ROWS, ids=list(OBSERVED_CHANNEL_ROWS))
+def test_every_observed_channel_row_is_read(row_value: str) -> None:
+    view = synthetic(
+        "4954",
+        title="마그네슘 - U-PICK B2B",
+        rows=(("상품명", "마그네슘"), ("판매가능플랫폼", row_value), ("배송비", "3,000원")),
+        description="<p>상세 설명</p>",
+    )
+    channels = SITES["upick"].collection.fields(view)["sales_channels"]
+    assert channels.status is FieldStatus.CONFIRMED, row_value
+    assert (channels.value.scope, channels.value.forbidden) == OBSERVED_CHANNEL_ROWS[row_value]
