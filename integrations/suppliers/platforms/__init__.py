@@ -48,3 +48,6 @@ class PlatformTemplate:
     capture_revision: str
     # (site, the site's extraction revision) -> its CONNECT and COLLECT definitions.
     bind: Callable[[SiteConfig, str], SiteBinding]
+    # Every image-role rule name the template can assign, with its role: what the image
+    # auto-selection reads for a site on this template (Issue #219).
+    role_table: tuple[tuple[str, str], ...] = ()

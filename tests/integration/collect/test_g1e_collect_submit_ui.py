@@ -470,11 +470,13 @@ def test_the_focused_run_shows_its_revision_fields_and_evidence_as_stored(
         count = facts.locator("[data-role='image-count']")
         assert count.get_attribute("data-included") == str(included)
         assert count.get_attribute("data-total") == str(len(revision["images"]))
-        # A field the source did not confirm shows no value: only its status.
+        # A field the source did not confirm shows no value: only its status. ADR-0031 §5 words
+        # one absence: a page with no sales-channel statement reads 판매채널 제한 없음.
         for field in revision["fields"]:
             if field["status"] != "CONFIRMED":
                 value = facts.locator(f"tr[data-field='{field['key']}'] [data-role='field-value']")
-                assert value.inner_text() == "—"
+                absent_channels = field["key"] == "sales_channels" and field["status"] == "ABSENT"
+                assert value.inner_text() == ("판매채널 제한 없음" if absent_channels else "—")
         # Collapsed, an absent part renders as nothing. (An opened value is the stored JSON itself,
         # where null is the value's own word for a part the source did not state.)
         _no_absent_text(page)

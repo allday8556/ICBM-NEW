@@ -30,7 +30,14 @@ from datetime import datetime
 from typing import Any
 
 from app.platform.core.errors import AppError, ErrorClass, InputValidationError
-from app.stages.collect.facts import FieldStatus, ImageRole, ImagesValue, StockValue, TextValue
+from app.stages.collect.facts import (
+    FieldStatus,
+    ImageRole,
+    ImagesValue,
+    SalesChannelsValue,
+    StockValue,
+    TextValue,
+)
 from app.stages.products.contracts import MemberSourceView, SourceFactView, SourceImagesView
 from app.stages.products.model import GroupStatus
 from app.stages.products.store import (
@@ -50,7 +57,8 @@ CURSOR_VERSION = 1
 
 IMAGES_FIELD = "images"
 # The source facts the detail shows, each read through its member's current revision.
-DISPLAY_FIELDS = (NAME_FIELD, "brand", "manufacturer", "origin", "stock")
+# ADR-0031 §5: the supplier's sales-channel restriction is shown beside the source facts.
+DISPLAY_FIELDS = (NAME_FIELD, "brand", "manufacturer", "origin", "stock", "sales_channels")
 
 # Request refusals.
 QUERY_INVALID = "PRODUCTS_QUERY_INVALID"
@@ -170,6 +178,14 @@ def _fact(key: str, reading: FieldReading | None) -> SourceFactView:
             value = reading.value.text
         elif isinstance(reading.value, StockValue):
             value = reading.value.availability.value
+        elif isinstance(reading.value, SalesChannelsValue):
+            # The reading's scope and forbidden marketplaces; the page words the reading (§5).
+            value = "|".join(
+                (
+                    ":".join((reading.value.scope.value, *reading.value.forbidden)),
+                    reading.value.policy_text,
+                )
+            )
     return SourceFactView(key=key, status=reading.status, value=value)
 
 

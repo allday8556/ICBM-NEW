@@ -34,8 +34,8 @@ _SLOT = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 _TOKEN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,79}$")
 _RECORD = re.compile(r"^documents/acceptance/suppliers/[a-z0-9_-]+\.md$")
 _DECISION = re.compile(r"^Issue #\d{1,6} \d{6,12}$")
-# A seller-code convention is a fixed prefix, then the source product id, then a fixed suffix.
-_CONVENTION = re.compile(r"^[A-Za-z0-9_-]{0,16}\{source_product_id\}[A-Za-z0-9_-]{0,16}$")
+# A seller-code convention in ADR-0024 §2's code form: letters, then the source product id.
+_CONVENTION = re.compile(r"^[A-Za-z]{2,8}\{source_product_id\}$")
 _WORD_LIMIT = 40
 _WORDS_PER_SLOT = 12
 

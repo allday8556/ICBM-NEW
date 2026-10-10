@@ -44,6 +44,8 @@ from integrations.suppliers.platforms import PlatformTemplate, SiteBinding
 from integrations.suppliers.platforms.cafe24.collect import (
     DEFAULT_VOCABULARY,
     EXTRACTION_REVISION,
+    OG_IMAGE_RULE,
+    ROLE_RULES,
     Vocabulary,
     classify_images,
     parse_fields,
@@ -283,4 +285,5 @@ TEMPLATE = PlatformTemplate(
     platform_egress_hosts=frozenset({SECURE_LOGIN_HOST}),
     capture_revision=CAPTURE_REVISION,
     bind=bind,
+    role_table=tuple((rule.rule_id, rule.role.value) for rule in (*ROLE_RULES, OG_IMAGE_RULE)),
 )

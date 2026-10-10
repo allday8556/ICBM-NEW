@@ -98,6 +98,9 @@ def test_a_minimal_site_parses() -> None:
         ({"limits": {"min_queue_interval_s": float("nan")}}, "example"),
         ({"limits": {"unknown": 1}}, "example"),
         ({"seller_code_convention": "UP-{name}"}, "example"),
+        ({"seller_code_convention": "UP_{source_product_id}"}, "example"),
+        ({"seller_code_convention": "{source_product_id}"}, "example"),
+        ({"seller_code_convention": "UP{source_product_id}X"}, "example"),
         ({"recon_record": "../secrets.md"}, "example"),
     ],
 )
@@ -143,8 +146,18 @@ def test_an_invalid_file_leaves_only_its_own_site_out(tmp_path: Path) -> None:
     _write(tmp_path, "form", encoded(supplier_key="form", product_path_form="detail"))
     _write(tmp_path, "raised", encoded(supplier_key="raised", limits={"max_image_refs": 99}))
     _write(
-        tmp_path, "faster", encoded(supplier_key="faster", limits={"same_product_interval_s": 61})
+        tmp_path,
+        "faster",
+        encoded(
+            supplier_key="faster",
+            base_url="https://faster.co.kr",
+            storefront_host="faster.co.kr",
+            image_hosts=["faster.co.kr"],
+            limits={"same_product_interval_s": 61},
+        ),
     )
+    # One host, one supplier: a second site on a taken storefront host is left out.
+    _write(tmp_path, "twin", encoded(supplier_key="twin"))
     bound, problems = bind_sites(tmp_path)
     assert [site.config.supplier_key for site in bound] == ["example", "faster"]
     assert {problem.split(":")[0] for problem in problems} == {
@@ -154,6 +167,7 @@ def test_an_invalid_file_leaves_only_its_own_site_out(tmp_path: Path) -> None:
         "slots.json",
         "form.json",
         "raised.json",
+        "twin.json",
     }
 
 
@@ -196,3 +210,8 @@ def test_this_build_s_sites_all_bind() -> None:
     _, problems = bind_sites(SITE_DIRECTORY)
     assert problems == ()
     assert set(TEMPLATES) == {"cafe24"}
+
+
+def test_a_seller_code_convention_takes_the_adr_0024_form() -> None:
+    parsed = parse_site(encoded(seller_code_convention="UP{source_product_id}"), "example")
+    assert parsed.seller_code_convention == "UP{source_product_id}"

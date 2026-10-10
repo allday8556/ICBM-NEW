@@ -348,6 +348,8 @@ def test_the_detail_is_exact_and_every_fact_is_member_scoped(
         "manufacturer": ("ABSENT", None),
         "origin": ("CONFIRMED", "국산"),
         "stock": ("CONFIRMED", Availability.ON_SALE.value),
+        # ADR-0031 §5: the synthetic source states no sales-channel restriction.
+        "sales_channels": ("ABSENT", None),
     }
     # The second member states no brand: it stays absent, never filled from the first member.
     assert facts["S-OIL-2"]["brand"] == ("ABSENT", None)

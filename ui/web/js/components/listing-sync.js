@@ -14,7 +14,6 @@ import { toast } from '../core/toast.js';
 const LISTINGS = '/api/v1/operate/listings';
 const SYNC = '/api/v1/operate/listings/sync';
 const ADOPT = '/api/v1/operate/adoptions/run';
-const ADOPT_SUPPLIER = 'kmretail';
 const ADOPTION_LABEL = {
   ADOPTED: '가져옴',
   ALREADY_ADOPTED: '이미 가져옴',
@@ -111,24 +110,30 @@ function body(found, reload) {
       button.disabled = false;
     }
   });
-  const adopt = h('button', { type: 'button', class: 'btn', 'data-action': 'adopt-listings' }, 'KM 상품 가져오기');
-  adopt.addEventListener('click', async () => {
-    adopt.disabled = true;
-    try {
-      const run = await sendJson('POST', ADOPT, { supplier_key: ADOPT_SUPPLIER });
-      const tally = {};
-      for (const outcome of run.outcomes) tally[outcome.outcome] = (tally[outcome.outcome] ?? 0) + 1;
-      const summary = Object.entries(tally)
-        .map(([code, count]) => `${ADOPTION_LABEL[code] ?? code} ${count}`)
-        .join(' · ');
-      toast('KM 상품 가져오기', summary || '대상 상품 없음');
-      await reload();
-    } catch (error) {
-      const code = error instanceof ApiError ? error.error?.code : null;
-      toast('KM 상품 가져오기', code === 'OPERATE_ADOPTION_RUNNING' ? '이미 가져오는 중입니다.' : String(error?.message ?? error));
-    } finally {
-      adopt.disabled = false;
-    }
+  // ADR-0030 §11 S2: one button per supplier with an owner-declared seller-code convention,
+  // as the server lists them; the page never names a supplier itself.
+  const adopters = (found.adoptable_suppliers ?? []).map(({ supplier_key: key, display_name: name }) => {
+    const title = `${name} 상품 가져오기`;
+    const adopt = h('button', { type: 'button', class: 'btn', 'data-action': 'adopt-listings', 'data-supplier': key }, title);
+    adopt.addEventListener('click', async () => {
+      adopt.disabled = true;
+      try {
+        const run = await sendJson('POST', ADOPT, { supplier_key: key });
+        const tally = {};
+        for (const outcome of run.outcomes) tally[outcome.outcome] = (tally[outcome.outcome] ?? 0) + 1;
+        const summary = Object.entries(tally)
+          .map(([code, count]) => `${ADOPTION_LABEL[code] ?? code} ${count}`)
+          .join(' · ');
+        toast(title, summary || '대상 상품 없음');
+        await reload();
+      } catch (error) {
+        const code = error instanceof ApiError ? error.error?.code : null;
+        toast(title, code === 'OPERATE_ADOPTION_RUNNING' ? '이미 가져오는 중입니다.' : String(error?.message ?? error));
+      } finally {
+        adopt.disabled = false;
+      }
+    });
+    return adopt;
   });
   const minutes = Math.round((found.interval_s ?? 0) / 60);
   return [
@@ -143,7 +148,7 @@ function body(found, reload) {
             `마지막 확인 ${dotDateTime(last.started_at)} · ${OUTCOME_LABEL[last.outcome] ?? last.outcome ?? '진행 중'}`,
           )
         : h('span', { class: 'mini', 'data-sync-outcome': 'NONE' }, '아직 확인한 적 없음'),
-      adopt,
+      ...adopters,
       button,
     ),
     found.listings.length
