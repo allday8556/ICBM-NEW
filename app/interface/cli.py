@@ -426,7 +426,7 @@ def _json_file(path: Path, name: str) -> Any:
 
 def _artifacts(path: Path) -> list[Any]:
     from app.capabilities.live_safety.store import ArtifactRef
-    from app.stages.products.image_model import ImageAssetKind
+    from app.stages.register.model import publication_asset_kind
 
     entries = _json_file(path, "--artifacts")
     if not isinstance(entries, list):
@@ -439,7 +439,8 @@ def _artifacts(path: Path) -> list[Any]:
                 "each artifact is exactly {asset_kind, sha256, derivation_id}",
             )
         try:
-            kind = ImageAssetKind(entry["asset_kind"])
+            # An M4 image, or a Detail Guidance image (ADR-0033 §8).
+            kind = publication_asset_kind(entry["asset_kind"])
         except ValueError as exc:
             raise _OperatorInputError("LIVE_CLI_ARTIFACTS_INVALID", "unknown asset_kind") from exc
         artifacts.append(ArtifactRef(kind, entry["sha256"], entry["derivation_id"]))

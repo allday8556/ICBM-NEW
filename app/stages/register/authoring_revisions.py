@@ -13,7 +13,9 @@ server-owned authoring profile revision:
   orders ``DETAIL_IMAGES`` → ``BODY`` with a ``PLAIN_TEXT`` body under a pinned renderer version;
   it still holds no product content — a unit's detail images and body are the product-specific
   plan (:mod:`app.stages.register.detail`). It is what ``DetailComposition.composition_revision``
-  names, and the server now appends v2.
+  names. Its v3 content (ADR-0033 §7, G5) orders ``TOP_GUIDANCE`` → ``DETAIL_IMAGES`` → ``BODY`` →
+  ``BOTTOM_GUIDANCE`` under ``detail-renderer/v2``: the Detail Guidance notices become image
+  sections. The server appends v3 for SmartStore and v2 for every other marketplace (DG-10).
 
 A revision is a real row, never a label: a server-created identity, a strictly typed canonical
 content document and the SHA-256 fingerprint of it. No client authors one, and none holds Product,
@@ -51,8 +53,11 @@ from app.stages.register import sanitize
 from app.stages.register.detail import (
     BODY_FORMAT_PLAIN_TEXT,
     DETAIL_RENDERER_VERSION,
+    DETAIL_RENDERER_VERSION_V2,
     SECTION_BODY,
+    SECTION_BOTTOM_GUIDANCE,
     SECTION_DETAIL_IMAGES,
+    SECTION_TOP_GUIDANCE,
     DetailProfile,
 )
 from app.stages.register.model import canonical_json, sanitized_digest
@@ -60,6 +65,11 @@ from app.stages.register.model import canonical_json, sanitized_digest
 CATEGORY_MAPPING_CONTENT_VERSION: Final = "registration-category-mapping/v1"
 DETAIL_COMPOSITION_CONTENT_VERSION_V1: Final = "registration-detail-composition/v1"
 DETAIL_COMPOSITION_CONTENT_VERSION: Final = "registration-detail-composition/v2"
+# ADR-0033 §7 (G5): the Detail Guidance notices placed as image sections.
+DETAIL_COMPOSITION_CONTENT_VERSION_V3: Final = "registration-detail-composition/v3"
+# The marketplaces whose detail composition places Detail Guidance (ADR-0033 DG-10: SmartStore
+# only). Every other marketplace keeps content v2 until its own decision.
+GUIDANCE_MARKETPLACES: Final = frozenset({"smartstore"})
 
 # The server is the only author of a revision (resolution 5907626428 D1).
 SERVER_ACTOR: Final = "system:register-authoring"
@@ -114,6 +124,25 @@ class DetailCompositionContentV2(_Content):
     guidance: Literal[False]
 
 
+class DetailCompositionContentV3(_Content):
+    """ADR-0033 §7 (G5): v2's vocabulary plus the two Detail Guidance image sections, around it,
+    under ``detail-renderer/v2``. Still never an image, a body, a notice or a URL — the resolved
+    notices are the product-specific plan's. ``VIDEO`` and ``OPTION_TABLE`` stay unrepresentable."""
+
+    content_version: Literal["registration-detail-composition/v3"]
+    kind: Literal["DETAIL_COMPOSITION"]
+    marketplace_key: StrictStr
+    sections: tuple[
+        Literal["TOP_GUIDANCE"],
+        Literal["DETAIL_IMAGES"],
+        Literal["BODY"],
+        Literal["BOTTOM_GUIDANCE"],
+    ]
+    body_format: Literal["PLAIN_TEXT"]
+    renderer: Literal["detail-renderer/v2"]
+    guidance: Literal[True]
+
+
 def category_mapping_content(marketplace_key: str, taxonomy_revision: str) -> dict[str, Any]:
     """The v1 category-authoring profile of one marketplace taxonomy."""
     return {
@@ -126,8 +155,8 @@ def category_mapping_content(marketplace_key: str, taxonomy_revision: str) -> di
     }
 
 
-def detail_composition_content(marketplace_key: str) -> dict[str, Any]:
-    """The current (v2) detail-composition profile of one marketplace (B-DETAIL)."""
+def detail_composition_content_v2(marketplace_key: str) -> dict[str, Any]:
+    """The v2 detail-composition profile of one marketplace (B-DETAIL)."""
     return {
         "content_version": DETAIL_COMPOSITION_CONTENT_VERSION,
         "kind": AuthoringRevisionKind.DETAIL_COMPOSITION.value,
@@ -139,6 +168,32 @@ def detail_composition_content(marketplace_key: str) -> dict[str, Any]:
     }
 
 
+def detail_composition_content_v3(marketplace_key: str) -> dict[str, Any]:
+    """The v3 detail-composition profile of one marketplace (ADR-0033 §7)."""
+    return {
+        "content_version": DETAIL_COMPOSITION_CONTENT_VERSION_V3,
+        "kind": AuthoringRevisionKind.DETAIL_COMPOSITION.value,
+        "marketplace_key": marketplace_key,
+        "sections": [
+            SECTION_TOP_GUIDANCE,
+            SECTION_DETAIL_IMAGES,
+            SECTION_BODY,
+            SECTION_BOTTOM_GUIDANCE,
+        ],
+        "body_format": BODY_FORMAT_PLAIN_TEXT,
+        "renderer": DETAIL_RENDERER_VERSION_V2,
+        "guidance": True,
+    }
+
+
+def detail_composition_content(marketplace_key: str) -> dict[str, Any]:
+    """The current detail-composition profile of one marketplace: v3 where Detail Guidance is
+    placed (SmartStore, ADR-0033 §7), and v2 everywhere else (B-DETAIL)."""
+    if marketplace_key in GUIDANCE_MARKETPLACES:
+        return detail_composition_content_v3(marketplace_key)
+    return detail_composition_content_v2(marketplace_key)
+
+
 # Every content version a revision of each kind may hold. An earlier version stays readable: a
 # revision is never rewritten.
 _MODELS: Final[Mapping[AuthoringRevisionKind, Mapping[str, type[_Content]]]] = {
@@ -148,6 +203,7 @@ _MODELS: Final[Mapping[AuthoringRevisionKind, Mapping[str, type[_Content]]]] = {
     AuthoringRevisionKind.DETAIL_COMPOSITION: {
         DETAIL_COMPOSITION_CONTENT_VERSION_V1: DetailCompositionContentV1,
         DETAIL_COMPOSITION_CONTENT_VERSION: DetailCompositionContentV2,
+        DETAIL_COMPOSITION_CONTENT_VERSION_V3: DetailCompositionContentV3,
     },
 }
 

@@ -17,6 +17,27 @@ from typing import Any, Final
 
 from app.platform.core.errors import AppError, ErrorClass
 from app.stages.connect.marketplace.capability import RemoteOutcome
+from app.stages.products.image_model import ImageAssetKind
+
+
+class GuidanceAssetKind(StrEnum):
+    """ADR-0033 §6, §8 (G5): a rendered Detail Guidance image, the third kind of artifact a
+    registration publishes beside an M4 source asset and derived artifact. It is store-level and
+    content-addressed: named by its SHA-256 alone, never by a derivation (its ``derivation_id`` is
+    always ``None``), and never an M4 image selection, so it is not an ``ImageAssetKind``."""
+
+    GUIDANCE_ARTIFACT = "GUIDANCE_ARTIFACT"
+
+
+# Every kind of artifact an ASSET grant, an upload attempt or a prepared provider asset may name.
+type PublicationAssetKind = ImageAssetKind | GuidanceAssetKind
+
+
+def publication_asset_kind(value: str) -> PublicationAssetKind:
+    """The publication asset kind ``value`` names; anything else is refused (``ValueError``)."""
+    if value == GuidanceAssetKind.GUIDANCE_ARTIFACT.value:
+        return GuidanceAssetKind.GUIDANCE_ARTIFACT
+    return ImageAssetKind(value)
 
 
 class ListingShape(StrEnum):

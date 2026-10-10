@@ -106,6 +106,9 @@ ADR-0033 G4 added REGISTER's guidance choice and resolution `app/stages/register
 shared notice editor `ui/web/js/components/guidance-editor.js` (moved out of the settings card,
 which now uses it beside the product editor's 상세페이지 step) and two integration suites; no
 migration.
+ADR-0033 G5 placed the notices: composition v3, `detail-renderer/v2`, the `registration-payload/v3`
+Snapshot pin and the SmartStore wire v10 in the existing REGISTER and adapter modules, the guidance
+byte source of the upload run, migration `0059`, one unit and one integration suite.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -137,10 +140,10 @@ the mapper is provider-zero, semantic/unit-based and read-only.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 354 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 355 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 68 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
 | `app/interface/` | 28 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 88 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/platform/` | 89 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 165 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
@@ -163,13 +166,13 @@ the mapper is provider-zero, semantic/unit-based and read-only.
 | `integrations/` | 78 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 28 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 337 | tests |
+| `tests/` | 339 | tests |
 | `tests/contracts/` | 11 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 142 | integration tests by runtime owner |
+| `tests/integration/` | 143 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 123 | unit tests by runtime owner |
+| `tests/unit/` | 124 | unit tests by runtime owner |
 | `ui/` | 70 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 61 | the served web client |
