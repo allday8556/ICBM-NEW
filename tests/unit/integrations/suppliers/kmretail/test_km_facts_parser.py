@@ -444,3 +444,29 @@ def test_a_shipping_range_is_read_as_its_highest_amount() -> None:
 def test_km_states_no_sales_channel_restriction() -> None:
     # ADR-0031 §3: KM통상's reconnaissance found no such statement.
     assert parse_fields(document(page(body=BUY)))["sales_channels"].status is FieldStatus.ABSENT
+
+
+@pytest.mark.parametrize(
+    ("cell", "amount"),
+    [("35,000", 35000), ("35,000원", 35000), ("35,000원 이상", 35000), ("8000원이상", 8000)],
+)
+def test_a_minimum_cell_of_one_amount_is_read(cell: str, amount: int) -> None:
+    fact = fields(rows=row("판매가", "39,000원") + row("최저지도가", cell))["minimum_sale_price"]
+    assert fact.status is FieldStatus.CONFIRMED
+    assert fact.value is not None and fact.value.amount_krw == amount
+
+
+@pytest.mark.parametrize(
+    "cell",
+    [
+        "1개 13,900원 이상/ 2개 27,500원 이상 / 3개 40,800원 이상",
+        "12,000원 / 15,000원",
+        "최저 9,000원 (2개 17,000원)",
+        "9,000원 (부가세 별도)",
+        "자율 (단, 9,000원 이상)",
+    ],
+)
+def test_a_minimum_cell_that_is_not_one_amount_is_never_confirmed(cell: str) -> None:
+    # kmretail-5: the first number of the cell used to be confirmed as the minimum.
+    fact = fields(rows=row("판매가", "39,000원") + row("최저지도가", cell))["minimum_sale_price"]
+    assert fact.status is FieldStatus.REVIEW_REQUIRED and fact.value is None
