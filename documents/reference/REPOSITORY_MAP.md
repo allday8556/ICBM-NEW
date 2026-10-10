@@ -135,6 +135,9 @@ C-P3 extends the existing category-metadata JSON contract with reviewed marketpl
 requirements and adds `marketplace_requirement_mapping.py` plus unit/contract/integration coverage.
 It reuses the category revision owner, so it has no migration or second Pricing/option/SKU owner;
 the mapper is provider-zero, semantic/unit-based and read-only.
+C-AUTH-1 adds the Coupang HMAC/auth and evidence-bounded error contracts, an in-memory fake
+transport, their unit/contract coverage, and the provider-zero auth contract. It adopts no endpoint,
+contains no provider transport, and grants no credentials or LIVE authority.
 
 | path | files | role |
 | --- | --- | --- |
@@ -152,27 +155,27 @@ the mapper is provider-zero, semantic/unit-based and read-only.
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 183 | all canonical and historical documents |
+| `documents/` | 184 | all canonical and historical documents |
 | `documents/acceptance/` | 71 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
-| `documents/contracts/` | 10 | platform and UI contracts |
+| `documents/contracts/` | 11 | platform and UI contracts |
 | `documents/decisions/` | 37 | ADRs and architect review records |
 | `documents/evidence/` | 30 | external provider evidence catalog |
 | `documents/reference/` | 3 | this map and the path migration map |
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 78 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 28 |  |
+| `integrations/` | 82 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 32 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 341 | tests |
-| `tests/contracts/` | 12 | repository-rule and document-contract tests |
+| `tests/` | 345 | tests |
+| `tests/contracts/` | 13 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 143 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 125 | unit tests by runtime owner |
+| `tests/unit/` | 128 | unit tests by runtime owner |
 | `ui/` | 70 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 61 | the served web client |
