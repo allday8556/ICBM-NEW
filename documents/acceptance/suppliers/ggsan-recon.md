@@ -27,8 +27,12 @@ No image was fetched. The ADR-0030 §8.1 bound is six product pages; three were 
 - **Terms:** §22 is the standard clause on reuse of the mall's copyrighted information. Images are re-hosted through ICBM's own upload; the owner already re-hosts 건강산's images for Naver (Issue #219 `6086199255`).
 - **CONNECT:**
   - The login form is `form#formLogin`, with `loginId` and `loginPwd` and a submit button inside `.login_input_sec`.
-  - Signed out, `/mypage/index.php` sends the reader to `/member/login.php`.
-  - Signed in, the page carries the logout action `/member/logout.php` and the member's order-list link.
+  - Signed out, `/mypage/index.php` answers `200` with a result page whose only content is a script, `location.replace("https://www.ggsan.com:443/member/login.php")`. The redirect happens in the page, not through the status.
+  - Signed in, the page carries the logout action `../member/logout.php?returnUrl=…` and the member page's own content block `<div class="mypage_main">`, and no login form.
+  - The order-list link `/mypage/order_list.php` is no proof of a session, because the login page carries it too.
+  - These three facts were confirmed on 2026-10-10, after the first connection test failed with `SUPPLIER_TARGET_NOT_AUTH_GATED`:
+    - one unauthenticated read of `/mypage/index.php`;
+    - the owner signing in in the built-in browser, followed by a presence-only check of these markers. No member text was read.
 - **Product path:**
   - `/goods/goods_view.php?goodsNo=<10 digits>`.
   - Listing links add a tracking query, `mtn=…`.

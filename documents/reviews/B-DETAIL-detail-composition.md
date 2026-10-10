@@ -19,6 +19,12 @@ functional prerequisite, not a UI improvement.
 - **D1** The first image-placing section order is `DETAIL_IMAGES` → `BODY` (profile content v2;
   content v1 stays `BODY`-only). Top/bottom guidance (Issue #61), video and
   an option table are not implemented; only the section vocabulary stays extensible.
+
+  > **Amendment note (ADR-0033 G5; owner decision 2026-10-10, Issue #219 `6085853541`).** The
+  > reserved `TOP_GUIDANCE` and `BOTTOM_GUIDANCE` become image sections of profile content v3
+  > (`TOP_GUIDANCE` → `DETAIL_IMAGES` → `BODY` → `BOTTOM_GUIDANCE`, `detail-renderer/v2`), stamped
+  > for SmartStore only. `VIDEO` and `OPTION_TABLE` stay reserved and unrepresentable. It takes
+  > effect once ADR-0033 slice G5 is accepted and landed; until then D1 holds unchanged.
 - **D2** `BODY` (operator text) is optional when `DETAIL_IMAGES` holds at least one image. COLLECT's
   `detail_description` (a 200-character truncated text) is never used to fill `BODY`.
 - **D3** No operator raw HTML. Authoring accepts plain text only; the wire renderer HTML-escapes it
@@ -83,6 +89,18 @@ identities, the optional `BODY` and the exact authoring/preparation revision inp
   already in the candidate fingerprint. REGISTER never chooses or reorders images.
 - The preparation's `detail_sections` become **server-derived from the profile** (a client value
   other than the profile's is refused).
+
+> **Amendment note (ADR-0033 G5; owner decision 2026-10-10, Issue #219 `6085853541`).** The
+> SmartStore profile moves to content v3:
+> `{"content_version": "registration-detail-composition/v3", "kind": "DETAIL_COMPOSITION",
+> "marketplace_key": …, "sections": ["TOP_GUIDANCE", "DETAIL_IMAGES", "BODY", "BOTTOM_GUIDANCE"],
+> "body_format": "PLAIN_TEXT", "renderer": "detail-renderer/v2", "guidance": true}`. The reserved
+> `TOP_GUIDANCE`/`BOTTOM_GUIDANCE` are sections of v3; `VIDEO` and `OPTION_TABLE` stay reserved and
+> are refused in every version. The profile still holds no product content (two layers): a unit's
+> resolved Detail Guidance notices are the product-specific plan's (`payload.detail.guidance`,
+> `registration-payload/v3`), and their uploaded images are the Snapshot's `guidance_assets`. v1
+> and v2 keep reading as before, and every other marketplace keeps v2. It takes effect once
+> ADR-0033 slice G5 is accepted and landed; until then §5.1 holds unchanged.
 
 ### 5.2 What the Snapshot pins (URL-free)
 

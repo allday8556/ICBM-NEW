@@ -66,6 +66,12 @@ A consignment reseller ships one or two units per order, so the free-over thresh
 - **The pricing owners read it as the base fee.** `source_inputs` (and every owner that prices the supplier shipping) prices a `CONDITIONAL` fact that carries both `fee_krw` and `free_over_krw` at `fee_krw`. This is the owner's rule. The policy words stay visible beside the price.
 - **Any other conditional shape stays `PRICING_SHIPPING_CONDITIONAL`, as today:** a condition without a base fee, a quantity tier or a region surcharge.
 - **A region surcharge is one the page states.** A region-fee layer that states no amount (건강산's captures show it empty) states no surcharge; its words stay in the policy text beside the price. A region-fee layer that states any amount is held for review.
+
+  > **Amendment note (ADR-0035 §2).** The last sentence above is superseded. A region surcharge
+  > that states an amount is priced at the base fee, as the owner decided (Issue #219 `6097181737`),
+  > and its words stay in the policy text. The other conditional shapes listed above stay
+  > `PRICING_SHIPPING_CONDITIONAL`.
+
 - A product whose single unit already costs more than the threshold is still priced at the base fee. This overstates the cost and never understates it, which the owner accepted.
 
 ### 3. Slice

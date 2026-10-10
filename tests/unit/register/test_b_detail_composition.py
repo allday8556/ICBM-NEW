@@ -23,6 +23,8 @@ from app.stages.register.authoring_revisions import (
     AuthoringRevisionKind,
     canonical_content,
     detail_composition_content,
+    detail_composition_content_v2,
+    detail_composition_content_v3,
     detail_profile_of,
 )
 from app.stages.register.detail import (
@@ -554,7 +556,12 @@ def test_20_this_suite_is_provider_zero() -> None:
 
 
 def test_the_profile_v2_holds_no_product_content_and_v1_still_reads() -> None:
-    content = detail_composition_content("smartstore")
+    # ADR-0033 G5: SmartStore is now stamped at v3; v2 stays the profile of every other
+    # marketplace and keeps reading exactly as before.
+    assert detail_composition_content("another-market") == detail_composition_content_v2(
+        "another-market"
+    )
+    content = detail_composition_content_v2("smartstore")
     document = canonical_content(
         AuthoringRevisionKind.DETAIL_COMPOSITION, "smartstore", None, content
     )
@@ -585,16 +592,72 @@ def test_the_profile_v2_holds_no_product_content_and_v1_still_reads() -> None:
     [
         {"sections": ["BODY", "DETAIL_IMAGES"]},
         {"sections": ["TOP_GUIDANCE", "DETAIL_IMAGES", "BODY"]},
+        {"sections": ["DETAIL_IMAGES", "BODY", "BOTTOM_GUIDANCE"]},
+        {"sections": ["TOP_GUIDANCE", "DETAIL_IMAGES", "BODY", "BOTTOM_GUIDANCE"]},
         {"sections": ["DETAIL_IMAGES", "BODY", "VIDEO"]},
         {"body_format": "HTML"},
         {"renderer": "detail-renderer/v0"},
+        {"renderer": "detail-renderer/v2"},
         {"guidance": True},
         {"images": ["3" * 64]},
         {"body": "product text"},
     ],
 )
 def test_a_profile_is_never_widened(change: dict[str, Any]) -> None:
-    content = {**detail_composition_content("smartstore"), **change}
+    """v1 and v2 stay locked: only content v3 holds the two guidance sections (ADR-0033 §7)."""
+    content = {**detail_composition_content_v2("smartstore"), **change}
+    with pytest.raises(AuthoringRevisionError):
+        canonical_content(AuthoringRevisionKind.DETAIL_COMPOSITION, "smartstore", None, content)
+    v1 = {
+        "content_version": "registration-detail-composition/v1",
+        "kind": "DETAIL_COMPOSITION",
+        "marketplace_key": "smartstore",
+        "sections": ["BODY"],
+        "guidance": False,
+        **change,
+    }
+    with pytest.raises(AuthoringRevisionError):
+        canonical_content(AuthoringRevisionKind.DETAIL_COMPOSITION, "smartstore", None, v1)
+
+
+def test_the_profile_v3_places_the_guidance_sections_and_holds_no_product_content() -> None:
+    content = detail_composition_content("smartstore")
+    assert content == detail_composition_content_v3("smartstore")
+    document = canonical_content(
+        AuthoringRevisionKind.DETAIL_COMPOSITION, "smartstore", None, content
+    )
+    assert document == {
+        "content_version": "registration-detail-composition/v3",
+        "kind": "DETAIL_COMPOSITION",
+        "marketplace_key": "smartstore",
+        "sections": ["TOP_GUIDANCE", "DETAIL_IMAGES", "BODY", "BOTTOM_GUIDANCE"],
+        "body_format": "PLAIN_TEXT",
+        "renderer": "detail-renderer/v2",
+        "guidance": True,
+    }
+    profile = detail_profile_of("rev-3", document)
+    assert profile.places_images and profile.places_guidance
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"sections": ["DETAIL_IMAGES", "BODY"]},
+        {"sections": ["DETAIL_IMAGES", "TOP_GUIDANCE", "BODY", "BOTTOM_GUIDANCE"]},
+        {"sections": ["TOP_GUIDANCE", "DETAIL_IMAGES", "BODY"]},
+        {"sections": ["TOP_GUIDANCE", "DETAIL_IMAGES", "BODY", "BOTTOM_GUIDANCE", "VIDEO"]},
+        {"sections": ["TOP_GUIDANCE", "DETAIL_IMAGES", "BODY", "OPTION_TABLE", "BOTTOM_GUIDANCE"]},
+        {"body_format": "HTML"},
+        {"renderer": "detail-renderer/v1"},
+        {"guidance": False},
+        {"images": ["3" * 64]},
+        {"body": "product text"},
+        {"guidance_top": ["3" * 64]},
+    ],
+)
+def test_the_profile_v3_is_never_widened(change: dict[str, Any]) -> None:
+    """``VIDEO`` and ``OPTION_TABLE`` stay reserved, and v3 holds no product content."""
+    content = {**detail_composition_content_v3("smartstore"), **change}
     with pytest.raises(AuthoringRevisionError):
         canonical_content(AuthoringRevisionKind.DETAIL_COMPOSITION, "smartstore", None, content)
 

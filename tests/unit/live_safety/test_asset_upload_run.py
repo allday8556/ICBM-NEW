@@ -10,6 +10,7 @@ It composes the existing owners and decides nothing itself:
 - an artifact already APPLIED_PROVEN under the grant's revision and candidate is not uploaded again.
 """
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -33,6 +34,7 @@ from app.capabilities.live_safety.upload_run import (
 from app.platform.core.errors import AppError
 from app.platform.core.execution import ExecutionMode
 from app.stages.products.image_model import ImageAssetKind
+from app.stages.register.model import GuidanceAssetKind
 
 AT = datetime(2026, 10, 4, tzinfo=UTC)
 SOURCE = ArtifactRef(ImageAssetKind.SOURCE_ASSET, "a" * 64, None)
@@ -292,3 +294,108 @@ def test_nothing_starts_when_the_run_cannot_be_formed(
         run.run("grant-1", window_s=900, actor="op", correlation_id="cid")
     assert refused.value.code == code
     assert events == []
+
+
+# ---------------------------------------------------------------- ADR-0033 §8: the guidance source
+
+NOTICE_PNG = b"\x89PNG\r\n\x1a\n" + b"rendered-notice"
+NOTICE = ArtifactRef(
+    GuidanceAssetKind.GUIDANCE_ARTIFACT, hashlib.sha256(NOTICE_PNG).hexdigest(), None
+)
+
+
+@dataclass
+class Notices:
+    """The Detail Guidance owner's recorded images, as the run reads them."""
+
+    images: dict[str, bytes]
+    reads: list[str] = field(default_factory=list)
+
+    def image(self, sha256: str) -> bytes:
+        self.reads.append(sha256)
+        if sha256 not in self.images:
+            raise AppError("GUIDANCE_IMAGE_UNKNOWN", "no guidance image has that checksum")
+        return self.images[sha256]
+
+
+def guided_run(
+    store: Store, uploads: Uploads, events: list[tuple[str, Any]], notices: Notices | None
+) -> AssetUploadRun:
+    run = run_of(store, uploads, events)
+    run._guidance = notices
+    return run
+
+
+def test_a_guidance_image_is_read_from_the_guidance_store_only() -> None:
+    events: list[tuple[str, Any]] = []
+    notices = Notices({NOTICE.sha256: NOTICE_PNG})
+    result = guided_run(Store(grant(SOURCE, NOTICE)), Uploads(events), events, notices).run(
+        "grant-1", window_s=900, actor="op", correlation_id="cid"
+    )
+    assert kinds(events) == ["mode:LIVE", "connect", "upload", "upload", "mode:DRY_RUN"]
+    sent = [e[1] for e in events if e[0] == "upload"]
+    assert (sent[1].artifact, sent[1].content, sent[1].media_type, sent[1].file_name) == (
+        NOTICE,
+        NOTICE_PNG,
+        "image/png",
+        f"{NOTICE.sha256[:16]}.png",
+    )
+    assert notices.reads == [NOTICE.sha256]
+    assert result.complete
+    assert {i.asset_kind for i in result.items} == {"SOURCE_ASSET", "GUIDANCE_ARTIFACT"}
+
+
+@pytest.mark.parametrize(
+    ("notices", "code"),
+    [
+        (None, UPLOAD_ARTIFACT_MISSING),
+        (Notices({}), UPLOAD_ARTIFACT_MISSING),
+        (Notices({NOTICE.sha256: NOTICE_PNG + b"x"}), UPLOAD_ARTIFACT_MISSING),
+    ],
+    ids=["no-store", "not-recorded", "not-the-granted-bytes"],
+)
+def test_a_guidance_image_that_cannot_be_read_exactly_stops_the_run_before_anything(
+    notices: Notices | None, code: str
+) -> None:
+    events: list[tuple[str, Any]] = []
+    run = guided_run(Store(grant(SOURCE, NOTICE)), Uploads(events), events, notices)
+    with pytest.raises(AppError) as refused:
+        run.run("grant-1", window_s=900, actor="op", correlation_id="cid")
+    assert refused.value.code == code
+    assert events == []
+
+
+def test_a_guidance_image_that_is_not_a_png_is_refused() -> None:
+    events: list[tuple[str, Any]] = []
+    jpeg = b"\xff\xd8\xffnot-a-png"
+    notice = ArtifactRef(
+        GuidanceAssetKind.GUIDANCE_ARTIFACT, hashlib.sha256(jpeg).hexdigest(), None
+    )
+    run = guided_run(Store(grant(notice)), Uploads(events), events, Notices({notice.sha256: jpeg}))
+    with pytest.raises(AppError) as refused:
+        run.run("grant-1", window_s=900, actor="op", correlation_id="cid")
+    assert refused.value.code == UPLOAD_MEDIA_UNSUPPORTED
+    assert events == []
+
+
+def test_a_guidance_image_already_applied_for_the_account_is_reused() -> None:
+    """One store-wide notice is uploaded once per account (ADR-0033 §8)."""
+    events: list[tuple[str, Any]] = []
+    applied = Attempt(
+        "att-notice",
+        NOTICE.sha256,
+        GuidanceAssetKind.GUIDANCE_ARTIFACT,  # type: ignore[arg-type]
+        UploadAttemptState.APPLIED_PROVEN,
+        "https://shop-phinf.example/notice.png",
+    )
+    notices = Notices({NOTICE.sha256: NOTICE_PNG})
+    result = guided_run(
+        Store(grant(SOURCE, NOTICE), (applied,)), Uploads(events), events, notices
+    ).run("grant-1", window_s=900, actor="op", correlation_id="cid")
+    assert [e[1].artifact.sha256 for e in events if e[0] == "upload"] == [SOURCE.sha256]
+    assert notices.reads == []
+    assert {(i.sha256, i.outcome) for i in result.items} == {
+        (NOTICE.sha256, "ALREADY_APPLIED"),
+        (SOURCE.sha256, "APPLIED_PROVEN"),
+    }
+    assert result.complete

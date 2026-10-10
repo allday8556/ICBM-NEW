@@ -370,7 +370,8 @@ def _copy_unit(config: AppConfig, snapshot_id: str) -> str:
             " marketplace_key, marketplace_account_id, listing_shape, ?, preflight_rule_version,"
             " preflight_fingerprint, category_mapping_revision, taxonomy_revision,"
             " policy_revisions_json, detail_composition_revision, sanitizer_profile_version,"
-            " payload_hash, payload_json, created_by, correlation_id, created_at"
+            " payload_hash, payload_json, created_by, correlation_id, created_at,"
+            " guidance_assets_json"
             " FROM registration_snapshots WHERE registration_snapshot_id = ?",
             (copy, f"icbm-{uuid.uuid4().hex}", snapshot_id),
         )
