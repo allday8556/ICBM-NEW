@@ -40,6 +40,7 @@ from app.stages.register.guidance import (
     DEFAULT_CHOICE,
     NO_GUIDANCE,
     GuidanceChoice,
+    GuidanceRevision,
     GuidanceSource,
     ResolvedGuidance,
 )
@@ -292,6 +293,13 @@ class RegistrationPreflightService:
             return NO_GUIDANCE
         now, revisions = self._guidance.newest()
         return resolve_guidance(choice, now, revisions, preparation_revision_id)
+
+    def guidance_revisions(self) -> tuple[GuidanceRevision, ...]:
+        """The owner's newest revision of every notice, as it holds them now; empty without a
+        wired source. A read only: the frozen-Snapshot preview labels a frozen notice with it."""
+        if self._guidance is None:
+            return ()
+        return tuple(self._guidance.newest()[1])
 
     def detail_profile(self, revision_id: str | None) -> DetailProfile | None:
         """The profile a target's detail-composition revision names, as its owner holds it; none

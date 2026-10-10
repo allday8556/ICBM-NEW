@@ -109,6 +109,9 @@ migration.
 ADR-0033 G5 placed the notices: composition v3, `detail-renderer/v2`, the `registration-payload/v3`
 Snapshot pin and the SmartStore wire v10 in the existing REGISTER and adapter modules, the guidance
 byte source of the upload run, migration `0059`, one unit and one integration suite.
+ADR-0033 G6 shows the frozen notices as image slots in the Registration Management snapshot preview
+(top notices, detail images, body, bottom notices) in the existing REGISTER and UI modules, and
+added two integration suites; no migration.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -166,11 +169,11 @@ the mapper is provider-zero, semantic/unit-based and read-only.
 | `integrations/` | 78 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 28 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 339 | tests |
+| `tests/` | 341 | tests |
 | `tests/contracts/` | 11 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 143 | integration tests by runtime owner |
+| `tests/integration/` | 145 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 124 | unit tests by runtime owner |
 | `ui/` | 70 | operator clients: the served web client and the capture extension |
