@@ -151,7 +151,11 @@ All writes go through one owner store with an injected clock and an audit event 
 
 ## Invariants
 
-- **OB-01** An onboarded host is an exact `https` host that a trial observed and the operator confirmed. It is never a wildcard, an IP literal, a loopback, private or link-local address, a port or a path.
+- **OB-01** An onboarded host is an exact `https` host that the operator confirmed and that is either:
+  - the storefront origin's host the operator entered at add time, the one bootstrap host, needed for detection, policy reads and CONNECT; or
+  - a host a trial observed.
+
+  It is never a wildcard, an IP literal, a loopback, private or link-local address, a port or a path.
 - **OB-02** A trial never writes a `ProductFactsRevision` or any canonical product truth.
 - **OB-03** An onboarded site's configuration holds words only, and every words revision is a distinct extraction identity.
 - **OB-04** `ACTIVE` needs 3 distinct samples with every core field read, each verified by the operator, under the current words revision. A words change returns the site to `RECON`.
