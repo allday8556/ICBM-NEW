@@ -4,7 +4,7 @@ The hashed set is every module of ``collect/``; this manifest is never part of i
 extraction identity joins this revision with its own and hashes this fingerprint with its file.
 """
 
-EXTRACTOR_REVISION = "godomall-1"
+EXTRACTOR_REVISION = "godomall-2"
 EXTRACTOR_INPUTS = (
     "integrations/suppliers/platforms/godomall/collect/__init__.py",
     "integrations/suppliers/platforms/godomall/collect/dom.py",
@@ -17,4 +17,4 @@ EXTRACTOR_INPUTS = (
 # A reader cannot recompute a SHA-256; the proof is mechanical:
 # tests/contracts/test_repository_rules.py recomputes this digest from EXTRACTOR_INPUTS, and the
 # merge guard requires that test green in the FULL CI of the exact HEAD.
-EXTRACTOR_FINGERPRINT = "711bb4ecb9609146d034650ea6d19f35792ace528ab4ae4aec703417d962f032"
+EXTRACTOR_FINGERPRINT = "0d417d9bcd32dbe0b32f1fb04b500aa4036132fdfa09945e1feebbd14902b4c3"

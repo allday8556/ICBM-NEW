@@ -18,6 +18,15 @@ KM통상's parser reads a first value, a guess or nothing, the template fails cl
 - a declared title that only appends a suffix to the 상품명 row reads as the row;
 - the smart-design purchase controls ``actionBuy`` and ``actionCart``;
 - the representative image's container as a vocabulary region.
+
+``cafe24-3`` (2026-10-10, ADR-0035 after U-PICK acceptance run 1):
+- a restricting sales-channel phrase is read in the product's name too, never an allowed one;
+- the region-surcharge row (label slot ``shipping_region_fee``, ``추가배송비``) is kept as words in
+  the shipping policy text and never priced;
+- a minimum row that is exactly a per-quantity list reads its ``1개`` amount;
+- text is cleaned of invisible characters and a no-break space is a space, in page text and in the
+  declared title, so a text made only of invisible characters is empty, and a title with a doubled
+  space still matches its row plus the site's suffix.
 """
 
-EXTRACTION_REVISION = "cafe24-2"
+EXTRACTION_REVISION = "cafe24-3"

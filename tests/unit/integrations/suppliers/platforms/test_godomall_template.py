@@ -72,8 +72,10 @@ def page(
     controls: str = BUY,
     description: str | None = "<p>설명입니다</p>",
     og_url: str | None = URL,
+    name: str = "마그네슘",
+    heading: str | None = None,
 ) -> DocumentView:
-    head = '<meta property="og:title" content="마그네슘">'
+    head = f'<meta property="og:title" content="{name}">'
     if og_url is not None:
         head += f'<meta property="og:url" content="{og_url}">'
     detail = (
@@ -85,7 +87,7 @@ def page(
     body = (
         f"<html><head>{head}</head><body>"
         '<div class="goods_view_top"><form id="frmView"><input type="hidden">'
-        '<div class="item_detail_tit"><h3>마그네슘</h3></div>'
+        f'<div class="item_detail_tit"><h3>{name if heading is None else heading}</h3></div>'
         f'<div class="item_detail_list">{rows}</div>{choice}{controls}'
         f"</form></div>{detail}</body></html>"
     )
@@ -307,7 +309,7 @@ def test_a_fee_without_a_layer_is_fixed_and_zero_is_free() -> None:
         "<strong>4,000원</strong>" + TIERS,
         "<strong>3,000원</strong>" + TIERS.replace("</ul>", "</ul><p>제주 추가 5,000원</p>"),
         "<strong>3,000원</strong>" + TIERS + TIERS.replace("3,000원", "2,500원"),
-        "<strong>3,000원</strong>" + TIERS + REGION.format("<p>제주 5,000원</p>"),
+        "<strong>3,000원</strong>" + TIERS + REGION.format("") + REGION.format(""),
         "착불",
     ],
     ids=[
@@ -318,7 +320,8 @@ def test_a_fee_without_a_layer_is_fixed_and_zero_is_free() -> None:
         "base fee disagrees",
         "an amount outside the tiers",
         "two tier layers",
-        "a region surcharge",
+        # ADR-0035 §2 keeps a region surcharge's words (below); two region layers stay held.
+        "two region layers",
         "no amount",
     ],
 )
@@ -416,3 +419,119 @@ def test_a_shown_notice_is_never_absent() -> None:
         description="<p>설명</p><h3>상품필수 정보</h3><table><tr><th>소비기한</th></tr></table>"
     )
     assert fields(view)["notice"].status is FieldStatus.REVIEW_REQUIRED
+
+
+# ---------------------------------------------------------------- ADR-0035 (godomall-2)
+
+ALLOWED_ROW = BASE_ROWS + row("판매가능플랫폼", "모든마켓 판매가능")
+# The real per-quantity minimum cell (U-PICK 4072), with the line break the page collapsed
+# between "40,800원 이상" and "4개".
+QUANTITY_CELL = (
+    "1개 13,900원 이상/ 2개 27,500원 이상 / 3개 40,800원 이상4개 53,900원 이상 / "
+    "5개 66,700원 이상 / 6개 79,200원 이상"
+)
+
+
+@pytest.mark.parametrize(
+    ("name", "heading"),
+    [("모든마켓 판매가능 마그네슘", None), ("마그네슘", "모든마켓 판매가능 마그네슘")],
+    ids=["title", "heading"],
+)
+def test_nr_01_an_allowed_reading_never_comes_from_a_name(name: str, heading: str | None) -> None:
+    view = page(name=name, heading=heading, description="<p>설명</p>")
+    assert fields(view)["sales_channels"].status is FieldStatus.ABSENT
+
+
+@pytest.mark.parametrize(
+    ("name", "heading"),
+    [("마그네슘 - 쿠팡판매 불가", None), ("마그네슘", "마그네슘 - 쿠팡판매 불가")],
+    ids=["title", "heading"],
+)
+def test_nr_02_a_name_restriction_beside_an_all_allowed_row_is_held(
+    name: str, heading: str | None
+) -> None:
+    view = page(rows=ALLOWED_ROW, name=name, heading=heading)
+    assert fields(view)["sales_channels"].status is FieldStatus.REVIEW_REQUIRED
+
+
+def test_a_name_restriction_alone_lists_the_forbidden_marketplace() -> None:
+    fact = fields(page(name="마그네슘 - 쿠팡 판매불가"))["sales_channels"]
+    assert fact.status is FieldStatus.CONFIRMED
+    assert (fact.value.scope, fact.value.forbidden) == (SalesChannelScope.LISTED, ("coupang",))
+    assert fact.value.policy_text == "쿠팡판매 불가"
+    assert {e.locator for e in fact.evidence} == {"meta[og:title]", ".item_detail_tit h3"}
+
+
+def test_rs_01_a_region_surcharge_is_kept_as_words_and_never_priced() -> None:
+    region = REGION.format("<p>제주 5,000원</p><p>도서산간 7,000원</p>")
+    conditional = shipping(f"<strong>3,000원</strong>{TIERS}{region}")
+    assert conditional.status is FieldStatus.CONFIRMED
+    value = conditional.value
+    assert (value.kind, value.fee_krw, value.free_over_krw) == (
+        ShippingKind.CONDITIONAL,
+        3000,
+        200000,
+    )
+    assert value.policy_text.endswith(" · 지역별추가배송비 제주 5,000원 도서산간 7,000원")
+    fixed = shipping(f"<strong>3,000원</strong>{region}").value
+    assert (fixed.kind, fixed.fee_krw) == (ShippingKind.FIXED, 3000)
+    free = shipping(f"<strong>0원</strong>{region}").value
+    assert (free.kind, free.fee_krw) == (ShippingKind.FREE, None)
+    # A layer that states nothing but its own title is named as an empty one, as before.
+    empty = shipping(f"<strong>3,000원</strong>{REGION.format('')}").value
+    assert empty.policy_text == "배송비 3,000원 · 지역별추가배송비 (금액 표시 없음)"
+
+
+@pytest.mark.parametrize(
+    "dd",
+    [
+        "<strong>3,000원</strong>" + REGION.format("<p>제주 https://example.com 5,000원</p>"),
+        "<strong>3,000원</strong>" + REGION.format("<p>제주 //example.com 5,000원</p>"),
+        "<strong>3,000원</strong>"
+        + REGION.format("<p>제주 5,000원</p>")
+        + REGION.format("<p>제주 6,000원</p>"),
+        "<strong>3,000원</strong> 제주 5,000원 추가" + REGION.format("<p>제주 5,000원</p>"),
+    ],
+    ids=["url", "protocol-relative url", "two layers", "an amount outside the layers"],
+)
+def test_rs_01_a_region_surcharge_that_cannot_be_kept_as_words_is_held(dd: str) -> None:
+    fact = shipping(dd)
+    assert fact.status is FieldStatus.REVIEW_REQUIRED
+    assert "example.com" not in repr(fact.evidence)
+
+
+def test_qm_01_a_per_quantity_minimum_row_reads_its_one_unit_amount() -> None:
+    fact = fields(page(rows=BASE_ROWS + row("최저판매가", QUANTITY_CELL)))["minimum_sale_price"]
+    assert fact.status is FieldStatus.CONFIRMED
+    assert (fact.value.label, fact.value.amount_krw) == ("최저판매가", 13900)
+    assert fact.evidence[0].normalized == "13900"
+    assert fact.evidence[0].observed == QUANTITY_CELL
+
+
+@pytest.mark.parametrize(
+    "cell",
+    [
+        "2개 27,500원 이상 / 1개 13,900원 이상",
+        "1개 13,900원 이상 / 2개 27,500원 이상 (택배)",
+        "1개 13,900원 이상 / 2개 27,500원 이상 / 2개 26,000원 이상",
+        "1개 13,900원 이상 / 27,500원",
+        "1개 13,900원 / 2개 27,500원 이상",
+        "1개 13,900원 이상 // 2개 27,500원 이상",
+    ],
+    ids=["not 1개 first", "other words", "repeated quantity", "unaccounted", "no 이상", "two seps"],
+)
+def test_qm_01_any_other_minimum_row_shape_is_held(cell: str) -> None:
+    fact = fields(page(rows=BASE_ROWS + row("최저판매가", cell)))["minimum_sale_price"]
+    assert fact.status is FieldStatus.REVIEW_REQUIRED
+
+
+def test_a_description_of_invisible_characters_only_is_empty() -> None:
+    fact = fields(page(description="<p>\ufeff\ufeff</p>"))["detail_description"]
+    assert fact.status is FieldStatus.REVIEW_REQUIRED
+
+
+def test_a_no_break_space_in_the_title_is_a_space() -> None:
+    view = page(name="마그네슘\u00a0 90정", heading="마그네슘 90정")
+    name = fields(view)["original_name"]
+    assert name.status is FieldStatus.CONFIRMED
+    assert name.value.text == "마그네슘 90정"

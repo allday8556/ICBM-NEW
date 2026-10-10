@@ -6,6 +6,14 @@ say ``cafe24``). For each fact it must give the same status and value, or a stat
 fails closed (the ``facts`` module lists them). Evidence is not compared: the template writes its
 own locators. Every fixture is written here or is an existing synthetic one; no supplier is
 contacted.
+
+``cafe24-3`` (ADR-0035) adds differences that are words only or the owner's rule, each proven on a
+corpus page of its own shape:
+- a region surcharge (``추가배송비``) is kept after KM통상's shipping policy text, with the same
+  kind and fee, and the field is held for review when it cannot be kept as words;
+- text is cleaned of invisible characters and a no-break space is a space: a description made only
+  of invisible characters is held for review, and a title's doubled space reads as one;
+- a per-quantity minimum row reads its ``1개`` amount, where KM통상 reads the quantity 1.
 """
 
 from dataclasses import asdict
@@ -13,7 +21,13 @@ from pathlib import Path
 
 import pytest
 
-from app.stages.collect.facts import FieldStatus, ShippingKind, ShippingValue, TextValue
+from app.stages.collect.facts import (
+    FieldStatus,
+    MoneyValue,
+    ShippingKind,
+    ShippingValue,
+    TextValue,
+)
 from integrations.suppliers.kmretail.collect import classify_images as km_classify
 from integrations.suppliers.kmretail.collect import parse_fields as km_fields
 from integrations.suppliers.kmretail.collect import resolve as km_resolve
@@ -68,6 +82,17 @@ CORPUS = {
     "disagree": page(retailer_item="356"),
     "no_canonical": page(canonical=None),
     "script_only": page(body=BUY + "<script>var price='판매가 1원'</script>"),
+    # ADR-0035's shapes (cafe24-3), so each stated difference below is read, not only claimed.
+    "region_surcharge": page(
+        rows=row("배송비", "3,000원") + row("추가배송비", "제주도 3,000원/도서산간 5,000원 추가"),
+        body=BUY,
+    ),
+    "per_quantity_minimum": page(
+        rows=row("최저지도가", "1개 13,900원 이상/ 2개 27,500원 이상 / 3개 40,800원 이상"),
+        body=BUY,
+    ),
+    "invisible_description": page(body=BUY + '<div id="prdDetail"><p>&#xFEFF;&#xFEFF;</p></div>'),
+    "spaced_title": page(name="마그네슘&nbsp; 90정"),
 }
 FILES = {
     path.name: path.read_text("utf-8")
@@ -105,9 +130,54 @@ def test_the_template_reads_every_km_document_as_km_does(body: str) -> None:
             and isinstance(ours_fact.value, ShippingValue)
             and ours_fact.value.kind is ShippingKind.FREE
         )
+        # cafe24-3 (ADR-0035), words only: a region surcharge's words follow KM통상's policy text,
+        # with the same kind and fee; and a title's no-break or doubled space is one space.
+        surcharge_words = (
+            key == "shipping"
+            and isinstance(ours_fact.value, ShippingValue)
+            and isinstance(theirs_fact.value, ShippingValue)
+            and (ours_fact.value.kind, ours_fact.value.fee_krw)
+            == (theirs_fact.value.kind, theirs_fact.value.fee_krw)
+            and ours_fact.value.policy_text.startswith(f"{theirs_fact.value.policy_text} / ")
+        )
+        spaces_only = (
+            isinstance(ours_fact.value, TextValue)
+            and isinstance(theirs_fact.value, TextValue)
+            and ours_fact.value.text == " ".join(theirs_fact.value.text.split())
+        )
+        # cafe24-3 (ADR-0035 §3): a per-quantity minimum row reads its 1개 amount, where KM통상
+        # reads the cell's first number, the quantity 1.
+        one_unit_minimum = (
+            key == "minimum_sale_price"
+            and isinstance(ours_fact.value, MoneyValue)
+            and isinstance(theirs_fact.value, MoneyValue)
+            and theirs_fact.value.amount_krw == 1
+            and (ours_fact.evidence[0].observed or "").startswith("1개 ")
+        )
         assert (
-            ours_fact.status is FieldStatus.REVIEW_REQUIRED or stock_rule or whole_text or free_fee
+            ours_fact.status is FieldStatus.REVIEW_REQUIRED
+            or stock_rule
+            or whole_text
+            or free_fee
+            or surcharge_words
+            or spaces_only
+            or one_unit_minimum
         ), key
+
+
+@pytest.mark.parametrize(
+    ("name", "key"),
+    [
+        ("region_surcharge", "shipping"),
+        ("per_quantity_minimum", "minimum_sale_price"),
+        ("invisible_description", "detail_description"),
+        ("spaced_title", "original_name"),
+    ],
+)
+def test_each_adr_0035_corpus_page_exercises_its_stated_difference(name: str, key: str) -> None:
+    view = document(CORPUS[name])
+    ours, theirs = parse_fields(view)[key], km_fields(view)[key]
+    assert (ours.status, ours.value) != (theirs.status, theirs.value)
 
 
 @pytest.mark.parametrize(
