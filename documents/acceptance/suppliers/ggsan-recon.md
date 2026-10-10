@@ -73,6 +73,7 @@ No image was fetched. The ADR-0030 §8.1 bound is six product pages; three were 
 | a different platform | the `godomall` template (ADR-0030 §4, S4), `godomall-1` |
 | the minimum price is a description sentence | ADR-0034 §1: the site phrase `판매가격절대준수`; a per-unit amount only, bundle and shipping-inclusive amounts excluded; several different amounts go to review |
 | a free-over shipping policy | ADR-0034 §2: recorded as `CONDITIONAL` with its base fee and threshold, priced at the base fee (Issue #219 `6088081139`) |
+| a shipping fee stated as a range (not seen in the captures) | ADR-0032 §4: `FIXED` at its highest amount, its words kept |
 | `판매가` beside `정가` | ADR-0032: 건강산 declares `판매가` as `PURCHASE` and `정가` as `LIST` (Issue #219 `6086421199`) |
 | `쿠팡판매 불가` | ADR-0031: the site's `channel_forbid_coupang` phrase |
 | the product form's hidden inputs | not read: the capture keeps no input value (ADR-0019 §6.1). "No options" (ADR-0013 ruling B) is read from what the page shows: an order list with exactly one line written in advance and no option control of any kind. A sold-out page has no order list, so its options stay under review |

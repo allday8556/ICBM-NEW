@@ -281,6 +281,15 @@ def test_a_free_over_layer_is_a_conditional_policy_with_its_base_fee() -> None:
     assert "금액별배송비" in value.policy_text and "지역별추가배송비" in value.policy_text
 
 
+def test_a_fee_range_is_fixed_at_its_highest_amount() -> None:
+    # ADR-0032 §4 PR-04: the owner's rule, for every template; the words are kept.
+    fact = shipping("<strong>3,000원 ~ 4,000원</strong><strong> / 주문시결제(선결제)</strong>")
+    assert fact.status is FieldStatus.CONFIRMED
+    assert (fact.value.kind, fact.value.fee_krw) == (ShippingKind.FIXED, 4000)
+    assert "3,000원 ~ 4,000원" in fact.value.policy_text
+    assert any(evidence.normalized == "4000" for evidence in fact.evidence)
+
+
 def test_a_fee_without_a_layer_is_fixed_and_zero_is_free() -> None:
     fixed = shipping("<strong>3,000원</strong>").value
     assert (fixed.kind, fixed.fee_krw) == (ShippingKind.FIXED, 3000)
@@ -290,7 +299,8 @@ def test_a_fee_without_a_layer_is_fixed_and_zero_is_free() -> None:
 @pytest.mark.parametrize(
     "dd",
     [
-        "<strong>3,000원 ~ 4,000원</strong>",
+        "<strong>3,000원 ~ 4,000원</strong>" + TIERS,
+        "<strong>3,000원 ~ 4,000원</strong> 제주 5,000원 추가",
         "<strong>3,000원</strong> 제주 5,000원 추가",
         "<strong>3,000원</strong>"
         + TIERS.replace("200,000원 이상 <span> 0원", "200,000원 이상 <span> 1,000원"),
@@ -301,7 +311,8 @@ def test_a_fee_without_a_layer_is_fixed_and_zero_is_free() -> None:
         "착불",
     ],
     ids=[
-        "range",
+        "a range beside tiers",
+        "a range and another amount",
         "another amount",
         "not free over",
         "base fee disagrees",

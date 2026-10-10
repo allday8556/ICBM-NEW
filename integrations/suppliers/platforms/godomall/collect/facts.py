@@ -17,7 +17,8 @@ Every reading fails closed:
   (ADR-0010 §10); a sold-out control decides ``SOLD_OUT`` only when no active control exists.
   A stock row stating none beside an active control is a disagreement, held for review.
 - The shipping fact is recorded as the page states it. A base fee with a free-over threshold is
-  ``CONDITIONAL``, carrying both; pricing reads that at its base fee (ADR-0034 §2).
+  ``CONDITIONAL``, carrying both; pricing reads that at its base fee (ADR-0034 §2). A fee stated
+  as a range is ``FIXED`` at its highest amount, its words kept (ADR-0032 §4).
 - A minimum resale price written as a description sentence is read only from the site's phrases
   (ADR-0034 §1).
 - Nothing is read from an image or a script, and every locator is written here.
@@ -116,6 +117,9 @@ _SENTENCE_MINIMUM = re.compile(r"(?:1개)?" + _NUMBER + r"원이상")
 # The amount-tier layer: "<from>원 이상 ~ <to>원 미만 <fee>원" and "<from>원 이상 <fee>원".
 _TIER_BOUNDED = re.compile(_NUMBER + r"원이상~" + _NUMBER + r"원미만" + _NUMBER + r"원")
 _TIER_OPEN = re.compile(_NUMBER + r"원이상" + _NUMBER + r"원")
+# ADR-0032 §4 (the owner's rule, Issue #219 6086421199): a fee stated as a range, ``A원 ~ B원``,
+# is read as its highest amount.
+_FEE_RANGE = re.compile(_NUMBER + r"원?[~∼〜～]" + _NUMBER + r"원")
 _URL_MATERIAL = re.compile(r"(?i)(?:[a-z][a-z0-9+.-]*:)?//\S*")
 _DIGIT = re.compile(r"\d")
 
@@ -388,12 +392,18 @@ def _shipping(found: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Fiel
     if len(fee) > 1:
         return _review(locator, *(v for _, v, _n in fee))
     _label, _value, dd = fee[0]
-    # The base fee: the row's first strong statement, exactly one amount of won.
+    # The base fee: the row's first strong statement, exactly one amount of won, or exactly a
+    # range, which is read as its highest amount (ADR-0032 §4).
     strongs = [node for node in dd.content if isinstance(node, Node) and node.tag == "strong"]
-    base = _ONE_AMOUNT.fullmatch(_squash(strongs[0].text)) if strongs else None
-    if base is None:
+    stated = _squash(strongs[0].text) if strongs else ""
+    base = _ONE_AMOUNT.fullmatch(stated)
+    ranged = _FEE_RANGE.fullmatch(stated)
+    if base is not None:
+        base_fee = _amount(base)
+    elif ranged is not None:
+        base_fee = max(_amount(ranged, 1), _amount(ranged, 2))
+    else:
         return _review(locator, dd.text)
-    base_fee = _amount(base)
     tiers = [node for node in dd.descendants() if node.marks_exactly(f"#{FEE_TIERS}")]
     regions = [node for node in dd.descendants() if node.marks_exactly(f"#{REGION_FEES}")]
     if len(tiers) > 1 or len(regions) > 1:
@@ -410,7 +420,10 @@ def _shipping(found: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Fiel
     outside = _squash(dd.text_outside(f"#{FEE_TIERS}", f"#{REGION_FEES}"))
     # Outside the layers the row may hold only its base fee, the payment words and the
     # platform's button labels; any other amount is a condition no rule reads.
-    if len(_ONE_AMOUNT.findall(outside)) != 1:
+    if len(_ONE_AMOUNT.findall(outside)) != len(_ONE_AMOUNT.findall(stated)):
+        return _review(locator, dd.text)
+    if ranged is not None and tiers:
+        # A range beside an amount-tier layer is two conditions at once: no rule reads it.
         return _review(locator, dd.text)
     policy = (
         f"배송비 {strongs[0].text}"
@@ -420,7 +433,18 @@ def _shipping(found: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Fiel
     )
     if _carries_url(policy):
         return _review(locator, policy)
-    evidence = (_evidence(locator, FieldStatus.CONFIRMED, policy),)
+    evidence: tuple[Evidence, ...] = (_evidence(locator, FieldStatus.CONFIRMED, policy),)
+    if ranged is not None:
+        # The evidence names the reading: the highest amount of the range.
+        evidence += (
+            Evidence(
+                EvidenceKind.DOM_TEXT,
+                locator,
+                FieldStatus.CONFIRMED,
+                observed=_quote(strongs[0].text),
+                normalized=str(base_fee),
+            ),
+        )
     if not tier_items:
         kind = ShippingKind.FREE if base_fee == 0 else ShippingKind.FIXED
         return FieldFact(
