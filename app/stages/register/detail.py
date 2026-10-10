@@ -20,6 +20,15 @@ because the plan holds none. The outbound sanitizer is unchanged.
 
 No count or length limit is applied (owner decision D4, G-1 ``INSUFFICIENT``), and nothing here
 ever edits or truncates a plan.
+
+**Detail Guidance (ADR-0033 §6, §7; G5).** Composition content v3 adds the image sections
+``TOP_GUIDANCE`` and ``BOTTOM_GUIDANCE`` under ``detail-renderer/v2``. A v3 plan also freezes the
+resolved notices of both placements (``guidance: {top, bottom}``), each by its resolution identity,
+template and image SHA-256 — never its text and never a URL. ``detail-renderer/v2`` draws each one
+as an image element exactly like a detail image, from the same Snapshot's uploaded guidance asset
+identities; an empty guidance section renders nothing, so a v3 plan without a notice renders the
+same bytes as its v2 counterpart. ``detail-renderer/v1`` is unchanged and never renders a guidance
+section.
 """
 
 import html
@@ -28,20 +37,38 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
+from app.stages.register.model import GuidanceAssetKind
 from app.stages.register.sanitize import safe_provider_reference
 
 DETAIL_RENDERER_VERSION: Final = "detail-renderer/v1"
+# ADR-0033 §7 (G5): the renderer of composition v3, which also draws the guidance sections.
+DETAIL_RENDERER_VERSION_V2: Final = "detail-renderer/v2"
+SECTION_TOP_GUIDANCE: Final = "TOP_GUIDANCE"
 SECTION_DETAIL_IMAGES: Final = "DETAIL_IMAGES"
 SECTION_BODY: Final = "BODY"
+SECTION_BOTTOM_GUIDANCE: Final = "BOTTOM_GUIDANCE"
 BODY_FORMAT_PLAIN_TEXT: Final = "PLAIN_TEXT"
+GUIDANCE_ASSET_KIND: Final = GuidanceAssetKind.GUIDANCE_ARTIFACT.value
 
-# The renderer each pinned version names; another version is never rendered by this one.
-RENDERERS: Final = frozenset({DETAIL_RENDERER_VERSION})
+# The section vocabulary each pinned renderer version renders; another version is never rendered.
+_VOCABULARY: Final[Mapping[str, frozenset[str]]] = {
+    DETAIL_RENDERER_VERSION: frozenset({SECTION_DETAIL_IMAGES, SECTION_BODY}),
+    DETAIL_RENDERER_VERSION_V2: frozenset(
+        {SECTION_TOP_GUIDANCE, SECTION_DETAIL_IMAGES, SECTION_BODY, SECTION_BOTTOM_GUIDANCE}
+    ),
+}
+RENDERERS: Final = frozenset(_VOCABULARY)
 
 _PLAN_KEYS: Final = frozenset(
     {"composition_revision", "sections", "body_format", "renderer", "body", "images"}
 )
+# A ``detail-renderer/v2`` plan also freezes its resolved guidance (ADR-0033 §6).
+_PLAN_KEYS_V2: Final = _PLAN_KEYS | {"guidance"}
 _IMAGE_KEYS: Final = frozenset({"item_id", "position", "asset_kind", "sha256", "derivation_id"})
+_GUIDANCE_SOURCES: Final[Mapping[str, str]] = {
+    "STORE": "guidance_revision_id",
+    "PRODUCT": "preparation_revision_id",
+}
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
@@ -74,6 +101,36 @@ class DetailProfile:
     @property
     def places_images(self) -> bool:
         return self.renders and SECTION_DETAIL_IMAGES in self.sections
+
+    @property
+    def places_guidance(self) -> bool:
+        """Whether the profile places Detail Guidance notices (content v3, ADR-0033 §7)."""
+        return self.renderer == DETAIL_RENDERER_VERSION_V2
+
+
+@dataclass(frozen=True)
+class PlannedGuidance:
+    """One resolved Detail Guidance notice (ADR-0033 §6), frozen by its resolution identity — the
+    store-wide revision, or the preparation revision that authored a product's own notice — its
+    template and its image's SHA-256. Never its text and never a URL."""
+
+    source: str
+    identity: str | None
+    template: str
+    sha256: str
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        """The guidance artifact this entry draws: content-addressed, with no derivation."""
+        return (GUIDANCE_ASSET_KIND, self.sha256, "")
+
+    def canonical(self) -> dict[str, Any]:
+        return {
+            "source": self.source,
+            _GUIDANCE_SOURCES[self.source]: self.identity,
+            "template": self.template,
+            "sha256": self.sha256,
+        }
 
 
 @dataclass(frozen=True)
@@ -110,13 +167,27 @@ class DetailPlan:
     renderer: str
     body: str
     images: tuple[PlannedImage, ...]
+    # ADR-0033 §6 (G5): the resolved notices of each placement, in order (``detail-renderer/v2``).
+    guidance_top: tuple[PlannedGuidance, ...] = ()
+    guidance_bottom: tuple[PlannedGuidance, ...] = ()
 
     @property
     def places_images(self) -> bool:
         return SECTION_DETAIL_IMAGES in self.sections
 
+    @property
+    def guides(self) -> bool:
+        """Whether this is a guidance plan (``detail-renderer/v2``): it freezes its resolved
+        notices, an empty resolution included."""
+        return self.renderer == DETAIL_RENDERER_VERSION_V2
+
+    @property
+    def guidance(self) -> tuple[PlannedGuidance, ...]:
+        """Every planned notice, top first, each in its placement's order."""
+        return self.guidance_top + self.guidance_bottom
+
     def canonical(self) -> dict[str, Any]:
-        return {
+        document: dict[str, Any] = {
             "composition_revision": self.composition_revision,
             "sections": list(self.sections),
             "body_format": self.body_format,
@@ -124,13 +195,52 @@ class DetailPlan:
             "body": self.body,
             "images": [image.canonical() for image in self.images],
         }
+        if self.guides:
+            document["guidance"] = {
+                "top": [entry.canonical() for entry in self.guidance_top],
+                "bottom": [entry.canonical() for entry in self.guidance_bottom],
+            }
+        return document
+
+
+def _planned_guidance(entries: object) -> tuple[PlannedGuidance, ...]:
+    if not isinstance(entries, list):
+        raise DetailPlanError("DETAIL_PLAN_MALFORMED", "a guidance placement is not a list")
+    planned: list[PlannedGuidance] = []
+    for entry in entries:
+        if not isinstance(entry, Mapping) or entry.get("source") not in _GUIDANCE_SOURCES:
+            raise DetailPlanError("DETAIL_PLAN_MALFORMED", "not exactly a planned notice")
+        source = str(entry["source"])
+        identity_key = _GUIDANCE_SOURCES[source]
+        identity = entry.get(identity_key)
+        if (
+            set(entry) != {"source", identity_key, "template", "sha256"}
+            or not (identity is None or isinstance(identity, str))
+            or not isinstance(entry["template"], str)
+            or not isinstance(entry["sha256"], str)
+            or not _SHA256.fullmatch(entry["sha256"])
+        ):
+            raise DetailPlanError("DETAIL_PLAN_MALFORMED", "a planned notice member is invalid")
+        planned.append(PlannedGuidance(source, identity, entry["template"], entry["sha256"]))
+    return tuple(planned)
 
 
 def plan_of(document: object) -> DetailPlan:
     """The plan one frozen payload holds, read strictly: an unknown or missing member — a URL
-    included — refuses the whole plan."""
-    if not isinstance(document, Mapping) or set(document) != _PLAN_KEYS:
+    included — refuses the whole plan. Only a ``detail-renderer/v2`` plan holds ``guidance``, and
+    it always does."""
+    if not isinstance(document, Mapping):
         raise DetailPlanError("DETAIL_PLAN_MALFORMED", "not exactly a detail plan")
+    guides = document.get("renderer") == DETAIL_RENDERER_VERSION_V2
+    if set(document) != (_PLAN_KEYS_V2 if guides else _PLAN_KEYS):
+        raise DetailPlanError("DETAIL_PLAN_MALFORMED", "not exactly a detail plan")
+    top: tuple[PlannedGuidance, ...] = ()
+    bottom: tuple[PlannedGuidance, ...] = ()
+    if guides:
+        guidance = document["guidance"]
+        if not isinstance(guidance, Mapping) or set(guidance) != {"top", "bottom"}:
+            raise DetailPlanError("DETAIL_PLAN_MALFORMED", "not exactly a planned guidance")
+        top, bottom = _planned_guidance(guidance["top"]), _planned_guidance(guidance["bottom"])
     sections = document["sections"]
     images = document["images"]
     if (
@@ -170,6 +280,8 @@ def plan_of(document: object) -> DetailPlan:
         renderer=document["renderer"],
         body=document["body"],
         images=tuple(planned),
+        guidance_top=top,
+        guidance_bottom=bottom,
     )
 
 
@@ -177,7 +289,8 @@ class UploadedProviderAsset:
     """The provider identity of one uploaded asset — the only reference the renderer emits.
 
     It is a type of its own, apart from any operator string: it is built only from a Snapshot's
-    prepared ``publication_assets`` reference, and only when that reference is a safe provider
+    prepared ``publication_assets`` — or, for a notice, ``guidance_assets`` (ADR-0033 §7) —
+    reference, and only when that reference is a safe provider
     reference (opaque, or plain https without query, fragment or user information)."""
 
     __slots__ = ("_reference",)
@@ -216,34 +329,50 @@ def _paragraphs(body: str) -> list[str]:
     return rendered
 
 
-def render(plan: DetailPlan, uploaded: Mapping[tuple[str, str, str], UploadedProviderAsset]) -> str:
-    """``detail-renderer/v1``: the provider detail body of one frozen plan.
+def _image_element(
+    key: tuple[str, str, str], uploaded: Mapping[tuple[str, str, str], UploadedProviderAsset]
+) -> str:
+    asset = uploaded.get(key)
+    if not isinstance(asset, UploadedProviderAsset):
+        raise DetailPlanError(
+            "DETAIL_IMAGE_NOT_UPLOADED", f"image {key[1]} has no provider identity"
+        )
+    return f'<img src="{html.escape(asset.reference, quote=True)}" alt="">'
 
-    Sections in plan order; ``DETAIL_IMAGES`` as one image element per planned image, in plan order,
-    each pointing at that image's uploaded provider reference; ``BODY`` as escaped paragraphs.
+
+def render(plan: DetailPlan, uploaded: Mapping[tuple[str, str, str], UploadedProviderAsset]) -> str:
+    """The provider detail body of one frozen plan, under its pinned renderer.
+
+    ``detail-renderer/v1``: sections in plan order; ``DETAIL_IMAGES`` as one image element per
+    planned image, in plan order, each pointing at that image's uploaded provider reference;
+    ``BODY`` as escaped paragraphs. ``detail-renderer/v2`` (ADR-0033 §7) also renders
+    ``TOP_GUIDANCE`` and ``BOTTOM_GUIDANCE``: one image element per planned notice of that
+    placement, in order, exactly as a detail image, from that notice's uploaded guidance asset. An
+    empty section renders nothing.
     """
-    if plan.renderer not in RENDERERS:
+    vocabulary = _VOCABULARY.get(plan.renderer)
+    if vocabulary is None:
         raise DetailPlanError("DETAIL_RENDERER_UNKNOWN", plan.renderer)
     if plan.body_format != BODY_FORMAT_PLAIN_TEXT:
         raise DetailPlanError("DETAIL_PLAN_MALFORMED", "the body is not plain text")
-    if len(set(plan.sections)) != len(plan.sections) or not set(plan.sections) <= {
-        SECTION_DETAIL_IMAGES,
-        SECTION_BODY,
-    }:
+    if len(set(plan.sections)) != len(plan.sections) or not set(plan.sections) <= vocabulary:
         raise DetailPlanError("DETAIL_PLAN_MALFORMED", "a section is not in the vocabulary")
     if plan.images and not plan.places_images:
         raise DetailPlanError("DETAIL_PLAN_MALFORMED", "images are planned without their section")
+    placed = {
+        SECTION_TOP_GUIDANCE: plan.guidance_top,
+        SECTION_BOTTOM_GUIDANCE: plan.guidance_bottom,
+    }
+    if (plan.guidance and not plan.guides) or any(
+        entries and section not in plan.sections for section, entries in placed.items()
+    ):
+        raise DetailPlanError("DETAIL_PLAN_MALFORMED", "a notice is planned without its section")
     parts: list[str] = []
     for section in plan.sections:
         if section == SECTION_DETAIL_IMAGES:
-            for image in plan.images:
-                asset = uploaded.get(image.key)
-                if not isinstance(asset, UploadedProviderAsset):
-                    raise DetailPlanError(
-                        "DETAIL_IMAGE_NOT_UPLOADED",
-                        f"image {image.sha256} has no provider identity",
-                    )
-                parts.append(f'<img src="{html.escape(asset.reference, quote=True)}" alt="">')
+            parts.extend(_image_element(image.key, uploaded) for image in plan.images)
+        elif section in placed:
+            parts.extend(_image_element(entry.key, uploaded) for entry in placed[section])
         else:
             parts.extend(_paragraphs(plan.body))
     if not parts:

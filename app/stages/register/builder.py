@@ -152,6 +152,7 @@ class RegistrationSnapshotBuilder:
                 ],
                 preparation_revision_id=preparation_revision_id,
                 identity_generation=unit.identity_generation,
+                guidance_assets=outbound.guidance_assets,
             ),
             created_by=created_by,
             correlation_id=correlation_id,

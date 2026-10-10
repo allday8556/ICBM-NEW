@@ -59,16 +59,29 @@ from app.stages.products.source_gates import (
     SUPPLIER_NOT_ACTIVE,
 )
 from app.stages.register import sanitize
-from app.stages.register.detail import DetailPlan, DetailProfile, PlannedImage
+from app.stages.register.detail import (
+    GUIDANCE_ASSET_KIND,
+    DetailPlan,
+    DetailProfile,
+    PlannedGuidance,
+    PlannedImage,
+)
 from app.stages.register.guidance import (
     DEFAULT_CHOICE,
     NO_GUIDANCE,
     PLACEMENT_SECTIONS,
     PLACEMENTS,
+    SOURCE_STORE,
     GuidanceChoice,
+    GuidanceEntry,
     ResolvedGuidance,
 )
-from app.stages.register.model import ListingShape, canonical_json, valid_listing_identity
+from app.stages.register.model import (
+    ListingShape,
+    PublicationAssetKind,
+    canonical_json,
+    valid_listing_identity,
+)
 from app.stages.register.policy import (
     SATISFYING,
     STRONG_KEYS,
@@ -173,8 +186,8 @@ PUBLICATION_REPRESENTATIVE_MISSING: Final = "PUBLICATION_REPRESENTATIVE_MISSING"
 # reason; every planned image must still be uploaded before the final preflight is READY.
 PUBLICATION_DETAIL_IMAGES_UNPLACED: Final = "PUBLICATION_DETAIL_IMAGES_UNPLACED"
 # ADR-0033 §8 (G4): a resolved Detail Guidance notice whose placement no section of the unit's
-# composition places blocks the unit, with ``PUBLICATION_DETAIL_IMAGES_UNPLACED``'s semantics. No
-# profile places one before composition v3 (G5), so a unit with any resolved notice stays here.
+# composition places blocks the unit, with ``PUBLICATION_DETAIL_IMAGES_UNPLACED``'s semantics. Only
+# a composition v3 plan places one (G5): under any other profile a resolved notice stays here.
 PUBLICATION_GUIDANCE_UNPLACED: Final = "PUBLICATION_GUIDANCE_UNPLACED"
 PUBLICATION_ASSET_QA_NOT_PASSED: Final = "PUBLICATION_ASSET_QA_NOT_PASSED"
 PROVIDER_ASSET_IDENTITY_MISSING: Final = "PROVIDER_ASSET_IDENTITY_MISSING"
@@ -440,9 +453,10 @@ class DuplicateEvidence:
 @dataclass(frozen=True)
 class PreparedAsset:
     """A provider asset PR-D prepared for one exact local artifact, bound to the candidate
-    fingerprint it was uploaded under. An ambiguous upload is never represented as one."""
+    fingerprint it was uploaded under. An ambiguous upload is never represented as one. The artifact
+    is a selected M4 image or, under composition v3, a resolved guidance image (ADR-0033 §8)."""
 
-    asset_kind: ImageAssetKind
+    asset_kind: PublicationAssetKind
     sha256: str
     derivation_id: str | None
     asset_profile: str
@@ -1221,6 +1235,12 @@ def detail_plan(request: PreflightRequest, unit: ResolvedUnit) -> DetailPlan | N
                         derivation_id=image.derivation_id,
                     )
                 )
+    top: tuple[PlannedGuidance, ...] = ()
+    bottom: tuple[PlannedGuidance, ...] = ()
+    if profile.places_guidance:
+        # ADR-0033 §6: the resolved notices, exactly as resolved. REGISTER never reorders one.
+        top = tuple(_planned_guidance(entry) for entry in unit.guidance.top)
+        bottom = tuple(_planned_guidance(entry) for entry in unit.guidance.bottom)
     return DetailPlan(
         composition_revision=profile.revision_id,
         sections=profile.sections,
@@ -1228,7 +1248,32 @@ def detail_plan(request: PreflightRequest, unit: ResolvedUnit) -> DetailPlan | N
         renderer=profile.renderer,
         body=detail.body,
         images=tuple(images),
+        guidance_top=top,
+        guidance_bottom=bottom,
     )
+
+
+def _planned_guidance(entry: GuidanceEntry) -> PlannedGuidance:
+    identity = (
+        entry.guidance_revision_id
+        if entry.source == SOURCE_STORE
+        else entry.preparation_revision_id
+    )
+    return PlannedGuidance(entry.source, identity, entry.template, entry.sha256)
+
+
+def guidance_artifacts(unit: ResolvedUnit) -> tuple[tuple[str, str, str], ...]:
+    """ADR-0033 §6, §8 (G5): the distinct guidance images of the unit's resolved notices, top
+    first, each once — the guidance half of the artifact set an ASSET grant names and the final
+    preflight requires a provider asset for. Content-addressed: no derivation."""
+    entries = unit.guidance.top + unit.guidance.bottom
+    return tuple(dict.fromkeys((GUIDANCE_ASSET_KIND, entry.sha256, "") for entry in entries))
+
+
+def selected_artifacts(unit: ResolvedUnit) -> tuple[tuple[str, str, str], ...]:
+    """Every artifact a unit publishes: its Items' selected M4 images, then its guidance images."""
+    images = (image.key for item in unit.items for image in item.images)
+    return tuple(dict.fromkeys((*images, *guidance_artifacts(unit))))
 
 
 def _detail_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Reason]:
@@ -1305,8 +1350,7 @@ def _publication_reasons(
 
 def _guidance_reasons(unit: ResolvedUnit, plan: DetailPlan | None) -> list[Reason]:
     """ADR-0033 §8: a placement whose resolved notices no section of the unit's plan places blocks
-    the unit, so nothing is ever sent without them. Composition v3 (G5) is the only profile that
-    will place them; until it exists every resolved notice stays here."""
+    the unit, so nothing is ever sent without them. Only a composition v3 plan (G5) places them."""
     sections = () if plan is None else plan.sections
     return [
         Reason(PUBLICATION_GUIDANCE_UNPLACED, _B, f"guidance:{placement.lower()}")
@@ -1425,8 +1469,9 @@ def _prepared_reasons(
     prepared: Sequence[PreparedAsset],
     candidate_fingerprint: str,
 ) -> list[Reason]:
-    """The final stage only: each selected artifact has a provider asset prepared for exactly it,
-    under this very candidate fingerprint and profile (ADR-0014 §3 B2, §5)."""
+    """The final stage only: each selected artifact — every selected M4 image and every resolved
+    guidance image (ADR-0033 §8) — has a provider asset prepared for exactly it, under this very
+    candidate fingerprint and profile (ADR-0014 §3 B2, §5)."""
     policy = target.asset_policy
     if not policy.provider_asset_identity_required:
         return [Reason(PREPARED_ASSET_UNEXPECTED, _R, f"asset:{p.sha256}") for p in prepared]
@@ -1436,7 +1481,7 @@ def _prepared_reasons(
         if asset.key in by_key:
             reasons.append(Reason(PREPARED_ASSET_DUPLICATED, _R, f"asset:{asset.sha256}"))
         by_key[asset.key] = asset
-    selected = {image.key for item in unit.items for image in item.images}
+    selected = set(selected_artifacts(unit))
     for key in sorted(selected):
         found = by_key.get(key)
         subject = f"asset:{key[1]}"

@@ -62,7 +62,6 @@ from app.capabilities.live_safety.model import MutationRefused, MutationStage
 from app.platform.core.clock import Clock
 from app.platform.core.errors import AppError, ErrorClass, InputValidationError
 from app.stages.connect.marketplace.capability import RemoteOutcome
-from app.stages.products.image_model import ImageAssetKind
 from app.stages.products.model import ReadinessStatus
 from app.stages.register.guidance import decode_choice
 from app.stages.register.model import (
@@ -75,6 +74,7 @@ from app.stages.register.model import (
     ResolvedBy,
     ScopePauseReason,
     VerificationState,
+    publication_asset_kind,
     sanitized_digest,
 )
 from app.stages.register.policy import DuplicateKeyKind, Provenance
@@ -493,7 +493,7 @@ def _encode_asset(asset: PreparedAsset) -> dict[str, Any]:
 
 def _decode_asset(asset: Mapping[str, Any]) -> PreparedAsset:
     return PreparedAsset(
-        asset_kind=ImageAssetKind(asset["asset_kind"]),
+        asset_kind=publication_asset_kind(asset["asset_kind"]),
         sha256=asset["sha256"],
         derivation_id=asset["derivation_id"],
         asset_profile=asset["asset_profile"],
@@ -1557,11 +1557,15 @@ class RegistrationExecutionService:
 
     def _frozen_refs(self, registration_snapshot_id: str) -> tuple[str, ...]:
         payload = self._payload_of(registration_snapshot_id)
+        # ADR-0033 §6: a v3 Snapshot's guidance assets are sent exactly as its Item assets are.
+        frozen = [
+            *(asset for item in payload["items"] for asset in item["publication_assets"]),
+            *payload.get("guidance_assets", ()),
+        ]
         return tuple(
             sorted(
                 asset["provider_asset_ref"]
-                for item in payload["items"]
-                for asset in item["publication_assets"]
+                for asset in frozen
                 if asset.get("provider_asset_ref") is not None
             )
         )

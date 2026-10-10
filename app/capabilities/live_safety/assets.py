@@ -54,9 +54,12 @@ from app.capabilities.live_safety.store import (
 )
 from app.platform.core.clock import Clock
 from app.platform.core.errors import InputValidationError
-from app.stages.products.image_model import ImageAssetKind
 from app.stages.products.model import ReadinessStatus
-from app.stages.register.model import DUPLICATE_EVIDENCE_UNAVAILABLE, RegistrationConflictError
+from app.stages.register.model import (
+    DUPLICATE_EVIDENCE_UNAVAILABLE,
+    RegistrationConflictError,
+    publication_asset_kind,
+)
 from app.stages.register.preparation import PreparedAsset
 from app.stages.register.sanitize import PayloadSanitationError
 
@@ -388,7 +391,7 @@ class PreparedUploadAssets:
             for key in matching:
                 assert attempt.provider_asset_ref is not None
                 prepared[key] = PreparedAsset(
-                    asset_kind=ImageAssetKind(key[0]),
+                    asset_kind=publication_asset_kind(key[0]),
                     sha256=key[1],
                     derivation_id=key[2] or None,
                     asset_profile=asset_profile,

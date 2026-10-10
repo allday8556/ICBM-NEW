@@ -265,7 +265,9 @@ AI_PROVIDER_PROFILE = "0056_ai_provider_profile"
 M65_DISPATCH_STAGE = "0057_m65_dispatch_stage"
 # ADR-0033 G2: the Detail Guidance owner, its image artifacts and revisions.
 DETAIL_GUIDANCE = "0058_detail_guidance"
-SCHEMA_HEAD = DETAIL_GUIDANCE
+# ADR-0033 G5: the Snapshot pin of the guidance assets and the guidance upload kind.
+DETAIL_GUIDANCE_PLACEMENT = "0059_detail_guidance_placement"
+SCHEMA_HEAD = DETAIL_GUIDANCE_PLACEMENT
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -305,6 +307,7 @@ AFTER_M5 = (
     AI_PROVIDER_PROFILE,
     M65_DISPATCH_STAGE,
     DETAIL_GUIDANCE,
+    DETAIL_GUIDANCE_PLACEMENT,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

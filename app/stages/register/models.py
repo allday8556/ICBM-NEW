@@ -117,6 +117,16 @@ def _json_array(column: str, *, minimum: int) -> str:
     )
 
 
+# ADR-0033 §6 (G5): the guidance assets a Snapshot pins. Migration 0059 adds the column with
+# exactly this CHECK; a payload of another builder version never holds one.
+GUIDANCE_ASSETS_PINNED = (
+    "(json_extract(payload_json, '$.builder_version') = 'registration-payload/v3')"
+    " = (guidance_assets_json IS NOT NULL)"
+    " AND (guidance_assets_json IS NULL OR (json_valid(guidance_assets_json)"
+    " AND json_type(guidance_assets_json) = 'array'))"
+)
+
+
 def _listing_identity(column: str) -> str:
     return (
         f"length({column}) BETWEEN 8 AND 64 AND {column} NOT GLOB '*[^A-Za-z0-9_-]*'"
@@ -236,6 +246,9 @@ class RegistrationSnapshot(Base):
         CheckConstraint(_json_object("payload_json"), name="payload_is_object"),
         CheckConstraint(_present("created_by"), name="created_by_present"),
         CheckConstraint(_present("correlation_id"), name="correlation_present"),
+        # ADR-0033 §6 (G5, migration 0059): a ``registration-payload/v3`` Snapshot pins its guidance
+        # assets as a JSON array (empty when no notice resolved), and no other Snapshot holds one.
+        CheckConstraint(GUIDANCE_ASSETS_PINNED, name="guidance_assets_pinned"),
     )
 
     registration_snapshot_id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -258,6 +271,8 @@ class RegistrationSnapshot(Base):
     created_by: Mapped[str] = mapped_column(String(64))
     correlation_id: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # ADR-0033 §6: one entry per distinct guidance image, URL-free but for the provider reference.
+    guidance_assets_json: Mapped[str | None] = mapped_column(Text)
 
 
 class RegistrationItemSnapshot(Base):

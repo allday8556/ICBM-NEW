@@ -203,8 +203,12 @@ def test_the_server_builds_a_deterministic_packet_from_the_owners(
     # The publication-facing text of exactly this preparation, for the wording review.
     text = packet["publication_text"]
     assert text["name"] == {"value": "합성 상품", "provenance": "OPERATOR_CONFIRMED"}
-    # B-DETAIL: the sections are the owned composition profile's, server-derived.
-    assert text["detail"] == {"sections": ["DETAIL_IMAGES", "BODY"], "body": "상세 본문"}
+    # B-DETAIL: the sections are the owned composition profile's, server-derived — for
+    # SmartStore the v3 profile with the Detail Guidance sections (ADR-0033 §7, G5).
+    assert text["detail"] == {
+        "sections": ["TOP_GUIDANCE", "DETAIL_IMAGES", "BODY", "BOTTOM_GUIDANCE"],
+        "body": "상세 본문",
+    }
     assert text["attributes"]["brand"]["value"] == "합성 브랜드"
     assert text["notices"]["returnCostReason"]["detail_page_reference"] is True
     assert first.binding == EligibilityBinding(

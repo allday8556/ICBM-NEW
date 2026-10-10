@@ -620,6 +620,18 @@ remains `UNVERIFIED`, the canary remains `BLOCKED` on every other prerequisite, 
 > No provider limit or HTML rule is assumed without official evidence (G-1 `INSUFFICIENT`), and a
 > provider incompatibility never edits the canonical composition. Decided by the owner on 2026-10-04; it takes effect only once the B-DETAIL implementation slice is accepted and landed (design draft `documents/reviews/B-DETAIL-detail-composition.md`), and until then the rule above holds unchanged.
 
+> **Amendment note (ADR-0033 G5; owner decision 2026-10-10, Issue #219 `6085853541`).** Detail
+> Guidance is implemented by ADR-0033: composition content v3 adds `TOP_GUIDANCE` and
+> `BOTTOM_GUIDANCE` as image sections, in the order `TOP_GUIDANCE` → `DETAIL_IMAGES` → `BODY` →
+> `BOTTOM_GUIDANCE`, under the pinned `detail-renderer/v2`. The server stamps v3 for SmartStore
+> only; every other marketplace keeps v2, and v1 and v2 keep reading and rendering as before. A
+> notice reaches `detailContent` only as an ICBM-rendered image, uploaded through the adopted image
+> upload, placed by the trusted REGISTER renderer from the same Snapshot's `guidance_assets`
+> (`registration-payload/v3`) — never as operator text, HTML or a URL. An empty guidance section
+> renders nothing, and `BODY` and its `DETAIL_BODY_EMPTY` rule are unchanged. `VIDEO` and
+> `OPTION_TABLE` stay reserved. It takes effect once ADR-0033 slice G5 is accepted and landed;
+> until then the rule above holds unchanged.
+
 ### 20. Supplier resale-price advisory is UI only
 
 Issue #80 ruling `5738886070` stays binding. Complex supplier resale guidance is shown in the registration option-price UI as **`공급처 판매가 정책 참고`**:
