@@ -42,7 +42,8 @@ def _refuse(reason: str, **details: Any) -> InputValidationError:
 def _text(value: Any, *, where: str, limit: int, drawable: frozenset[int]) -> str:
     if not isinstance(value, str):
         raise _refuse("a value is not text", where=where)
-    text = value.strip()
+    # Only spaces are trimmed; a control character anywhere, edges included, is refused (DG-09).
+    text = value.strip(" ")
     if len(text) > limit:
         raise _refuse("a value is too long", where=where, length=len(text), limit=limit)
     for char in text:
