@@ -77,3 +77,11 @@ No image was fetched. The ADR-0030 §8.1 bound is six product pages; three were 
 | `판매가능플랫폼` | ADR-0031: U-PICK's phrases go in its channel slots |
 | `?icid=` on listing links | none needed: URL sanitization keeps only a host's safe query keys, so `icid` is dropped before any read |
 | login submit `a.btnSubmit` | the `cafe24` template's submit selector names both `a.btnLogin` and `a.btnSubmit` inside the login form |
+
+## 4. Site configuration and offline proof (ADR-0030 §8.2, S3)
+
+- `integrations/suppliers/sites/upick.json`, revision `upick-1`, status **`RECON`**: products collected from it are refused by the registration preflight (`SUPPLIER_NOT_ACTIVE`, PT-06) until a reviewed PR flips it to `ACTIVE` with an acceptance record (§8.3).
+- Hosts, all observed above: storefront `upickb2b.com`; images `upickb2b.com`, `thepath.cafe24.com`; the platform's secure-login host `login2.cafe24ssl.com` comes from the template.
+- Words: `회원가` is the purchase price and `소비자가` the list price (ADR-0032; Issue #219 `6086421199`); `폐쇄몰 최저판매가` is a minimum-price label; the channel phrases `모든마켓 판매가능` (all allowed) and `폐쇄몰`, `오픈마켓 판매불가` (closed mall only); the title suffix `- U-PICK B2B`. Region: the representative image's container is `.prdImg`.
+- No seller-code convention: only the owner declares one (ADR-0024 §2).
+- The offline proof is `tests/unit/integrations/suppliers/test_upick_site.py`: through the registry, on both captures, the identity, name, member price, minimum, fee (a range priced at 4,000원), stock, sales channel and representative image are read as recorded above.

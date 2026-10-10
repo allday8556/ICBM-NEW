@@ -29,6 +29,7 @@ from fastapi.testclient import TestClient
 
 from app.config import AppConfig
 from app.container import Container
+from integrations.suppliers.registry import SITES
 from tests.support.collect_submit_support import (
     FAILED_ID,
     NO_REVISION_ID,
@@ -119,9 +120,10 @@ def collect_jobs(config: AppConfig) -> list[tuple[str, int]]:
 
 def test_the_screen_names_only_the_collection_capable_suppliers(api: TestClient) -> None:
     screen = api.get("/api/v1/screens/collect", headers=CLIENT).json()
+    # This screen is built on the fake shop's collection only; CONNECT also lists the sites.
     assert screen["collection_supplier_keys"] == [SUPPLIER_KEY]
     # CONNECT's own suppliers stay CONNECT's: one without a collection definition is not listed.
-    assert {s["supplier_key"] for s in screen["suppliers"]} == {"kmretail"}
+    assert {s["supplier_key"] for s in screen["suppliers"]} == {"kmretail", *SITES}
     assert screen["meta"]["state"] == "EMPTY" and screen["collection_jobs_total"] == 0
 
 
