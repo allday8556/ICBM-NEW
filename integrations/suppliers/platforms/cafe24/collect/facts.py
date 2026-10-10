@@ -156,6 +156,15 @@ FEE_TOOLTIP = ".ec-front-shop-delivery-defferent-shipping"
 _FREE_WORDS = ("무료", "무료배송")
 # URL material: a scheme or a protocol-relative reference. It is never quoted and never stored.
 _URL_MATERIAL = re.compile(r"(?i)(?:[a-z][a-z0-9+.-]*:)?//\S*")
+# Any URL shape in shipping words (a "//", a scheme followed by its address, or a domain-like
+# name), the same detector the detail-guidance owner uses. Shipping words never name a domain, so
+# a match is URL material; other texts keep the narrower ``_URL_MATERIAL`` test, because a maker's
+# name such as "Co.KG" looks like a domain.
+_URL_SHAPE = re.compile(
+    r"//|\b(?:https?|ftp|file|data|javascript|mailto|tel|sms):(?!\s)"
+    r"|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b",
+    re.IGNORECASE,
+)
 _DIGIT = re.compile(r"\d")
 # ADR-0035 §2: the longest region-surcharge words kept as policy text; longer ones are held.
 REGION_WORDS_LIMIT = 200
@@ -181,6 +190,10 @@ def _quote(text: str) -> str:
 
 def _carries_url(text: str) -> bool:
     return _URL_MATERIAL.search(text) is not None
+
+
+def _carries_url_shape(text: str) -> bool:
+    return _carries_url(text) or _URL_SHAPE.search(text) is not None
 
 
 def _cells(nodes: Sequence[Node]) -> Iterator[tuple[str, Node]]:
@@ -260,7 +273,8 @@ def _text_fact(locator: str, text: str, kind: EvidenceKind = EvidenceKind.DOM_TE
     """A text value, whole, or held for review when it carries URL material: such a value is
     never persisted, and the field never aborts the whole revision."""
     if _carries_url(text):
-        return _review(locator, text)
+        # Held by its locator alone: the value, URL included, is never quoted into evidence.
+        return _review(locator)
     return FieldFact(
         FieldStatus.CONFIRMED,
         TextValue(text=text),
@@ -458,7 +472,10 @@ def _shipping(
         disagreeing = _disagreement(region_locator, [v for _, v, _n in region])
         if disagreeing is not None:
             return disagreeing
-        if _carries_url(region[0][1]) or len(region[0][1]) > REGION_WORDS_LIMIT:
+        if _carries_url_shape(region[0][1]):
+            # Held by its locator alone: URL material is never quoted into evidence.
+            return _review(region_locator)
+        if len(region[0][1]) > REGION_WORDS_LIMIT:
             return _review(region_locator, region[0][1])
     if any(_DIGIT.search(v) for _, v, _n in method):
         # A method row that names an amount states a condition beside the fee.
@@ -494,8 +511,9 @@ def _shipping(
     # The surcharge's words, once: the same words stated twice are one statement.
     stated_rows = (*method, *fee, *region[:1])
     policy = " / ".join(f"{label} {value}" for label, value, _ in stated_rows)
-    if _carries_url(policy):
-        return _review(fee_locator, policy)
+    if _carries_url_shape(policy):
+        # Held by its locator alone: URL material is never quoted into evidence.
+        return _review(fee_locator)
     # The kind and the fee are the base fee's alone (RS-01).
     kind = ShippingKind.FREE if amount == 0 else ShippingKind.FIXED
     evidence = (

@@ -157,6 +157,15 @@ _TIER_OPEN = re.compile(_NUMBER + r"원이상" + _NUMBER + r"원")
 # is read as its highest amount.
 _FEE_RANGE = re.compile(_NUMBER + r"원?[~∼〜～]" + _NUMBER + r"원")
 _URL_MATERIAL = re.compile(r"(?i)(?:[a-z][a-z0-9+.-]*:)?//\S*")
+# Any URL shape in shipping words (a "//", a scheme followed by its address, or a domain-like
+# name), the same detector the detail-guidance owner uses. Shipping words never name a domain, so
+# a match is URL material; other texts keep the narrower ``_URL_MATERIAL`` test, because a maker's
+# name such as "Co.KG" looks like a domain.
+_URL_SHAPE = re.compile(
+    r"//|\b(?:https?|ftp|file|data|javascript|mailto|tel|sms):(?!\s)"
+    r"|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b",
+    re.IGNORECASE,
+)
 _DIGIT = re.compile(r"\d")
 
 
@@ -174,6 +183,10 @@ def _quote(text: str) -> str:
 
 def _carries_url(text: str) -> bool:
     return _URL_MATERIAL.search(text) is not None
+
+
+def _carries_url_shape(text: str) -> bool:
+    return _carries_url(text) or _URL_SHAPE.search(text) is not None
 
 
 def _evidence(locator: str, status: FieldStatus, observed: str | None = None) -> Evidence:
@@ -245,7 +258,8 @@ def _disagreement(locator: str, values: Sequence[str]) -> FieldFact | None:
 
 def _text_fact(locator: str, text: str, kind: EvidenceKind = EvidenceKind.DOM_TEXT) -> FieldFact:
     if _carries_url(text):
-        return _review(locator, text)
+        # Held by its locator alone: the value, URL included, is never quoted into evidence.
+        return _review(locator)
     return FieldFact(
         FieldStatus.CONFIRMED,
         TextValue(text=text),
@@ -553,9 +567,10 @@ def _shipping(found: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Fiel
             # ADR-0035 §2: a layer that states its surcharge only as an image cannot be kept as
             # words. The layer's own close control is no statement.
             return _review(locator, dd.text)
-    if _carries_url(region_words):
-        # URL material in the layer's words is never kept, summarized or not.
-        return _review(locator, region_words)
+    if _carries_url_shape(region_words):
+        # URL material in the layer's words is never kept, summarized or not, nor quoted into
+        # evidence: the fact is held by its locator alone.
+        return _review(locator)
     summary = _region_summary(regions[0]) if regions else None
     region_text = region_words if summary is None else summary
     if summary is None and len(region_words) > REGION_WORDS_LIMIT:
@@ -577,9 +592,10 @@ def _shipping(found: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Fiel
         # is named as one.
         + (f" · 지역별추가배송비 {region_text or '(금액 표시 없음)'}" if regions else "")
     )
-    if _carries_url(policy):
-        # URL material in any of the words, the region layer's included, is never kept.
-        return _review(locator, policy)
+    if _carries_url_shape(policy):
+        # URL material in any of the words, the region layer's included, is never kept nor
+        # quoted into evidence: the fact is held by its locator alone.
+        return _review(locator)
     evidence: tuple[Evidence, ...] = (_evidence(locator, FieldStatus.CONFIRMED, policy),)
     if summary is not None:
         # The summarized layer's own words, quoted as far as evidence quotes (its first 200

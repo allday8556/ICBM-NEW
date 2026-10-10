@@ -368,3 +368,22 @@ def test_a_title_that_differs_beyond_its_spaces_still_disagrees() -> None:
         body=BUY,
     )
     assert fields(body)["original_name"].status is FieldStatus.REVIEW_REQUIRED
+
+
+@pytest.mark.parametrize(
+    "material",
+    [
+        "https://example.com/x?token=abc",
+        "www.example.com/x?token=abc",
+        "example.co.kr/x?token=abc",
+    ],
+)
+def test_url_shaped_region_words_are_held_and_never_quoted(material: str) -> None:
+    # ADR-0035 §2: the surcharge row is held by its locator alone; the URL never reaches evidence.
+    body = page(
+        rows=row("배송비", "3,000원") + row("추가배송비", f"제주 {material} 추가"), body=BUY
+    )
+    fact = fields(body)["shipping"]
+    assert fact.status is FieldStatus.REVIEW_REQUIRED
+    assert "example" not in repr(fact.evidence)
+    assert all(evidence.observed is None for evidence in fact.evidence)

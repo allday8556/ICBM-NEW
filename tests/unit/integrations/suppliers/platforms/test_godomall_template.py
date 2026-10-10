@@ -779,3 +779,22 @@ def test_a_region_list_with_url_material_is_held() -> None:
     fact = shipping(f"<strong>3,000원</strong>{layer}")
     assert fact.status is FieldStatus.REVIEW_REQUIRED
     assert "example.com" not in repr(fact.evidence)
+
+
+@pytest.mark.parametrize(
+    "material",
+    [
+        "https://example.com/x?token=abc",
+        "www.example.com/x?token=abc",
+        "example.co.kr/x?token=abc",
+        "mailto:owner",
+    ],
+)
+def test_url_shaped_region_words_are_held_and_never_quoted(material: str) -> None:
+    # ADR-0035 §2: a region statement that cannot be kept as words is held, and the URL, signed
+    # or not, never reaches evidence: the fact is held by its locator alone.
+    layer = REGION.format(f"<p>제주 {material} 5,000원</p>")
+    fact = shipping(f"<strong>3,000원</strong>{layer}")
+    assert fact.status is FieldStatus.REVIEW_REQUIRED
+    assert "example" not in repr(fact.evidence) and "owner" not in repr(fact.evidence)
+    assert all(evidence.observed is None for evidence in fact.evidence)
