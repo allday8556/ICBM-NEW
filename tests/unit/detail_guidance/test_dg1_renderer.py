@@ -122,6 +122,12 @@ def test_the_content_is_trimmed_plain_text() -> None:
         {"blocks": [{"heading": "안내\n", "lines": ["당일발송"]}]},
         {"blocks": [{"lines": ["당일발송 😀"]}]},
         {"blocks": [{"lines": [3]}]},
+        {"blocks": [{"lines": ["문의 https://example.kr"]}]},
+        {"blocks": [{"lines": ["www.shop 에서 확인"]}]},
+        {"blocks": [{"lines": ["naver.com 으로 문의"]}]},
+        {"blocks": [{"heading": "<b>안내</b>", "lines": ["당일발송"]}]},
+        {"blocks": [{"lines": ["당일 &amp; 익일"]}]},
+        {"blocks": [{"lines": ["<script>당일"]}]},
     ],
 )
 def test_text_that_cannot_be_drawn_exactly_is_refused(raw: dict[str, Any]) -> None:
@@ -165,3 +171,17 @@ def test_the_shipping_presets_are_valid_editable_examples() -> None:
     assert "개인통관고유부호" in overseas and "관부가세" in overseas
     # No fixed legal threshold or amount (ADR-0033 §11).
     assert not any(word in overseas for word in ("달러", "USD", "$", "원 ", "만원"))
+
+
+def test_plain_punctuation_is_not_markup_or_a_url() -> None:
+    content = _content(
+        {
+            "blocks": [
+                {
+                    "heading": "C/S 안내",
+                    "lines": ["<주말 제외>", "10:00 ~ 17:00 (1.5일)", "A/S 1:1"],
+                }
+            ]
+        }
+    )
+    assert content.blocks[0].lines[0] == "<주말 제외>"

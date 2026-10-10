@@ -3,8 +3,13 @@
 A notice is 1 to 3 blocks; each block has an optional heading and 1 to 6 lines. Every value is
 plain text, trimmed; a control character or a character the bundled font cannot draw is refused,
 never dropped (DG-09). The limits are ICBM's own layout limits, not provider limits (B-DETAIL D4).
+
+No operator string carries a URL or markup (B-DETAIL D3, DG-01), even though it is only ever
+drawn as pixels: a URL (a scheme, ``www.`` or a domain name) or a tag or character entity is
+refused.
 """
 
+import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -17,6 +22,12 @@ LINES_MAX: Final = 6
 HEADING_MAX_LENGTH: Final = 20
 LINE_MAX_LENGTH: Final = 40
 GUIDANCE_TEXT_INVALID: Final = "GUIDANCE_TEXT_INVALID"
+_URL: Final = re.compile(
+    r"[a-z][a-z0-9+.-]*://|\bwww\.|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\."
+    r"(?:com|net|org|kr|co|io|shop|store|me|biz|info|xyz|app|site|link|ly|gl)\b",
+    re.IGNORECASE,
+)
+_MARKUP: Final = re.compile(r"<\s*/?\s*[A-Za-z!?]|&#?[A-Za-z0-9]+;")
 
 
 @dataclass(frozen=True)
@@ -51,6 +62,8 @@ def _text(value: Any, *, where: str, limit: int, drawable: frozenset[int]) -> st
             raise _refuse(
                 "a character cannot be drawn", where=where, codepoint=f"U+{ord(char):04X}"
             )
+    if _URL.search(text) or _MARKUP.search(text):
+        raise _refuse("a value carries a URL or markup", where=where)
     return text
 
 
