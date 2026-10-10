@@ -128,6 +128,8 @@ REGISTER_AREAS: Final[Mapping[str, tuple[ReasonArea, ...]]] = {
     "PUBLICATION_REPRESENTATIVE_MISSING": (_A.IMAGES,),
     # A selected detail-body image without a place in the detail composition (Issue #219).
     "PUBLICATION_DETAIL_IMAGES_UNPLACED": (_A.IMAGES, _A.DETAIL),
+    # ADR-0033 G4: a resolved top or bottom notice the composition does not place yet.
+    "PUBLICATION_GUIDANCE_UNPLACED": (_A.DETAIL,),
     "PUBLICATION_ASSET_QA_NOT_PASSED": (_A.IMAGES,),
     "PROVIDER_ASSET_IDENTITY_MISSING": (_A.IMAGES,),
     "PREPARED_ASSET_CANDIDATE_MISMATCH": (_A.IMAGES,),

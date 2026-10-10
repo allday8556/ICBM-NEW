@@ -365,7 +365,12 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
   2. `대표이미지`: the Item image editor. The bulk `배경 이미지 제거 / 리사이즈 / 이미지 편집 / 이미지 자동번역` are inert. `자동 선택 다시 실행` is the image owner's own.
   3. `옵션·가격`: the repin and the Items table. The price facts no read states read `데이터 없음`, and the option tools are inert.
   4. `상품정보고시`: the category requirements and their fields.
-  5. `상세페이지`: the image-editor mode. `HTML 방식` is inert. The top and bottom notices read `데이터 없음`. The body is the authoring form's. `미리보기` opens the snapshot preview.
+  5. `상세페이지`: the image-editor mode. `HTML 방식` is inert. The body is the authoring form's. `미리보기` opens the snapshot preview. The top and bottom notices (ADR-0033 §5, G4):
+     - `상단 공지` and `하단 공지` each show the notices the server resolves for the unit now (`GET /api/v1/register/detail-guidance`), in order — the active period notices, then the product's own notice or the store-wide standing one — each with its image, `기간 공지 / 상시 공지 / 이 상품 공지` and its template. With none, the group says so.
+     - `기본값 / 끄기 / 직접 작성` choose the placement's mode. A changed mode says it applies once the preparation is saved; the list stays the server's for the saved choice.
+     - `직접 작성` shows the settings card's own editor (`components/guidance-editor.js`): the same inputs, five-template live preview and `국내배송 / 해외배송` presets. The save is refused locally, sending nothing, until its text and template are chosen; the server validates and draws the text when the preparation is saved.
+     - The choice is saved with the preparation through the one `/preparations` write. Any other surface sends the stored choice back unchanged.
+     - While a group has a resolved notice, it shows the server's `PUBLICATION_GUIDANCE_UNPLACED` reason (BLOCKED until composition v3 places notices, G5).
   6. `기타 등록정보`: the preflight, the attempts, the scope brake and the unit's own actions.
 - **One save.** The authoring form stays one form, and its parts are bound back to it. The editor's `준비 내용 저장` is the register page's one `/preparations` write.
 - **`등록 준비` strip.** A one-line strip sits at the bottom. Each step is coloured from the server's preflight reasons only, by the first area each reason names:
@@ -426,8 +431,9 @@ only POSTs to that owner's routes.
   plus `시작` and `끝` (`datetime-local`), sent as instants with the browser's offset. `조기 종료`
   appends `enabled = false`. An existing period notice's text and period are not edited here.
 - **Server-owned.** Validation, the rendering, the presets, the revision numbers and each period's
-  status belong to the Detail Guidance owner. The page computes none of them. Nothing here reaches
-  a product or a marketplace: the editor's 상세페이지 step and registration come with G4 and G5.
+  status belong to the Detail Guidance owner. The page computes none of them. A saved notice is
+  resolved into every product whose choice is `기본값` (the editor's 상세페이지 step, G4), and
+  nothing reaches a marketplace before G5.
 
 ## Supplier common images (A-NEXT2a, owner decision 2026-10-04 option 1, Issue #231)
 

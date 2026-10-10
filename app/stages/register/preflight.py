@@ -16,7 +16,10 @@ What it reads, and from whom:
   the M4 image owner. Nothing is priced, selected or recorded here;
 - the category metadata: a :class:`~app.stages.register.policy.RegistrationMetadataSource`;
 - the detail-composition profile the target names (B-DETAIL): the authoring-revision owner,
-  through :class:`DetailProfileSource`.
+  through :class:`DetailProfileSource`;
+- the store-wide Detail Guidance notices (ADR-0033 G4): the Detail Guidance owner, through
+  :class:`~app.stages.register.guidance.GuidanceSource`, resolved for the request's choice at that
+  owner's injected clock by :func:`~app.stages.register.guidance.resolve`.
 
 No provider is called: no duplicate lookup, no upload, no marketplace read. Provider duplicate
 evidence and prepared provider assets are inputs a later adapter supplies.
@@ -33,6 +36,14 @@ from app.stages.products.images import ProductImageService
 from app.stages.products.pricing_service import ProductPricingService
 from app.stages.products.readiness import ProductReadinessService, Readiness
 from app.stages.register.detail import DetailProfile
+from app.stages.register.guidance import (
+    DEFAULT_CHOICE,
+    NO_GUIDANCE,
+    GuidanceChoice,
+    GuidanceSource,
+    ResolvedGuidance,
+)
+from app.stages.register.guidance import resolve as resolve_guidance
 from app.stages.register.model import ListingShape
 from app.stages.register.policy import (
     CategoryMetadata,
@@ -100,8 +111,11 @@ class RegistrationPreflightService:
         detail_profiles: DetailProfileSource | None = None,
         adopted_items: Callable[[str, Sequence[str]], tuple[str, ...]] | None = None,
         source_gates: Callable[[str, Sequence[str]], tuple[tuple[str, str], ...]] | None = None,
+        guidance: GuidanceSource | None = None,
     ) -> None:
         self._registrations = registrations
+        # ADR-0033 G4: the Detail Guidance owner's notices. None when not wired: nothing resolves.
+        self._guidance = guidance
         self._detail_profiles = detail_profiles
         self._readiness = readiness
         self._pricing = pricing
@@ -162,6 +176,8 @@ class RegistrationPreflightService:
             item_ids=request.unit.item_ids,
             category=request.category,
             identity_generation=identity_generation,
+            guidance=request.guidance,
+            preparation_revision_id=request.preparation_revision_id,
         )
 
     def unit_truth(
@@ -171,6 +187,8 @@ class RegistrationPreflightService:
         item_ids: Sequence[str] | None = None,
         category: CategorySelection | None = None,
         identity_generation: int | None = None,
+        guidance: GuidanceChoice = DEFAULT_CHOICE,
+        preparation_revision_id: str | None = None,
     ) -> ResolvedUnit:
         """The current truth of one provider-listing unit, gathered and not judged.
 
@@ -262,7 +280,18 @@ class RegistrationPreflightService:
             metadata=metadata,
             target=target,
             detail_profile=self.detail_profile(target.detail_composition_revision),
+            guidance=self.guidance(guidance, preparation_revision_id),
         )
+
+    def guidance(
+        self, choice: GuidanceChoice, preparation_revision_id: str | None = None
+    ) -> ResolvedGuidance:
+        """The Detail Guidance notices a product's choice resolves to now (ADR-0033 §6): the
+        owner's newest revisions at its injected clock's instant. None without a wired source."""
+        if self._guidance is None:
+            return NO_GUIDANCE
+        now, revisions = self._guidance.newest()
+        return resolve_guidance(choice, now, revisions, preparation_revision_id)
 
     def detail_profile(self, revision_id: str | None) -> DetailProfile | None:
         """The profile a target's detail-composition revision names, as its owner holds it; none

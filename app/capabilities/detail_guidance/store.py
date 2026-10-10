@@ -66,6 +66,7 @@ GUIDANCE_UNKNOWN: Final = "GUIDANCE_UNKNOWN"
 GUIDANCE_CURRENT_MOVED: Final = "GUIDANCE_CURRENT_MOVED"
 GUIDANCE_UNCHANGED: Final = "GUIDANCE_UNCHANGED"
 GUIDANCE_IMAGE_RECORD_CONFLICT: Final = "GUIDANCE_IMAGE_RECORD_CONFLICT"
+GUIDANCE_TEMPLATE_UNKNOWN: Final = "GUIDANCE_TEMPLATE_UNKNOWN"
 
 # The bundled font's FreeType face is shared by every rendering of this process; one rendering at
 # a time keeps it from being used by two request threads at once.
@@ -135,6 +136,16 @@ class CurrentGuidance:
     placements: tuple[PlacementNotices, ...]
 
 
+@dataclass(frozen=True)
+class RecordedCustomImage:
+    """A product's own notice (ADR-0033 §5): its validated text, its template and the SHA-256 of
+    the recorded rendering."""
+
+    content: dict[str, Any]
+    template: Template
+    sha256: str
+
+
 def canonical_json(content: Mapping[str, Any]) -> str:
     return json.dumps(dict(content), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
@@ -163,6 +174,17 @@ def parse_content(raw: Mapping[str, Any]) -> GuidanceContent:
 def render_one(content: GuidanceContent, template: Template) -> RenderedGuidance:
     with _RENDER_LOCK:
         return render(content, template)
+
+
+def parse_template(name: str) -> Template:
+    try:
+        return Template(name)
+    except ValueError:
+        raise InputValidationError(
+            GUIDANCE_TEMPLATE_UNKNOWN,
+            "a notice is drawn with one of the official templates",
+            details={"template": name},
+        ) from None
 
 
 def render_all(content: GuidanceContent) -> tuple[RenderedGuidance, ...]:
@@ -306,9 +328,10 @@ class DetailGuidanceStore:
             )
             return _record(row, identity, rendered.width, rendered.height)
 
-    def current(self) -> CurrentGuidance:
-        """Each placement's standing notice and every period notice, at their newest revision,
-        with each period's status at the injected clock's instant."""
+    def newest(self) -> tuple[datetime, tuple[GuidanceRevisionRecord, ...]]:
+        """The injected clock's instant and the newest revision of every notice, in one read.
+
+        REGISTER resolves a product's notices from exactly this (ADR-0033 §6, G4)."""
         now = self._clock.now()
         with self._db.read() as session:
             newest = (
@@ -333,8 +356,15 @@ class DetailGuidanceStore:
                     GuidanceImageArtifact,
                     GuidanceImageArtifact.sha256 == DetailGuidanceRevision.image_sha256,
                 )
+                .order_by(DetailGuidanceRevision.guidance_id)
             ).all()
-            records = [_record(r, g, a.width, a.height) for r, g, a in rows]
+            records = tuple(_record(r, g, a.width, a.height) for r, g, a in rows)
+        return now, records
+
+    def current(self) -> CurrentGuidance:
+        """Each placement's standing notice and every period notice, at their newest revision,
+        with each period's status at the injected clock's instant."""
+        now, records = self.newest()
         placements = []
         for placement in Placement:
             mine = [r for r in records if r.placement is placement]
@@ -351,6 +381,50 @@ class DetailGuidanceStore:
                 )
             )
         return CurrentGuidance(now=now, placements=tuple(placements))
+
+    def record_custom_image(
+        self,
+        content: Mapping[str, Any],
+        template: str,
+        *,
+        actor: str,
+        correlation_id: str,
+    ) -> RecordedCustomImage:
+        """Validate, render and record a product's own notice (ADR-0033 §5, G4).
+
+        The text is validated exactly as a store-wide notice is (``GUIDANCE_TEXT_INVALID``,
+        ``GUIDANCE_TEXT_TOO_WIDE``), rendered by the one renderer and its PNG placed in the
+        guidance image store. The artifact row is store-level, not product-scoped: an image that
+        is already recorded is reused and nothing is written; a new one is recorded and audited.
+        No revision is appended: the product's choice is the REGISTER preparation's."""
+        chosen = parse_template(template)
+        parsed = parse_content(content)
+        rendered = render_one(parsed, chosen)
+        now = self._clock.now()
+        with self._db.write() as session:
+            # The bytes before the row that names them, as in ``save``.
+            sha256 = self._images.put(rendered.png)
+            if self._record_artifact(session, rendered, sha256, now):
+                self._audit.append(
+                    AuditEntry(
+                        event_type=AuditEventType.DETAIL_GUIDANCE_REVISED,
+                        action="DETAIL_GUIDANCE_CUSTOM_IMAGE_RECORDED",
+                        actor=actor,
+                        outcome=AuditOutcome.RECORDED,
+                        target_ref=sha256,
+                        before=None,
+                        after={
+                            "image_sha256": sha256,
+                            "template": chosen.value,
+                            "renderer_version": rendered.renderer_version,
+                            "content_fingerprint": fingerprint(parsed.canonical()),
+                        },
+                        details={"scope": "PRODUCT"},
+                        correlation_id=correlation_id,
+                    ),
+                    session=session,
+                )
+        return RecordedCustomImage(content=parsed.canonical(), template=chosen, sha256=sha256)
 
     def history(self, guidance_id: str) -> tuple[GuidanceRevisionRecord, ...]:
         """Every revision of one notice, newest first."""
@@ -405,7 +479,8 @@ class DetailGuidanceStore:
     @staticmethod
     def _record_artifact(
         session: Session, rendered: RenderedGuidance, sha256: str, now: datetime
-    ) -> None:
+    ) -> bool:
+        """Record the artifact when it is new (``True``); an equal record is reused."""
         expected = {
             "width": rendered.width,
             "height": rendered.height,
@@ -418,13 +493,14 @@ class DetailGuidanceStore:
         if existing is None:
             session.add(GuidanceImageArtifact(sha256=sha256, created_at=now, **expected))
             session.flush()
-            return
+            return True
         if {key: getattr(existing, key) for key in expected} != expected:
             raise GuidanceImageIntegrityError(
                 GUIDANCE_IMAGE_RECORD_CONFLICT,
                 "a recorded guidance image does not describe these bytes",
                 details={"sha256": sha256},
             )
+        return False
 
 
 def _newest(session: Session, guidance_id: str) -> DetailGuidanceRevision | None:

@@ -154,6 +154,8 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     "PUBLICATION_REPRESENTATIVE_MISSING": (_F, _IMAGES),
     # B-DETAIL's reason, consumed as it is: no screen places a detail image here.
     "PUBLICATION_DETAIL_IMAGES_UNPLACED": (_X, None),
+    # ADR-0033 G4: no composition places a top or bottom notice until G5 lands.
+    "PUBLICATION_GUIDANCE_UNPLACED": (_X, None),
     "PUBLICATION_ASSET_QA_NOT_PASSED": (_X, None),
     "PROVIDER_ASSET_IDENTITY_MISSING": (_X, None),
     "PREPARED_ASSET_CANDIDATE_MISMATCH": (_X, None),

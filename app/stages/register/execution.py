@@ -64,6 +64,7 @@ from app.platform.core.errors import AppError, ErrorClass, InputValidationError
 from app.stages.connect.marketplace.capability import RemoteOutcome
 from app.stages.products.image_model import ImageAssetKind
 from app.stages.products.model import ReadinessStatus
+from app.stages.register.guidance import decode_choice
 from app.stages.register.model import (
     CREATE_ENDPOINT_GROUP,
     OPERATOR_RESUMABLE,
@@ -301,6 +302,17 @@ def encode_send_request(
             },
         },
         "detail": encode_detail(request.detail),
+        # ADR-0033 §5 (G4): the product's Detail Guidance choice and the revision that authored it,
+        # named only when the operator chose something, so a send gate resolves exactly what the
+        # Snapshot froze. A DEFAULT request encodes as before.
+        **(
+            {}
+            if request.guidance.is_default
+            else {
+                "guidance": request.guidance.encode(),
+                "preparation_revision_id": request.preparation_revision_id,
+            }
+        ),
     }
     # The same typed boundary the Snapshot builder uses (PR-C): business values are refused when
     # they carry secret or URL-shaped material, while a provider reference is judged by the
@@ -358,6 +370,8 @@ def decode_send_request(
         ),
         detail=decode_detail(payload["detail"]),
         duplicate_evidence=_decode_evidence(payload["duplicate_evidence"]),
+        guidance=decode_choice(payload.get("guidance")),
+        preparation_revision_id=payload.get("preparation_revision_id"),
     )
     return request, tuple(_decode_asset(a) for a in payload["prepared_assets"])
 

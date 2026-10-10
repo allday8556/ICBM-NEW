@@ -508,9 +508,10 @@ def build_container(
     ai_execution = AIExecution(profiled_provider)
     ai_provider = ProviderProfileService(profile_store, profiled_provider, clock)
     # ADR-0033 G2: the Detail Guidance owner, its revisions and its content-addressed images.
-    detail_guidance = DetailGuidanceService(
-        DetailGuidanceStore(db, clock, audit, GuidanceImageStore(config.guidance_images_dir))
+    detail_guidance_store = DetailGuidanceStore(
+        db, clock, audit, GuidanceImageStore(config.guidance_images_dir)
     )
+    detail_guidance = DetailGuidanceService(detail_guidance_store)
     # ADR-0028 §3: the SearchSignal port, provider-zero until a source has its own owner decision.
     search_signal = NoSearchSignal()
     readiness = ReadinessService(
@@ -803,6 +804,8 @@ def build_container(
             product_store,
             lambda key: SITES[key].config.active if key in SITES else None,
         ),
+        # ADR-0033 G4: the store-wide Detail Guidance notices a product's choice resolves to.
+        guidance=detail_guidance_store,
     )
     # Gate 1 G1-D (ADR-0015 §5): a Draft from the operator's Product DB selection. It composes the
     # owners above — the revalidated selection, the bound account, the current target policy, M4
@@ -871,6 +874,8 @@ def build_container(
         prepared_assets=PreparedUploadAssets(live_store),
         # ADR-0026 AIF-4: the current enrichment results an apply reads.
         enrichment=enrichment,
+        # ADR-0033 G4: the owner that renders and records a product's own notice on save.
+        guidance=detail_guidance_store,
     )
     # M5 PR-E (ADR-0014 §9-§11): the execution owner over the M0 job system. Its CREATE seam is
     # the production SmartStore one, which is unavailable while the endpoint is NOT_ADOPTED, so

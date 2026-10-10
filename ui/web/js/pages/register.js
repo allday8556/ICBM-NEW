@@ -152,6 +152,13 @@ export const REASON_COPY = {
   REGISTER_FROZEN_METADATA_UNRESOLVED:
     '스냅샷이 고정한 카테고리 메타데이터 리비전을 찾을 수 없어 규칙을 표시하지 않습니다. 현재 리비전으로 대신 표시하지 않습니다.',
   DUPLICATE_EVIDENCE_MISSING: '중복 조회 근거가 없습니다. 조회 계약이 아직 채택되지 않았습니다.',
+  // ADR-0033 G4: a resolved top or bottom notice that no composition can place until G5.
+  PUBLICATION_GUIDANCE_UNPLACED: '상·하단 공지는 아직 등록에 넣을 수 없습니다 (G5 이후). 이 상품에서 그 공지를 끄면 이 사유는 사라집니다.',
+  GUIDANCE_TEXT_INVALID: '쓸 수 없는 공지 문구입니다. 상세페이지 단계의 직접 작성 문구를 확인하세요.',
+  GUIDANCE_TEXT_TOO_WIDE: '공지 문구 중 템플릿 글상자보다 넓은 줄이 있습니다.',
+  GUIDANCE_TEMPLATE_UNKNOWN: '알 수 없는 공지 템플릿입니다.',
+  REGISTER_GUIDANCE_CHOICE_INVALID: '직접 작성한 공지는 템플릿과 문구가 모두 있어야 합니다.',
+  REGISTER_GUIDANCE_UNAVAILABLE: '상세페이지 공지를 그릴 수 있는 서버 구성 요소가 연결되어 있지 않습니다.',
   ENDPOINT_NOT_ADOPTED: '해당 마켓 연동 계약이 아직 채택되지 않았습니다.',
   PROOF_NOT_AVAILABLE_IN_PROCESS: '실행 중인 앱에서는 증명할 수 없는 항목입니다.',
   ACCOUNT_NOT_BOUND: '판매자 계정 연결이 확인되지 않았습니다.',
@@ -681,6 +688,9 @@ export function authoringForm(unit, onDone) {
             ? (values.detail_body ?? '')
             : (values.detail_body || null),
           detail_sections: approved?.detail_sections ?? inputs.detail_sections ?? ['BODY'],
+          // ADR-0033 §5 (G4): the product editor's 상·하단 공지 choice; any other surface sends the
+          // stored choice back unchanged, so a save never resets it.
+          guidance: form.guidanceValue ? form.guidanceValue() : (inputs.guidance ?? null),
         },
       };
       if (authored) {
@@ -692,7 +702,7 @@ export function authoringForm(unit, onDone) {
       onDone();
     } catch (error) {
       const code = error instanceof ApiError ? error.error?.code : null;
-      toast(REASON_COPY[code] ?? (error instanceof ApiError ? error.message : String(error)));
+      toast(REASON_COPY[code] ?? (error instanceof Error ? error.message : String(error)));
     }
   });
   return form;

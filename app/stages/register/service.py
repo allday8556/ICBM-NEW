@@ -65,6 +65,11 @@ from app.stages.register.contracts import (
     CategoryView,
     FieldStateView,
     FieldValueView,
+    GuidanceChoiceView,
+    GuidanceEntryView,
+    GuidancePlacementResolutionView,
+    GuidancePlacementView,
+    GuidanceResolutionView,
     IntentView,
     ItemView,
     PreflightView,
@@ -95,6 +100,12 @@ from app.stages.register.execution import (
     queue_send_request,
     settleable_rejection,
     target_ref,
+)
+from app.stages.register.guidance import (
+    PLACEMENTS,
+    GuidanceChoice,
+    GuidanceMode,
+    PlacementChoice,
 )
 from app.stages.register.model import (
     CREATE_ENDPOINT_GROUP,
@@ -604,6 +615,38 @@ class RegisterService:
     def preparation(self, preparation_id: str) -> PreparationView:
         """What is authored now, and the revisions behind it. A reload reads exactly this."""
         return _preparation_view(self._require_authoring().preparation(preparation_id))
+
+    def detail_guidance(self, preparation_id: str | None) -> GuidanceResolutionView:
+        """ADR-0033 §5, §6 (G4): a unit's Detail Guidance choice and the notices it resolves to
+        now, each with the Detail Guidance owner's image route — a preparation's own, or DEFAULT
+        for a unit not yet authored. A read: the verdict stays the preflight's."""
+        choice, resolved = self._require_authoring().guidance(preparation_id)
+        return GuidanceResolutionView(
+            preparation_id=preparation_id,
+            placements=tuple(
+                GuidancePlacementResolutionView(
+                    placement=placement,
+                    choice=_placement_view(choice.of(placement)),
+                    entries=tuple(
+                        GuidanceEntryView(
+                            source=entry.source,
+                            guidance_revision_id=entry.guidance_revision_id,
+                            preparation_revision_id=entry.preparation_revision_id,
+                            template=entry.template,
+                            sha256=entry.sha256,
+                            kind=entry.kind,
+                            starts_at=entry.starts_at,
+                            ends_at=entry.ends_at,
+                            image_url=GUIDANCE_IMAGE_PATH.format(sha256=entry.sha256),
+                        )
+                        for entry in resolved.of(placement)
+                    ),
+                    # No composition places a notice before G5 (``PUBLICATION_GUIDANCE_UNPLACED``).
+                    unplaced=bool(resolved.of(placement)),
+                )
+                for placement in PLACEMENTS
+            ),
+        )
 
     def authoring_metadata(self, draft_id: str, category_id: str) -> AuthoringMetadataView:
         """Reviewed category fields and authoring revisions from the server's current owners."""
@@ -1523,6 +1566,30 @@ def _preflight_view(result: Any, *, source: str, matches: bool | None) -> Prefli
     )
 
 
+# The Detail Guidance owner's image route (``app.capabilities.detail_guidance.service``), which
+# serves every recorded guidance image, a product's own included. A contract test pins the two.
+GUIDANCE_IMAGE_PATH = "/api/v1/settings/detail-guidance/images/{sha256}"
+
+
+def _placement_view(choice: PlacementChoice) -> GuidancePlacementView:
+    if choice.mode is not GuidanceMode.CUSTOM:
+        return GuidancePlacementView(mode=choice.mode.value)
+    return GuidancePlacementView(
+        mode=choice.mode.value,
+        template=choice.template,
+        content=None if choice.content is None else dict(choice.content),
+    )
+
+
+def _guidance_view(choice: GuidanceChoice) -> GuidanceChoiceView | None:
+    """The choice read back in the shape a client sends; None for DEFAULT at both placements."""
+    if choice.is_default:
+        return None
+    return GuidanceChoiceView(
+        top=_placement_view(choice.top), bottom=_placement_view(choice.bottom)
+    )
+
+
 def _preparation_view(record: PreparationRecord) -> PreparationView:
     """The durable preparation, with what is authored now and the history behind it (§27)."""
     current = record.current
@@ -1559,6 +1626,7 @@ def _preparation_view(record: PreparationRecord) -> PreparationView:
             ),
             detail_body=None if inputs.detail is None else inputs.detail.body,
             detail_sections=() if inputs.detail is None else tuple(inputs.detail.sections),
+            guidance=_guidance_view(inputs.guidance),
         ),
         inputs_fingerprint=current.inputs_fingerprint,
         revisions=tuple(
