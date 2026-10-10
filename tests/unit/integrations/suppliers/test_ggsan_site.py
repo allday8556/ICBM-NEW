@@ -35,7 +35,7 @@ def test_ggsan_is_bound_in_recon_and_offered_to_connect_and_collect() -> None:
     site = SITES["ggsan"]
     assert site.config.status is SiteStatus.RECON
     assert site.template.platform == "godomall"
-    assert site.extractor_revision == f"{site.template.revision}+ggsan-1"
+    assert site.extractor_revision == f"{site.template.revision}+ggsan-2"
     assert site.collection in COLLECTIONS
     assert site.definition in SUPPLIERS
     assert site.definition.profile.egress_hosts == {"www.ggsan.com"}
@@ -112,3 +112,23 @@ def test_the_site_s_images_take_their_roles() -> None:
     assert all("/image/detail/thumb/" in url for url in by_role[ImageRole.THUMBNAIL])
     assert len(by_role[ImageRole.DETAIL]) == 1
     assert all("/img/" in url or "/magnify/" in url for url in by_role[ImageRole.UI_COMMON])
+
+
+def test_a_one_unit_minimum_written_in_brackets_is_read() -> None:
+    # ADR-0035 §4: 1000001010 states its minimum as "(1개)12,900원 이상 판매 부탁드립니다 …"
+    # without 판매가격절대준수; ggsan-2's phrase "(1개)" reads the one-unit amount.
+    body = capture("1000004918").body
+    start = body.index('<div class="txt-manual">') + len('<div class="txt-manual">')
+    end = body.index("</div>", start)
+    sentence = "<p>(1개)12,900원 이상 판매 부탁드립니다 (2개) 23,900원 이상 (3개) 34,900원 이상</p>"
+    view = DocumentView(
+        ReadKind.PRODUCT_READ,
+        200,
+        "/goods/goods_view.php",
+        None,
+        "text/html",
+        body[:start] + sentence + body[end:],
+    )
+    minimum = SITES["ggsan"].collection.fields(view)["minimum_sale_price"]
+    assert minimum.status is FieldStatus.CONFIRMED
+    assert minimum.value.amount_krw == 12900

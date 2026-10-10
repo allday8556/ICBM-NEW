@@ -10,10 +10,10 @@
   "label_overrides": {
     "purchase_price": ["판매가"],
     "list_price": ["정가"],
-    "minimum_price_phrase": ["판매가격절대준수", "판매가격 준수"],
+    "minimum_price_phrase": ["판매가격절대준수", "판매가격 준수", "(1개)"],
     "channel_forbid_coupang": ["쿠팡판매 불가"]
   },
   "status": "RECON",
   "recon_record": "documents/acceptance/suppliers/ggsan-recon.md",
-  "revision": "ggsan-1"
+  "revision": "ggsan-2"
 }
