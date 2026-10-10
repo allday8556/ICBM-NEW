@@ -554,11 +554,13 @@ button.registry-item:hover {
   gap: var(--space-2);
 }
 
-.detail-guidance .btn.dg-small {
+.detail-guidance .btn.dg-small,
+.dg-unit .btn.dg-small {
   padding: 6px 9px;
 }
 
-.detail-guidance .btn:disabled {
+.detail-guidance .btn:disabled,
+.dg-unit .btn:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -703,6 +705,74 @@ button.registry-item:hover {
   font-weight: var(--fw-semibold);
 }
 
+/* ---------- 상품 편집기 › 상세페이지 › 상·하단 공지 (ADR-0033 G4) ---------- */
+.dg-unit {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.dg-unit-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.dg-unit-head h4 {
+  margin: 0;
+}
+
+.dg-modes {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.dg-modes .btn[aria-checked="true"] {
+  border-color: var(--color-primary);
+  background: #f4f8ff;
+  color: var(--color-primary);
+  font-weight: var(--fw-bold);
+}
+
+.dg-resolved {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.dg-resolved figure {
+  display: grid;
+  grid-template-columns: minmax(0, 430px) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.dg-resolved figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.dg-resolved figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: start;
+  gap: var(--space-2);
+}
+
+.dg-unit .dg-presets {
+  margin-top: 0;
+}
+
+.dg-unit .dg-composer {
+  margin-top: 0;
+}
+
 @media (max-width: 1280px), (orientation: portrait) {
   .dg-composer {
     grid-template-columns: minmax(0, 1fr);
@@ -712,6 +782,9 @@ button.registry-item:hover {
 @media (max-width: 720px) {
   .dg-placement {
     padding: var(--space-4);
+  }
+  .dg-resolved figure {
+    grid-template-columns: minmax(0, 1fr);
   }
   .dg-period {
     grid-template-columns: minmax(0, 1fr);

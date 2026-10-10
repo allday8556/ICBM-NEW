@@ -35,6 +35,7 @@ from app.stages.register.contracts import (
     AuthoredInputsView,
     AuthoringMetadataView,
     BulkCreateResult,
+    GuidanceResolutionView,
     PreparationView,
     RegisterOverview,
     RegisterReadinessView,
@@ -199,6 +200,15 @@ def create_preparation(
 @router.get("/preparations/{preparation_id}")
 def preparation(container: ContainerDep, preparation_id: str) -> PreparationView:
     return container.register.preparation(preparation_id)
+
+
+@router.get("/detail-guidance")
+def detail_guidance(
+    container: ContainerDep, preparation_id: str | None = None
+) -> GuidanceResolutionView:
+    """ADR-0033 G4: a unit's Detail Guidance choice and the notices it resolves to now — the
+    preparation's own, or DEFAULT for a unit not yet authored. A read."""
+    return container.register.detail_guidance(preparation_id)
 
 
 @router.get("/drafts/{draft_id}/authoring-metadata/{category_id}")

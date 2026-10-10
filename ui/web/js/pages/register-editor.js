@@ -12,6 +12,13 @@
 // nothing until its server owner exists (owner decision 2026-10-08, Issue #219 comment 6054956408;
 // ROADMAP, Issue #127). 상품수정 is read-only in phase 1: no contract edits a registered listing yet,
 // and a unit with a Snapshot or an Intent is never authored here.
+//
+// ADR-0033 G4: the 상세페이지 step's 상단 공지 and 하단 공지 show the notices the server resolves for
+// the unit (GET /api/v1/register/detail-guidance), in order, and offer 기본값 / 끄기 / 직접 작성. 직접
+// 작성 is the settings card's own editor (components/guidance-editor.js): the same five-template
+// live preview and presets. The choice is saved with the preparation through the same save; the
+// server validates and draws a product's own notice, and states PUBLICATION_GUIDANCE_UNPLACED while
+// no composition can place a notice (G5).
 
 import { ApiError, getJson, sendJson } from '../core/api.js';
 import { fragment, h } from '../core/dom.js';
@@ -24,6 +31,16 @@ import { TAG_RESULT, TAG_TASK, aiTagsPanel } from '../components/ai-tags.js';
 import { CATEGORY_RESULT, CATEGORY_TASK, aiCategoryPanel } from '../components/ai-category.js';
 import { itemImagesEditor } from '../components/item-images.js';
 import { emptyState } from '../components/states.js';
+import {
+  GUIDANCE_BASE,
+  OPENING,
+  PLACEMENTS,
+  composer,
+  errorText,
+  exampleNote,
+  labelOf,
+  presetBar,
+} from '../components/guidance-editor.js';
 import {
   PREPARATION_LABEL,
   REASON_COPY,
@@ -363,6 +380,164 @@ function tagsBlock(unit, reload) {
   );
 }
 
+const GUIDANCE_READ = '/api/v1/register/detail-guidance';
+const GUIDANCE_MODES = [
+  ['DEFAULT', '기본값', '설정의 상세페이지 공지를 그대로 씁니다'],
+  ['OFF', '끄기', '이 상품에는 이 자리 공지를 넣지 않습니다'],
+  ['CUSTOM', '직접 작성', '이 상품만의 상시 공지를 씁니다 · 기간 공지는 그대로 들어갑니다'],
+];
+const GUIDANCE_UNPLACED = 'PUBLICATION_GUIDANCE_UNPLACED';
+
+function guidanceTime(iso) {
+  return new Date(iso).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+// One resolved notice, as the server resolved it: its image, what it is and its design.
+function resolvedEntry(entry, settings, label) {
+  const what =
+    entry.source === 'PRODUCT' ? '이 상품 공지' : entry.kind === 'PERIOD' ? '기간 공지' : '상시 공지';
+  return h(
+    'figure',
+    { 'data-role': 'dg-entry', 'data-source': entry.source, 'data-kind': entry.kind, 'data-sha256': entry.sha256 },
+    h('img', { src: entry.image_url, alt: `${label} · ${what}` }),
+    h(
+      'figcaption',
+      {},
+      h('span', { class: entry.source === 'PRODUCT' ? 'chip info' : 'chip' }, what),
+      h('span', { class: 'chip' }, settings ? labelOf(settings, entry.template) : entry.template),
+      entry.kind === 'PERIOD' && entry.ends_at ? h('span', { class: 'mini' }, `${guidanceTime(entry.ends_at)}까지`) : null,
+    ),
+  );
+}
+
+// ADR-0033 §5: one placement's group. The resolved list is the server's for the saved choice; a
+// changed choice applies once the preparation is saved.
+function guidanceGroup(unit, placement, read, settings, editable) {
+  const saved = read.placements.find((item) => item.placement === placement.key);
+  const savedChoice = saved?.choice ?? { mode: 'DEFAULT' };
+  let mode = savedChoice.mode;
+  let editor = null;
+  const customHost = h('div', { class: 'dg-unit-custom', 'data-role': 'dg-custom' });
+  const changeNote = h('div', { class: 'mini', 'data-role': 'dg-mode-note' });
+  const buttons = GUIDANCE_MODES.map(([key, label, copy]) => {
+    const button = h('button', { type: 'button', class: 'btn dg-small', role: 'radio', 'data-mode': key, title: copy }, label);
+    button.disabled = !editable;
+    button.addEventListener('click', () => {
+      mode = key;
+      draw();
+    });
+    return button;
+  });
+  const reasons = (unit.preflight?.reasons ?? []).filter(
+    (item) => item.code === GUIDANCE_UNPLACED && item.subject === `guidance:${placement.key.toLowerCase()}`,
+  );
+  const unplaced = reasons.length || (!unit.preflight && saved?.unplaced);
+  const entries = saved?.entries ?? [];
+
+  function draw() {
+    buttons.forEach((button) => button.setAttribute('aria-checked', String(button.dataset.mode === mode)));
+    changeNote.textContent =
+      mode === savedChoice.mode
+        ? GUIDANCE_MODES.find(([key]) => key === mode)?.[2] ?? ''
+        : `${GUIDANCE_MODES.find(([key]) => key === mode)?.[1]}: 준비 내용을 저장하면 적용됩니다.`;
+    if (mode !== 'CUSTOM' || !editable || !settings) {
+      customHost.replaceChildren();
+      return;
+    }
+    if (!editor) {
+      const own = savedChoice.mode === 'CUSTOM';
+      editor = composer({
+        blocks: own ? savedChoice.content?.blocks : OPENING[placement.key],
+        template: own ? savedChoice.template : null,
+        templates: settings.templates,
+        saved: own,
+      });
+    }
+    customHost.replaceChildren(
+      presetBar(settings, placement.key, editor),
+      exampleNote('준비 내용을 저장하기 전에는 이 상품에 들어가지 않습니다.'),
+      editor.el,
+    );
+  }
+  draw();
+
+  const element = h(
+    'div',
+    { class: 'detail-group dg-unit', 'data-role': `editor-guidance-${placement.key.toLowerCase()}`, 'data-placement': placement.key, 'data-saved-mode': savedChoice.mode },
+    h(
+      'div',
+      { class: 'dg-unit-head' },
+      h('h4', {}, placement.label),
+      h('span', { class: 'mini' }, placement.where),
+      h('div', { class: 'dg-modes', role: 'radiogroup', 'aria-label': `${placement.label} 선택`, 'data-role': 'dg-modes' }, ...buttons),
+    ),
+    changeNote,
+    h(
+      'div',
+      { class: 'dg-resolved', 'data-role': 'dg-resolved', 'data-count': String(entries.length) },
+      entries.length
+        ? entries.map((entry) => resolvedEntry(entry, settings, placement.label))
+        : h('span', { class: 'mini', 'data-role': 'dg-none' }, '이 상품에 들어가는 공지가 없습니다.'),
+    ),
+    unplaced
+      ? h('div', { class: 'note', 'data-role': 'dg-unplaced', 'data-reason': GUIDANCE_UNPLACED }, REASON_COPY[GUIDANCE_UNPLACED] ?? GUIDANCE_UNPLACED)
+      : null,
+    customHost,
+  );
+  return {
+    element,
+    // What the save sends for this placement. A product's own notice needs its design chosen; the
+    // server validates its text and draws it.
+    value() {
+      if (mode !== 'CUSTOM') return { mode };
+      if (!editor) return savedChoice.mode === 'CUSTOM' ? savedChoice : { mode: 'CUSTOM' };
+      if (editor.empty()) throw new Error(`${placement.label}: 직접 작성할 공지 문구를 입력하세요.`);
+      if (!editor.template()) throw new Error(`${placement.label}: 직접 작성한 공지의 템플릿을 고르세요.`);
+      return { mode: 'CUSTOM', template: editor.template(), content: editor.content() };
+    },
+  };
+}
+
+// ADR-0033 §5 (G4): the 상단 공지 and 하단 공지 groups of the 상세페이지 step. Each reads the server's
+// resolution for the unit; the authoring form saves the choice with the preparation.
+function guidanceGroups(unit, form, editable) {
+  const hosts = Object.fromEntries(
+    PLACEMENTS.map((placement) => [
+      placement.key,
+      h(
+        'div',
+        { class: 'detail-group dg-unit', 'data-role': `editor-guidance-${placement.key.toLowerCase()}`, 'data-state': 'loading' },
+        h('h4', {}, placement.label),
+        h('span', { class: 'chip' }, '불러오는 중'),
+      ),
+    ]),
+  );
+  const preparationId = unit.authored?.preparation_id;
+  const read = getJson(preparationId ? `${GUIDANCE_READ}?preparation_id=${encodeURIComponent(preparationId)}` : GUIDANCE_READ);
+  Promise.all([read, getJson(GUIDANCE_BASE).catch(() => null)])
+    .then(([resolved, settings]) => {
+      const groups = PLACEMENTS.map((placement) => {
+        const group = guidanceGroup(unit, placement, resolved, settings, editable && Boolean(form));
+        group.element.dataset.state = 'ready';
+        hosts[placement.key].replaceWith(group.element);
+        hosts[placement.key] = group.element;
+        return [placement.key, group];
+      });
+      if (form) {
+        const byKey = Object.fromEntries(groups);
+        form.guidanceValue = () => ({ top: byKey.TOP.value(), bottom: byKey.BOTTOM.value() });
+      }
+    })
+    .catch((error) => {
+      for (const placement of PLACEMENTS) {
+        const host = hosts[placement.key];
+        host.dataset.state = 'error';
+        host.replaceChildren(h('h4', {}, placement.label), h('span', { class: 'chip warn' }, `확인 불가 · ${errorText(error)}`));
+      }
+    });
+  return hosts;
+}
+
 function pane(index, title, copy, ...children) {
   return h(
     'section',
@@ -407,6 +582,7 @@ function editor(unit, ctx, labels, mode, step) {
     form.parts.submit.setAttribute('form', form.id);
   }
   const parts = form?.parts;
+  const guidance = guidanceGroups(unit, form, editable);
   const stepper = h('nav', { class: 'stepper', 'aria-label': '편집 단계' });
   const panes = [
     pane(
@@ -459,10 +635,10 @@ function editor(unit, ctx, labels, mode, step) {
       '⑤ 상세페이지',
       '상단 공지 → 상세 이미지 → 본문 → 하단 공지',
       h('div', { class: 'mode-switch' }, h('button', { type: 'button', class: 'mode-card on' }, h('b', {}, '이미지 에디터 방식'), h('span', { class: 'mini' }, '상세 이미지는 대표이미지 단계에서 「상세」로 고릅니다')), markInert(h('button', { type: 'button', class: 'mode-card' }, h('b', {}, 'HTML 방식'), h('span', { class: 'mini' }, '준비 중')), 'HTML 방식은 준비 중')),
-      h('div', { class: 'detail-group' }, h('h4', {}, '상단 공지'), noData('상단 공지'), pending('＋ 공지 추가', '상·하단 공지는 준비 중')),
+      guidance.TOP,
       parts ? parts.detail : h('div', { class: 'kv' }, h('span', {}, '상세 본문'), h('b', {}, unit.authored?.inputs?.detail_body ?? '—')),
       h('div', { class: 'row' }, pending('이미지 편집', '상세 이미지 편집은 준비 중'), aiPending('이미지 자동번역'), h('button', { type: 'button', class: 'btn', 'data-action': 'open-preview', onclick: () => previewModal(unit) }, '미리보기')),
-      h('div', { class: 'detail-group' }, h('h4', {}, '하단 공지'), noData('하단 공지')),
+      guidance.BOTTOM,
     ),
     pane(
       6,

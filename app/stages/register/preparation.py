@@ -60,6 +60,14 @@ from app.stages.products.source_gates import (
 )
 from app.stages.register import sanitize
 from app.stages.register.detail import DetailPlan, DetailProfile, PlannedImage
+from app.stages.register.guidance import (
+    DEFAULT_CHOICE,
+    NO_GUIDANCE,
+    PLACEMENT_SECTIONS,
+    PLACEMENTS,
+    GuidanceChoice,
+    ResolvedGuidance,
+)
 from app.stages.register.model import ListingShape, canonical_json, valid_listing_identity
 from app.stages.register.policy import (
     SATISFYING,
@@ -164,6 +172,10 @@ PUBLICATION_REPRESENTATIVE_MISSING: Final = "PUBLICATION_REPRESENTATIVE_MISSING"
 # only by a valid plan — an owner-held v2 composition placing ``DETAIL_IMAGES`` — and only for this
 # reason; every planned image must still be uploaded before the final preflight is READY.
 PUBLICATION_DETAIL_IMAGES_UNPLACED: Final = "PUBLICATION_DETAIL_IMAGES_UNPLACED"
+# ADR-0033 §8 (G4): a resolved Detail Guidance notice whose placement no section of the unit's
+# composition places blocks the unit, with ``PUBLICATION_DETAIL_IMAGES_UNPLACED``'s semantics. No
+# profile places one before composition v3 (G5), so a unit with any resolved notice stays here.
+PUBLICATION_GUIDANCE_UNPLACED: Final = "PUBLICATION_GUIDANCE_UNPLACED"
 PUBLICATION_ASSET_QA_NOT_PASSED: Final = "PUBLICATION_ASSET_QA_NOT_PASSED"
 PROVIDER_ASSET_IDENTITY_MISSING: Final = "PROVIDER_ASSET_IDENTITY_MISSING"
 PREPARED_ASSET_CANDIDATE_MISMATCH: Final = "PREPARED_ASSET_CANDIDATE_MISMATCH"
@@ -249,6 +261,7 @@ REASON_CODES: Final = frozenset(
         PUBLICATION_ASSET_COUNT_EXCEEDED,
         PUBLICATION_REPRESENTATIVE_MISSING,
         PUBLICATION_DETAIL_IMAGES_UNPLACED,
+        PUBLICATION_GUIDANCE_UNPLACED,
         PUBLICATION_ASSET_QA_NOT_PASSED,
         PROVIDER_ASSET_IDENTITY_MISSING,
         PREPARED_ASSET_CANDIDATE_MISMATCH,
@@ -486,6 +499,10 @@ class PreflightRequest:
     detail: DetailComposition | None
     duplicate_evidence: DuplicateEvidence | None = None
     advisories: tuple[ResaleAdvisory, ...] = ()
+    # ADR-0033 §5 (G4): the product's Detail Guidance choice, and the preparation revision that
+    # authored it (the identity of a ``CUSTOM`` notice's resolved entry).
+    guidance: GuidanceChoice = DEFAULT_CHOICE
+    preparation_revision_id: str | None = None
 
 
 # ---------------------------------------------------------------- resolved current truth
@@ -713,6 +730,9 @@ class ResolvedUnit:
     # ADR-0031 §4, ADR-0030 §7: ``(item_id, code)`` for each gate an Item's source puts on this
     # marketplace (SOURCE_GATE_CODES).
     source_gates: tuple[tuple[str, str], ...] = ()
+    # ADR-0033 §6 (G4): the Detail Guidance notices resolved for the request's choice at the
+    # injected clock's instant; empty when none applies or no guidance source is wired.
+    guidance: ResolvedGuidance = NO_GUIDANCE
 
 
 # ---------------------------------------------------------------- the result
@@ -1283,6 +1303,18 @@ def _publication_reasons(
     return reasons
 
 
+def _guidance_reasons(unit: ResolvedUnit, plan: DetailPlan | None) -> list[Reason]:
+    """ADR-0033 §8: a placement whose resolved notices no section of the unit's plan places blocks
+    the unit, so nothing is ever sent without them. Composition v3 (G5) is the only profile that
+    will place them; until it exists every resolved notice stays here."""
+    sections = () if plan is None else plan.sections
+    return [
+        Reason(PUBLICATION_GUIDANCE_UNPLACED, _B, f"guidance:{placement.lower()}")
+        for placement in PLACEMENTS
+        if unit.guidance.of(placement) and PLACEMENT_SECTIONS[placement] not in sections
+    ]
+
+
 def _conflict_reasons(unit: ResolvedUnit) -> list[Reason]:
     """R2: an in-flight or unresolved CREATE in the scope. No override ever releases it."""
     return [
@@ -1381,6 +1413,8 @@ def _sanitation_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[R
             "sections": list(detail.sections),
             "body": detail.body,
         },
+        # ADR-0033 §5: a product's own notice text, named only when it chose something.
+        **({} if request.guidance.is_default else {"guidance": request.guidance.encode()}),
     }
     return [Reason(code, _B, where) for code, where in sanitize.problems(values, path="outbound")]
 
@@ -1578,6 +1612,10 @@ def candidate_dependencies(request: PreflightRequest, unit: ResolvedUnit) -> dic
         },
         # Only when present, so a unit its sources do not gate keeps its earlier fingerprint.
         **({"source_gates": sorted(unit.source_gates)} if unit.source_gates else {}),
+        # ADR-0033 §6 (DG-05): the resolved notices of both placements, named only when at least
+        # one notice is resolved, so a unit with none keeps its earlier fingerprint. A new
+        # revision, a period that starts or ends, or a changed product choice changes it.
+        **({} if unit.guidance.empty else {"guidance": unit.guidance.canonical()}),
         "conflicts": sorted([c.intent_id, c.state] for c in unit.conflicts),
     }
 
@@ -1607,6 +1645,7 @@ def evaluate(
         *_detail_reasons(request, unit),
         *_authoring_reasons(request, unit),
         *_publication_reasons(unit.target, unit, plan),
+        *_guidance_reasons(unit, plan),
         *_conflict_reasons(unit),
         *_duplicate_reasons(request, unit),
         *_sanitation_reasons(request, unit),

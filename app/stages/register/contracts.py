@@ -15,8 +15,9 @@ would send — never a credential, a provider URL or provider response text.
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
-from pydantic import BaseModel, StrictBool, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 
 from app.platform.core.errors import ErrorClass
 from app.stages.connect.accounts import AccountBinding
@@ -262,6 +263,58 @@ class AuthoringMetadataView(BaseModel):
     max_option_dimensions: int = 1
 
 
+class GuidancePlacementView(BaseModel):
+    """One placement's Detail Guidance choice (ADR-0033 §5): ``DEFAULT``, ``OFF`` or ``CUSTOM``
+    with this product's own ``template`` and plain-text ``content`` (``{"blocks": [...]}``). The
+    server validates and renders a CUSTOM notice; a client never names its image."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: StrictStr = "DEFAULT"
+    template: StrictStr | None = None
+    content: dict[str, Any] | None = None
+
+
+class GuidanceChoiceView(BaseModel):
+    """A product's Detail Guidance choice at both placements; absent is DEFAULT at both."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    top: GuidancePlacementView = GuidancePlacementView()
+    bottom: GuidancePlacementView = GuidancePlacementView()
+
+
+class GuidanceEntryView(BaseModel):
+    """One resolved notice (ADR-0033 §6), in order, with the owner's image route."""
+
+    source: str
+    guidance_revision_id: str | None = None
+    preparation_revision_id: str | None = None
+    template: str
+    sha256: str
+    # ``PERIOD`` or ``STANDING``: display only.
+    kind: str
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    image_url: str
+
+
+class GuidancePlacementResolutionView(BaseModel):
+    placement: str
+    choice: GuidancePlacementView
+    entries: tuple[GuidanceEntryView, ...]
+    # ADR-0033 §8 (G4): a resolved notice no composition places yet blocks the unit.
+    unplaced: bool
+
+
+class GuidanceResolutionView(BaseModel):
+    """What a unit's Detail Guidance choice resolves to now, per placement. A read: the verdict on
+    the unit stays the preflight's (``PUBLICATION_GUIDANCE_UNPLACED``)."""
+
+    preparation_id: str | None
+    placements: tuple[GuidancePlacementResolutionView, ...]
+
+
 class AuthoredInputsView(BaseModel):
     """What an operator authored for one provider-listing unit (§27).
 
@@ -282,6 +335,8 @@ class AuthoredInputsView(BaseModel):
     detail_composition_revision: str | None = None
     detail_body: str | None = None
     detail_sections: tuple[str, ...] = ("BODY",)
+    # ADR-0033 §5 (G4): the Detail Guidance choice; absent is DEFAULT at both placements.
+    guidance: GuidanceChoiceView | None = None
 
 
 class PreparationRevisionView(BaseModel):

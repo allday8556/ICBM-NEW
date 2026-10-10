@@ -30,7 +30,7 @@ from app.platform.core.errors import InputValidationError, NotFoundError
 from app.stages.products.image_model import ImageAssetKind
 from app.stages.products.model import ReadinessStatus
 from app.stages.register.builder import RegistrationSnapshotBuilder
-from app.stages.register.contracts import AuthoredInputsView, FieldValueView
+from app.stages.register.contracts import AuthoredInputsView, FieldValueView, GuidanceChoiceView
 from app.stages.register.execution import (
     decode_category,
     decode_detail,
@@ -38,6 +38,17 @@ from app.stages.register.execution import (
     encode_category,
     encode_detail,
     encode_field,
+)
+from app.stages.register.guidance import (
+    DEFAULT_CHOICE,
+    GUIDANCE_UNAVAILABLE,
+    GuidanceChoice,
+    GuidanceMode,
+    GuidanceSource,
+    PlacementChoice,
+    ResolvedGuidance,
+    decode_choice,
+    requested_placement,
 )
 from app.stages.register.model import (
     DUPLICATE_EVIDENCE_UNAVAILABLE,
@@ -93,6 +104,9 @@ class AuthoredInputs:
     category: CategorySelection | None
     listing: ListingValues
     detail: DetailComposition | None
+    # ADR-0033 §5 (G4): the product's Detail Guidance choice; DEFAULT at both placements unless
+    # the operator chose otherwise.
+    guidance: GuidanceChoice = DEFAULT_CHOICE
 
 
 @dataclass(frozen=True)
@@ -137,6 +151,10 @@ def encode_inputs(inputs: AuthoredInputs) -> PreparationInputs:
                 item: dict(sorted(values.items()))
                 for item, values in sorted(listing.options.items())
             },
+            # ADR-0033 §5 (G4): the Detail Guidance choice rides in the listing document, so no
+            # migration is needed and the detail composition stays optional. It is named only when
+            # the operator chose something, so every DEFAULT revision encodes exactly as before.
+            **({} if inputs.guidance.is_default else {"guidance": inputs.guidance.encode()}),
         },
         "detail": encode_detail(inputs.detail),
     }
@@ -181,7 +199,19 @@ def inputs_from_view(view: AuthoredInputsView) -> AuthoredInputs:
                 sections=tuple(view.detail_sections) or ("BODY",),
             )
         ),
+        guidance=_guidance(view.guidance),
     )
+
+
+def _guidance(view: GuidanceChoiceView | None) -> GuidanceChoice:
+    """The choice a client sent, unrendered: a CUSTOM notice is validated, rendered and recorded by
+    the Detail Guidance owner when the preparation is saved, and its image is the server's."""
+    if view is None:
+        return DEFAULT_CHOICE
+    top, bottom = (
+        requested_placement(p.mode, p.template, p.content) for p in (view.top, view.bottom)
+    )
+    return GuidanceChoice(top=top, bottom=bottom)
 
 
 def submitted_revisions(inputs: AuthoredInputs) -> dict[str, str | None]:
@@ -229,6 +259,7 @@ def decode_inputs(revision: PreparationRevisionRecord) -> AuthoredInputs:
             options={item: dict(values) for item, values in listing["options"].items()},
         ),
         detail=decode_detail(revision.detail),
+        guidance=decode_choice(listing.get("guidance")),
     )
 
 
@@ -258,6 +289,8 @@ def preflight_request(
         listing=inputs.listing,
         detail=inputs.detail,
         duplicate_evidence=duplicate_evidence,
+        guidance=inputs.guidance,
+        preparation_revision_id=revision.preparation_revision_id,
     )
 
 
@@ -389,8 +422,11 @@ class RegistrationPreparationService:
         duplicate_lookup: DuplicateLookupSource | None = None,
         prepared_assets: PreparedAssetSource | None = None,
         enrichment: EnrichmentResultSource | None = None,
+        guidance: GuidanceSource | None = None,
     ) -> None:
         self._enrichment = enrichment
+        # ADR-0033 G4: the Detail Guidance owner that renders and records a product's own notice.
+        self._guidance = guidance
         self._registrations = registrations
         self._preflight = preflight
         self._builder = builder
@@ -417,6 +453,7 @@ class RegistrationPreparationService:
         inputs = self._require_owned_revisions(
             draft.marketplace_key, draft.marketplace_account_id, inputs, revisions
         )
+        cid = self._correlation(correlation_id)
         chosen, problems = resolve_unit(
             draft.listing_shape, [item.item_id for item in draft.items], item_ids
         )
@@ -426,6 +463,7 @@ class RegistrationPreparationService:
                 "the requested Items do not form one provider-listing unit",
                 details={"reasons": [problem.code for problem in problems]},
             )
+        inputs = self._render_guidance(inputs, actor=actor, correlation_id=cid)
         encoded = encode_inputs(inputs)
         try:
             with self._registrations.transaction() as unit:
@@ -434,7 +472,7 @@ class RegistrationPreparationService:
                     item_ids=chosen,
                     inputs=encoded,
                     created_by=actor,
-                    correlation_id=self._correlation(correlation_id),
+                    correlation_id=cid,
                 )
         except IntegrityError as exc:
             if "registration_preparations.draft_id" not in str(exc):
@@ -459,6 +497,8 @@ class RegistrationPreparationService:
         inputs = self._require_owned_revisions(
             current.marketplace_key, current.marketplace_account_id, inputs, revisions
         )
+        cid = self._correlation(correlation_id)
+        inputs = self._render_guidance(inputs, actor=actor, correlation_id=cid)
         encoded = encode_inputs(inputs)
         with self._registrations.transaction() as unit:
             return unit.revise_preparation(
@@ -466,8 +506,47 @@ class RegistrationPreparationService:
                 item_ids=item_ids,
                 inputs=encoded,
                 authored_by=actor,
-                correlation_id=self._correlation(correlation_id),
+                correlation_id=cid,
             )
+
+    def _render_guidance(
+        self, inputs: AuthoredInputs, *, actor: str, correlation_id: str
+    ) -> AuthoredInputs:
+        """ADR-0033 §5: each CUSTOM notice is validated (``GUIDANCE_TEXT_INVALID``), rendered by
+        the one renderer and recorded in ``guidance_image_artifacts`` by the Detail Guidance owner
+        before the revision is written; the choice keeps the owner's validated text and the
+        SHA-256 of its rendering. The image record is store-level and append-only, so a refused
+        preparation write leaves at most an unused, reusable image — never a partial revision."""
+        choice = inputs.guidance
+        rendered: dict[str, PlacementChoice] = {}
+        for name, pick in (("top", choice.top), ("bottom", choice.bottom)):
+            if pick.mode is not GuidanceMode.CUSTOM:
+                rendered[name] = pick
+                continue
+            if self._guidance is None:
+                raise InputValidationError(
+                    GUIDANCE_UNAVAILABLE, "no Detail Guidance owner is wired to draw this notice"
+                )
+            assert pick.template is not None and pick.content is not None
+            recorded = self._guidance.record_custom_image(
+                pick.content, pick.template, actor=actor, correlation_id=correlation_id
+            )
+            rendered[name] = PlacementChoice(
+                GuidanceMode.CUSTOM,
+                str(recorded.template),
+                dict(recorded.content),
+                recorded.sha256,
+            )
+        return replace(inputs, guidance=GuidanceChoice(**rendered))
+
+    def guidance(self, preparation_id: str | None) -> tuple[GuidanceChoice, ResolvedGuidance]:
+        """The product's current choice and the notices it resolves to now (ADR-0033 §5, §6): a
+        preparation's own, or DEFAULT for a unit not yet authored. A read; nothing is judged."""
+        if preparation_id is None:
+            return DEFAULT_CHOICE, self._preflight.guidance(DEFAULT_CHOICE)
+        revision = self.preparation(preparation_id).current
+        choice = decode_inputs(revision).guidance
+        return choice, self._preflight.guidance(choice, revision.preparation_revision_id)
 
     def apply_enrichment(
         self,

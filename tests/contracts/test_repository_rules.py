@@ -2116,6 +2116,9 @@ PREFLIGHT_TRUTH_WRITERS = {
     **dict.fromkeys(("LiveGrant", "ProtectedWriteBrake", "AssetUploadAttempt", "RestoreDrill",
                      "RetentionProof", "VisualAcceptance"),
                     "app/capabilities/live_safety/store.py"),
+    # ADR-0033 G4: the preflight resolves the Detail Guidance notices; G2's owner writes them.
+    **dict.fromkeys(("DetailGuidance", "GuidanceImageArtifact", "DetailGuidanceRevision"),
+                    "app/capabilities/detail_guidance/store.py"),
 }  # fmt: skip
 
 
