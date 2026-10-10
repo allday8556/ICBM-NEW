@@ -1,0 +1,24 @@
+{
+  "schema": "icbm-supplier-site/v1",
+  "supplier_key": "upick",
+  "display_name": "U-PICK",
+  "platform": "cafe24",
+  "base_url": "https://upickb2b.com",
+  "storefront_host": "upickb2b.com",
+  "image_hosts": ["upickb2b.com", "thepath.cafe24.com"],
+  "product_path_form": "seo",
+  "label_overrides": {
+    "purchase_price": ["회원가"],
+    "list_price": ["소비자가"],
+    "minimum_price": ["폐쇄몰 최저판매가"],
+    "channel_all_allowed": ["모든마켓 판매가능"],
+    "channel_closed_only": ["폐쇄몰", "오픈마켓 판매불가"],
+    "title_suffix": ["- U-PICK B2B"]
+  },
+  "region_overrides": {
+    "key_image": {"by": "class", "token": "prdImg"}
+  },
+  "status": "RECON",
+  "recon_record": "documents/acceptance/suppliers/upick-recon.md",
+  "revision": "upick-1"
+}

@@ -962,7 +962,8 @@ function suppliersView(view, ctx) {
       markInert(h('button', { type: 'button', class: 'btn blue' }, '+ 공급처 추가')),
     ),
   );
-  // New suppliers need their own site definition; M1 ships KM통상 only.
+  // A new supplier is a reviewed site configuration on a platform template (ADR-0030); the
+  // configured suppliers come from the server, so this card adds none by itself.
   const addCard = markInert(
     h(
       'button',
