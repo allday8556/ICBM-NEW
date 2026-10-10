@@ -77,10 +77,15 @@ This amends ADR-0031 §3, "Where the words are read".
 - **One row that states both.** A channel row whose value holds an allowed phrase *and* restrictions reads as its restrictions, `LISTED` (or `CLOSED_MALL_ONLY`).
   - Example: `모든마켓 판매가능/쿠팡,토스 판매금지` is "every marketplace except Coupang and Toss".
   - An all-allowed reading comes only from a row whose whole value is an allowed phrase. This is how `cafe24-2` and `godomall-1` already read it.
-  - Every word of such a row must be read. After the matched configured phrases and the separators (`/`, `,`, `·`) are set aside, anything left over is a statement no rule reads → `REVIEW_REQUIRED` (ADR-0031 SC-02).
+- **Every word of a channel row is read.** This holds for every channel row that is not wholly an allowed phrase, a restriction-only row included.
+  - After the matched configured phrases and the separators (`/`, `,`, `·`) are set aside, anything left over is a statement no rule reads → `REVIEW_REQUIRED` (ADR-0031 SC-02).
+  - A site therefore configures every phrase its rows use.
   - ADR-0031 §3's "an `all_allowed` phrase together with any restricting phrase → `REVIEW_REQUIRED`" applies to *separate* statements: an all-allowed row beside a restriction in another row, the description or the name.
 - **A marketplace ICBM does not list.** A restriction naming one (토스) is kept in the fact's `policy_text`, so a later marketplace can read it. It restricts nothing today.
-- **Phrases.** U-PICK's site revision adds the phrases its pages use for Coupang: `쿠팡 판매 금지`, `쿠팡 등록 불가`, `쿠팡,토스 판매금지`.
+- **Phrases.** U-PICK's site revision adds the phrases its pages use:
+  - Coupang: `쿠팡 판매 금지`, `쿠팡 등록 불가`, `쿠팡,토스 판매금지`;
+  - closed malls: `폐쇄몰 전용`, `오픈마켓 판매 금지`, beside the existing `폐쇄몰` and `오픈마켓 판매불가`.
+  - Each channel-row value seen in reconnaissance and in acceptance run 1 then reads fully.
   - Matching ignores whitespace, as ADR-0031 §3 says.
 
 ### 2. A region surcharge is priced at the base fee
@@ -116,7 +121,7 @@ This amends the money-cell rule for `minimum_sale_price` rows (ADR-0030 §2, ADR
 
 - **NR-01** Only restricting phrases are read in a product name. An allowed reading never comes from a name.
 - **NR-02** A name restriction beside an all-allowed row is `REVIEW_REQUIRED`.
-- **NR-03** One row that states an allowed phrase and restrictions reads as its restrictions. An all-allowed reading needs a row whose whole value is an allowed phrase.
+- **NR-03** One row that states an allowed phrase and restrictions reads as its restrictions. An all-allowed reading needs a row whose whole value is an allowed phrase. Any word of a channel row that no configured phrase reads holds the field for review.
 - **RS-01** A region surcharge never changes the priced fee, and its words are kept in `policy_text`.
 - **QM-01** A per-quantity minimum row yields its `1개` amount and nothing else. Any other shape stays `REVIEW_REQUIRED`.
 
