@@ -17,7 +17,11 @@ with ADR-0034's description minimum and free-over shipping readings.
 - a minimum row that is exactly a per-quantity list reads its ``1개`` amount, which must be above
   zero;
 - text is cleaned of the byte-order mark, the zero-width space and the word joiner, and a no-break
-  space is a space, so a text made only of them is empty.
+  space is a space, so a text made only of them is empty;
+- after the 건강산 preview collection (2026-10-10): every reading but the description is made
+  inside the product form ``form#frmView``, never in the floating cart layer; a region layer that
+  is exactly a list of regions with one amount each is summarized in the policy text; and a
+  minimum-looking description sentence without the site's phrase holds the minimum for review.
 """
 
 EXTRACTION_REVISION = "godomall-2"

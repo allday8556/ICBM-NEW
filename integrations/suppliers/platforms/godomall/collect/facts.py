@@ -3,7 +3,9 @@
 Written from 건강산's reconnaissance captures (Issue #219 `6086058056`). A Godomall skin lays the
 product's own data out as ``dl`` rows of ``dt`` label and ``dd`` value inside
 ``.item_detail_list``, lists the lines to be ordered in ``.item_choice_list``, writes the purchase
-controls in ``.btn_choice_box``, and puts the description in ``#detail .txt-manual``.
+controls in ``.btn_choice_box``, and puts the description in ``#detail .txt-manual``. All of
+them but the description are read only inside the product form ``form#frmView``: a member page
+also writes a hidden floating cart layer with its own copies (건강산 preview, 2026-10-10).
 
 The browser capture keeps no ``name`` or ``value`` attribute (ADR-0019 §6.1), so nothing here reads
 a form input's value: every fact is read from what the page shows.
@@ -19,11 +21,15 @@ Every reading fails closed:
 - The shipping fact is recorded as the page states it. A base fee with a free-over threshold is
   ``CONDITIONAL``, carrying both; pricing reads that at its base fee (ADR-0034 §2). A fee stated
   as a range is ``FIXED`` at its highest amount, its words kept (ADR-0032 §4). A region layer's
-  words are kept beside the base fee and never priced (ADR-0035 §2); a layer stating its
-  surcharge only as an image, or in words longer than 200 characters, is held for review.
+  words are kept beside the base fee and never priced (ADR-0035 §2); a layer that is exactly a
+  list of regions, each with one amount, is summarized (``287개 지역 3,000원~5,000원``), and any
+  other layer stating its surcharge only as an image, or in words longer than 200 characters, is
+  held for review.
 - A minimum resale price written as a description sentence is read only from the site's phrases
-  (ADR-0034 §1). A minimum row that is exactly a per-quantity list with a one-unit amount above
-  zero reads that amount (ADR-0035 §3).
+  (ADR-0034 §1). When the site names phrases and none states a minimum, a sentence that reads as
+  one (an amount 이상 and 판매) holds the field rather than leave it ``ABSENT``. A minimum row
+  that is exactly a per-quantity list with a one-unit amount above zero reads that amount
+  (ADR-0035 §3).
 - A restricting channel phrase is read in the product's name too, never an allowed one, and a
   channel row that is not wholly allowed is read only when every word of it is a configured
   phrase or a separator (ADR-0035 §1, NR-03).
@@ -58,6 +64,8 @@ from integrations.suppliers.collection import DocumentView
 from integrations.suppliers.platforms.godomall.collect.dom import Node, clean, meta, read
 
 # The product's information rows and the box of its purchase controls.
+# The product's own form: every product reading but the description is made inside it.
+PRODUCT_FORM = "#frmView"
 INFO_LIST = "item_detail_list"
 CHOICE_BOX = "btn_choice_box"
 # The amount-tier layer of the shipping row (금액별배송비), and its region layer (지역별배송비).
@@ -69,6 +77,8 @@ REGION_TITLE = ".ly_tit"
 REGION_CLOSE = "ly_close"
 # ADR-0035 §2: the longest region-surcharge words kept as policy text; longer ones are held.
 REGION_WORDS_LIMIT = 200
+# An amount inside a region entry's address words: the entry is then not "address, one amount".
+_REGION_ADDRESS_AMOUNT = re.compile(r"\d원")
 # ADR-0035 §1 NR-03: the separators a channel row puts between its phrases.
 _CHANNEL_SEPARATORS = str.maketrans("", "", "/,·")
 # The lines to be ordered, and one line of it. A product without options has its one line
@@ -138,6 +148,8 @@ _QUANTITY_LIST = re.compile(rf"{_QUANTITY_ENTRY}(?:[/,]?{_QUANTITY_ENTRY})*")
 # The amount must follow the phrase directly: anything between them (a quantity, a bundle, a
 # shipping-inclusive note, another amount) is not a per-unit minimum the rule can read.
 _SENTENCE_MINIMUM = re.compile(r"(?:1개)?" + _NUMBER + r"원이상")
+# A sentence that reads as a minimum without the site's phrase: an amount followed by 이상.
+_MINIMUM_LOOKING = re.compile(r"\d원이상")
 # The amount-tier layer: "<from>원 이상 ~ <to>원 미만 <fee>원" and "<from>원 이상 <fee>원".
 _TIER_BOUNDED = re.compile(_NUMBER + r"원이상~" + _NUMBER + r"원미만" + _NUMBER + r"원")
 _TIER_OPEN = re.compile(_NUMBER + r"원이상" + _NUMBER + r"원")
@@ -190,10 +202,27 @@ def _row_locator(label: str) -> str:
     return f"dt:{label} + dd"
 
 
+def product_form(nodes: Sequence[Node]) -> tuple[Node, ...]:
+    """Every element inside the product's own form ``form#frmView``, in source order.
+
+    A member page also writes a hidden floating cart layer (``#frmCartTabViewLayer``) with its own
+    order list, a pre-written order line and purchase controls (건강산 preview, 2026-10-10). Those
+    are the cart's, never the product's, so the product's rows, name heading, order list, option
+    controls and purchase controls are read only inside this form. The description is read from
+    ``#detail``, outside it.
+    """
+    return tuple(
+        inner
+        for form in nodes
+        if form.tag == "form" and form.marks_exactly(PRODUCT_FORM)
+        for inner in form.descendants()
+    )
+
+
 def rows(nodes: Sequence[Node]) -> Iterator[tuple[str, str, Node]]:
-    """Every (label, value, dd) row of the product's information list, in source order. A ``dt``
-    pairs only with the ``dd`` of its own ``dl``."""
-    for dl in nodes:
+    """Every (label, value, dd) row of the product's information list inside the product form, in
+    source order. A ``dt`` pairs only with the ``dd`` of its own ``dl``."""
+    for dl in product_form(nodes):
         if dl.tag != "dl" or not dl.within(INFO_LIST):
             continue
         children = [child for child in dl.content if isinstance(child, Node)]
@@ -235,7 +264,7 @@ def _declared_name(nodes: Sequence[Node]) -> str:
 def _name_headings(nodes: Sequence[Node], words: Vocabulary) -> list[str]:
     return [
         node.text
-        for node in nodes
+        for node in product_form(nodes)
         if node.tag == "h3" and node.within(words.name_heading) and node.text
     ]
 
@@ -433,7 +462,51 @@ def _minimum_sale_price(
                 ),
             ),
         )
+    if words.minimum_price_phrase:
+        # A fail-closed guard (건강산 preview, 2026-10-10): the site names its minimum with
+        # phrases, none of them stated one, yet a sentence states what reads as a minimum — an
+        # amount 이상 and 판매 — without the phrase. That is never "no minimum": it is held. The
+        # guard only ever holds; it never confirms an amount.
+        looking = [
+            sentence
+            for sentence in _sentences(block)
+            if _MINIMUM_LOOKING.search(_squash(sentence)) and "판매" in _squash(sentence)
+        ]
+        if looking:
+            return _review(sentence_locator, *looking)
     return _absent(_row_locator(words.minimum_price[0]))
+
+
+def _region_summary(layer: Node) -> str | None:
+    """ADR-0035 §2: a region layer that is exactly a list of regions, summarized for the policy
+    text: ``{count}개 지역 {min}원~{max}원``, or ``{count}개 지역 {amount}원`` when every amount is
+    the same. 건강산's real layer lists 287 regions in about 6,900 characters.
+
+    Exactly a list means: the layer's words (its title aside) are the words of its ``li`` entries
+    and nothing else, and every entry is address words written directly in the ``li`` followed by
+    one ``span`` that holds exactly one amount, ``N원``, with no other amount in the address
+    words. Any other shape is None, and the layer is kept as words or held. Nothing is priced.
+    """
+    items = [node for node in layer.descendants() if node.tag == "li"]
+    if not items:
+        return None
+    if _squash(layer.words_outside(REGION_TITLE)) != "".join(_squash(li.text) for li in items):
+        return None
+    amounts: list[int] = []
+    for item in items:
+        children = [child for child in item.content if isinstance(child, Node)]
+        address = clean("".join(piece for piece in item.content if isinstance(piece, str)))
+        if len(children) != 1 or children[0].tag != "span" or not address:
+            return None
+        stated = _ONE_AMOUNT.fullmatch(_squash(children[0].text))
+        if stated is None or any(child.tag != "br" for child in children[0].descendants()):
+            return None
+        if _REGION_ADDRESS_AMOUNT.search(_squash(address)):
+            return None
+        amounts.append(_amount(stated))
+    low, high = min(amounts), max(amounts)
+    stated_range = f"{low:,}원" if low == high else f"{low:,}원~{high:,}원"
+    return f"{len(items)}개 지역 {stated_range}"
 
 
 def _shipping(found: Sequence[tuple[str, str, Node]], words: Vocabulary) -> FieldFact:
@@ -480,8 +553,14 @@ def _shipping(found: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Fiel
             # ADR-0035 §2: a layer that states its surcharge only as an image cannot be kept as
             # words. The layer's own close control is no statement.
             return _review(locator, dd.text)
-    if len(region_words) > REGION_WORDS_LIMIT:
-        # ADR-0035 §2: words longer than a policy text keeps are held, never cut.
+    if _carries_url(region_words):
+        # URL material in the layer's words is never kept, summarized or not.
+        return _review(locator, region_words)
+    summary = _region_summary(regions[0]) if regions else None
+    region_text = region_words if summary is None else summary
+    if summary is None and len(region_words) > REGION_WORDS_LIMIT:
+        # ADR-0035 §2: words longer than a policy text keeps are held, never cut, unless the
+        # layer is exactly a list of regions, each with one amount, which is summarized.
         return _review(locator, region_words)
     outside = _squash(dd.text_outside(f"#{FEE_TIERS}", f"#{REGION_FEES}"))
     # Outside the layers the row may hold only its base fee, the payment words and the
@@ -496,12 +575,16 @@ def _shipping(found: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Fiel
         + (f" · 금액별배송비 {' / '.join(tier_items)}" if tier_items else "")
         # The words stay visible beside the price, the region layer's included; an empty layer
         # is named as one.
-        + (f" · 지역별추가배송비 {region_words or '(금액 표시 없음)'}" if regions else "")
+        + (f" · 지역별추가배송비 {region_text or '(금액 표시 없음)'}" if regions else "")
     )
     if _carries_url(policy):
         # URL material in any of the words, the region layer's included, is never kept.
         return _review(locator, policy)
     evidence: tuple[Evidence, ...] = (_evidence(locator, FieldStatus.CONFIRMED, policy),)
+    if summary is not None:
+        # The summarized layer's own words, quoted as far as evidence quotes (its first 200
+        # characters).
+        evidence += (_evidence(f"#{REGION_FEES}", FieldStatus.CONFIRMED, region_words),)
     if ranged is not None:
         # The evidence names the reading: the highest amount of the range.
         evidence += (
@@ -554,7 +637,11 @@ def _stock(
     nodes: Sequence[Node], found: Sequence[tuple[str, str, Node]], words: Vocabulary
 ) -> FieldFact:
     """ADR-0010 §10, read only inside the purchase-control box."""
-    box = [node for node in nodes if node.within(CHOICE_BOX) or node.marks_exactly(CHOICE_BOX)]
+    box = [
+        node
+        for node in product_form(nodes)
+        if node.within(CHOICE_BOX) or node.marks_exactly(CHOICE_BOX)
+    ]
     active = [
         node
         for node in box
@@ -615,9 +702,14 @@ def _options(nodes: Sequence[Node]) -> FieldFact:
     shows it: the order list exists with exactly one line written in advance, and the product has
     no option control of any kind, hidden or not (a skin may hide the real ``select``). A product
     with options starts its order list empty; every other shape, a sold-out page without an order
-    list included, is held for review."""
+    list included, is held for review.
+
+    Everything here is read inside the product form only (:func:`product_form`): the floating
+    cart layer's own order list and line are never the product's, and a page without the form's
+    order list is held for review even when the cart layer has one."""
     locator = f".{CHOICE_LIST}"
-    lists = [node for node in nodes if node.marks_exactly(f".{CHOICE_LIST}")]
+    form = product_form(nodes)
+    lists = [node for node in form if node.marks_exactly(f".{CHOICE_LIST}")]
     if len(lists) != 1 or not lists[0].closed:
         return _review(locator)
     lines = [
@@ -627,7 +719,7 @@ def _options(nodes: Sequence[Node]) -> FieldFact:
     ]
     controls = [
         node
-        for node in nodes
+        for node in form
         if node.tag == "select"
         or any(name.startswith("option_select") for name in node.classes)
         or node.element_id.startswith("option_select")
@@ -703,7 +795,11 @@ def _sales_channels(
     """
     row_locator = _row_locator(words.sales_channel_row[0])
     detail_locator = f"#{words.detail_container} .{words.detail_text}"
-    headed = [node for node in nodes if node.tag == "dt" and node.text in words.sales_channel_row]
+    headed = [
+        node
+        for node in product_form(nodes)
+        if node.tag == "dt" and node.text in words.sales_channel_row
+    ]
     stated = _labelled(found, words.sales_channel_row)
     if len(headed) > len(stated):
         # A channel row whose value is an image or nothing: a statement no rule can read.

@@ -47,7 +47,7 @@ No image was fetched. The ADR-0030 §8.1 bound is six product pages; three were 
   | `상품재고` | sold out only, `0개` |
 
 - **Hidden product state:** the product form `#frmView` mirrors the sale price, the list price, the stock and an option flag in hidden inputs. The browser capture keeps no input value (ADR-0019 §6.1), so the template reads none of them.
-- **Order list:** an on-sale product without options has its one order line written in advance (`.item_choice_list` with `tbody#option_display_item_0`). The sold-out capture has no order list.
+- **Order list:** an on-sale product without options has its one order line written in advance (`.item_choice_list` with `tbody#option_display_item_0`). The sold-out capture has no order list. **Amended (preview collection, 2026-10-10):** a full member page also writes a hidden floating cart layer (`div#shop_cart_wrap … form#frmCartTabViewLayer`) carrying its own `.item_choice_list` and pre-written line outside the product form, so `godomall-2` reads the order list, option controls, purchase controls, information rows and name heading only inside `form#frmView`.
 - **Stock:**
   - On sale: `button.btn_add_cart` and `button.btn_add_order` inside `.btn_choice_box`.
   - Sold out: `.btn_choice_box.btn_restock_box` holds a disabled `button.btn_add_soldout` reading `구매 불가`.

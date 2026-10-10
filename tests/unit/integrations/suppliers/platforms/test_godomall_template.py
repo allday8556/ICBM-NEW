@@ -252,8 +252,31 @@ def test_an_unclosed_description_never_states_a_minimum() -> None:
     assert fields(unclosed)["minimum_sale_price"].status is FieldStatus.REVIEW_REQUIRED
 
 
-def test_without_the_phrase_there_is_no_description_minimum() -> None:
-    assert minimum("<p>1개 21,000원 이상 판매 부탁드립니다.</p>").status is FieldStatus.ABSENT
+def test_without_the_phrase_a_minimum_looking_sentence_is_held_never_absent() -> None:
+    # 건강산 preview, 2026-10-10 (product 1000001010): a minimum written without the site's phrase
+    # was recorded ABSENT. With phrases configured, such a sentence holds the field; the guard never
+    # confirms an amount.
+    real = "<p>(1개)12,900원 이상 판매 부탁드립니다 (2개) 23,900원 이상 (3개) 34,900원 이상</p>"
+    for description in ("<p>1개 21,000원 이상 판매 부탁드립니다.</p>", real):
+        fact = minimum(description)
+        assert fact.status is FieldStatus.REVIEW_REQUIRED, description
+        assert fact.value is None
+    # Words that are not a minimum (no 판매, or no amount 이상) leave the field ABSENT.
+    assert minimum("<p>20,000원 이상 구매 시 무료배송</p>").status is FieldStatus.ABSENT
+    assert minimum("<p>판매 부탁드립니다.</p>").status is FieldStatus.ABSENT
+    # A site without minimum phrases reads no description minimum at all, as before.
+    plain = parse_fields(page(description=real), Vocabulary())["minimum_sale_price"]
+    assert plain.status is FieldStatus.ABSENT
+
+
+def test_the_guard_never_fires_beside_a_phrase_read_minimum() -> None:
+    # 1000004918: a shipping-inclusive sentence with 판매 sits beside the phrase-read 21,000.
+    fact = minimum(
+        "<p>판매가격절대준수 1개 21,000원 이상</p>"
+        "<p>배송비 포함 24,000원 이상 판매해주시기 바랍니다</p>"
+    )
+    assert fact.status is FieldStatus.CONFIRMED
+    assert fact.value.amount_krw == 21000
 
 
 def test_a_minimum_row_reading_autonomous_states_no_minimum() -> None:
@@ -615,3 +638,104 @@ def test_a_closed_mall_phrase_in_the_name_is_closed_mall_only() -> None:
 def test_invisible_characters_inside_words_are_dropped() -> None:
     fact = fields(page(description="<p>\ufeff설명\u200b입니다\u2060</p>"))["detail_description"]
     assert fact.value.text == "설명입니다"
+
+
+# ---------------------------------------------------------------- the floating cart layer
+
+# A member page's hidden floating cart layer (건강산 preview, 2026-10-10): its own order list, a
+# pre-written line, an option select and purchase controls, outside the product form.
+CART_LAYER = (
+    '<div id="shop_cart_wrap" style="display:none"><div id="cart_tab_option">'
+    '<form id="frmCartTabViewLayer"><div class="option_table_box">'
+    '<div class="item_choice_list"><table><tbody id="option_display_item_0"><tr><td>담긴 상품'
+    "</td></tr></tbody></table></div><select><option>옵션</option></select>"
+    '<div class="item_detail_list"><dl><dt>판매가</dt><dd><strong>99,000</strong>원</dd></dl></div>'
+    '<div class="item_detail_tit"><h3>다른 상품</h3></div>'
+    '<div class="btn_choice_box"><button class="btn_add_cart">장바구니</button></div>'
+    "</div></form></div></div>"
+)
+
+
+def with_cart_layer(view: DocumentView) -> DocumentView:
+    body = view.body.replace("</body>", f"{CART_LAYER}</body>")
+    return DocumentView(view.kind, 200, view.path, None, view.content_type, body)
+
+
+@pytest.mark.parametrize(
+    "view",
+    [page(), page(controls=SOLD_OUT, choice=""), page(choice="")],
+    ids=["on sale", "sold out without an order list", "no order list"],
+)
+def test_the_cart_layer_outside_the_product_form_is_never_read(view: DocumentView) -> None:
+    alone, beside = fields(view), fields(with_cart_layer(view))
+    for key in alone:
+        assert (beside[key].status, beside[key].value) == (alone[key].status, alone[key].value), key
+    assert resolve(with_cart_layer(view), URL) == resolve(view, URL)
+
+
+def test_a_sold_out_page_without_its_own_order_list_holds_its_options() -> None:
+    # The cart layer's pre-written line made this ABSENT before: fail-open.
+    view = with_cart_layer(page(controls=SOLD_OUT, choice=""))
+    assert fields(view)["options"].status is FieldStatus.REVIEW_REQUIRED
+    assert fields(view)["stock"].value.availability is Availability.SOLD_OUT
+
+
+# ---------------------------------------------------------------- a list of regions
+
+
+def region_list(count: int, amount: str = "{}") -> str:
+    entries = "".join(
+        f"<li>제주특별자치도 제주시 지역{index} <span>{amount.format(fee)}원</span></li>"
+        for index, fee in ((i, "3,000" if i % 2 else "5,000") for i in range(count))
+    )
+    return REGION.format(f'<div class="delivery_list"><ul>{entries}</ul></div>')
+
+
+def test_a_layer_listing_287_regions_is_summarized_and_never_priced() -> None:
+    layer = region_list(287)
+    conditional = shipping(f"<strong>3,000원</strong>{TIERS}{layer}")
+    assert conditional.status is FieldStatus.CONFIRMED
+    value = conditional.value
+    assert (value.kind, value.fee_krw, value.free_over_krw) == (
+        ShippingKind.CONDITIONAL,
+        3000,
+        200000,
+    )
+    assert value.policy_text.endswith(" · 지역별추가배송비 287개 지역 3,000원~5,000원")
+    quoted = [e.observed for e in conditional.evidence if e.locator == "#lyDeliveryZone"]
+    assert quoted and len(quoted[0]) == 200 and quoted[0].startswith("제주특별자치도 제주시 지역0")
+    fixed = shipping(f"<strong>3,000원</strong>{layer}").value
+    assert (fixed.kind, fixed.fee_krw) == (ShippingKind.FIXED, 3000)
+
+
+def test_a_region_list_of_one_amount_names_it_once() -> None:
+    value = shipping(f"<strong>3,000원</strong>{region_list(12, '7,000')}").value
+    assert value.policy_text.endswith(" · 지역별추가배송비 12개 지역 7,000원")
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "<li>제주시 3,000원 <span>3,000원</span></li>",
+        "<li>제주시 <span>3,000원 / 5,000원</span></li>",
+        "<li><em>제주시</em> <span>3,000원</span></li>",
+        "<li><span>3,000원</span></li>",
+        "<li>제주시 <span>문의</span></li>",
+    ],
+    ids=["amount in address", "two amounts", "wrapped address", "no address", "no amount"],
+)
+def test_a_long_layer_of_any_other_shape_is_held(entry: str) -> None:
+    layer = region_list(40).replace("</ul>", f"{entry}</ul>")
+    assert shipping(f"<strong>3,000원</strong>{layer}").status is FieldStatus.REVIEW_REQUIRED
+
+
+def test_words_outside_the_list_are_no_list() -> None:
+    layer = region_list(40).replace("</ul>", "</ul><p>도서산간 별도 문의</p>")
+    assert shipping(f"<strong>3,000원</strong>{layer}").status is FieldStatus.REVIEW_REQUIRED
+
+
+def test_a_region_list_with_url_material_is_held() -> None:
+    layer = region_list(40).replace("지역3 ", "지역3 https://example.com ")
+    fact = shipping(f"<strong>3,000원</strong>{layer}")
+    assert fact.status is FieldStatus.REVIEW_REQUIRED
+    assert "example.com" not in repr(fact.evidence)
