@@ -370,7 +370,7 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
      - `기본값 / 끄기 / 직접 작성` choose the placement's mode. A changed mode says it applies once the preparation is saved; the list stays the server's for the saved choice.
      - `직접 작성` shows the settings card's own editor (`components/guidance-editor.js`): the same inputs, five-template live preview and `국내배송 / 해외배송` presets. The save is refused locally, sending nothing, until its text and template are chosen; the server validates and draws the text when the preparation is saved.
      - The choice is saved with the preparation through the one `/preparations` write. Any other surface sends the stored choice back unchanged.
-     - While a group has a resolved notice, it shows the server's `PUBLICATION_GUIDANCE_UNPLACED` reason (BLOCKED until composition v3 places notices, G5).
+     - While a group has a resolved notice that the unit's composition does not place, it shows the server's `PUBLICATION_GUIDANCE_UNPLACED` reason (BLOCKED). Since G5 the SmartStore composition v3 places both notices, so the reason remains only for a unit authored against an older composition revision: saving the target policy again and then the preparation clears it.
   6. `기타 등록정보`: the preflight, the attempts, the scope brake and the unit's own actions.
 - **One save.** The authoring form stays one form, and its parts are bound back to it. The editor's `준비 내용 저장` is the register page's one `/preparations` write.
 - **`등록 준비` strip.** A one-line strip sits at the bottom. Each step is coloured from the server's preflight reasons only, by the first area each reason names:
@@ -439,8 +439,10 @@ only POSTs to that owner's routes.
   - A `종료` notice is read-only: it shows no `수정` and no `조기 종료`.
 - **Server-owned.** Validation, the rendering, the presets, the revision numbers and each period's
   status belong to the Detail Guidance owner. The page computes none of them. A saved notice is
-  resolved into every product whose choice is `기본값` (the editor's 상세페이지 step, G4), and
-  nothing reaches a marketplace before G5.
+  resolved into every product whose choice is `기본값` (the editor's 상세페이지 step, G4). Since
+  G5 a resolved notice reaches a SmartStore listing only as its uploaded image, placed by the
+  frozen Snapshot above the detail images (상단) or below the body (하단), and only through a new
+  registration; a registered listing is never updated by a notice change.
 
 ## Supplier common images (A-NEXT2a, owner decision 2026-10-04 option 1, Issue #231)
 

@@ -72,8 +72,11 @@ from app.platform.core.clock import Clock
 from app.platform.core.errors import InputValidationError, NotFoundError
 from app.platform.db.database import Database
 from app.stages.connect.accounts import AccountBinding, binding_state, require_bound
-from app.stages.products.image_model import ImageAssetKind
-from app.stages.register.model import CREATE_ENDPOINT_GROUP
+from app.stages.register.model import (
+    CREATE_ENDPOINT_GROUP,
+    PublicationAssetKind,
+    publication_asset_kind,
+)
 from app.stages.register.sanitize import require_clean, safe_provider_reference
 
 GLOBAL_BRAKE = "GLOBAL"
@@ -89,9 +92,10 @@ _CODE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 
 @dataclass(frozen=True)
 class ArtifactRef:
-    """One selected artifact of an ASSET grant: provenance, never a replay-key field."""
+    """One selected artifact of an ASSET grant: provenance, never a replay-key field. A selected
+    M4 image, or a resolved Detail Guidance image (``GUIDANCE_ARTIFACT``, ADR-0033 §8)."""
 
-    asset_kind: ImageAssetKind
+    asset_kind: PublicationAssetKind
     sha256: str
     derivation_id: str | None
 
@@ -183,7 +187,7 @@ class UploadAttemptRecord:
     content_sha256: str
     preparation_revision_id: str
     candidate_fingerprint: str
-    asset_kind: ImageAssetKind
+    asset_kind: PublicationAssetKind
     artifact_sha256: str
     derivation_id: str | None
     asset_profile: str
@@ -1415,7 +1419,7 @@ def _grant_audit(row: LiveGrant) -> dict[str, Any]:
 def _grant_record(row: LiveGrant) -> GrantRecord:
     artifacts = tuple(
         ArtifactRef(
-            asset_kind=ImageAssetKind(item["asset_kind"]),
+            asset_kind=publication_asset_kind(item["asset_kind"]),
             sha256=item["sha256"],
             derivation_id=item["derivation_id"],
         )
@@ -1459,7 +1463,7 @@ def _attempt_record(row: AssetUploadAttempt) -> UploadAttemptRecord:
         content_sha256=row.content_sha256,
         preparation_revision_id=row.preparation_revision_id,
         candidate_fingerprint=row.candidate_fingerprint,
-        asset_kind=ImageAssetKind(row.asset_kind),
+        asset_kind=publication_asset_kind(row.asset_kind),
         artifact_sha256=row.artifact_sha256,
         derivation_id=row.derivation_id,
         asset_profile=row.asset_profile,

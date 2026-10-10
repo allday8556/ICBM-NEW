@@ -95,7 +95,12 @@ from datetime import date
 from types import MappingProxyType
 from typing import Any, Final
 
-from app.stages.register.detail import DetailPlan, DetailPlanError, UploadedProviderAsset
+from app.stages.register.detail import (
+    GUIDANCE_ASSET_KIND,
+    DetailPlan,
+    DetailPlanError,
+    UploadedProviderAsset,
+)
 from app.stages.register.detail import plan_of as _plan_of
 from app.stages.register.detail import render as _render_detail
 from app.stages.register.model import ListingShape
@@ -122,7 +127,11 @@ from integrations.marketplaces.smartstore.notice_schema import (
 # notice; and the first vertical permits minor purchases for this non-adult category.
 # v9: the canary account's shipping address is overseas, so the provider requires customsTaxType.
 # This listing does not charge customs tax to the buyer; domestic shipping addresses ignore it.
-WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v9"
+# v10: ADR-0033 G5 — a ``registration-payload/v3`` Snapshot's detailContent is rendered by
+# ``detail-renderer/v2``: its top and bottom Detail Guidance images around the detail images and the
+# body, each from the same Snapshot's ``guidance_assets``, which must equal the plan's notices
+# exactly (``WIRE_GUIDANCE_PLAN_MISMATCH``). A v1 or v2 Snapshot projects exactly as under v9.
+WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v10"
 
 # Architect ruling R1: the provider projection of the internal listing identity.
 SELLER_MANAGEMENT_CODE_PROJECTION: Final = "smartstore-seller-management-code/v1"
@@ -884,8 +893,9 @@ _DETAIL_WIRE_CODES: Final = MappingProxyType(
 
 
 def _detail_plan(payload: Mapping[str, Any]) -> DetailPlan | None:
-    """The frozen B-DETAIL plan of a ``registration-payload/v2`` Snapshot, or ``None`` for a
-    BODY-only one. A v2 detail that is not exactly a plan is refused, never read as a body."""
+    """The frozen B-DETAIL plan of a ``registration-payload/v2`` or ``/v3`` Snapshot, or ``None``
+    for a BODY-only one. A plan detail that is not exactly a plan is refused, never read as a
+    body."""
     detail = payload.get("detail")
     if not isinstance(detail, Mapping) or "renderer" not in detail:
         return None
@@ -927,14 +937,77 @@ def _uploaded_detail_assets(
     return uploaded
 
 
+_GUIDANCE_ASSET_KEYS: Final = frozenset(
+    {"asset_kind", "sha256", "derivation_id", "asset_profile", "provider_asset_ref"}
+)
+
+
+def _uploaded_guidance_assets(
+    payload: Mapping[str, Any], plan: DetailPlan
+) -> dict[tuple[str, str, str], UploadedProviderAsset]:
+    """ADR-0033 §7: the uploaded provider identity of each Detail Guidance image the Snapshot
+    pinned. A guidance plan's distinct notice images and the Snapshot's ``guidance_assets`` must be
+    exactly the same list — kind, SHA-256, no derivation, in order — and a Snapshot that is not a
+    guidance plan pins none. A notice image without an uploaded identity is not encodable."""
+    pinned = payload.get("guidance_assets")
+    if not plan.guides:
+        if pinned is not None:
+            raise WireContractError(
+                "WIRE_GUIDANCE_PLAN_MISMATCH", "a Snapshot that places no notice pins none"
+            )
+        return {}
+    if not isinstance(pinned, list):
+        raise WireContractError(
+            "WIRE_GUIDANCE_PLAN_MISMATCH", "a guidance plan's Snapshot pins its guidance assets"
+        )
+    uploaded: dict[tuple[str, str, str], UploadedProviderAsset] = {}
+    keys: list[tuple[str, str, str]] = []
+    for asset in pinned:
+        if (
+            not isinstance(asset, Mapping)
+            or set(asset) != _GUIDANCE_ASSET_KEYS
+            or asset["asset_kind"] != GUIDANCE_ASSET_KIND
+            or asset["derivation_id"] is not None
+            or not isinstance(asset["sha256"], str)
+        ):
+            raise WireContractError(
+                "WIRE_GUIDANCE_PLAN_MISMATCH", "a pinned guidance asset is not a guidance image"
+            )
+        key = (GUIDANCE_ASSET_KIND, asset["sha256"], "")
+        keys.append(key)
+        reference = asset["provider_asset_ref"]
+        if reference is None:
+            raise WireContractError(
+                "WIRE_IMAGE_NOT_PREPARED", "a guidance image has no provider reference yet"
+            )
+        try:
+            uploaded[key] = UploadedProviderAsset(reference)
+        except DetailPlanError as refused:
+            raise WireContractError("WIRE_IMAGE_REFERENCE_UNSAFE", refused.detail) from refused
+    if keys != list(dict.fromkeys(entry.key for entry in plan.guidance)):
+        raise WireContractError(
+            "WIRE_GUIDANCE_PLAN_MISMATCH",
+            "the plan's notices are not exactly the Snapshot's guidance assets",
+        )
+    return uploaded
+
+
 def _detail_content(payload: Mapping[str, Any], items: Sequence[Mapping[str, Any]]) -> str:
     plan = _detail_plan(payload)
     if plan is not None:
         try:
-            return _render_detail(plan, _uploaded_detail_assets(items, plan))
+            uploaded = {
+                **_uploaded_detail_assets(items, plan),
+                **_uploaded_guidance_assets(payload, plan),
+            }
+            return _render_detail(plan, uploaded)
         except DetailPlanError as refused:
             raise WireContractError(_DETAIL_WIRE_CODES[refused.code], refused.detail) from refused
     # A BODY-only Snapshot (content v1): its frozen body, exactly as before B-DETAIL.
+    if payload.get("guidance_assets") is not None:
+        raise WireContractError(
+            "WIRE_GUIDANCE_PLAN_MISMATCH", "a Snapshot that places no notice pins none"
+        )
     detail = payload.get("detail")
     body = detail.get("body") if isinstance(detail, Mapping) else None
     if not isinstance(body, str) or not body.strip():

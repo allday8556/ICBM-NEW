@@ -7,7 +7,7 @@
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
 | SmartStore | `OFFICIAL_API_DOC` + `OFFICIAL_SUPPORT` | `IMPLEMENTATION_EVIDENCE_COMPLETE` | `ADOPTED` (token issuance, seller-account identity read) | `UNVERIFIED` |
-| Coupang | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
+| Coupang | `OFFICIAL_API_DOC` | `IMPLEMENTATION_EVIDENCE_COMPLETE` (C-AUTH-1 provider-zero scope) | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Gmarket / Auction | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -64,10 +64,11 @@
 
 ## Coupang
 
-- **Locator:** https://developers.coupang.com/en/getting-started/open-api-test-guide ; API root https://developers.coupang.com/en/api — `OFFICIAL_API_DOC`, observed 2026-09-28.
-- **Captured:** Wing issues an Access Key / Secret Key; requests are HMAC-SHA256 signed; IP allowlisting is part of setup; RESTful JSON over HTTPS.
-- **Missing:** the signed-string composition, header names/format, timestamp rules, auth error responses.
-- **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+- **Official sources (`OFFICIAL_API_DOC`):** [HMAC signature](https://developers.coupang.com/en/getting-started/creating-hmac-signature), [Open API test guide](https://developers.coupang.com/en/getting-started/open-api-test-guide), [key issuance](https://developers.coupang.com/en/getting-started/issue-open-api-keynew), [invalid signature FAQ](https://developers.coupang.com/en/faq/an-invalid-signature-error-is-returned-hmac-error), [expired signature FAQ](https://developers.coupang.com/en/faq/specified-signature-is-expired-401-error-return), and [IP allowlist FAQ](https://developers.coupang.com/en/faq/when-calling-the-api-a-403-forbidden-not-allowed-ip-error-occurs); re-read 2026-10-10.
+- **Captured contract:** Wing issues the Access Key / Secret Key and associates an outbound IP. The signed message is `signed-date + uppercase method + path + exact query` (without `?`); the digest is lowercase HMAC-SHA256 hex. The authorization value is `CEA algorithm=HmacSHA256, access-key=..., signed-date=..., signature=...`; request context also carries `X-Requested-By` (vendor ID) and `X-MARKET` (`KR` or `TW`). The UTC signed date uses `yyMMdd'T'HHmmss'Z'`, a new signature is created per request, and the documented maximum validity is five minutes.
+- **Captured failures:** exact `401` text `Specified signature is expired` supports the expired-signature classification; the invalid-signature FAQ documents vendor/key/path/time/timezone causes; exact `403` text `Not allowed IP` supports the allowlist-policy classification. Other response semantics remain unknown unless their endpoint page supplies evidence.
+- **Implementation evidence:** `integrations/marketplaces/coupang/auth.py`, `errors.py`, and `fake_transport.py` implement only deterministic signing, setup-evidence binding, evidence-bounded error classification, and an in-memory fake. `documents/contracts/platforms/coupang/AUTH.md` is the normative local boundary. No HTTP client or real provider send exists in C-AUTH-1.
+- **ICBM:** `NOT_ADOPTED`, `UNVERIFIED`; credential readiness does not adopt an endpoint and does not grant LIVE authority. No real credential, allowlist mutation, or provider call was used. Runtime slices must re-open the relevant official endpoint page before adoption.
 
 ## 11st
 

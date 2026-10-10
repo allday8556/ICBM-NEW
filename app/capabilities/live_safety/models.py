@@ -278,8 +278,10 @@ class AssetUploadAttempt(Base):
         CheckConstraint("wire_host <> '' AND wire_host = lower(wire_host)", name="host_normalized"),
         CheckConstraint("substr(wire_path, 1, 1) = '/'", name="path_absolute"),
         CheckConstraint("attempt_no >= 1", name="attempt_no_positive"),
+        # ADR-0033 §8 (migration 0059): a rendered Detail Guidance image is the third kind.
         CheckConstraint(
-            "asset_kind IN ('SOURCE_ASSET', 'DERIVED_ARTIFACT')", name="asset_kind_valid"
+            "asset_kind IN ('SOURCE_ASSET', 'DERIVED_ARTIFACT', 'GUIDANCE_ARTIFACT')",
+            name="asset_kind_valid",
         ),
         CheckConstraint(
             "(state = 'STARTED') = (finished_at IS NULL)", name="started_until_terminal"

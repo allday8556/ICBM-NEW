@@ -1221,6 +1221,10 @@ def test_0027_is_additive_and_its_downgrade_never_destroys_capture_evidence(
         "image_selection_revisions",
         "image_selection_outputs",
         "trg_current_image_selection_moves_chain",
+        # Migration 0059 (ADR-0033 G5) adds the Snapshot's guidance-asset pin and admits the
+        # GUIDANCE_ARTIFACT upload kind in the attempt's asset-kind CHECK.
+        "registration_snapshots",
+        "asset_upload_attempts",
     }
     assert {"adaptive_capture_requests", "adaptive_capture_candidates"} <= set(after) - set(before)
     command.downgrade(alembic_config(url), "0026_g3_live_authority")

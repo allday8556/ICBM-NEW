@@ -12,8 +12,10 @@ server is stopped), and composes existing owners only — it decides nothing its
    ends — whatever happens — or when the process exits. Nothing reaches a provider before it;
 3. one CONNECT pass of the marketplace owner (token, committed session), so the canonical bearer
    source answers in this process;
-4. each artifact's exact local bytes, read from the M4 lineage store that holds it, uploaded once
-   through the upload owner: every layer of the send-time stack still decides, and the grant's
+4. each artifact's exact local bytes, read from the M4 lineage store that holds it — or, for a
+   rendered Detail Guidance image (``GUIDANCE_ARTIFACT``, ADR-0033 §8), from the guidance image
+   store, the third byte source, verified against its SHA-256 — uploaded once through the upload
+   owner: every layer of the send-time stack still decides, and the grant's
    budget is spent by the owner. A terminal failure is recorded for that artifact and the run
    continues with the next artifact; an ``UPLOAD_UNKNOWN`` is never retried, and a safety-stack
    refusal still stops the run because the mutation boundary itself is no longer valid.
@@ -24,16 +26,20 @@ from dataclasses import dataclass
 from typing import Any, Final, Protocol
 
 from app.capabilities.live_safety.assets import AssetUploadRequest, AssetUploadService
-from app.capabilities.live_safety.model import MutationStage
+from app.capabilities.live_safety.model import MutationStage, content_digest
 from app.capabilities.live_safety.store import ArtifactRef, GrantRecord, LiveAuthorityStore
 from app.platform.core.errors import AppError, InputValidationError, NotFoundError
 from app.platform.core.execution import ExecutionMode
 from app.stages.products.image_model import ImageAssetKind
+from app.stages.register.model import GuidanceAssetKind
 
 UPLOAD_GRANT_NOT_FOUND: Final = "LIVE_UPLOAD_GRANT_NOT_FOUND"
 UPLOAD_GRANT_NOT_ASSET: Final = "LIVE_UPLOAD_GRANT_NOT_ASSET"
 UPLOAD_ARTIFACT_MISSING: Final = "LIVE_UPLOAD_ARTIFACT_MISSING"
 UPLOAD_MEDIA_UNSUPPORTED: Final = "LIVE_UPLOAD_MEDIA_UNSUPPORTED"
+# ADR-0033 §3: the one media type the guidance renderer draws.
+GUIDANCE_MEDIA_TYPE: Final = "image/png"
+_PNG_SIGNATURE: Final = b"\x89PNG\r\n\x1a\n"
 UPLOAD_RUN_REASON: Final = "LIVE_ASSET_UPLOAD_RUN"
 
 # The media types the M4 lineage stores accept, with the file extension the upload names.
@@ -69,6 +75,13 @@ class ArtifactBytes(Protocol):
     def read(self, sha256: str) -> bytes: ...
 
 
+class GuidanceBytes(Protocol):
+    """The Detail Guidance owner's recorded images (``DetailGuidanceStore.image``): the exact bytes
+    of a recorded guidance image, verified against its address, or a refusal."""
+
+    def image(self, sha256: str) -> bytes: ...
+
+
 @dataclass(frozen=True)
 class UploadRunItem:
     sha256: str
@@ -97,6 +110,7 @@ class AssetUploadRun:
         connect: Callable[[], Any],
         sources: ArtifactBytes,
         derived: ArtifactBytes,
+        guidance: GuidanceBytes | None = None,
     ) -> None:
         self._store = store
         self._uploads = uploads
@@ -104,6 +118,8 @@ class AssetUploadRun:
         self._connect = connect
         self._sources = sources
         self._derived = derived
+        # ADR-0033 §8: the third byte source, read only for a GUIDANCE_ARTIFACT.
+        self._guidance = guidance
 
     def run(
         self, grant_id: str, *, window_s: int, actor: str, correlation_id: str
@@ -195,6 +211,8 @@ class AssetUploadRun:
         return grant
 
     def _content(self, artifact: ArtifactRef) -> tuple[bytes, str]:
+        if artifact.asset_kind is GuidanceAssetKind.GUIDANCE_ARTIFACT:
+            return self._guidance_content(artifact)
         store = (
             self._sources if artifact.asset_kind is ImageAssetKind.SOURCE_ASSET else self._derived
         )
@@ -205,3 +223,20 @@ class AssetUploadRun:
         if media_type not in EXTENSIONS:
             raise AppError(UPLOAD_MEDIA_UNSUPPORTED, f"unsupported media type {media_type}")
         return store.read(artifact.sha256), media_type
+
+    def _guidance_content(self, artifact: ArtifactRef) -> tuple[bytes, str]:
+        """A rendered guidance image from ICBM's own guidance store (DG-07): recorded, at its
+        content address, with exactly its SHA-256, and a PNG. Anything else stops the run."""
+        if self._guidance is None:
+            raise AppError(UPLOAD_ARTIFACT_MISSING, "no guidance image store is wired")
+        try:
+            content = self._guidance.image(artifact.sha256)
+        except AppError as missing:
+            raise AppError(
+                UPLOAD_ARTIFACT_MISSING, "the guidance image is not in its store"
+            ) from missing
+        if content_digest(content) != artifact.sha256:
+            raise AppError(UPLOAD_ARTIFACT_MISSING, "the guidance image is not the one granted")
+        if not content.startswith(_PNG_SIGNATURE):
+            raise AppError(UPLOAD_MEDIA_UNSUPPORTED, "a guidance image is a PNG")
+        return content, GUIDANCE_MEDIA_TYPE

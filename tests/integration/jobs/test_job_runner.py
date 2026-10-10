@@ -10,6 +10,7 @@ from app.capabilities.jobs.diagnostic import FAILING_JOB_TYPE
 from app.capabilities.jobs.models import JobState
 from app.container import Container
 from app.platform.core.correlation import correlation_scope
+from app.platform.core.logging import CorrelationFilter
 from tests.support.jobs_support import FakeClock
 
 pytestmark = pytest.mark.integration
@@ -101,6 +102,10 @@ def test_attempt_logs_carry_the_job_correlation_id(
     with correlation_scope("trace-runner-logs"):
         container.jobs.enqueue(FAILING_JOB_TYPE)
     caplog.set_level(logging.INFO)
+    # The correlation filter is what stamps a record (configure_logging installs it on the root
+    # handlers); give it to the capture handler too, so the test does not depend on another test
+    # having configured logging first.
+    caplog.handler.addFilter(CorrelationFilter())
     container.runner.run_next()
     attempt_logs = [r for r in caplog.records if r.getMessage() == "job.attempt.started"]
     assert attempt_logs
