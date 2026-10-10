@@ -5,6 +5,8 @@ Status: **ACCEPTED** 2026-10-10. The U-PICK acceptance run (ADR-0030 §8.3) foun
 - a region surcharge is priced at the base fee, and its words are kept;
 - a minimum row that states one minimum per quantity yields the per-unit minimum.
 
+The 건강산 preview run then found a fourth: a minimum the description states without the site phrase must never be recorded as no minimum (§4).
+
 This ADR lands before its code.
 
 Decision owners:
