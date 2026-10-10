@@ -15,7 +15,7 @@ from app.platform.core.errors import InputValidationError
 BLOCKS_MAX: Final = 3
 LINES_MAX: Final = 6
 HEADING_MAX_LENGTH: Final = 20
-LINE_MAX_LENGTH: Final = 26
+LINE_MAX_LENGTH: Final = 40
 GUIDANCE_TEXT_INVALID: Final = "GUIDANCE_TEXT_INVALID"
 
 

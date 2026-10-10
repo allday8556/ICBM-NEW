@@ -36,11 +36,11 @@ SAMPLE: dict[str, Any] = {
 # The decoded pixels of SAMPLE under each template, pinned for guidance-renderer/v1 with the
 # bundled font and the pinned Pillow (constraints.txt). A drawing change must bump the version.
 PIXELS = {
-    Template.CLEAN: "fee09a799966cb547916734dfa2493bdc72ea6678b688f2488a81970ac4fdd03",
-    Template.MODERN: "fdfbe591fad4c4384ae9626e696cd167cd935a1ec650e671e6e031ca5872bb9d",
-    Template.WARM: "544a9fdada7d788687754f19ff6181d2772bc841557d0adb991a7973ed71a1ad",
-    Template.DOMESTIC: "5cff2bc5ca8dcedaea649567e20afe84f36b21eacb4c9f23c64a751907eabd4e",
-    Template.OVERSEAS: "172dc617d898825b2e64800a56f597198e9384c87a2736a22f3c46aae618f92e",
+    Template.CLEAN: "354ab2f0fc537b4b733e6f45a89dfab79977b707e471e3899ddab1260add076f",
+    Template.MODERN: "508a412a67c664a95728e8de5fd9959d32a081e1659aff6e0f2030634c23ca53",
+    Template.WARM: "8274623ce786d08cf1fb810e2920554971fa74799169bd2bb671fabf9f594e8e",
+    Template.DOMESTIC: "370af15041a5670ac9228866cf0607b4eb68bd992b883eeef3295e82ef33c040",
+    Template.OVERSEAS: "0d289d9de08f3d4917da5eb0de49db73db0919262f221de4bfaeb0d9f478e5ed",
 }
 
 

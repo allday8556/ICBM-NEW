@@ -65,7 +65,7 @@ Date: 2026-10-10
 - `blocks`: 1 to 3 blocks.
 - Each block is `{heading, lines}`.
   - `heading`: optional, at most 20 characters.
-  - `lines`: 1 to 6 lines, each at most 26 characters (G1 implementation note, §3).
+  - `lines`: 1 to 6 lines, each at most 40 characters.
 
 **Character rules.** Each line is trimmed. Control characters, and every character the bundled font cannot draw, are refused with `GUIDANCE_TEXT_INVALID`; nothing is silently dropped. These limits are ICBM's own layout limits, not provider limits (B-DETAIL D4).
 
@@ -101,17 +101,17 @@ The new owner `app/capabilities/detail_guidance/` is marketplace-neutral. Follow
 - **Library and font.**
   - The image library is Pillow, pinned to one exact version in `pyproject.toml` and `constraints.txt`.
   - The font is Noto Sans KR (SIL Open Font License 1.1), Regular and Bold. It is bundled in the owner's `fonts/` with its licence text, and its SHA-256 is pinned in code.
-- **Canvas.** It is 860 px wide. The height follows the laid-out text. Line wrapping is deterministic: no line wraps, because §1 caps each line's length, and the template's text box fits 26 full-width characters at its font size. A line that does not fit the box is refused as `GUIDANCE_TEXT_TOO_WIDE`; it is never shrunk or cut.
+- **Canvas.** It is 860 px wide. The height follows the laid-out text. Line wrapping is deterministic: no line wraps, because §1 caps each line's length, and the template's text box fits 40 characters at its font size. A line that does not fit the box is refused as `GUIDANCE_TEXT_TOO_WIDE`; it is never shrunk or cut.
 - **Determinism.** The same `(content, template, renderer_version)` gives the same PNG bytes: fixed encoder parameters and no metadata, time or randomness.
   - The version is `guidance-renderer/v1`. A change of the font, the Pillow version or any template drawing bumps it.
   - A test pins the SHA-256 of one rendering of each template.
 - **Preview.** It renders the five templates for the typed content and stores nothing. It returns the PNGs to the page.
 
 **Implementation note (2026-10-10, G1).**
-- **Line length.** The line limit is **26** characters, not 40. The 860 px image is shown about 390 px wide on a phone, so the body text is drawn at 28 px, and 26 full-width characters at 28 px fill the 732 px text box. A 40-character line would need about 18 px text, which a phone shows at about 8 px. The headings stay at most 20 characters, at 34 px.
+- **Line length.** The line limit stays at 40 characters, as above. The owner confirmed it in chat on 2026-10-10 after being shown that a phone shows the 860 px image at under half its width. To fit 40 full-width characters, the body text is drawn at 19 px and the headings at 26 px, in a 772 px text box.
 - **Font file.** The bundled font is the single variable file `NotoSansKR[wght].ttf` (Google Fonts `ofl/notosanskr`, git blob `b386890b`). Its weight axis gives the Regular (400) body and the Bold (700) headings.
-- **Pin.** Pillow is pinned at 12.3.0.
-- **The pinning test.** It pins the SHA-256 of each template's decoded pixels, which are equal on Windows and Linux for the same pinned stack. It also proves the PNG bytes are equal across renderings.
+- **Pillow.** It is pinned at exactly 12.3.0.
+- **The pinning test.** It pins the SHA-256 of each template's decoded pixels, and proves the PNG bytes are equal across renderings.
 
 ## 4. Settings: 설정 › 공통 › 상세페이지 공지
 
