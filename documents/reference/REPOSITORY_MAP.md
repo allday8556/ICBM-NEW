@@ -97,6 +97,9 @@ ADR-0029 C3 added the category apply to the register owner, the component
 `ui/web/js/components/ai-category.js` (on the shared panel) and two integration suites.
 ADR-0033 G1 added the Detail Guidance renderer `app/capabilities/detail_guidance/` (content,
 renderer with five templates, shipping presets, the bundled OFL font) and one unit suite.
+ADR-0033 G2 added the Detail Guidance owner (its models, revision store, content-addressed image
+store and settings service) to `app/capabilities/detail_guidance/`, the routes
+`app/interface/api/routes/detail_guidance.py`, migration `0058` and one integration suite.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -128,10 +131,10 @@ the mapper is provider-zero, semantic/unit-based and read-only.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 347 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 64 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
-| `app/interface/` | 27 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 87 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/` | 353 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 68 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
+| `app/interface/` | 28 | operator surfaces: HTTP api, screens, cli |
+| `app/platform/` | 88 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 164 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
@@ -154,11 +157,11 @@ the mapper is provider-zero, semantic/unit-based and read-only.
 | `integrations/` | 78 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 28 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 332 | tests |
+| `tests/` | 334 | tests |
 | `tests/contracts/` | 11 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 137 | integration tests by runtime owner |
+| `tests/integration/` | 139 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 123 | unit tests by runtime owner |
 | `ui/` | 68 | operator clients: the served web client and the capture extension |

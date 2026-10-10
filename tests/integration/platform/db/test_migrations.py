@@ -194,8 +194,13 @@ CANONICAL_TABLES = (
     "ai_provider_calls",
     "live_grant_dispatch_bindings",
     "operate_dispatch_attempts",
+    # ADR-0033 G2: the Detail Guidance owner — notice identities, rendered images
+    # and append-only revisions.
+    "detail_guidances",
+    "guidance_image_artifacts",
+    "detail_guidance_revisions",
 )
-HEAD = "0057_m65_dispatch_stage"
+HEAD = "0058_detail_guidance"
 
 
 def _url(path: Path) -> str:

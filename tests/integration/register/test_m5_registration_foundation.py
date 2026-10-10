@@ -549,6 +549,9 @@ ADAPTIVE_TABLES = (
     "ai_provider_calls",
     "live_grant_dispatch_bindings",
     "operate_dispatch_attempts",
+    "detail_guidances",
+    "guidance_image_artifacts",
+    "detail_guidance_revisions",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

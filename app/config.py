@@ -237,6 +237,12 @@ class AppConfig:
         return self.data_dir / "derived-images"
 
     @property
+    def guidance_images_dir(self) -> Path:
+        """Content-addressed Detail Guidance images (ADR-0033 §2): store-level notices, apart from
+        every product image."""
+        return self.data_dir / "guidance"
+
+    @property
     def log_dir(self) -> Path | None:
         return self.data_dir / "logs" if self.log_to_file else None
 

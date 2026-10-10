@@ -25,6 +25,7 @@ from app.interface.api.routes import (
     collect,
     collect_extension,
     connect,
+    detail_guidance,
     diagnostics,
     enrichment,
     operate,
@@ -197,6 +198,7 @@ def create_app(
     app.include_router(product_images.router)
     app.include_router(register.router)
     app.include_router(settings.router)
+    app.include_router(detail_guidance.router)
     app.include_router(ai.router)
     app.include_router(review.router)
 
