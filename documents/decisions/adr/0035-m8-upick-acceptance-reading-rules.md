@@ -134,6 +134,7 @@ This amends ADR-0034 §1.
 - **Why.** `ABSENT` means "no minimum", and pricing would then ignore a minimum the supplier did state.
 - **Where it was found.** 건강산's 1000001010 states `(1개)12,900원 이상 판매 부탁드립니다 (2개) 23,900원 이상 …` without `판매가격절대준수`.
 - **The site phrase.** 건강산's site revision adds the phrase `(1개)`, and that sentence then reads 12,900 under ADR-0034 §1 unchanged.
+- **Round brackets in site words.** A site word may hold `(` and `)`, because pages print them. Site words are matched only as literal text and are never compiled, so ADR-0030 PT-01 (no regular expression) is unchanged; every other pattern or markup character stays refused.
 
 ## Invariants
 
