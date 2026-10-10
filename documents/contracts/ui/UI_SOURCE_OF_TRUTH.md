@@ -396,6 +396,39 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
   - The ICBM-dedicated client key is typed once into a password field. The server writes it to the OS secret store, and it is never shown again: the card shows only `저장됨 · <time>` or `없음`.
 - **Still inert.** The "AI 기본 설정" toggles stay inert placeholders until their stage.
 
+### 설정 › 공통 › 상세페이지 공지 (ADR-0033 G3)
+
+v29 has no surface for the detail page's notices. They get their own 공통 sub-tab, `상세페이지 공지`,
+with one card in v29's card language. The card reads `GET /api/v1/settings/detail-guidance` and
+only POSTs to that owner's routes.
+
+- **Two sections.** `상단 공지` (above the detail images) and `하단 공지` (below the body). Each has
+  a standing notice and its period notices.
+- **상시 공지.**
+  - The saved image (`image_url`), its template label, `사용 중` or `꺼짐`, and its revision.
+    `공지 끄기 / 켜기` appends the same text and template with `enabled` flipped.
+  - The inputs: 1–3 blocks, each an optional heading (at most 20 characters) and 1–6 lines (at
+    most 40), with add/remove buttons inside those bounds. With no saved notice, the top opens with
+    one empty block and the bottom with the editable headings `배송 안내` and `C/S 안내`.
+  - `국내배송` and `해외배송` fill this section's inputs with the server's preset text and select
+    its suggested template. Edited inputs are replaced only after a confirmation. A note says the
+    text is an example to check against the seller's own conditions, with `○○` to be replaced.
+  - The live preview: about 400 ms after typing, the server renders the five templates and the
+    page shows them side by side, each selectable, with the chosen one shown larger. Choosing a
+    template never changes the text.
+  - A refusal (a URL or markup, an empty or too-long line, an undrawable character) shows the
+    server's message under the inputs, marks the input it names and disables `상시 공지 저장`.
+  - `상시 공지 저장` is enabled only when a template is chosen and the server previewed the text as
+    it is now. It appends a revision against the sequence read. `GUIDANCE_CURRENT_MOVED` offers
+    `다시 불러오기`; `GUIDANCE_UNCHANGED` says nothing changed.
+- **기간 공지.** Each period notice shows its image, its period in local time and the server's
+  status label (`예정`, `진행 중` or `종료`). `＋ 기간 공지 추가` opens the same inputs and preview
+  plus `시작` and `끝` (`datetime-local`), sent as instants with the browser's offset. `조기 종료`
+  appends `enabled = false`. An existing period notice's text and period are not edited here.
+- **Server-owned.** Validation, the rendering, the presets, the revision numbers and each period's
+  status belong to the Detail Guidance owner. The page computes none of them. Nothing here reaches
+  a product or a marketplace: the editor's 상세페이지 step and registration come with G4 and G5.
+
 ## Supplier common images (A-NEXT2a, owner decision 2026-10-04 option 1, Issue #231)
 
 v29 has no board for Issue #219's supplier common images; they live with the supplier they belong

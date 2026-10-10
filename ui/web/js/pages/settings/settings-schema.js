@@ -187,6 +187,23 @@ export const SUBTABS = {
       ],
     },
     {
+      // ADR-0033 G3: the store-wide top and bottom notices of the detail page, saved through the
+      // Detail Guidance owner's own contract (detail-guidance.js).
+      key: 'guidance',
+      label: '상세페이지 공지',
+      blocks: [
+        {
+          card: {
+            title: '상세페이지 공지',
+            full: true,
+            help:
+              '상세페이지 맨 위(상단 공지)와 맨 아래(하단 공지)에 들어가는 공지입니다. 입력한 문구를 서버가 템플릿 이미지로 그리며, 저장한 공지는 모든 상품의 기본값이 됩니다. · 기간 공지는 시작부터 끝까지만 들어갑니다. · 문구에는 URL이나 마크업을 쓸 수 없습니다.',
+            items: [{ detailGuidance: true }],
+          },
+        },
+      ],
+    },
+    {
       key: 'pricing',
       label: '가격정책',
       blocks: [

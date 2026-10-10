@@ -238,6 +238,7 @@ def test_the_save_bar_is_server_owned_and_general_settings_stay_read_only(
         chip = page.locator(".savebar .chip")
         assert chip.get_attribute("data-save-scope") == (
             "REGISTRATION_TARGET_POLICY REGISTRATION_CATEGORY_METADATA AI_PROMPT_REGISTRY"
+            " DETAIL_GUIDANCE"
         )
         text = chip.inner_text()
         assert "M0" not in text

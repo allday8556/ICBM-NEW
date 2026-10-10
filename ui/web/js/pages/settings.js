@@ -5,9 +5,10 @@
 // (M2 PR-D, CAPABILITY_MAPPING §14.11), read from the capability read API, the SmartStore
 // operator actions (M2 PR-E, instructions §8A), after each of which that truth is re-read, and
 // the registration target policy (Gate 1 G1-A, ADR-0015 §2), the operator-reviewed category
-// metadata (Gate 1 G1-B, ADR-0015 §3) and the AI Prompt Registry (ADR-0026 AIF-1): the surfaces
-// the server lists in `editable_surfaces`, each saved through its own contract. What the save bar says comes from those server fields, never
-// from this page.
+// metadata (Gate 1 G1-B, ADR-0015 §3), the AI Prompt Registry (ADR-0026 AIF-1) and the detail
+// page's top and bottom notices (ADR-0033 G3): the surfaces the server lists in
+// `editable_surfaces`, each saved through its own contract. What the save bar says comes from
+// those server fields, never from this page.
 
 import { getJson } from '../core/api.js';
 import { authLine, statusChip } from '../platforms/smartstore/capability.js';
@@ -24,6 +25,7 @@ import { API_STATUS_LABEL, CONNECTION_LABEL, PLATFORM_TABS, SUBTABS } from './se
 import { accountPanel, contractReviewPanel, credentialsPanel, workflowActions } from './settings/smartstore-operator.js';
 import { categoryMetadataPanel } from './settings/category-metadata.js';
 import { targetPolicyPanel } from './settings/target-policy.js';
+import { detailGuidancePanel } from './settings/detail-guidance.js';
 
 const ENDPOINT = '/api/v1/screens/settings';
 const READINESS = '/api/ready';
@@ -59,6 +61,7 @@ const SURFACE_LABEL = {
   REGISTRATION_TARGET_POLICY: '등록 대상 정책 (마켓 탭 › 등록 정책)',
   REGISTRATION_CATEGORY_METADATA: '카테고리 메타데이터 (마켓 탭 › 상품 / 카테고리)',
   AI_PROMPT_REGISTRY: 'AI Prompt Registry (공통 › AI / Prompt)',
+  DETAIL_GUIDANCE: '상세페이지 공지 (공통 › 상세페이지 공지)',
 };
 
 function saveScope(view) {
@@ -192,6 +195,7 @@ function renderItem(item, state) {
   }
   if (item.targetPolicy) return targetPolicyPanel(item.targetPolicy, item.section ?? 'policy');
   if (item.categoryMetadata) return categoryMetadataPanel(item.categoryMetadata);
+  if (item.detailGuidance) return detailGuidancePanel();
   if (item.usersTable) return usersTable();
   if (item.aiCapability) return aiCapabilityRow();
   if (item.aiProvider) return aiProviderPanel();
