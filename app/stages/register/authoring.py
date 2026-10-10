@@ -27,7 +27,6 @@ from sqlalchemy.exc import IntegrityError
 
 from app.platform.core.correlation import get_correlation_id, new_correlation_id
 from app.platform.core.errors import InputValidationError, NotFoundError
-from app.stages.products.image_model import ImageAssetKind
 from app.stages.products.model import ReadinessStatus
 from app.stages.register.builder import RegistrationSnapshotBuilder
 from app.stages.register.contracts import AuthoredInputsView, FieldValueView, GuidanceChoiceView
@@ -53,6 +52,7 @@ from app.stages.register.guidance import (
 from app.stages.register.model import (
     DUPLICATE_EVIDENCE_UNAVAILABLE,
     RegistrationConflictError,
+    publication_asset_kind,
     sanitized_digest,
 )
 from app.stages.register.payload import build_payload
@@ -70,6 +70,7 @@ from app.stages.register.preparation import (
     PreparedAsset,
     UnitRequest,
     resolve_unit,
+    selected_artifacts,
 )
 from app.stages.register.provider import DuplicateLookupSource, PreparedAssetSource
 from app.stages.register.sanitize import require_clean
@@ -846,9 +847,8 @@ class RegistrationPreparationService:
                 marketplace_account_id=preparation.marketplace_account_id,
                 preparation_revision_id=preparation.current.preparation_revision_id,
                 candidate_fingerprint=candidate.candidate_fingerprint,
-                selected_artifacts=tuple(
-                    image.key for item in candidate.resolved.items for image in item.images
-                ),
+                # ADR-0033 §8: the selected Item images plus the resolved guidance images.
+                selected_artifacts=selected_artifacts(candidate.resolved),
                 asset_profile=candidate.resolved.target.asset_policy.profile,
             )
         return self.freeze(
@@ -1072,20 +1072,29 @@ class RegistrationPreparationService:
 def _prepared_assets(
     payload: Mapping[str, Any], candidate_fingerprint: str
 ) -> tuple[PreparedAsset, ...]:
-    """Provider asset identities frozen in the Snapshot, rebound to the rechecked candidate."""
+    """Provider asset identities frozen in the Snapshot — every Item's publication assets and, for
+    a ``registration-payload/v3`` Snapshot, its guidance assets (ADR-0033 §6) — rebound to the
+    rechecked candidate."""
     found: dict[tuple[str, str, str], PreparedAsset] = {}
-    for item in payload.get("items", ()):
-        for asset in item.get("publication_assets", ()):
-            provider_ref = asset.get("provider_asset_ref")
-            if provider_ref is None:
-                continue
-            prepared = PreparedAsset(
-                asset_kind=ImageAssetKind(asset["asset_kind"]),
-                sha256=asset["sha256"],
-                derivation_id=asset.get("derivation_id"),
-                asset_profile=asset["asset_profile"],
-                candidate_fingerprint=candidate_fingerprint,
-                provider_asset_ref=provider_ref,
-            )
-            found[prepared.key] = prepared
+    frozen = [
+        *(
+            asset
+            for item in payload.get("items", ())
+            for asset in item.get("publication_assets", ())
+        ),
+        *payload.get("guidance_assets", ()),
+    ]
+    for asset in frozen:
+        provider_ref = asset.get("provider_asset_ref")
+        if provider_ref is None:
+            continue
+        prepared = PreparedAsset(
+            asset_kind=publication_asset_kind(asset["asset_kind"]),
+            sha256=asset["sha256"],
+            derivation_id=asset.get("derivation_id"),
+            asset_profile=asset["asset_profile"],
+            candidate_fingerprint=candidate_fingerprint,
+            provider_asset_ref=provider_ref,
+        )
+        found[prepared.key] = prepared
     return tuple(found[key] for key in sorted(found))

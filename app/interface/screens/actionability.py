@@ -154,7 +154,8 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     "PUBLICATION_REPRESENTATIVE_MISSING": (_F, _IMAGES),
     # B-DETAIL's reason, consumed as it is: no screen places a detail image here.
     "PUBLICATION_DETAIL_IMAGES_UNPLACED": (_X, None),
-    # ADR-0033 G4: no composition places a top or bottom notice until G5 lands.
+    # ADR-0033 §8: the unit's composition does not place a resolved top or bottom notice (since
+    # G5 only a composition revision older than the SmartStore v3 profile).
     "PUBLICATION_GUIDANCE_UNPLACED": (_X, None),
     "PUBLICATION_ASSET_QA_NOT_PASSED": (_X, None),
     "PROVIDER_ASSET_IDENTITY_MISSING": (_X, None),

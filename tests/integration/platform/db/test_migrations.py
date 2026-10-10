@@ -200,7 +200,7 @@ CANONICAL_TABLES = (
     "guidance_image_artifacts",
     "detail_guidance_revisions",
 )
-HEAD = "0058_detail_guidance"
+HEAD = "0059_detail_guidance_placement"
 
 
 def _url(path: Path) -> str:

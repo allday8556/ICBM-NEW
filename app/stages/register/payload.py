@@ -15,22 +15,66 @@ evaluated:
 - B-DETAIL: under a v2 detail composition the detail is the URL-free plan
   (``registration-payload/v2``): the composition revision, sections, body format, pinned renderer,
   the operator's plain body and the ordered detail image asset identities. A BODY-only composition
-  keeps the v1 document exactly.
+  keeps the v1 document exactly;
+- ADR-0033 §6 (G5): under a v3 detail composition (``detail-renderer/v2``) the payload is
+  ``registration-payload/v3``: the plan also freezes the resolved Detail Guidance notices
+  (``detail.guidance: {top, bottom}``), and ``guidance_assets`` pins one entry per distinct notice
+  image — ``{asset_kind: GUIDANCE_ARTIFACT, sha256, derivation_id: null, asset_profile,
+  provider_asset_ref}`` — with the provider reference prepared under the candidate fingerprint,
+  exactly as an Item's ``publication_assets`` carry theirs. Every unit of a v3 profile is v3, an
+  empty resolution included (both lists empty, no guidance asset).
 
 The SmartStore wire representation is PR-D's: this is the business representation it encodes.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
 from app.stages.products.model import ReadinessStatus
 from app.stages.register import sanitize
+from app.stages.register.detail import GUIDANCE_ASSET_KIND, DetailPlan
 from app.stages.register.model import registration_item_key, sanitized_digest
-from app.stages.register.preparation import PreflightResult, PreflightStage, detail_plan
+from app.stages.register.preparation import (
+    PreflightResult,
+    PreflightStage,
+    PreparedAsset,
+    detail_plan,
+)
 
 PAYLOAD_BUILDER_VERSION: Final = "registration-payload/v1"
 # B-DETAIL: the detail is a URL-free plan the trusted REGISTER renderer renders.
 PAYLOAD_BUILDER_VERSION_V2: Final = "registration-payload/v2"
+# ADR-0033 §6 (G5): the plan also freezes the resolved Detail Guidance, with its guidance assets.
+PAYLOAD_BUILDER_VERSION_V3: Final = "registration-payload/v3"
+
+
+def builder_version(plan: DetailPlan | None) -> str:
+    """The payload builder version of a unit's plan: v1 BODY-only, v2 a B-DETAIL plan, v3 a
+    guidance plan (``detail-renderer/v2``)."""
+    if plan is None:
+        return PAYLOAD_BUILDER_VERSION
+    return PAYLOAD_BUILDER_VERSION_V3 if plan.guides else PAYLOAD_BUILDER_VERSION_V2
+
+
+def guidance_assets(
+    plan: DetailPlan, prepared: Mapping[tuple[str, str, str], PreparedAsset], asset_profile: str
+) -> tuple[dict[str, Any], ...]:
+    """One entry per distinct guidance image of the plan, top first, URL-free but for the provider
+    reference the upload owner prepared for exactly it (``None`` before the upload)."""
+    entries: list[dict[str, Any]] = []
+    for key in dict.fromkeys(entry.key for entry in plan.guidance):
+        found = prepared.get(key)
+        entries.append(
+            {
+                "asset_kind": GUIDANCE_ASSET_KIND,
+                "sha256": key[1],
+                "derivation_id": None,
+                "asset_profile": asset_profile,
+                "provider_asset_ref": None if found is None else found.provider_asset_ref,
+            }
+        )
+    return tuple(entries)
 
 
 class PayloadNotReadyError(ValueError):
@@ -52,6 +96,8 @@ class OutboundPayload:
     payload_digest: str
     items: tuple[OutboundItem, ...]
     policy_revisions: dict[str, str]
+    # ADR-0033 §6: the Snapshot's guidance assets; ``None`` for a v1 or v2 payload.
+    guidance_assets: tuple[dict[str, Any], ...] | None = None
 
 
 def build_payload(result: PreflightResult) -> OutboundPayload:
@@ -159,14 +205,18 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
     }
     # Fail closed even if a caller bypassed the preflight's own sanitation reasons.
     sanitize.require_clean(business)
-    for asset in (a for i in items for a in i.publication_assets):
+    pinned = guidance_assets(plan, prepared, profile) if plan is not None and plan.guides else None
+    for path, asset in (
+        *(("publication_assets", a) for i in items for a in i.publication_assets),
+        *(("guidance_assets", a) for a in pinned or ()),
+    ):
         reference = asset["provider_asset_ref"]
         if reference is not None and not sanitize.safe_provider_reference(reference):
             raise sanitize.PayloadSanitationError(
-                ((sanitize.SECRET_MATERIAL, "publication_assets.provider_asset_ref"),)
+                ((sanitize.SECRET_MATERIAL, f"{path}.provider_asset_ref"),)
             )
     payload = {
-        "builder_version": PAYLOAD_BUILDER_VERSION if plan is None else PAYLOAD_BUILDER_VERSION_V2,
+        "builder_version": builder_version(plan),
         "marketplace_key": unit.marketplace_key,
         "marketplace_account_id": unit.marketplace_account_id,
         "listing_shape": unit.listing_shape.value,
@@ -189,6 +239,8 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
         },
         "detail": business["detail"],
         "items": payload_items,
+        # ADR-0033 §6: named only by a v3 payload, so a v1 or v2 payload keeps its exact shape.
+        **({} if pinned is None else {"guidance_assets": [dict(a) for a in pinned]}),
     }
     policy_revisions = {
         "policy_revision": target.policy_revision,
@@ -196,4 +248,6 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
         "metadata_revision": metadata.metadata_revision,
         **{f"template:{kind}": identity for kind, identity in sorted(target.templates.items())},
     }
-    return OutboundPayload(payload, sanitized_digest(payload), tuple(items), policy_revisions)
+    return OutboundPayload(
+        payload, sanitized_digest(payload), tuple(items), policy_revisions, pinned
+    )
