@@ -65,6 +65,10 @@ from integrations.suppliers.site_config import SiteConfig, SiteRegion
 
 __all__ = ["TEMPLATE", "authenticated", "bind", "login_required", "vocabulary"]
 
+# The page the browser opens to sign in (``LoginFormSpec.path``). The common browser transport
+# fills the form there and clicks its submit control; the form itself posts to
+# ``/member/login_ps.php`` and the browser follows it, exactly as the Cafe24 template opens
+# ``/member/login.html`` while its form posts elsewhere (``transport/gateway.py``).
 LOGIN_PATH = "/member/login.php"
 # The member page: it exists only for a signed-in member. Its contents are never read or kept.
 PROTECTED_TARGET = "/mypage/index.php"
