@@ -134,8 +134,8 @@ payload or external call and leaves legacy Item economics unchanged.
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 180 | all canonical and historical documents |
-| `documents/acceptance/` | 70 | acceptance records (milestones, gates, adaptive, issues) |
+| `documents/` | 181 | all canonical and historical documents |
+| `documents/acceptance/` | 71 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 9 | platform and UI contracts |
@@ -145,16 +145,16 @@ payload or external call and leaves legacy Item economics unchanged.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 67 | adapters: suppliers and marketplaces |
+| `integrations/` | 78 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 28 |  |
-| `integrations/suppliers/` | 35 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 324 | tests |
+| `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
+| `tests/` | 328 | tests |
 | `tests/contracts/` | 10 | repository-rule and document-contract tests |
-| `tests/fixtures/` | 13 | test fixtures (byte-pinned) |
+| `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 137 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 118 | unit tests by runtime owner |
+| `tests/unit/` | 120 | unit tests by runtime owner |
 | `ui/` | 68 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 59 | the served web client |

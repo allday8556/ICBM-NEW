@@ -1,0 +1,46 @@
+{
+  "schema": "icbm-browser-capture-policy/v1",
+  "supplier_key": "godomall-template",
+  "revision": "godomall-capture-1",
+  "host": "template.godomall.invalid",
+  "product_root": {"by": "class", "token": "goods_view_top"},
+  "allowed_regions": [
+    {"by": "id", "token": "detail"}
+  ],
+  "excluded_regions": [
+    {"by": "id", "token": "reviews"},
+    {"by": "id", "token": "qna"},
+    {"by": "class", "token": "item_goods_tab"}
+  ],
+  "excluded_tags": [
+    "script",
+    "style",
+    "noscript",
+    "template",
+    "textarea",
+    "iframe",
+    "object",
+    "embed",
+    "link",
+    "meta",
+    "base"
+  ],
+  "allowed_attributes": {
+    "*": ["id", "class", "style", "hidden"],
+    "img": ["src", "data-src", "data-original", "srcset"],
+    "button": ["type", "disabled"],
+    "meta": ["property", "content"],
+    "td": ["colspan", "rowspan"],
+    "th": ["colspan", "rowspan", "scope"]
+  },
+  "head_allowance": [
+    {"tag": "meta", "attribute": "property", "value": "og:url"},
+    {"tag": "meta", "attribute": "property", "value": "og:title"},
+    {"tag": "meta", "attribute": "property", "value": "og:image"}
+  ],
+  "bounds": {
+    "max_html_bytes": 524288,
+    "max_nodes": 20000,
+    "max_image_refs": 40
+  }
+}

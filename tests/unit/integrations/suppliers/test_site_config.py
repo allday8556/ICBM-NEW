@@ -209,7 +209,7 @@ def test_a_site_s_capture_policy_is_its_template_s_with_its_own_host(tmp_path: P
 def test_this_build_s_sites_all_bind() -> None:
     _, problems = bind_sites(SITE_DIRECTORY)
     assert problems == ()
-    assert set(TEMPLATES) == {"cafe24"}
+    assert set(TEMPLATES) == {"cafe24", "godomall"}
 
 
 def test_a_seller_code_convention_takes_the_adr_0024_form() -> None:

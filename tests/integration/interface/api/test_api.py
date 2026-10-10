@@ -126,12 +126,12 @@ def test_settings_contract_has_no_connections_and_is_read_only(client: TestClien
         "REGISTRATION_CATEGORY_METADATA",
         "AI_PROMPT_REGISTRY",
     ]
-    # The registered suppliers, KM통상 and each configured site (ADR-0030), appear unconfigured:
-    # no credentials, no session, not connected.
+    # The registered suppliers, KM통상 and each configured site (ADR-0030), appear unconfigured,
+    # by supplier key: no credentials, no session, not connected.
     assert [
         (s["supplier_key"], s["state"], s["capability_status"], s["credentials_stored"])
         for s in body["supplier_connections"]
-    ] == [(key, "DISCONNECTED", "NOT_CONFIGURED", False) for key in ("kmretail", *SITES)]
+    ] == [(key, "DISCONNECTED", "NOT_CONFIGURED", False) for key in sorted(("kmretail", *SITES))]
     assert body["policy_values"] == {}
     # SmartStore's connection truth is its capability (CAPABILITY_MAPPING §14.11): it is never
     # listed here as a hard-coded NOT_CONNECTED. The marketplaces without a contract still are.
