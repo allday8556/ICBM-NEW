@@ -127,7 +127,9 @@ def _font_bytes() -> bytes:
 
 @cache
 def _font(size: int, weight: int) -> ImageFont.FreeTypeFont:
-    font = ImageFont.truetype(io.BytesIO(_font_bytes()), size)
+    # BASIC layout on every platform: the optional raqm engine (present in some Linux builds)
+    # would place glyphs differently and break DG-02.
+    font = ImageFont.truetype(io.BytesIO(_font_bytes()), size, layout_engine=ImageFont.Layout.BASIC)
     font.set_variation_by_axes([weight])
     return font
 
