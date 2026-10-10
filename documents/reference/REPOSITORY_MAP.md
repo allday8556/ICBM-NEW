@@ -100,6 +100,8 @@ renderer with five templates, shipping presets, the bundled OFL font) and one un
 ADR-0033 G2 added the Detail Guidance owner (its models, revision store, content-addressed image
 store and settings service) to `app/capabilities/detail_guidance/`, the routes
 `app/interface/api/routes/detail_guidance.py`, migration `0058` and one integration suite.
+ADR-0033 G3 added the settings card `ui/web/js/pages/settings/detail-guidance.js` and one
+integration suite.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -157,13 +159,13 @@ the mapper is provider-zero, semantic/unit-based and read-only.
 | `integrations/` | 78 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 28 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 334 | tests |
+| `tests/` | 335 | tests |
 | `tests/contracts/` | 11 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 139 | integration tests by runtime owner |
+| `tests/integration/` | 140 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 123 | unit tests by runtime owner |
-| `ui/` | 68 | operator clients: the served web client and the capture extension |
+| `ui/` | 69 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 59 | the served web client |
+| `ui/web/` | 60 | the served web client |

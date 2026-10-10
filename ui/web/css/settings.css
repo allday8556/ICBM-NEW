@@ -401,6 +401,329 @@ button.registry-item:hover {
   gap: 8px;
 }
 
+/* ---------- 상세페이지 공지 (ADR-0033 G3) ---------- */
+.detail-guidance {
+  display: grid;
+  gap: var(--space-6);
+  margin-top: var(--space-5);
+  min-width: 0;
+}
+
+.dg-placement {
+  min-width: 0;
+  padding: var(--space-6);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-panel-subtle);
+}
+
+.dg-placement > h4 {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-title);
+  font-weight: var(--fw-bold);
+}
+
+.dg-part {
+  min-width: 0;
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--color-line);
+}
+
+.dg-part-head,
+.dg-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.dg-part-head b,
+.dg-preview-head b {
+  color: var(--color-text-strong);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+}
+
+.dg-current {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-5);
+  margin-top: var(--space-4);
+}
+
+.dg-current > img {
+  display: block;
+  width: min(100%, 430px);
+  height: auto;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.dg-current-meta,
+.dg-period-meta {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.dg-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.dg-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+.dg-preset-note {
+  margin-top: var(--space-3);
+}
+
+.dg-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 400px) minmax(0, 1fr);
+  gap: var(--space-6);
+  margin-top: var(--space-4);
+}
+
+.dg-editor-pane,
+.dg-editor,
+.dg-preview-pane {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.dg-block {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-panel);
+}
+
+.dg-block legend {
+  padding: 0 4px;
+  color: var(--color-text-sub);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+}
+
+.dg-block input,
+.dg-period-times input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-input);
+  font-size: var(--fs-lg);
+}
+
+.dg-block input.dg-heading {
+  font-weight: var(--fw-bold);
+}
+
+.dg-block input[aria-invalid="true"] {
+  border-color: var(--color-bad);
+  background: var(--color-bad-bg);
+}
+
+.dg-line-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+}
+
+.dg-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.detail-guidance .btn.dg-small {
+  padding: 6px 9px;
+}
+
+.detail-guidance .btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.dg-error {
+  display: grid;
+  gap: 3px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid #f3c6c6;
+  border-radius: var(--radius-md);
+  background: var(--color-bad-bg);
+  color: var(--color-bad);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+
+.dg-error .mini {
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.dg-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--space-3);
+}
+
+.dg-template {
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-panel);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dg-template[aria-checked="true"] {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(31, 111, 255, 0.18);
+}
+
+.dg-template img,
+.dg-period > img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+.dg-template b {
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+}
+
+.dg-empty-image {
+  display: grid;
+  place-items: center;
+  min-height: 64px;
+  border-radius: 4px;
+  background: var(--color-control-subtle);
+  color: var(--color-text-faint);
+  font-size: var(--fs-xs);
+}
+
+.dg-large img {
+  display: block;
+  width: min(100%, 640px);
+  height: auto;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+}
+
+.dg-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.dg-actions.start {
+  justify-content: flex-start;
+}
+
+.dg-message {
+  min-width: 0;
+  color: var(--color-text-sub);
+  font-size: var(--fs-md);
+  overflow-wrap: anywhere;
+}
+
+.dg-message.bad {
+  color: var(--color-bad);
+}
+
+.dg-period-list {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.dg-period {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-panel);
+}
+
+.dg-period > img {
+  border: 1px solid var(--color-line-soft);
+}
+
+.dg-period-form {
+  margin-top: var(--space-4);
+  padding: var(--space-5);
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-panel);
+}
+
+.dg-period-times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 220px)) minmax(0, 1fr);
+  align-items: end;
+  gap: var(--space-3);
+}
+
+.dg-period-times label {
+  display: grid;
+  gap: 4px;
+  color: var(--color-text-sub);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+@media (max-width: 1280px), (orientation: portrait) {
+  .dg-composer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .dg-placement {
+    padding: var(--space-4);
+  }
+  .dg-period {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .dg-period > img {
+    max-width: 280px;
+  }
+  .dg-period-times {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* ---------- Save bar ---------- */
 .savebar {
   position: sticky;
@@ -419,8 +742,17 @@ button.registry-item:hover {
   box-shadow: 0 -8px 26px rgba(21, 35, 50, 0.07);
 }
 
+/* The save-scope chip names every surface the server accepts a save for; it wraps instead of
+   pushing the actions past the viewport. */
+.savebar > .chip {
+  min-width: 0;
+  white-space: normal;
+  line-height: 1.4;
+}
+
 .savebar-actions {
   display: flex;
+  flex: none;
   gap: var(--space-1);
 }
 
@@ -473,5 +805,9 @@ button.registry-item:hover {
 @media (max-width: 720px) {
   .registry-grid.policies {
     grid-template-columns: 1fr;
+  }
+  /* The four platform tabs scroll inside their bar on a phone instead of widening the page. */
+  .tabs {
+    overflow-x: auto;
   }
 }
