@@ -7,14 +7,18 @@ definitions the application already knows.
 **CONNECT.**
 - The login form is ``form#formLogin``, with ``loginId`` and ``loginPwd`` and a submit button in
   ``.login_input_sec``. It posts to ``/member/login_ps.php``.
-- Signed out, the member page ``/mypage/index.php`` sends the reader to ``/member/login.php``.
-- Signed in, the page carries the member logout action (``/member/logout.php``) and the member's
-  own order-list link, and no login form.
+- Signed out, the member page ``/mypage/index.php`` answers ``200`` with a result page whose only
+  content is a script, ``location.replace("https://<host>:443/member/login.php")``: Godomall
+  redirects in the page, not with a status (observed on 건강산, 2026-10-10).
+- Signed in, the page carries the member logout action (``../member/logout.php?returnUrl=…``)
+  and the member page's own content block (``<div class="mypage_main">``), and no login form
+  (observed on 건강산, 2026-10-10). The order-list link is no proof: the login page carries it too.
 - A status alone is never proof (ADR-0007 §4).
 
 This package describes; it cannot make a request.
 """
 
+import re
 from collections.abc import Mapping
 from types import MappingProxyType
 
@@ -75,8 +79,14 @@ PROTECTED_TARGET = "/mypage/index.php"
 
 _LOGIN_FORM = "form#formLogin"
 _LOGIN_FORM_MARKER = 'id="formLogin"'
+# The in-page redirect of Godomall's result page: to this site's own login page, nothing else.
+_SCRIPT_TO_LOGIN = re.compile(
+    r"""location\.replace\(\s*["'](?:https://[a-z0-9.-]+(?::443)?)?/member/login\.php["'?]""",
+    re.IGNORECASE,
+)
 _LOGOUT_ACTION = "/member/logout.php"
-_ORDER_LIST = "/mypage/order_list.php"
+# The member page's own content block; only a signed-in member is shown it.
+_MEMBER_PAGE = 'class="mypage_main"'
 
 REQUEST_POLICY = RequestPolicy(
     max_concurrency=1,
@@ -116,13 +126,16 @@ CAPTURE_REVISION = "godomall-capture-1"
 
 
 def login_required(response: ProbeResponse) -> Verdict:
-    """The target demands a login: a redirect to the login page, or the login form itself.
+    """The target demands a login: a redirect to the login page, by status or by the result page's
+    script, or the login form itself.
 
     A status alone is never proof (ADR-0007 §4); a denial is recorded and decides nothing.
     """
     signals: list[str] = []
     if response.location and response.location.startswith("/member/login"):
         signals.append("redirect_to_login")
+    if _SCRIPT_TO_LOGIN.search(response.body):
+        signals.append("script_redirect_to_login")
     if _LOGIN_FORM_MARKER in response.body:
         signals.append("login_form")
     proven = bool(signals)
@@ -132,15 +145,18 @@ def login_required(response: ProbeResponse) -> Verdict:
 
 
 def authenticated(response: ProbeResponse) -> Verdict:
-    """Only a signed-in member's page carries the logout action and the member's order list, and
-    no login form."""
+    """Only a signed-in member's page carries the logout action and the member page's own content
+    block, and neither a login form nor a redirect to the login page."""
     signals: list[str] = []
     if _LOGOUT_ACTION in response.body:
         signals.append("logout_action")
-    if _ORDER_LIST in response.body:
-        signals.append("member_order_list")
+    if _MEMBER_PAGE in response.body:
+        signals.append("member_page")
     proven = (
-        response.status == 200 and len(signals) == 2 and _LOGIN_FORM_MARKER not in response.body
+        response.status == 200
+        and len(signals) == 2
+        and _LOGIN_FORM_MARKER not in response.body
+        and not _SCRIPT_TO_LOGIN.search(response.body)
     )
     return proven, tuple(signals)
 
