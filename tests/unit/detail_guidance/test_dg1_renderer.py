@@ -128,6 +128,10 @@ def test_the_content_is_trimmed_plain_text() -> None:
         {"blocks": [{"heading": "<b>안내</b>", "lines": ["당일발송"]}]},
         {"blocks": [{"lines": ["당일 &amp; 익일"]}]},
         {"blocks": [{"lines": ["<script>당일"]}]},
+        {"blocks": [{"lines": ["//example.dev/path"]}]},
+        {"blocks": [{"lines": ["shop.example.dev 참고"]}]},
+        {"blocks": [{"lines": ["가게.kr 방문"]}]},
+        {"blocks": [{"lines": ["mailto:cs"]}]},
     ],
 )
 def test_text_that_cannot_be_drawn_exactly_is_refused(raw: dict[str, Any]) -> None:
@@ -179,7 +183,12 @@ def test_plain_punctuation_is_not_markup_or_a_url() -> None:
             "blocks": [
                 {
                     "heading": "C/S 안내",
-                    "lines": ["<주말 제외>", "10:00 ~ 17:00 (1.5일)", "A/S 1:1"],
+                    "lines": [
+                        "<주말 제외>",
+                        "10:00 ~ 17:00 (1.5일)",
+                        "A/S 1:1",
+                        "Tel: 010-1234-5678",
+                    ],
                 }
             ]
         }

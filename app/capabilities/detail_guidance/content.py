@@ -22,9 +22,11 @@ LINES_MAX: Final = 6
 HEADING_MAX_LENGTH: Final = 20
 LINE_MAX_LENGTH: Final = 40
 GUIDANCE_TEXT_INVALID: Final = "GUIDANCE_TEXT_INVALID"
+# Any URL shape, not a list of known domains: a "//", a scheme followed by its address, or a
+# domain-like name (any word, a dot and a final label of two or more letters, whatever the TLD).
 _URL: Final = re.compile(
-    r"[a-z][a-z0-9+.-]*://|\bwww\.|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\."
-    r"(?:com|net|org|kr|co|io|shop|store|me|biz|info|xyz|app|site|link|ly|gl)\b",
+    r"//|\b(?:https?|ftp|file|data|javascript|mailto|tel|sms):(?!\s)"
+    r"|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b",
     re.IGNORECASE,
 )
 _MARKUP: Final = re.compile(r"<\s*/?\s*[A-Za-z!?]|&#?[A-Za-z0-9]+;")
