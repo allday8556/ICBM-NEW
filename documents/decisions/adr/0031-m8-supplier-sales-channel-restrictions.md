@@ -86,7 +86,9 @@ Reading a restriction is site knowledge with a fixed shape. A parser never infer
 
   > **Amendment note (ADR-0035 §1).** The product name is also read, for the restricting
   > phrases only. It is never read for `channel_all_allowed`. A name restriction combines
-  > exactly as a description restriction does.
+  > exactly as a description restriction does. A single row that states an allowed phrase and
+  > restrictions reads as its restrictions (`LISTED`); the `all_allowed` + restriction →
+  > `REVIEW_REQUIRED` line below applies to separate statements (ADR-0035 §1, NR-03).
 
 - **Matching:** a phrase matches when the page's text contains it, with whitespace ignored. The readings combine as follows:
   - only `channel_all_allowed` phrases match → `ALL_ALLOWED`;
