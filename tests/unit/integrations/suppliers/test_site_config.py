@@ -88,6 +88,7 @@ def test_a_minimal_site_parses() -> None:
         ({"status": "LIVE"}, "example"),
         ({"status": "ACTIVE"}, "example"),
         ({"label_overrides": {"price": ["도.*가"]}}, "example"),
+        ({"label_overrides": {"price": ["(.+)가"]}}, "example"),
         ({"label_overrides": {"price": ["<b>가</b>"]}}, "example"),
         ({"label_overrides": {"price": []}}, "example"),
         ({"region_overrides": {"detail": {"by": "css", "token": "x"}}}, "example"),
@@ -215,3 +216,10 @@ def test_this_build_s_sites_all_bind() -> None:
 def test_a_seller_code_convention_takes_the_adr_0024_form() -> None:
     parsed = parse_site(encoded(seller_code_convention="UP{source_product_id}"), "example")
     assert parsed.seller_code_convention == "UP{source_product_id}"
+
+
+def test_a_site_word_may_hold_round_brackets_a_page_prints() -> None:
+    # ADR-0035 §4: 건강산 writes its one-unit minimum as "(1개)12,900원 이상". A site word is
+    # matched literally, so the brackets are page text, not pattern syntax.
+    parsed = parse_site(encoded(label_overrides={"minimum_price_phrase": ["(1개)"]}), "example")
+    assert parsed.label_overrides["minimum_price_phrase"] == ("(1개)",)
