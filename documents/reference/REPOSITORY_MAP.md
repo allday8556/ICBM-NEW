@@ -138,6 +138,9 @@ the mapper is provider-zero, semantic/unit-based and read-only.
 C-AUTH-1 adds the Coupang HMAC/auth and evidence-bounded error contracts, an in-memory fake
 transport, their unit/contract coverage, and the provider-zero auth contract. It adopts no endpoint,
 contains no provider transport, and grants no credentials or LIVE authority.
+C-CAT+PRODUCT-1 adds the six category, three brand and 22 product endpoint contracts on the same
+fake-only boundary, with unit/contract coverage. It separates provider identities and preserves
+REGISTER metadata review/adoption ownership; it adds no socket, credential or LIVE authority.
 
 | path | files | role |
 | --- | --- | --- |
@@ -155,27 +158,27 @@ contains no provider transport, and grants no credentials or LIVE authority.
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 184 | all canonical and historical documents |
+| `documents/` | 185 | all canonical and historical documents |
 | `documents/acceptance/` | 71 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
-| `documents/contracts/` | 11 | platform and UI contracts |
+| `documents/contracts/` | 12 | platform and UI contracts |
 | `documents/decisions/` | 37 | ADRs and architect review records |
 | `documents/evidence/` | 30 | external provider evidence catalog |
 | `documents/reference/` | 3 | this map and the path migration map |
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 82 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 32 |  |
+| `integrations/` | 84 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 34 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 344 | tests |
-| `tests/contracts/` | 13 | repository-rule and document-contract tests |
+| `tests/` | 347 | tests |
+| `tests/contracts/` | 14 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 143 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 127 | unit tests by runtime owner |
+| `tests/unit/` | 129 | unit tests by runtime owner |
 | `ui/` | 70 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 61 | the served web client |
