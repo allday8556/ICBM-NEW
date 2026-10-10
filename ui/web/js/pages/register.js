@@ -152,8 +152,9 @@ export const REASON_COPY = {
   REGISTER_FROZEN_METADATA_UNRESOLVED:
     '스냅샷이 고정한 카테고리 메타데이터 리비전을 찾을 수 없어 규칙을 표시하지 않습니다. 현재 리비전으로 대신 표시하지 않습니다.',
   DUPLICATE_EVIDENCE_MISSING: '중복 조회 근거가 없습니다. 조회 계약이 아직 채택되지 않았습니다.',
-  // ADR-0033 G4: a resolved top or bottom notice that no composition can place until G5.
-  PUBLICATION_GUIDANCE_UNPLACED: '상·하단 공지는 아직 등록에 넣을 수 없습니다 (G5 이후). 이 상품에서 그 공지를 끄면 이 사유는 사라집니다.',
+  // ADR-0033 §8: a resolved top or bottom notice the unit's composition does not place. Since G5
+  // the SmartStore composition (v3) places both; an older composition revision does not.
+  PUBLICATION_GUIDANCE_UNPLACED: '이 상품의 상세페이지 구성은 상·하단 공지를 넣지 못합니다. 등록 정책을 다시 저장한 뒤 준비 내용을 저장하면 공지가 들어갑니다. 이 상품에서 그 공지를 끄면 이 사유는 사라집니다.',
   GUIDANCE_TEXT_INVALID: '쓸 수 없는 공지 문구입니다. 상세페이지 단계의 직접 작성 문구를 확인하세요.',
   GUIDANCE_TEXT_TOO_WIDE: '공지 문구 중 템플릿 글상자보다 넓은 줄이 있습니다.',
   GUIDANCE_TEMPLATE_UNKNOWN: '알 수 없는 공지 템플릿입니다.',

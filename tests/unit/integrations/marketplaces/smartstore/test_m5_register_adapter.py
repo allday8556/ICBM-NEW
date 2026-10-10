@@ -149,7 +149,7 @@ def test_the_seller_management_code_projection_is_deterministic_and_versioned() 
 
 def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None:
     projected = product.project(payload())
-    assert projected.encoding_version == "smartstore-register-wire/v9"
+    assert projected.encoding_version == "smartstore-register-wire/v10"
     assert projected.document.mapping() == {
         # Both required channel members, each with the value ICBM owns (5915900049 D1, D2.1).
         "smartstoreChannelProduct": {

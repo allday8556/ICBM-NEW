@@ -7,7 +7,9 @@ validates each named identity against its own owner before the store records it:
   preparation owner's current candidate evaluation: it must be ``READY`` and permit an upload, and
   the named candidate fingerprint, the exact selected M4 artifact set (kind, SHA-256, derivation
   identity) and the target policy's asset profile must equal what that evaluation derives. The
-  caller's values are expectations only; a mismatch refuses and records nothing;
+  artifact set is the selected M4 images **plus** the distinct images of the unit's resolved
+  Detail Guidance notices (``GUIDANCE_ARTIFACT``, no derivation; ADR-0033 §8). The caller's values
+  are expectations only; a mismatch refuses and records nothing;
 - a CREATE grant names an Intent that exists, belongs to the named account, is ``PREPARED`` or
   proven not applied, with its own Snapshot and idempotency key, and **the next attempt number**
   — so it authorizes exactly that one attempt, and a retry after ``NOT_APPLIED_PROVEN`` needs a
@@ -41,8 +43,8 @@ from app.capabilities.live_safety.store import (
 )
 from app.platform.core.errors import InputValidationError, NotFoundError
 from app.stages.products.model import ReadinessStatus
-from app.stages.register.model import IntentState, RegistrationLifecycle
-from app.stages.register.preparation import PreflightResult
+from app.stages.register.model import IntentState, RegistrationLifecycle, publication_asset_kind
+from app.stages.register.preparation import PreflightResult, selected_artifacts
 from app.stages.register.store import RegistrationStore
 
 SENDABLE = (IntentState.PREPARED, IntentState.FAILED)
@@ -131,10 +133,10 @@ class LiveAuthorityService:
                 "LIVE_GRANT_CANDIDATE_MISMATCH",
                 "the named candidate fingerprint is not the current READY candidate's",
             )
+        # ADR-0033 §8: the selected Item images plus the distinct guidance images.
         selected = {
-            ArtifactRef(image.asset_kind, image.sha256, image.derivation_id)
-            for item in candidate.resolved.items
-            for image in item.images
+            ArtifactRef(publication_asset_kind(kind), sha256, derivation or None)
+            for kind, sha256, derivation in selected_artifacts(candidate.resolved)
         }
         named = list(artifacts)
         if len(named) != len(set(named)) or set(named) != selected:

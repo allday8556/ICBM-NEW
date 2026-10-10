@@ -18,7 +18,7 @@
 // 작성 is the settings card's own editor (components/guidance-editor.js): the same five-template
 // live preview and presets. The choice is saved with the preparation through the same save; the
 // server validates and draws a product's own notice, and states PUBLICATION_GUIDANCE_UNPLACED while
-// no composition can place a notice (G5).
+// the unit's composition cannot place a notice (since G5 only an older composition revision).
 
 import { ApiError, getJson, sendJson } from '../core/api.js';
 import { fragment, h } from '../core/dom.js';

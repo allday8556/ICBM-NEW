@@ -64,7 +64,12 @@ from app.platform.db.schema_contract import (
     manifest_of,
 )
 from app.stages.products.image_model import ImageAssetKind
-from app.stages.register.model import CREATE_ENDPOINT_GROUP, IntentState
+from app.stages.register.model import (
+    CREATE_ENDPOINT_GROUP,
+    GuidanceAssetKind,
+    IntentState,
+    PublicationAssetKind,
+)
 from app.stages.register.store import RegistrationStore
 
 DRILL_VERSION: Final = "restore-drill/v2"
@@ -109,16 +114,23 @@ def read_element(connection: sqlite3.Connection, element: Element) -> Reading:
     return Reading(len(rows), _digest(rows))
 
 
+# The data-directory folder of each artifact kind's content-addressed store.
+_FOLDERS: Final[dict[str, str]] = {
+    ImageAssetKind.SOURCE_ASSET.value: "source-assets",
+    ImageAssetKind.DERIVED_ARTIFACT.value: "derived-images",
+    # ADR-0033 §2, §8: the rendered Detail Guidance images, the third byte source.
+    GuidanceAssetKind.GUIDANCE_ARTIFACT.value: "guidance",
+}
+
+
 @dataclass(frozen=True)
 class Artifact:
-    asset_kind: ImageAssetKind
+    asset_kind: PublicationAssetKind
     sha256: str
 
     @property
     def relative(self) -> Path:
-        folder = (
-            "source-assets" if self.asset_kind is ImageAssetKind.SOURCE_ASSET else "derived-images"
-        )
+        folder = _FOLDERS[self.asset_kind.value]
         return Path(folder) / "sha256" / self.sha256[:2] / self.sha256
 
 
@@ -229,11 +241,26 @@ def unit_elements(resolved: Any, preparation: Any, revision_id: str) -> list[Ele
                         (("artifact_sha256", image.sha256),),
                     )
                 )
+    # ADR-0033 §8: every resolved guidance image is an artifact of the unit too.
+    elements += [
+        Element(f"artifact:{sha}", "guidance_image_artifacts", (("sha256", sha),))
+        for sha in _guidance_images(resolved)
+    ]
     return _unique(elements)
 
 
+def _guidance_images(resolved: Any) -> list[str]:
+    """ADR-0033 §8: the distinct images of the unit's resolved Detail Guidance notices."""
+    guidance = getattr(resolved, "guidance", None)
+    entries = () if guidance is None else (*guidance.top, *guidance.bottom)
+    return list(dict.fromkeys(entry.sha256 for entry in entries))
+
+
 def unit_artifacts(resolved: Any) -> list[Artifact]:
-    found = {(i.asset_kind, i.sha256) for item in resolved.items for i in item.images}
+    found: set[tuple[PublicationAssetKind, str]] = {
+        (i.asset_kind, i.sha256) for item in resolved.items for i in item.images
+    }
+    found |= {(GuidanceAssetKind.GUIDANCE_ARTIFACT, sha) for sha in _guidance_images(resolved)}
     return [Artifact(kind, sha) for kind, sha in sorted(found)]
 
 

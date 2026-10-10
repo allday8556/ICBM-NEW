@@ -111,20 +111,60 @@ def test_a_redirect_to_the_login_page_proves_a_login_is_required() -> None:
     assert proven and signals == ("redirect_to_login",)
 
 
+# 건강산's signed-out answer for /mypage/index.php, as fetched on 2026-10-10: 200 and this page.
+SIGNED_OUT_RESULT = """<!doctype html>
+<html lang="ko">
+<head>
+    <!--<title>결과</title>-->
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <script type="text/javascript">
+    location.replace("https://www.ggsan.com:443/member/login.php");
+    </script>
+</head>
+<body>
+</body>
+</html>"""
+
+
+def test_the_result_page_s_script_redirect_to_login_proves_a_login_is_required() -> None:
+    proven, signals = login_required(
+        ProbeResponse(200, "/mypage/index.php", None, SIGNED_OUT_RESULT)
+    )
+    assert proven and signals == ("script_redirect_to_login",)
+    # A script that goes anywhere but the login page proves nothing.
+    elsewhere = SIGNED_OUT_RESULT.replace("/member/login.php", "/main/index.php")
+    assert not login_required(ProbeResponse(200, "/mypage/index.php", None, elsewhere))[0]
+    # Nor does a page that only mentions the login page in a link.
+    linked = '<a href="/member/login.php">로그인</a>'
+    assert not login_required(ProbeResponse(200, "/mypage/index.php", None, linked))[0]
+
+
 def test_a_status_alone_never_proves_a_login_is_required() -> None:
     proven, signals = login_required(ProbeResponse(403, "/mypage/index.php", None, "denied"))
     assert not proven and signals == ("access_denied",)
 
 
 def test_only_a_member_page_proves_a_session() -> None:
-    member = '<a href="/member/logout.php">로그아웃</a><a href="/mypage/order_list.php">주문</a>'
-    assert authenticated(ProbeResponse(200, "/mypage/index.php", None, member))[0]
-    # One signal is not enough, and a login form on the page proves the opposite.
-    one = '<a href="/member/logout.php">x</a>'
+    # 건강산's signed-in member page, as observed on 2026-10-10: the logout action and the member
+    # page's own content block.
+    member = (
+        '<body class="body-mypage body-index pc">'
+        '<a href="../member/logout.php?returnUrl=">로그아웃</a>'
+        '<a href="../mypage/order_list.php">주문</a><div class="mypage_main"></div></body>'
+    )
+    proven, signals = authenticated(ProbeResponse(200, "/mypage/index.php", None, member))
+    assert proven and signals == ("logout_action", "member_page")
+    # One signal is not enough: the login page carries the order-list link too.
+    one = '<a href="../member/logout.php">x</a><a href="../mypage/order_list.php">주문</a>'
     assert not authenticated(ProbeResponse(200, "/mypage/index.php", None, one))[0]
+    # A login form or a redirect to the login page proves the opposite.
     with_form = member + '<form id="formLogin"></form>'
     assert not authenticated(ProbeResponse(200, "/mypage/index.php", None, with_form))[0]
+    redirected = member + SIGNED_OUT_RESULT
+    assert not authenticated(ProbeResponse(200, "/mypage/index.php", None, redirected))[0]
     assert not authenticated(ProbeResponse(500, "/mypage/index.php", None, member))[0]
+    # The signed-out answer is never a session.
+    assert not authenticated(ProbeResponse(200, "/mypage/index.php", None, SIGNED_OUT_RESULT))[0]
 
 
 def test_a_site_s_words_are_appended_to_the_template_s() -> None:
