@@ -30,12 +30,13 @@ def capture(number: str) -> DocumentView:
     )
 
 
-def test_ggsan_is_bound_in_recon_and_offered_to_connect_and_collect() -> None:
+def test_ggsan_is_bound_active_and_offered_to_connect_and_collect() -> None:
     assert SITE_PROBLEMS == ()
     site = SITES["ggsan"]
-    assert site.config.status is SiteStatus.RECON
+    # ADR-0030 PT-07: ACTIVE by the PR that cites documents/acceptance/suppliers/ggsan.md.
+    assert site.config.status is SiteStatus.ACTIVE
     assert site.template.platform == "godomall"
-    assert site.extractor_revision == f"{site.template.revision}+ggsan-2"
+    assert site.extractor_revision == f"{site.template.revision}+ggsan-3"
     assert site.collection in COLLECTIONS
     assert site.definition in SUPPLIERS
     assert site.definition.profile.egress_hosts == {"www.ggsan.com"}

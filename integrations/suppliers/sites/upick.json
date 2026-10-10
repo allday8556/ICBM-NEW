@@ -20,7 +20,7 @@
   "region_overrides": {
     "key_image": {"by": "class", "token": "prdImg"}
   },
-  "status": "RECON",
+  "status": "ACTIVE",
   "recon_record": "documents/acceptance/suppliers/upick-recon.md",
-  "revision": "upick-2"
+  "revision": "upick-3"
 }

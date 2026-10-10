@@ -13,7 +13,7 @@
     "minimum_price_phrase": ["판매가격절대준수", "판매가격 준수", "(1개)"],
     "channel_forbid_coupang": ["쿠팡판매 불가"]
   },
-  "status": "RECON",
+  "status": "ACTIVE",
   "recon_record": "documents/acceptance/suppliers/ggsan-recon.md",
-  "revision": "ggsan-2"
+  "revision": "ggsan-3"
 }
