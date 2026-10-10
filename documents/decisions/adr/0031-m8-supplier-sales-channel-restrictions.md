@@ -83,6 +83,11 @@ Reading a restriction is site knowledge with a fixed shape. A parser never infer
   | `channel_forbid_coupang` | a phrase forbidding Coupang | `쿠팡판매 불가` |
   | `channel_forbid_smartstore` | a phrase forbidding SmartStore | `스마트스토어 판매불가` |
 - **Where the words are read:** a labelled row whose label is in `sales_channel_row`, and the description text. Words that appear only inside an image are not read.
+
+  > **Amendment note (ADR-0035 §1).** The product name is also read, for the restricting
+  > phrases only. It is never read for `channel_all_allowed`. A name restriction combines
+  > exactly as a description restriction does.
+
 - **Matching:** a phrase matches when the page's text contains it, with whitespace ignored. The readings combine as follows:
   - only `channel_all_allowed` phrases match → `ALL_ALLOWED`;
   - any `channel_closed_only` phrase matches → `CLOSED_MALL_ONLY`. It is the strictest reading and wins over a `forbid` phrase;
