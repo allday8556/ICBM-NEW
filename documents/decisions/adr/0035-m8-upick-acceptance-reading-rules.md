@@ -31,7 +31,11 @@ What it does not authorize:
 - **No real read** beyond the owner-approved acceptance runs.
 
 Sources:
-- Issue #219: `6097077145` (the acceptance go-ahead and the five products), `6097181737` (run 1 and the decisions);
+- Issue #219:
+  - `6097077145`: the U-PICK acceptance go-ahead and its five products;
+  - `6097181737`: run 1 and the decisions;
+  - `6097576508`: the decision on a channel row that states both;
+  - `6097929512`: the 건강산 acceptance go-ahead and the preview run;
 - ADR-0030 §2, §8.3; ADR-0031 §3; ADR-0032 §4; ADR-0034 §1, §2.
 
 Recorded by: Claude Code (Track B). The number was confirmed free on main and on every open branch.
@@ -95,6 +99,9 @@ This amends ADR-0034 §2.
 - **The fact keeps the words.** A region-surcharge statement goes into the shipping fact's `policy_text` beside the base fee:
   - the `cafe24` template's `추가배송비` row (a site label slot);
   - the `godomall` template's `지역별배송비` layer.
+- **A long region list is summarised.** A Godomall region layer that is exactly a list of entries, each a region's words and one amount, is kept as its count and amount range, e.g. `지역별추가배송비 287개 지역 3,000원~5,000원`.
+  - 건강산's layer lists 287 island addresses (preview run, Issue #219 `6097929512`).
+  - The evidence quotes its beginning.
 - **The amount is not priced.** The fact's kind and fee are what the base fee alone gives (`FIXED`, `FREE`, or the free-over `CONDITIONAL`). The surcharge applies only to orders to those regions.
 - **What stays under review:**
   - a surcharge statement that cannot be kept as words → `REVIEW_REQUIRED`. That means URL material, a row whose value is only an image, or words longer than 200 characters;
@@ -117,6 +124,15 @@ This amends the money-cell rule for `minimum_sale_price` rows (ADR-0030 §2, ADR
   - a cell with a repeated quantity;
   - a cell with any amount the list shape does not account for.
 
+### 4. A minimum the description states without a site phrase
+
+This amends ADR-0034 §1.
+
+- **The rule.** When a site configures minimum phrases but no phrase yields an amount, a description sentence that still states a minimum-looking amount holds `minimum_sale_price` for review; it is not recorded `ABSENT`. A minimum-looking amount is `N원 이상` together with `판매`.
+- **Why.** `ABSENT` means "no minimum", and pricing would then ignore a minimum the supplier did state.
+- **Where it was found.** 건강산's 1000001010 states `(1개)12,900원 이상 판매 부탁드립니다 (2개) 23,900원 이상 …` without `판매가격절대준수`.
+- **The site phrase.** 건강산's site revision adds the phrase `(1개)`, and that sentence then reads 12,900 under ADR-0034 §1 unchanged.
+
 ## Invariants
 
 - **NR-01** Only restricting phrases are read in a product name. An allowed reading never comes from a name.
@@ -124,13 +140,14 @@ This amends the money-cell rule for `minimum_sale_price` rows (ADR-0030 §2, ADR
 - **NR-03** One row that states an allowed phrase and restrictions reads as its restrictions. An all-allowed reading needs a row whose whole value is an allowed phrase. Any word of a channel row that no configured phrase reads holds the field for review.
 - **RS-01** A region surcharge never changes the priced fee, and its words are kept in `policy_text`.
 - **QM-01** A per-quantity minimum row yields its `1개` amount and nothing else. Any other shape stays `REVIEW_REQUIRED`.
+- **DM-04** A description that states a minimum-looking amount no site phrase reads is never `ABSENT`.
 
 ## Slices
 
 | # | slice |
 | --- | --- |
 | U0 | this ADR |
-| U1 | `cafe24-3` and `godomall-2` applying §1 to §3, plus the fail-closed text fixes found in run 1 (a text made only of invisible characters is empty; a no-break space is a space); `upick-2` with the phrases of §1 and the `추가배송비` region label; offline proof on reduced captures |
+| U1 | `cafe24-3` and `godomall-2` applying §1 to §3, plus the fail-closed text fixes found in run 1 (a text made only of invisible characters is empty; a no-break space is a space); `upick-2` with the phrases of §1 and the `추가배송비` region label; `ggsan-2` with the phrase of §4; offline proof on reduced captures |
 | U2 | U-PICK acceptance run 2 on the redeployed build, then the run from a fresh server process; the record `documents/acceptance/suppliers/upick.md`; the flip to `ACTIVE` |
 
 Each slice finalizes in its turn of the global merge lane.
