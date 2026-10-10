@@ -118,6 +118,8 @@ def test_the_content_is_trimmed_plain_text() -> None:
         {"blocks": [{"lines": ["가" * (LINE_MAX_LENGTH + 1)]}]},
         {"blocks": [{"lines": ["당일\t발송"]}]},
         {"blocks": [{"lines": ["당일\n발송"]}]},
+        {"blocks": [{"lines": ["\t당일발송"]}]},
+        {"blocks": [{"heading": "안내\n", "lines": ["당일발송"]}]},
         {"blocks": [{"lines": ["당일발송 😀"]}]},
         {"blocks": [{"lines": [3]}]},
     ],
