@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.platform.core.logging import LOG_FILE_NAME
+from integrations.suppliers.registry import SITES
 from tests.conftest import LOCAL, make_config
 from tests.support.jobs_support import TEST_JOBS
 
@@ -125,11 +126,12 @@ def test_settings_contract_has_no_connections_and_is_read_only(client: TestClien
         "REGISTRATION_CATEGORY_METADATA",
         "AI_PROMPT_REGISTRY",
     ]
-    # The registered supplier appears unconfigured: no credentials, no session, not connected.
+    # The registered suppliers, KM통상 and each configured site (ADR-0030), appear unconfigured:
+    # no credentials, no session, not connected.
     assert [
         (s["supplier_key"], s["state"], s["capability_status"], s["credentials_stored"])
         for s in body["supplier_connections"]
-    ] == [("kmretail", "DISCONNECTED", "NOT_CONFIGURED", False)]
+    ] == [(key, "DISCONNECTED", "NOT_CONFIGURED", False) for key in ("kmretail", *SITES)]
     assert body["policy_values"] == {}
     # SmartStore's connection truth is its capability (CAPABILITY_MAPPING §14.11): it is never
     # listed here as a hard-coded NOT_CONNECTED. The marketplaces without a contract still are.
