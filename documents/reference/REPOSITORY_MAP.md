@@ -126,11 +126,11 @@ the mapper is provider-zero, semantic/unit-based and read-only.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 340 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 341 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 58 | supporting capabilities: audit, jobs, review, live_safety, ai |
 | `app/interface/` | 27 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 87 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 163 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/stages/` | 164 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
