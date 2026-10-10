@@ -160,14 +160,15 @@ def test_4072_a_listed_row_and_a_name_ban_forbid_coupang_and_the_minimum_is_one_
     )
     fields = SITES["upick"].collection.fields(view)
     channels = fields["sales_channels"]
-    # ADR-0031 §3 as the templates read it: "모든마켓 판매가능" inside other words is no allowed
-    # reading (all-allowed is read only from a whole row), and "쿠팡,토스 판매금지" restricts
-    # Coupang; 토스 is no marketplace ICBM lists, so nothing else is forbidden.
+    # ADR-0035 §1 NR-03: one row stating an allowed phrase and restrictions reads as its
+    # restrictions. "쿠팡,토스 판매금지" restricts Coupang; 토스 is no marketplace ICBM lists, so
+    # nothing else is forbidden, but its words stay in the policy text for a later marketplace.
     assert channels.status is FieldStatus.CONFIRMED
     assert (channels.value.scope, channels.value.forbidden) == (
         SalesChannelScope.LISTED,
         ("coupang",),
     )
+    assert "쿠팡,토스 판매금지" in channels.value.policy_text
     minimum = fields["minimum_sale_price"]
     assert minimum.status is FieldStatus.CONFIRMED
     assert minimum.value.amount_krw == 13900
