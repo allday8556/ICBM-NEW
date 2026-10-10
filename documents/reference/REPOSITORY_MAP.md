@@ -119,16 +119,20 @@ The existing pricing/readiness services expose the additive AtomicSKU-qualified 
 does not calculate. Its integration suite covers per-configuration cost/price, missing-delta and
 composed-fulfillment refusal, stale propagation and immutable snapshot pinning. It has no provider
 payload or external call and leaves legacy Item economics unchanged.
+C-P3 extends the existing category-metadata JSON contract with reviewed marketplace option
+requirements and adds `marketplace_requirement_mapping.py` plus unit/contract/integration coverage.
+It reuses the category revision owner, so it has no migration or second Pricing/option/SKU owner;
+the mapper is provider-zero, semantic/unit-based and read-only.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 346 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 347 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 64 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
 | `app/interface/` | 27 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 87 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 163 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/stages/` | 164 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -150,13 +154,13 @@ payload or external call and leaves legacy Item economics unchanged.
 | `integrations/` | 78 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 28 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 330 | tests |
-| `tests/contracts/` | 10 | repository-rule and document-contract tests |
+| `tests/` | 332 | tests |
+| `tests/contracts/` | 11 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 137 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 122 | unit tests by runtime owner |
+| `tests/unit/` | 123 | unit tests by runtime owner |
 | `ui/` | 68 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 59 | the served web client |
