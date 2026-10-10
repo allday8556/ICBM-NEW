@@ -35,7 +35,7 @@ from tests.support.product_support import (
     PRODUCT,
     SUPPLIER,
     Collections,
-    conditional,
+    conditional_without_fee,
     context,
     count,
     fixed,
@@ -187,7 +187,10 @@ def test_a_minimum_sale_price_can_block_pricing_with_every_guard_kept(
 
 UNRESOLVED = {
     "several prices": (product(price=(10000, 12000)), "PRICING_PURCHASE_PRICE_AMBIGUOUS"),
-    "conditional shipping": (product(shipping=conditional()), "PRICING_SHIPPING_CONDITIONAL"),
+    "conditional shipping": (
+        product(shipping=conditional_without_fee()),
+        "PRICING_SHIPPING_CONDITIONAL",
+    ),
     "shipping under review": (product(shipping=review(".delivery")), "PRICING_SHIPPING_UNRESOLVED"),
     "minimum under review": (
         product(minimum_sale_price=review(".minimum-price")),

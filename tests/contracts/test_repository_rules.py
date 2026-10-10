@@ -2696,6 +2696,7 @@ def test_every_collection_definition_pins_its_extraction_identity() -> None:
     templates = [path for path in (suppliers / "platforms").iterdir() if path.is_dir()]
     templates = [path for path in templates if path.name != "__pycache__"]
     assert suppliers / "platforms" / "cafe24" in templates
+    assert suppliers / "platforms" / "godomall" in templates
     packages += templates
     problems = {package.name: manifest_problems(REPO_ROOT, package) for package in packages}
     assert {name: found for name, found in problems.items() if found} == {}
@@ -2728,6 +2729,7 @@ def test_a_supplier_parser_owns_nothing_but_reading() -> None:
     }
     assert "integrations/suppliers/kmretail/collect/facts.py" in package
     assert "integrations/suppliers/platforms/cafe24/collect/facts.py" in package
+    assert "integrations/suppliers/platforms/godomall/collect/facts.py" in package
     assert "integrations/suppliers/kmretail/collect/identity.py" in package
     for path, tree in package.items():
         imported = _imported_modules(tree)
@@ -2808,19 +2810,24 @@ def test_one_extraction_identity_covers_the_whole_collect_package() -> None:
 def test_a_platform_template_is_one_extraction_identity() -> None:
     # ADR-0030 §4: a template's collect package is one identity, like a supplier package's, and
     # its revision is the one the template declares and every site's revision starts with.
-    from integrations.suppliers.extraction import read_manifest
-    from integrations.suppliers.platforms.cafe24 import TEMPLATE
-    from integrations.suppliers.platforms.cafe24.collect import ROLE_RULES
-    from integrations.suppliers.platforms.cafe24.collect.revision import EXTRACTION_REVISION
+    import importlib
 
-    package = REPO_ROOT / "integrations" / "suppliers" / "platforms" / "cafe24"
-    manifest = read_manifest(package / "extraction_identity.py")
-    assert EXTRACTION_REVISION == manifest.revision == TEMPLATE.revision
-    modules = {
-        path.relative_to(REPO_ROOT).as_posix() for path in (package / "collect").rglob("*.py")
-    }
-    assert modules == set(manifest.inputs), "every collect module is part of the identity"
-    assert len({rule.rule_id for rule in ROLE_RULES}) == len(ROLE_RULES), "rule ids are distinct"
+    from integrations.suppliers.extraction import read_manifest
+    from integrations.suppliers.sites import TEMPLATES
+
+    assert set(TEMPLATES) == {"cafe24", "godomall"}
+    for platform, template in TEMPLATES.items():
+        collect = importlib.import_module(f"integrations.suppliers.platforms.{platform}.collect")
+        package = REPO_ROOT / "integrations" / "suppliers" / "platforms" / platform
+        manifest = read_manifest(package / "extraction_identity.py")
+        assert collect.EXTRACTION_REVISION == manifest.revision == template.revision, platform
+        modules = {
+            path.relative_to(REPO_ROOT).as_posix() for path in (package / "collect").rglob("*.py")
+        }
+        assert modules == set(manifest.inputs), f"every {platform} collect module is pinned"
+        rule_ids = [rule.rule_id for rule in collect.ROLE_RULES]
+        assert len(set(rule_ids)) == len(rule_ids), f"{platform} rule ids are distinct"
+        assert all(rule_id.startswith(f"{platform}.") for rule_id in rule_ids), platform
 
 
 def test_a_site_is_configuration_and_never_code() -> None:

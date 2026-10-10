@@ -23,8 +23,9 @@ gate is an exact rational comparison. Rounding is declared, not implied: v1 know
 
 **Source inputs fail closed.** A purchase cost, a supplier shipping fee and a minimum sale price
 are read only where the current source revision states them unambiguously. Anything else is a
-reason, never a guess: no price is chosen by label or order, no conditional shipping is flattened,
-and nothing is multiplied by a quantity or divided into a unit price.
+reason, never a guess: no price is chosen by label or order, no conditional shipping is flattened
+(the one exception is the owner's: a free-over policy is priced at its base fee, ADR-0034 §2
+FO-02), and nothing is multiplied by a quantity or divided into a unit price.
 
 **Two procurements** (ADR-0013 §6–§7):
 - A ``BASE_PRODUCT`` binding reads the revision's one explicit base price, its shipping and its
@@ -265,8 +266,16 @@ def _supplier_shipping(fields: Mapping[str, SourceField], reasons: list[Reason])
         return 0
     elif shipping.value.kind is ShippingKind.FIXED and shipping.value.fee_krw is not None:
         return shipping.value.fee_krw
+    elif (
+        shipping.value.kind is ShippingKind.CONDITIONAL
+        and shipping.value.fee_krw is not None
+        and shipping.value.free_over_krw is not None
+    ):
+        # ADR-0034 §2 (Issue #219 6088081139): a free-over policy is priced at its base fee; a
+        # consignment order of one or two units almost never reaches the threshold.
+        return shipping.value.fee_krw
     elif shipping.value.kind is ShippingKind.CONDITIONAL:
-        # Which side of the threshold an order falls on is not a source fact.
+        # Any other condition (no base fee, a quantity tier, a region) is not priced.
         reasons.append(_review(SHIPPING_CONDITIONAL, "shipping"))
     else:
         reasons.append(_review(SHIPPING_UNKNOWN, "shipping"))

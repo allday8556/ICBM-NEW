@@ -1012,7 +1012,9 @@ def test_the_suppliers_common_images_preview_and_each_decision_is_the_owners(
             assert card.locator("[data-count-verdict='REVIEW']").get_attribute("data-count") == str(
                 reviews
             )
-            page.locator("[data-action='open-common-images']").first.click()
+            page.locator(
+                f".supplier-card[data-supplier='{COMMON_SUPPLIER}'] [data-action='open-common-images']"
+            ).click()
             tile = page.locator(f".common-image-tile[data-sha='{repeated}']")
             tile.wait_for()
             assert tile.get_attribute("data-verdict") == "REVIEW"

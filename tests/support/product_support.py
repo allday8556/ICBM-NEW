@@ -78,6 +78,20 @@ def conditional() -> FieldFact:
     )
 
 
+def conditional_without_fee() -> FieldFact:
+    return confirmed(
+        ShippingValue(kind=ShippingKind.CONDITIONAL, policy_text="cond", free_over_krw=50000),
+        ".delivery",
+    )
+
+
+def conditional_without_threshold() -> FieldFact:
+    return confirmed(
+        ShippingValue(kind=ShippingKind.CONDITIONAL, policy_text="cond", fee_krw=3000),
+        ".delivery",
+    )
+
+
 def unknown_shipping() -> FieldFact:
     return FieldFact(
         FieldStatus.REVIEW_REQUIRED,
