@@ -19,12 +19,16 @@ Every reading fails closed:
 - The shipping fact is recorded as the page states it. A base fee with a free-over threshold is
   ``CONDITIONAL``, carrying both; pricing reads that at its base fee (ADR-0034 §2). A fee stated
   as a range is ``FIXED`` at its highest amount, its words kept (ADR-0032 §4). A region layer's
-  words are kept beside the base fee and never priced (ADR-0035 §2).
+  words are kept beside the base fee and never priced (ADR-0035 §2); a layer stating its
+  surcharge only as an image, or in words longer than 200 characters, is held for review.
 - A minimum resale price written as a description sentence is read only from the site's phrases
-  (ADR-0034 §1). A minimum row that is exactly a per-quantity list reads its ``1개`` amount
-  (ADR-0035 §3).
-- A restricting channel phrase is read in the product's name too, never an allowed one
-  (ADR-0035 §1).
+  (ADR-0034 §1). A minimum row that is exactly a per-quantity list with a one-unit amount above
+  zero reads that amount (ADR-0035 §3).
+- A restricting channel phrase is read in the product's name too, never an allowed one, and a
+  channel row that is not wholly allowed is read only when every word of it is a configured
+  phrase or a separator (ADR-0035 §1, NR-03).
+- A value made only of invisible characters is empty (ADR-0035): a ``dd`` row stays stated with
+  an empty value, so a minimum row of only U+FEFF is held for review, as an empty one always was.
 - Nothing is read from an image or a script, and every locator is written here.
 """
 
@@ -59,8 +63,14 @@ CHOICE_BOX = "btn_choice_box"
 # The amount-tier layer of the shipping row (금액별배송비), and its region layer (지역별배송비).
 FEE_TIERS = "lyDelivery"
 REGION_FEES = "lyDeliveryZone"
-# The region layer's own title (지역별배송비): a heading, not a surcharge the layer states.
+# The region layer's own title (지역별배송비) and close control: neither is a surcharge the
+# layer states.
 REGION_TITLE = ".ly_tit"
+REGION_CLOSE = "ly_close"
+# ADR-0035 §2: the longest region-surcharge words kept as policy text; longer ones are held.
+REGION_WORDS_LIMIT = 200
+# ADR-0035 §1 NR-03: the separators a channel row puts between its phrases.
+_CHANNEL_SEPARATORS = str.maketrans("", "", "/,·")
 # The lines to be ordered, and one line of it. A product without options has its one line
 # written in advance; a product with options starts with none.
 CHOICE_LIST = "item_choice_list"
@@ -116,8 +126,10 @@ _PRICE_WITH_NOTES = re.compile(
 )
 _MINIMUM_CELL = re.compile(_NUMBER + r"원(?:이상)?")
 # ADR-0035 §3: one entry of a per-quantity minimum row, "<k>개 <amount>원 이상" with whitespace
-# removed, and a cell that is exactly a list of them, separated by "/", "," or nothing (a line
-# break the page collapsed). An entry ends at 이상, so the next quantity starts unambiguously.
+# removed, and a cell that is exactly a list of them, separated by "/" or ",". Entries separated
+# only by whitespace, or by nothing at all, are accepted too: a line break (``<br>``) leaves no
+# mark in the collapsed text, so it cannot be told apart from them. An entry ends at 이상, so the
+# next quantity starts unambiguously.
 _QUANTITY_ENTRY = r"([1-9]\d*)개" + _NUMBER + r"원이상"
 _QUANTITY_MINIMUM = re.compile(_QUANTITY_ENTRY)
 _QUANTITY_LIST = re.compile(rf"{_QUANTITY_ENTRY}(?:[/,]?{_QUANTITY_ENTRY})*")
@@ -326,19 +338,19 @@ def _occurrences(text: str, phrase: str) -> list[int]:
 
 def _per_quantity_minimum(squashed: str) -> int | None:
     """ADR-0035 §3 (QM-01): the one-unit amount of a minimum row that is exactly a list of
-    quantity minimums, ``1개 N원 이상`` first and then ``k개 M원 이상`` with distinct quantities
-    k ≥ 2.
+    quantity minimums, ``1개 N원 이상`` with N > 0 first, and then ``k개 M원 이상`` with distinct
+    quantities k ≥ 2.
 
     The other quantities stay only in the evidence; they are never divided into a unit price. None
-    for any other shape: a first entry that is not 1개, other words, a repeated quantity, or an
-    amount the list does not account for."""
+    for any other shape: a first entry that is not 1개, a zero one-unit amount (no minimum
+    statement), other words, a repeated quantity, or an amount the list does not account for."""
     if _QUANTITY_LIST.fullmatch(squashed) is None:
         return None
     entries = [
         (int(found.group(1)), _amount(found, 2)) for found in _QUANTITY_MINIMUM.finditer(squashed)
     ]
     quantities = [quantity for quantity, _stated in entries]
-    if quantities[0] != 1 or len(set(quantities)) != len(quantities):
+    if quantities[0] != 1 or len(set(quantities)) != len(quantities) or entries[0][1] <= 0:
         return None
     return entries[0][1]
 
@@ -458,6 +470,19 @@ def _shipping(found: Sequence[tuple[str, str, Node]], words: Vocabulary) -> Fiel
     # kept beside the base fee and never priced. The layer's own title is a heading, not words it
     # states; a layer with nothing else in it states no surcharge.
     region_words = regions[0].words_outside(REGION_TITLE) if regions else ""
+    if regions and not region_words:
+        pictured = [
+            node
+            for node in regions[0].descendants()
+            if node.tag == "img" and not node.within(REGION_CLOSE)
+        ]
+        if pictured:
+            # ADR-0035 §2: a layer that states its surcharge only as an image cannot be kept as
+            # words. The layer's own close control is no statement.
+            return _review(locator, dd.text)
+    if len(region_words) > REGION_WORDS_LIMIT:
+        # ADR-0035 §2: words longer than a policy text keeps are held, never cut.
+        return _review(locator, region_words)
     outside = _squash(dd.text_outside(f"#{FEE_TIERS}", f"#{REGION_FEES}"))
     # Outside the layers the row may hold only its base fee, the payment words and the
     # platform's button labels; any other amount is a condition no rule reads.
@@ -647,6 +672,16 @@ def _notice(nodes: Sequence[Node]) -> FieldFact:
     return _review(locator) if shown else _absent(locator)
 
 
+def _unread_channel_words(value: str, phrases: Sequence[str]) -> str:
+    """What a channel row says beyond the configured phrases it matches and the separators between
+    them (``/``, ``,``, ``·``), whitespace ignored. Longer phrases are set aside first, so a phrase
+    inside a longer one never leaves the longer one's remainder behind."""
+    left = _squash(value)
+    for phrase in sorted({_squash(p) for p in phrases if _squash(p)}, key=len, reverse=True):
+        left = left.replace(phrase, "")
+    return left.translate(_CHANNEL_SEPARATORS)
+
+
 def _sales_channels(
     nodes: Sequence[Node], found: Sequence[tuple[str, str, Node]], words: Vocabulary
 ) -> FieldFact:
@@ -659,7 +694,11 @@ def _sales_channels(
       nothing, is held for review;
     - "all allowed" is read only from a row whose whole value is an allowed phrase, never from a
       phrase inside other words, and never from a name;
-    - an allowed reading beside any restriction is a contradiction, held for review.
+    - a row that is not wholly allowed reads as its restrictions (ADR-0035 NR-03, so one row
+      stating an allowed phrase and restrictions is ``LISTED``) only when every word of it is a
+      matched configured phrase or a separator; anything left over is held for review;
+    - an allowed row beside a restriction stated elsewhere (another row, the name or the
+      description) is a contradiction, held for review.
     A restricting phrase is read wherever it appears.
     """
     row_locator = _row_locator(words.sales_channel_row[0])
@@ -688,11 +727,22 @@ def _sales_channels(
     hits: dict[str, list[str]] = {"closed": [], "coupang": [], "smartstore": []}
     # What was read, and where: (locator, the words quoted).
     quoted: list[tuple[str, str]] = []
+    configured = (
+        *words.channel_all_allowed,
+        *words.channel_closed_only,
+        *words.channel_forbid_coupang,
+        *words.channel_forbid_smartstore,
+    )
     for _label, row_value, _node in stated:
         row_restrictions = restrictions(row_value)
         whole_allowed = any(_squash(row_value) == _squash(p) for p in words.channel_all_allowed)
         if not whole_allowed and not any(row_restrictions.values()):
             # A row no phrase reads, or an allowed phrase inside other words: never allowed.
+            return _review(row_locator, row_value)
+        if not whole_allowed and _unread_channel_words(row_value, configured):
+            # ADR-0035 §1 NR-03: a row that is not wholly allowed reads as its restrictions only
+            # when every word of it is read. Words left over (an unconfigured ban such as
+            # "스마트스토어 등록 불가") are a statement no rule reads (ADR-0031 SC-02).
             return _review(row_locator, row_value)
         if whole_allowed:
             allowed_rows.append(row_value)

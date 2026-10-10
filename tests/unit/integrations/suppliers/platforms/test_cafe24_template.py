@@ -11,8 +11,9 @@ contacted.
 corpus page of its own shape:
 - a region surcharge (``추가배송비``) is kept after KM통상's shipping policy text, with the same
   kind and fee, and the field is held for review when it cannot be kept as words;
-- text is cleaned of invisible characters and a no-break space is a space: a description made only
-  of invisible characters is held for review, and a title's doubled space reads as one;
+- text is cleaned of the byte-order mark, the zero-width space and the word joiner, and a
+  no-break space is a space: a description made only of them is held for review, a description's
+  words lose them, and a title's doubled space reads as one;
 - a per-quantity minimum row reads its ``1개`` amount, where KM통상 reads the quantity 1.
 """
 
@@ -38,6 +39,7 @@ from integrations.suppliers.platforms.cafe24.collect import (
     parse_fields,
     resolve,
 )
+from integrations.suppliers.platforms.cafe24.collect.dom import clean
 from integrations.suppliers.site_config import SiteRegion
 from tests.unit.integrations.suppliers.kmretail import test_km_image_roles as km_images
 from tests.unit.integrations.suppliers.kmretail.test_km_facts_parser import (
@@ -93,6 +95,9 @@ CORPUS = {
     ),
     "invisible_description": page(body=BUY + '<div id="prdDetail"><p>&#xFEFF;&#xFEFF;</p></div>'),
     "spaced_title": page(name="마그네슘&nbsp; 90정"),
+    "invisible_inside_words": page(
+        body=BUY + '<div id="prdDetail"><p>설명&#x200B;입니다&#xFEFF;</p></div>'
+    ),
 }
 FILES = {
     path.name: path.read_text("utf-8")
@@ -141,9 +146,17 @@ def test_the_template_reads_every_km_document_as_km_does(body: str) -> None:
             and ours_fact.value.policy_text.startswith(f"{theirs_fact.value.policy_text} / ")
         )
         spaces_only = (
-            isinstance(ours_fact.value, TextValue)
+            key == "original_name"
+            and isinstance(ours_fact.value, TextValue)
             and isinstance(theirs_fact.value, TextValue)
-            and ours_fact.value.text == " ".join(theirs_fact.value.text.split())
+            and ours_fact.value.text == clean(theirs_fact.value.text)
+        )
+        # The same, for invisible characters written inside a description's words.
+        invisible_words = (
+            key == "detail_description"
+            and isinstance(ours_fact.value, TextValue)
+            and isinstance(theirs_fact.value, TextValue)
+            and ours_fact.value.text == clean(theirs_fact.value.text)
         )
         # cafe24-3 (ADR-0035 §3): a per-quantity minimum row reads its 1개 amount, where KM통상
         # reads the cell's first number, the quantity 1.
@@ -152,6 +165,7 @@ def test_the_template_reads_every_km_document_as_km_does(body: str) -> None:
             and isinstance(ours_fact.value, MoneyValue)
             and isinstance(theirs_fact.value, MoneyValue)
             and theirs_fact.value.amount_krw == 1
+            and ours_fact.value.amount_krw == 13900
             and (ours_fact.evidence[0].observed or "").startswith("1개 ")
         )
         assert (
@@ -161,6 +175,7 @@ def test_the_template_reads_every_km_document_as_km_does(body: str) -> None:
             or free_fee
             or surcharge_words
             or spaces_only
+            or invisible_words
             or one_unit_minimum
         ), key
 
@@ -172,6 +187,7 @@ def test_the_template_reads_every_km_document_as_km_does(body: str) -> None:
         ("per_quantity_minimum", "minimum_sale_price"),
         ("invisible_description", "detail_description"),
         ("spaced_title", "original_name"),
+        ("invisible_inside_words", "detail_description"),
     ],
 )
 def test_each_adr_0035_corpus_page_exercises_its_stated_difference(name: str, key: str) -> None:

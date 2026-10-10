@@ -77,7 +77,7 @@ No image was fetched. The ADR-0030 §8.1 bound is six product pages; three were 
 | `판매가` beside `정가` | ADR-0032: 건강산 declares `판매가` as `PURCHASE` and `정가` as `LIST` (Issue #219 `6086421199`) |
 | `쿠팡판매 불가` | ADR-0031: the site's `channel_forbid_coupang` phrase |
 | the product form's hidden inputs | not read: the capture keeps no input value (ADR-0019 §6.1). "No options" (ADR-0013 ruling B) is read from what the page shows: an order list with exactly one line written in advance and no option control of any kind. A sold-out page has no order list, so its options stay under review |
-| the `지역별추가배송비` layer | the captures show the layer empty. An empty layer states no surcharge amount, and its words stay in the shipping policy text beside the price (ADR-0034 §2). A layer that states any amount is a region surcharge and is held for review |
+| the `지역별추가배송비` layer | the captures show the layer empty. An empty layer states no surcharge amount, and its words stay in the shipping policy text beside the price (ADR-0034 §2). A layer that states any amount is a region surcharge and is held for review. **Amended:** under `godomall-2` (ADR-0035 §2) such a layer's words are kept in the policy text and the fact is priced at the base fee |
 | `mtn=` on listing links | none needed: URL sanitization keeps only `goodsNo`, so `mtn` is dropped before any read |
 | a shown `상품필수 정보` table | the template reads it as a notice and holds it for review, as the Cafe24 template does |
 

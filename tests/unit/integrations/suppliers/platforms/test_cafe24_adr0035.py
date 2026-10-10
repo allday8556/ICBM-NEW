@@ -3,6 +3,8 @@
 - NR-01: only restricting phrases are read in a product name; an allowed reading never comes
   from a name.
 - NR-02: a name restriction beside an all-allowed row is ``REVIEW_REQUIRED``.
+- NR-03: one row stating an allowed phrase and restrictions reads as its restrictions, when every
+  word of it is read.
 - RS-01: a region surcharge never changes the priced fee, and its words are kept.
 - QM-01: a per-quantity minimum row yields its ``1개`` amount; any other shape stays held.
 - The text fixes of acceptance run 1: invisible characters are no text, a no-break space is a
@@ -67,9 +69,9 @@ def test_nr_01_an_allowed_reading_never_comes_from_a_name(name: str, name_row: s
     channels = fields(page(name=name, rows=rows, body=BUY))["sales_channels"]
     assert channels.status is FieldStatus.ABSENT
     # Beside a restricting row, an allowed phrase in the name is no contradiction: it is unread.
-    restricted = fields(
-        page(name=name, rows=rows + row("판매가능플랫폼", "폐쇄몰 전용"), body=BUY)
-    )["sales_channels"]
+    restricted = fields(page(name=name, rows=rows + row("판매가능플랫폼", "폐쇄몰"), body=BUY))[
+        "sales_channels"
+    ]
     assert restricted.value.scope is SalesChannelScope.CLOSED_MALL_ONLY
 
 
@@ -117,6 +119,50 @@ def test_a_site_without_restricting_words_reads_nothing_from_a_name() -> None:
     assert fields(body, vocabulary(site()))["sales_channels"].status is FieldStatus.ABSENT
 
 
+# ---------------------------------------------------------------- §1 NR-03 one row stating both
+
+MIXED = "모든마켓 판매가능/쿠팡,토스 판매금지"
+
+
+def test_nr_03_a_row_stating_both_reads_as_its_restrictions() -> None:
+    channels = fields(page(rows=row("판매가능플랫폼", MIXED), body=BUY))["sales_channels"]
+    assert channels.status is FieldStatus.CONFIRMED
+    assert (channels.value.scope, channels.value.forbidden) == (
+        SalesChannelScope.LISTED,
+        ("coupang",),
+    )
+    # 토스 is no marketplace ICBM lists: its words stay for a later one.
+    assert channels.value.policy_text == MIXED
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "모든마켓 판매가능/쿠팡 판매 금지/스마트스토어 등록 불가",
+        "모든마켓 판매가능 · 쿠팡 판매 금지 (일부 제외)",
+        "쿠팡 판매 금지/스마트스토어 등록 불가",
+    ],
+    ids=["unconfigured ban", "other words", "restricting row with an unconfigured ban"],
+)
+def test_nr_03_words_no_phrase_reads_hold_the_row(value: str) -> None:
+    channels = fields(page(rows=row("판매가능플랫폼", value), body=BUY))["sales_channels"]
+    assert channels.status is FieldStatus.REVIEW_REQUIRED
+    assert channels.value is None
+
+
+def test_nr_03_separators_alone_are_set_aside() -> None:
+    value = "모든마켓 판매가능 · 쿠팡 판매 금지 / 오픈마켓 판매불가"
+    channels = fields(page(rows=row("판매가능플랫폼", value), body=BUY))["sales_channels"]
+    assert channels.value.scope is SalesChannelScope.CLOSED_MALL_ONLY
+
+
+def test_nr_03_a_row_stating_both_beside_a_wholly_allowed_row_is_held() -> None:
+    rows = row("판매가능플랫폼", MIXED) + ALLOWED
+    assert fields(page(rows=rows, body=BUY))["sales_channels"].status is (
+        FieldStatus.REVIEW_REQUIRED
+    )
+
+
 # ---------------------------------------------------------------- §2 region surcharge
 
 REGION_WORDS = "제주도 3,000원/도서산간 5,000원 추가"
@@ -162,14 +208,41 @@ def test_rs_01_the_same_surcharge_stated_twice_is_one_statement() -> None:
         + row("추가배송비", REGION_WORDS)
         + row("추가배송비", "제주도 4,000원/도서산간 5,000원 추가"),
         row("추가배송비", REGION_WORDS),
+        row("배송비", "3,000원") + row("추가배송비", '<img src="/web/upload/zone.jpg">'),
+        row("배송비", "3,000원") + row("추가배송비", "<span><img src='/zone.png'></span>"),
+        row("배송비", "3,000원") + row("추가배송비", "제주도 3,000원 추가 " * 15),
     ],
-    ids=["url", "protocol-relative url", "two different rows", "no fee row"],
+    ids=[
+        "url",
+        "protocol-relative url",
+        "two different rows",
+        "no fee row",
+        "image only",
+        "wrapped image only",
+        "over 200 characters",
+    ],
 )
 def test_rs_01_a_surcharge_that_cannot_be_kept_as_words_is_held(rows: str) -> None:
     shipping = fields(page(rows=rows, body=BUY))["shipping"]
     assert shipping.status is FieldStatus.REVIEW_REQUIRED
     assert shipping.value is None
     assert "example.com" not in repr(shipping.evidence)
+
+
+@pytest.mark.parametrize("cell", ["", "<span></span>", "<span>\ufeff</span><br>"])
+def test_an_empty_surcharge_cell_states_no_surcharge(cell: str) -> None:
+    # cafe24-3's choice: a surcharge row whose cell holds nothing (or only invisible characters)
+    # is read as no row; only a cell holding an image or another element without words is held.
+    body = page(rows=row("배송비", "3,000원") + row("추가배송비", cell), body=BUY)
+    shipping = fields(body)["shipping"]
+    assert shipping.status is FieldStatus.CONFIRMED
+    assert shipping.value.policy_text == "배송비 3,000원"
+
+
+def test_a_surcharge_of_exactly_200_characters_is_kept() -> None:
+    words = "가" * 200
+    body = page(rows=row("배송비", "3,000원") + row("추가배송비", words), body=BUY)
+    assert fields(body)["shipping"].value.policy_text.endswith(words)
 
 
 # ---------------------------------------------------------------- §3 per-quantity minimum
@@ -208,6 +281,8 @@ def test_qm_01_every_separator_is_read(cell: str) -> None:
         "1개 13,900원 이상 / 27,500원",
         "1개 13,900원 / 2개 27,500원 이상",
         "1개 13,900원 이상 // 2개 27,500원 이상",
+        "1개 0원 이상",
+        "1개 0원 이상 / 2개 27,500원 이상",
     ],
     ids=[
         "not 1개 first",
@@ -217,6 +292,8 @@ def test_qm_01_every_separator_is_read(cell: str) -> None:
         "unaccounted amount",
         "no 이상",
         "two separators",
+        "zero alone",
+        "zero first",
     ],
 )
 def test_qm_01_any_other_minimum_row_shape_is_held(cell: str) -> None:
@@ -234,9 +311,7 @@ def test_the_single_amount_and_no_minimum_readings_are_unchanged(cell: str, stat
 # ---------------------------------------------------------------- text fixes of run 1
 
 
-@pytest.mark.parametrize(
-    "words", ["\ufeff\ufeff", "\u200b", "\u200c\u200d\u2060", "&#xFEFF;", "\u00a0"]
-)
+@pytest.mark.parametrize("words", ["\ufeff\ufeff", "\u200b", "\u2060\u200b", "&#xFEFF;", "\u00a0"])
 def test_a_description_of_invisible_characters_only_is_empty(words: str) -> None:
     description = fields(page(body=BUY + f'<div id="prdDetail"><p>{words}</p></div>'))[
         "detail_description"
@@ -247,6 +322,19 @@ def test_a_description_of_invisible_characters_only_is_empty(words: str) -> None
 def test_invisible_characters_inside_words_are_dropped() -> None:
     body = page(body=BUY + '<div id="prdDetail"><p>\ufeff설명\u200b입니다\u00a0끝</p></div>')
     assert fields(body)["detail_description"].value.text == "설명입니다 끝"
+
+
+def test_joiners_are_kept_because_they_change_what_is_shown() -> None:
+    # A zero-width joiner builds an emoji sequence; a non-joiner shapes a script's letters.
+    family = "\U0001f468\u200d\U0001f469\u200d\U0001f467"
+    body = page(name=f"{family} 가족 세트 \u200c", body=BUY)
+    assert fields(body)["original_name"].value.text == f"{family} 가족 세트 \u200c"
+
+
+def test_a_row_of_only_invisible_characters_is_an_empty_cell() -> None:
+    # The row is not stated, as an empty cell never was: no minimum, read from the page.
+    body = page(rows=row("최저판매가", "\ufeff"), body=BUY)
+    assert fields(body)["minimum_sale_price"].status is FieldStatus.ABSENT
 
 
 NAME_4992 = "네이처그랜드 이너포에버 갱년기 앤 유산균 500mg x 60캡슐"

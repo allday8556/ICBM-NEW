@@ -7,6 +7,7 @@ which says something else is held for review rather than guessed. No supplier is
 """
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -491,8 +492,17 @@ def test_rs_01_a_region_surcharge_is_kept_as_words_and_never_priced() -> None:
         + REGION.format("<p>제주 5,000원</p>")
         + REGION.format("<p>제주 6,000원</p>"),
         "<strong>3,000원</strong> 제주 5,000원 추가" + REGION.format("<p>제주 5,000원</p>"),
+        "<strong>3,000원</strong>" + REGION.format('<img src="/data/zone.jpg">'),
+        "<strong>3,000원</strong>" + REGION.format(f"<p>{'제주 5,000원 추가 ' * 20}</p>"),
     ],
-    ids=["url", "protocol-relative url", "two layers", "an amount outside the layers"],
+    ids=[
+        "url",
+        "protocol-relative url",
+        "two layers",
+        "an amount outside the layers",
+        "image only",
+        "over 200 characters",
+    ],
 )
 def test_rs_01_a_region_surcharge_that_cannot_be_kept_as_words_is_held(dd: str) -> None:
     fact = shipping(dd)
@@ -517,8 +527,21 @@ def test_qm_01_a_per_quantity_minimum_row_reads_its_one_unit_amount() -> None:
         "1개 13,900원 이상 / 27,500원",
         "1개 13,900원 / 2개 27,500원 이상",
         "1개 13,900원 이상 // 2개 27,500원 이상",
+        "1개 13,900원 이상 / 1개 12,000원 이상",
+        "1개 0원 이상",
+        "1개 0원 이상 / 2개 27,500원 이상",
     ],
-    ids=["not 1개 first", "other words", "repeated quantity", "unaccounted", "no 이상", "two seps"],
+    ids=[
+        "not 1개 first",
+        "other words",
+        "repeated quantity",
+        "unaccounted",
+        "no 이상",
+        "two seps",
+        "1개 twice",
+        "zero alone",
+        "zero first",
+    ],
 )
 def test_qm_01_any_other_minimum_row_shape_is_held(cell: str) -> None:
     fact = fields(page(rows=BASE_ROWS + row("최저판매가", cell)))["minimum_sale_price"]
@@ -535,3 +558,60 @@ def test_a_no_break_space_in_the_title_is_a_space() -> None:
     name = fields(view)["original_name"]
     assert name.status is FieldStatus.CONFIRMED
     assert name.value.text == "마그네슘 90정"
+
+
+@pytest.mark.parametrize(
+    "cell",
+    [
+        "1개 13,900원 이상",
+        "1개 13,900원 이상, 2개 27,500원 이상",
+        "1개 13,900원 이상<br>2개 27,500원 이상",
+        "1개 13,900원 이상\n2개 27,500원 이상",
+    ],
+    ids=["single entry", "comma", "br", "line break"],
+)
+def test_qm_01_every_separator_is_read(cell: str) -> None:
+    fact = fields(page(rows=BASE_ROWS + row("최저판매가", cell)))["minimum_sale_price"]
+    assert fact.value.amount_krw == 13900
+
+
+def test_a_minimum_row_of_only_invisible_characters_is_an_empty_row() -> None:
+    # A dd row stays stated with an empty value, held for review as an empty one always was.
+    fact = fields(page(rows=BASE_ROWS + row("최저판매가", "\ufeff")))["minimum_sale_price"]
+    assert fact.status is FieldStatus.REVIEW_REQUIRED
+
+
+MIXED = "모든마켓 판매가능/쿠팡판매 불가"
+
+
+def test_nr_03_a_row_stating_both_reads_as_its_restrictions() -> None:
+    fact = fields(page(rows=BASE_ROWS + row("판매가능플랫폼", MIXED)))["sales_channels"]
+    assert fact.status is FieldStatus.CONFIRMED
+    assert (fact.value.scope, fact.value.forbidden) == (SalesChannelScope.LISTED, ("coupang",))
+    assert fact.value.policy_text == MIXED
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["모든마켓 판매가능/쿠팡판매 불가/스마트스토어 판매불가", "쿠팡판매 불가 (일부 상품)"],
+    ids=["unconfigured ban", "other words"],
+)
+def test_nr_03_words_no_phrase_reads_hold_the_row(value: str) -> None:
+    fact = fields(page(rows=BASE_ROWS + row("판매가능플랫폼", value)))["sales_channels"]
+    assert fact.status is FieldStatus.REVIEW_REQUIRED
+
+
+def test_nr_03_a_row_stating_both_beside_a_wholly_allowed_row_is_held() -> None:
+    view = page(rows=ALLOWED_ROW + row("판매가능플랫폼", MIXED))
+    assert fields(view)["sales_channels"].status is FieldStatus.REVIEW_REQUIRED
+
+
+def test_a_closed_mall_phrase_in_the_name_is_closed_mall_only() -> None:
+    words = replace(WORDS, channel_closed_only=("폐쇄몰",))
+    fact = parse_fields(page(name="[폐쇄몰] 마그네슘"), words)["sales_channels"]
+    assert fact.value.scope is SalesChannelScope.CLOSED_MALL_ONLY
+
+
+def test_invisible_characters_inside_words_are_dropped() -> None:
+    fact = fields(page(description="<p>\ufeff설명\u200b입니다\u2060</p>"))["detail_description"]
+    assert fact.value.text == "설명입니다"

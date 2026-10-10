@@ -76,10 +76,12 @@ def _hides(values: Mapping[str, str]) -> bool:
     return any(marker in style for marker in HIDDEN_STYLES)
 
 
-# Characters a page may write that show nothing: a byte-order mark, the zero-width space and
-# joiners, and the word joiner (ADR-0035, U-PICK acceptance run 1). They are no words, so a text
-# made only of them is empty. A no-break space is a space.
-INVISIBLE = "\ufeff\u200b\u200c\u200d\u2060"
+# Characters a page may write that show nothing and join nothing: a byte-order mark, the
+# zero-width space and the word joiner (ADR-0035, U-PICK acceptance run 1). They are no words, so a
+# text made only of them is empty. The zero-width joiner and non-joiner are kept: they join an
+# emoji sequence or a script's letters, and removing them would change what is shown. A no-break
+# space is a space.
+INVISIBLE = "\ufeff\u200b\u2060"
 _UNSHOWN = str.maketrans({**dict.fromkeys(INVISIBLE, None), "\u00a0": " "})
 
 

@@ -14,6 +14,7 @@
     "channel_all_allowed": ["모든마켓 판매가능"],
     "channel_closed_only": ["폐쇄몰", "오픈마켓 판매불가"],
     "channel_forbid_coupang": ["쿠팡 판매 금지", "쿠팡 등록 불가", "쿠팡,토스 판매금지"],
+    "shipping_region_fee": ["추가배송비"],
     "title_suffix": ["- U-PICK B2B"]
   },
   "region_overrides": {
