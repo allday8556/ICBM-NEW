@@ -38,6 +38,8 @@ from app.stages.products.pricing import (
 from tests.support.collect_support import absent
 from tests.support.product_support import (
     conditional,
+    conditional_without_fee,
+    conditional_without_threshold,
     context,
     fixed,
     minimum,
@@ -135,16 +137,30 @@ def test_several_source_prices_are_never_chosen_between() -> None:
 @pytest.mark.parametrize(
     ("shipping", "code"),
     [
-        (conditional(), "PRICING_SHIPPING_CONDITIONAL"),
+        (conditional_without_fee(), "PRICING_SHIPPING_CONDITIONAL"),
+        (conditional_without_threshold(), "PRICING_SHIPPING_CONDITIONAL"),
         (unknown_shipping(), "PRICING_SHIPPING_UNRESOLVED"),
         (review(".delivery"), "PRICING_SHIPPING_UNRESOLVED"),
         (absent(".delivery"), "PRICING_SHIPPING_UNRESOLVED"),
     ],
-    ids=["conditional", "unknown", "under review", "absent"],
+    ids=[
+        "conditional without a fee",
+        "conditional without a threshold",
+        "unknown",
+        "under review",
+        "absent",
+    ],
 )
 def test_shipping_that_is_not_free_or_fixed_is_never_guessed(shipping: object, code: str) -> None:
     # Kickoff §11.8: no 3,000 KRW default, no threshold guess.
     assert _codes(source_inputs(product(shipping=shipping))) == {code}  # type: ignore[arg-type]
+
+
+def test_a_free_over_policy_is_priced_at_its_base_fee() -> None:
+    # ADR-0034 §2 (FO-02): a CONDITIONAL fact with a base fee and a free-over threshold.
+    result = source_inputs(product(shipping=conditional()))
+    assert isinstance(result, SourceInputs), result
+    assert result.supplier_shipping_krw == 3000
 
 
 def test_a_minimum_sale_price_under_review_is_never_guessed() -> None:
@@ -155,7 +171,9 @@ def test_a_minimum_sale_price_under_review_is_never_guessed() -> None:
 
 def test_every_unresolved_input_is_reported_together() -> None:
     fields = product(
-        price=(1, 2), shipping=conditional(), minimum_sale_price=review(".minimum-price")
+        price=(1, 2),
+        shipping=conditional_without_fee(),
+        minimum_sale_price=review(".minimum-price"),
     )
     assert _codes(source_inputs(fields)) == {
         "PRICING_PURCHASE_PRICE_AMBIGUOUS",

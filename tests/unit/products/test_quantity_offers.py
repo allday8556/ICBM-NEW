@@ -29,7 +29,15 @@ from app.stages.products.pricing import (
 )
 from app.stages.products.quantity import OfferTerms, QuantityOfferEvidence, product_level_offers
 from tests.support.collect_support import absent, confirmed
-from tests.support.product_support import conditional, context, fixed, minimum, product, review
+from tests.support.product_support import (
+    conditional,
+    conditional_without_fee,
+    context,
+    fixed,
+    minimum,
+    product,
+    review,
+)
 
 CANONICAL = ((1, 19900), (2, 37900), (3, 53900))
 TERMS = (OfferTerms(0, 1, 19900), OfferTerms(1, 2, 37900), OfferTerms(2, 3, 53900))
@@ -111,9 +119,13 @@ def test_offer_shipping_follows_the_same_rules() -> None:
     assert offer_source_inputs(tiered(shipping=fixed(3000)), TERMS[1], CURRENCY) == SourceInputs(
         37900, 3000, None
     )
-    assert codes(offer_source_inputs(tiered(shipping=conditional()), TERMS[1], CURRENCY)) == {
-        SHIPPING_CONDITIONAL
-    }
+    # ADR-0034 §2: a free-over policy is priced at its base fee; any other condition is not.
+    assert offer_source_inputs(tiered(shipping=conditional()), TERMS[1], CURRENCY) == SourceInputs(
+        37900, 3000, None
+    )
+    assert codes(
+        offer_source_inputs(tiered(shipping=conditional_without_fee()), TERMS[1], CURRENCY)
+    ) == {SHIPPING_CONDITIONAL}
 
 
 def test_a_generic_minimum_names_no_offer() -> None:

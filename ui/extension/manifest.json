@@ -15,5 +15,5 @@
     "default_path": "sidepanel.html"
   },
   "permissions": ["scripting", "sidePanel", "storage"],
-  "host_permissions": ["https://kmretail.co.kr/*", "https://upickb2b.com/*", "http://127.0.0.1/*"]
+  "host_permissions": ["https://kmretail.co.kr/*", "https://upickb2b.com/*", "https://www.ggsan.com/*", "http://127.0.0.1/*"]
 }

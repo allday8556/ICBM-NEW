@@ -22,6 +22,7 @@ from integrations.suppliers.collection import SupplierCollection
 from integrations.suppliers.extraction import MANIFEST_NAME, read_manifest
 from integrations.suppliers.platforms import PlatformTemplate
 from integrations.suppliers.platforms.cafe24 import TEMPLATE as CAFE24
+from integrations.suppliers.platforms.godomall import TEMPLATE as GODOMALL
 from integrations.suppliers.site_config import (
     INTERVAL_LIMITS,
     SiteConfig,
@@ -32,7 +33,9 @@ from integrations.suppliers.site_config import (
 SITE_DIRECTORY = Path(__file__).resolve().parent / "sites"
 PLATFORM_DIRECTORY = Path(__file__).resolve().parent / "platforms"
 CAPTURE_POLICY_FILE = "browser_capture_policy.json"
-TEMPLATES: Mapping[str, PlatformTemplate] = MappingProxyType({CAFE24.platform: CAFE24})
+TEMPLATES: Mapping[str, PlatformTemplate] = MappingProxyType(
+    {CAFE24.platform: CAFE24, GODOMALL.platform: GODOMALL}
+)
 # Supplier keys that have their own package, and their storefront hosts; a site takes neither.
 PACKAGED_SUPPLIERS = frozenset({"kmretail"})
 PACKAGED_HOSTS = frozenset({"kmretail.co.kr"})

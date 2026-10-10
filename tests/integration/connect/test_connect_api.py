@@ -39,8 +39,9 @@ def api(config: AppConfig, gateway: FakeGateway) -> Iterator[TestClient]:
 
 
 # ADR-0030: each configured site is a supplier too. These tests drive KM통상; the sites stay
-# unconfigured beside it, in the registry's order.
+# unconfigured beside it. Supplier capabilities are listed by supplier key.
 SITE_CAPABILITIES = [f"supplier:{key}" for key in SITES]
+SUPPLIER_CAPABILITIES = sorted(["supplier:kmretail", *SITE_CAPABILITIES])
 
 
 def _wait_job(client: TestClient, job_id: str, *states: str) -> dict[str, Any]:
@@ -85,10 +86,9 @@ def test_an_unconfigured_supplier_degrades_a_capability_never_core_readiness(
     # ADR-0012 §9, ADR-0026 AIF-2: with no AI provider the ai capability is NOT_CONFIGURED too;
     # ADR-0028 §3: so is the provider-zero search_signal port. None ever fails core readiness.
     assert body["capabilities"] == [
-        {"key": "supplier:kmretail", "status": "NOT_CONFIGURED", "detail": "state=DISCONNECTED"},
         *(
             {"key": key, "status": "NOT_CONFIGURED", "detail": "state=DISCONNECTED"}
-            for key in SITE_CAPABILITIES
+            for key in SUPPLIER_CAPABILITIES
         ),
         {"key": "ai", "status": "NOT_CONFIGURED", "detail": "no AI provider is configured"},
         {
@@ -98,8 +98,7 @@ def test_an_unconfigured_supplier_degrades_a_capability_never_core_readiness(
         },
     ]
     assert body["degraded_capabilities"] == [
-        "supplier:kmretail",
-        *SITE_CAPABILITIES,
+        *SUPPLIER_CAPABILITIES,
         "ai",
         "search_signal",
     ]
@@ -119,9 +118,10 @@ def test_a_connection_test_proves_the_protected_read_and_makes_the_capability_re
         "VERIFIED",
     )
     ready = api.get("/api/ready").json()
-    assert ready["capabilities"][0]["status"] == "READY"
+    statuses = {c["key"]: c["status"] for c in ready["capabilities"]}
+    assert statuses["supplier:kmretail"] == "READY"
     # Only the ai capability stays degraded: no AI provider is configured (ADR-0026 AIF-2).
-    assert ready["degraded_capabilities"] == [*SITE_CAPABILITIES, "ai", "search_signal"]
+    assert ready["degraded_capabilities"] == [*sorted(SITE_CAPABILITIES), "ai", "search_signal"]
     assert gateway.logins == 1
     assert gateway.requests == [RequestKind.CONTROL_READ, RequestKind.PROTECTED_READ]
 
@@ -176,8 +176,7 @@ def test_repeated_rejections_pause_until_the_operator_resumes(
     supplier = _supplier(api)
     assert (supplier["state"], supplier["capability_status"]) == ("PAUSED", "PAUSED")
     assert api.get("/api/ready").json()["degraded_capabilities"] == [
-        "supplier:kmretail",
-        *SITE_CAPABILITIES,
+        *SUPPLIER_CAPABILITIES,
         "ai",
         "search_signal",
     ]

@@ -94,7 +94,7 @@ from tests.support.product_support import (
     PRODUCT,
     SUPPLIER,
     Collections,
-    conditional,
+    conditional_without_fee,
     context,
     count,
     fixed,
@@ -896,7 +896,7 @@ def test_fixed_supplier_shipping_is_added_exactly(
 
 
 UNSETTLED_SHIPPING = {
-    "conditional": conditional,
+    "conditional without a base fee": conditional_without_fee,
     "unknown": unknown_shipping,
     "under review": lambda: review(".delivery"),
 }

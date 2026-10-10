@@ -1,0 +1,19 @@
+{
+  "schema": "icbm-supplier-site/v1",
+  "supplier_key": "ggsan",
+  "display_name": "건강산",
+  "platform": "godomall",
+  "base_url": "https://www.ggsan.com",
+  "storefront_host": "www.ggsan.com",
+  "image_hosts": ["godomall-storage.cdn-nhncommerce.com", "cdn-saas-web-216-59.cdn-nhncommerce.com"],
+  "product_path_form": "goods_view",
+  "label_overrides": {
+    "purchase_price": ["판매가"],
+    "list_price": ["정가"],
+    "minimum_price_phrase": ["판매가격절대준수", "판매가격 준수"],
+    "channel_forbid_coupang": ["쿠팡판매 불가"]
+  },
+  "status": "RECON",
+  "recon_record": "documents/acceptance/suppliers/ggsan-recon.md",
+  "revision": "ggsan-1"
+}
