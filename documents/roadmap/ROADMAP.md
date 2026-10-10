@@ -416,6 +416,21 @@ snapshot plus append-only current-pointer history. Base and pricing readiness ar
 separately. Legacy no-option Items, bindings, snapshots and `registration_item_key/v1` are
 unchanged. This slice is provider-zero: it adopts no marketplace requirement and sends no payload.
 
+### C-P3 Marketplace Requirement Metadata and Semantic Mapping
+
+The existing append-only category-metadata revision adopts marketplace option requirements as
+reviewed evidence; it does not create a second category or requirement revision owner. Each rule
+keeps its provider rule key, role, raw requiredness, provider semantics, reviewed semantic key,
+canonical value semantics and unit semantics. Unknown or contradictory provider enums stay
+`REVIEW_REQUIRED` rather than being normalized by guesswork.
+
+The provider-zero mapper compares those explicit semantics with the current Common Sales Option
+revision. Provider label text is never a match key. A per-unit capsule/tablet count may map to the
+`unit_count` Common Sales Option axis, while selling-bundle quantity maps only through the explicit
+`ListingComposition.quantity` contract. Search attributes and Product Information Notice fields
+remain separate roles. This slice is read-only: it sends no provider payload, creates no option or
+AtomicSKU, and leaves the legacy no-positive-option path unchanged.
+
 ## Phase 3 acceptance
 
 - one collected product has one canonical product ID

@@ -671,6 +671,26 @@ AtomicSKU-qualified owner, v2 base readiness reports that gap as `REVIEW_REQUIRE
 silently projecting a legacy Item image selection. This amendment adopts no provider requirement,
 creates no provider payload, performs no marketplace call and does not make an Item sendable.
 
+### H. C-P3 implementation amendment — requirement adoption and semantic mapping (2026-10-08)
+
+C-P3 uses the existing append-only REGISTER category-metadata revision as the marketplace
+requirement revision; it creates no second category or requirement owner. Each adopted rule keeps
+its provider rule key and raw requiredness beside its reviewed role, provider semantics,
+provider-neutral `semantic_key`, canonical value semantics and unit semantics. Missing metadata,
+unknown enums and contradictory requiredness remain `REVIEW_REQUIRED` and are never guessed.
+
+The mapping is read-only and provider-zero. Provider label text is display evidence only, never a
+match key. A purchase-option candidate requires an explicit semantic-key match and compatible
+value/unit semantics. A count of capsules or tablets inside one sellable unit is distinct from the
+number of sellable units in a listing: the former may map to a Common Sales Option axis such as
+`unit_count`; the latter maps only through the explicit `ListingComposition.quantity` contract.
+Search attributes and Product Information Notice fields remain separate roles.
+
+This amendment does not mutate Product Facts, Common Sales Options or AtomicSKUs, does not create
+Cartesian combinations, does not build a provider payload and performs no marketplace call. An
+empty reviewed requirement set is not applicable and leaves the legacy no-positive-option path
+unchanged.
+
 ## Consequences
 
 - **PR-B to PR-F build on this contract** (Issue #80 §12): models and migrations, materialization and read-back, pricing and readiness, derived image lineage, then the M4 acceptance harness on a fresh dedicated data root. No preserved M3 campaign, and not the `m3-accept-04` runtime, is used as a migration shortcut.
