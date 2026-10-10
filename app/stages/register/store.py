@@ -164,6 +164,9 @@ class SnapshotSpec:
     # Snapshot frozen before that owner existed.
     preparation_revision_id: str | None = None
     identity_generation: int = 0
+    # ADR-0033 §6 (G5): one entry per distinct Detail Guidance image a ``registration-payload/v3``
+    # payload pins — exactly its ``guidance_assets`` — and ``None`` for a v1 or v2 payload.
+    guidance_assets: Sequence[Mapping[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -1232,6 +1235,13 @@ class RegistrationUnit:
                 "REGISTER_SINGLE_LISTING_COVERAGE",
                 "a single listing with options sends every open Item of its Draft revision",
             )
+        guidance = None if spec.guidance_assets is None else [dict(a) for a in spec.guidance_assets]
+        if spec.payload.get("guidance_assets") != guidance:
+            # ADR-0033 §6: the column pins exactly what the payload's guidance assets are.
+            raise InputValidationError(
+                "REGISTER_SNAPSHOT_GUIDANCE_ASSETS",
+                "a Snapshot pins exactly its payload's guidance assets",
+            )
         snapshot = RegistrationSnapshot(
             registration_snapshot_id=str(uuid.uuid4()),
             draft_id=draft.draft_id,
@@ -1249,6 +1259,7 @@ class RegistrationUnit:
             sanitizer_profile_version=spec.sanitizer_profile_version,
             payload_hash=sanitized_digest(spec.payload),
             payload_json=_json(dict(spec.payload)),
+            guidance_assets_json=None if guidance is None else _json(guidance),
             created_by=created_by,
             correlation_id=correlation_id,
             created_at=self._clock.now(),

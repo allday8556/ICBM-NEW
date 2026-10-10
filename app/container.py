@@ -1009,6 +1009,8 @@ def build_container(
         connect=smartstore.connect,
         sources=source_assets,
         derived=DerivedImageStore(config.derived_images_dir, db, HeaderImageDecoder()),
+        # ADR-0033 §8: the recorded Detail Guidance images, the third byte source.
+        guidance=detail_guidance_store,
     )
     # ADR-0018 §3.5: the deletion of one ICBM-confirmed registration, through the same send-time
     # stack and the same canonical bearer source. Its exact DELETE grant is the only authority for
