@@ -12,7 +12,8 @@
     "manufacturer": {"status": "CONFIRMED", "value": {"text": "합성식품공사"}},
     "origin": {"status": "ABSENT", "value": null},
     "notice": {"status": "CONFIRMED", "value": {"items": [{"label": "제조원", "text": "합성식품공사"}]}},
-    "detail_description": {"status": "CONFIRMED", "value": {"text": "재입고 예정입니다."}}
+    "detail_description": {"status": "CONFIRMED", "value": {"text": "재입고 예정입니다."}},
+    "sales_channels": {"status": "ABSENT", "value": null}
   },
   "images": [
     ["REPRESENTATIVE", 0, "/goods/sm-5002/cover.jpg"],

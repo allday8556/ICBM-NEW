@@ -9,7 +9,15 @@ from fractions import Fraction
 
 import pytest
 
-from app.stages.collect.facts import FieldStatus
+from app.stages.collect.facts import (
+    Evidence,
+    EvidenceKind,
+    FieldFact,
+    FieldStatus,
+    PriceRole,
+    PricesValue,
+    SourcePrice,
+)
 from app.stages.products.pricing import (
     MINIMUM_NET_MARGIN,
     TARGET_NET_MARGIN,
@@ -276,3 +284,23 @@ def test_the_rounding_rule_is_declared_and_only_ceiling_to_one_krw_exists() -> N
     assert [r.value for r in Rounding] == ["CEIL_KRW_1"]
     # A fee of 5.5% on 11,500 KRW is 632.5 KRW, charged as 633.
     assert context(fee_rate="0.055").platform_fee(11500) == 633
+
+
+def _role_prices(*entries: tuple[str, int, PriceRole | None]) -> FieldFact:
+    return FieldFact(
+        FieldStatus.CONFIRMED,
+        PricesValue(
+            prices=tuple(SourcePrice(label=lb, amount_krw=a, role=r) for lb, a, r in entries)
+        ),
+        (Evidence(EvidenceKind.DOM_TEXT, "th:price + td", FieldStatus.CONFIRMED),),
+    )
+
+
+def test_a_declared_purchase_price_is_chosen_and_a_list_price_never_is() -> None:
+    # ADR-0032 §3: the site's PURCHASE role decides; a LIST price is never a cost.
+    member = _role_prices(("소비자가", 16900, PriceRole.LIST), ("회원가", 5000, PriceRole.PURCHASE))
+    assert source_inputs(product(prices=member)) == SourceInputs(5000, 0, None)
+    beside = _role_prices(("정가", 33000, PriceRole.LIST), ("판매가", 15000, None))
+    assert source_inputs(product(prices=beside)) == SourceInputs(15000, 0, None)
+    alone = _role_prices(("정가", 33000, PriceRole.LIST))
+    assert _codes(source_inputs(product(prices=alone))) == {"PRICING_PURCHASE_PRICE_AMBIGUOUS"}

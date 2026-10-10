@@ -1,0 +1,47 @@
+{
+  "schema": "icbm-browser-capture-policy/v1",
+  "supplier_key": "cafe24-template",
+  "revision": "cafe24-capture-1",
+  "host": "template.cafe24.invalid",
+  "product_root": {"by": "class", "token": "xans-product-detail"},
+  "allowed_regions": [
+    {"by": "id", "token": "prdDetail"}
+  ],
+  "excluded_regions": [
+    {"by": "class", "token": "xans-product-review"},
+    {"by": "class", "token": "xans-product-qna"},
+    {"by": "class", "token": "xans-product-relation"},
+    {"by": "class", "token": "xans-myshop-asyncbenefit"}
+  ],
+  "excluded_tags": [
+    "script",
+    "style",
+    "noscript",
+    "template",
+    "textarea",
+    "iframe",
+    "object",
+    "embed",
+    "link",
+    "meta",
+    "base"
+  ],
+  "allowed_attributes": {
+    "*": ["id", "class", "style"],
+    "img": ["src", "data-src", "ec-data-src", "data-original", "srcset"],
+    "meta": ["property", "content"],
+    "link": ["rel", "href"],
+    "td": ["colspan", "rowspan"],
+    "th": ["colspan", "rowspan", "scope"]
+  },
+  "head_allowance": [
+    {"tag": "meta", "attribute": "property", "value": "product:productId"},
+    {"tag": "meta", "attribute": "property", "value": "product:retailer_item_id"},
+    {"tag": "link", "attribute": "rel", "value": "canonical"}
+  ],
+  "bounds": {
+    "max_html_bytes": 524288,
+    "max_nodes": 20000,
+    "max_image_refs": 40
+  }
+}

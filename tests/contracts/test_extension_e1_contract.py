@@ -53,8 +53,16 @@ def test_the_manifest_is_exactly_the_reviewed_one() -> None:
     assert manifest["minimum_chrome_version"] == "114"
     assert '"minimum_chrome_version": "114"' in _read(EXTENSION / "manifest.json")
     assert manifest["manifest_version"] == 3
-    # Ruling B-11: the reviewed supplier host and the loopback, and nothing else.
-    assert manifest["host_permissions"] == ["https://kmretail.co.kr/*", "http://127.0.0.1/*"]
+    # Ruling B-11: the reviewed supplier hosts and the loopback, and nothing else. ADR-0030 PT-11:
+    # the supplier hosts are exactly KM통상's and each configured site's storefront host.
+    from integrations.suppliers.registry import SITES
+
+    sites = sorted(f"https://{site.config.storefront_host}/*" for site in SITES.values())
+    assert manifest["host_permissions"] == [
+        "https://kmretail.co.kr/*",
+        *sites,
+        "http://127.0.0.1/*",
+    ]
     # No cookie, request, download, history or tab-content reach.
     assert manifest["permissions"] == ["scripting", "sidePanel", "storage"]
     assert "optional_permissions" not in manifest and "optional_host_permissions" not in manifest
@@ -217,11 +225,13 @@ def test_the_extension_surface_is_exactly_its_routes_and_their_preflights() -> N
     )
     # E1: the policy read and the capture. E3 (ADR-0019 §8.1): the queue policy read, the
     # declaration, the queue read, the server-issued next read, the cancel and the release of a
-    # read the extension could not capture. Each has its own preflight and nothing else does.
+    # read the extension could not capture. ADR-0030 §6: the supplier-host read. Each has its own
+    # preflight and nothing else does.
     assert routes == [
         ("get", "POLICY_PATH"),
         ("get", "QUEUE_PATH"),
         ("get", "QUEUE_POLICY_PATH"),
+        ("get", "SUPPLIERS_PATH"),
         ("options", "CAPTURE_PATH"),
         ("options", "POLICY_PATH"),
         ("options", "QUEUES_PATH"),
@@ -230,6 +240,7 @@ def test_the_extension_surface_is_exactly_its_routes_and_their_preflights() -> N
         ("options", "QUEUE_PATH"),
         ("options", "QUEUE_POLICY_PATH"),
         ("options", "QUEUE_RELEASE_PATH"),
+        ("options", "SUPPLIERS_PATH"),
         ("post", "CAPTURE_PATH"),
         ("post", "QUEUES_PATH"),
         ("post", "QUEUE_CANCEL_PATH"),
@@ -246,6 +257,7 @@ def test_the_extension_surface_is_exactly_its_routes_and_their_preflights() -> N
         'QUEUE_NEXT_PATH = "/api/v1/collect/extension/queues/{queue_id}/next"',
         'QUEUE_CANCEL_PATH = "/api/v1/collect/extension/queues/{queue_id}/cancel"',
         'QUEUE_RELEASE_PATH = "/api/v1/collect/extension/queues/{queue_id}/release"',
+        'SUPPLIERS_PATH = "/api/v1/collect/extension/suppliers"',
     ):
         assert path in source, path
 

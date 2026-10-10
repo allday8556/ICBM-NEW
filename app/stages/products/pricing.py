@@ -281,12 +281,14 @@ def source_inputs(fields: Mapping[str, SourceField]) -> SourceInputs | tuple[Rea
     prices = fields.get("prices")
     if prices is None or prices.status is not FieldStatus.CONFIRMED:
         reasons.append(_review(PURCHASE_PRICE_UNRESOLVED, "prices"))
-    elif not isinstance(prices.value, PricesValue) or len(prices.value.prices) != 1:
-        # Which of several stated prices is the purchase cost is not established by any accepted
-        # contract; it is never chosen by label, name or order.
+    elif not isinstance(prices.value, PricesValue) or prices.value.purchase() is None:
+        # ADR-0032 §3: the purchase cost is the one declared PURCHASE price or the only price
+        # without a role; it is never chosen by label, name or order, and a LIST price never is.
         reasons.append(_review(PURCHASE_PRICE_AMBIGUOUS, "prices"))
     else:
-        purchase = prices.value.prices[0].amount_krw
+        chosen = prices.value.purchase()
+        assert chosen is not None
+        purchase = chosen.amount_krw
 
     shipping_fee = _supplier_shipping(fields, reasons)
 

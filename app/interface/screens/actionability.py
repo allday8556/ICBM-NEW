@@ -166,6 +166,11 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     "UNRESOLVED_CREATE_CONFLICT": (_R, _ACT),
     "LIVE_REGISTRATION_EXISTS": (_X, None),
     "ADOPTED_LISTING_EXISTS": (_X, None),
+    # ADR-0031 §4.1, ADR-0030 §7: a supplier's own restriction or a site still in
+    # reconnaissance is a source fact the operator cannot change in ICBM.
+    "SOURCE_CHANNEL_FORBIDDEN": (_N, None),
+    "SOURCE_CHANNEL_UNRESOLVED": (_N, None),
+    "SUPPLIER_NOT_ACTIVE": (_N, None),
     "PROVIDER_DUPLICATE_FOUND": (_X, None),
     "PROVIDER_DUPLICATE_WEAK_SIGNAL": (_X, None),
     # No provider duplicate lookup is adopted yet.

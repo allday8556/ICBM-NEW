@@ -99,6 +99,7 @@ class RegistrationPreflightService:
         policies: RegistrationPolicySource,
         detail_profiles: DetailProfileSource | None = None,
         adopted_items: Callable[[str, Sequence[str]], tuple[str, ...]] | None = None,
+        source_gates: Callable[[str, Sequence[str]], tuple[tuple[str, str], ...]] | None = None,
     ) -> None:
         self._registrations = registrations
         self._detail_profiles = detail_profiles
@@ -111,6 +112,9 @@ class RegistrationPreflightService:
         # M6-E (ADR-0024 §5): the ACTIVE adopted listings of a marketplace whose Item is one of
         # the given ones — a listing ICBM did not create but operates. None when not wired.
         self._adopted_items = adopted_items
+        # ADR-0031 §4, ADR-0030 §7: the gates the Items' sources put on a marketplace, read by the
+        # Product owner (``app.stages.products.source_gates``). None when not wired.
+        self._source_gates = source_gates
 
     def candidate(
         self, request: PreflightRequest, *, identity_generation: int | None = None
@@ -249,6 +253,11 @@ class RegistrationPreflightService:
                 ()
                 if self._adopted_items is None
                 else tuple(self._adopted_items(draft.marketplace_key, unit_ids))
+            ),
+            source_gates=(
+                ()
+                if self._source_gates is None
+                else tuple(self._source_gates(draft.marketplace_key, unit_ids))
             ),
             metadata=metadata,
             target=target,

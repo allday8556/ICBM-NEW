@@ -2,9 +2,10 @@
 
 import logging
 import os
+import re
 import uuid
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 
@@ -118,6 +119,7 @@ from app.stages.connect.sessions import (
 )
 from app.stages.connect.smartstore.keeper import SmartStoreSessionKeeper
 from app.stages.connect.smartstore.service import SmartStoreConnectService
+from app.stages.operate.adoption import CONVENTIONS as ADOPTION_CONVENTIONS
 from app.stages.operate.adoption import AdoptionService
 from app.stages.operate.dispatch import DispatchService, dispatch_unit
 from app.stages.operate.fulfillment import FulfillmentService
@@ -144,6 +146,7 @@ from app.stages.products.materialization import Materialization, ProductMaterial
 from app.stages.products.pricing_service import ProductPricingService
 from app.stages.products.readiness import ProductReadinessService
 from app.stages.products.service import ProductsService
+from app.stages.products.source_gates import SourceGates
 from app.stages.products.store import ProductFoundationStore
 from app.stages.products.tasks import PRODUCTION_TASKS, platform_tag_task
 from app.stages.register.authoring import RegistrationPreparationService
@@ -207,7 +210,8 @@ from integrations.suppliers.extraction import supplier_manifest
 from integrations.suppliers.kmretail import PROFILE as KM_PROFILE
 from integrations.suppliers.kmretail.collect.images import OG_IMAGE_RULE as KM_OG_IMAGE_RULE
 from integrations.suppliers.kmretail.collect.images import ROLE_RULES as KM_ROLE_RULES
-from integrations.suppliers.registry import COLLECTIONS, SUPPLIERS
+from integrations.suppliers.registry import COLLECTIONS, SITE_PROBLEMS, SITES, SUPPLIERS
+from integrations.suppliers.sites import capture_policy_bytes
 from integrations.suppliers.transport.collection import DeferredCollectionGateway
 from integrations.suppliers.transport.gateway import PolicedSupplierGateway
 
@@ -335,6 +339,26 @@ class Container:
     phase_c_commands: PhaseCCommandStore
     phase_c_reads: PhaseCReadAccounting
     ownership: DataDirLease
+    # Each configured supplier's display name, by key (ADR-0030 §11 S2: the screens' lists).
+    supplier_names: Mapping[str, str] = field(default_factory=dict)
+
+
+def adoption_conventions() -> dict[str, str]:
+    """KM통상's convention and each site's owner-declared one (ADR-0024 §2, ADR-0030 §3). A site's
+    convention is used only in the ADR-0024 code form (letters, then the source product id) and
+    with a prefix of its own, so it can never match another supplier's listings."""
+    conventions = dict(ADOPTION_CONVENTIONS)
+    for key, site in sorted(SITES.items()):
+        convention = site.config.seller_code_convention
+        if convention is None:
+            continue
+        prefix = convention.removesuffix("{source_product_id}")
+        taken = {c.removesuffix("{source_product_id}").upper() for c in conventions.values()}
+        if not re.fullmatch(r"[A-Za-z]{2,8}", prefix) or prefix.upper() in taken:
+            logger.warning("seller-code convention of %s not used: %s", key, convention)
+            continue
+        conventions[key] = convention
+    return conventions
 
 
 def supplier_image_roles() -> dict[str, dict[str, ImageSlot]]:
@@ -350,7 +374,9 @@ def supplier_image_roles() -> dict[str, dict[str, ImageSlot]]:
         KM_PROFILE.supplier_key: slot_table(
             ((rule.rule_id, rule.role.value) for rule in (*KM_ROLE_RULES, KM_OG_IMAGE_RULE)),
             slot_of,
-        )
+        ),
+        # ADR-0030 §6: a site's rule names are its template's.
+        **{key: slot_table(site.template.role_table, slot_of) for key, site in SITES.items()},
     }
 
 
@@ -618,7 +644,10 @@ def build_container(
         clock=clock,
         jobs=jobs,
         runs=runs,
-        policies=CapturePolicySource(capture_policy_root or SUPPLIER_PACKAGES),
+        policies=CapturePolicySource(
+            capture_policy_root or SUPPLIER_PACKAGES,
+            sites={key: capture_policy_bytes(site) for key, site in SITES.items()},
+        ),
         buffer=CaptureBuffer(),
         final_scan=_server_final_scan,
         # The buffer is a handoff inside one process (ADR-0002 Option A; ruling 5906712259 N-1).
@@ -712,6 +741,8 @@ def build_container(
         ),
         bound_items=_bound_items,
         registered_sources=_registered_sources,
+        # ADR-0030 §3: a site's seller-code convention is the one its owner declared, if any.
+        conventions=adoption_conventions(),
     )
     # Gate 1 G1-A (ADR-0015 §2): the durable, append-only target policy of each canonical account,
     # saved from Settings. It is the production policy source: an account without a current
@@ -758,6 +789,11 @@ def build_container(
         detail_profiles=authoring_revisions,
         # M6-E (ADR-0024 §5): no second listing of an adopted Item.
         adopted_items=adoptions.adopted_items,
+        # ADR-0031 §4, ADR-0030 §7: a forbidden or unread sales channel, or a RECON supplier.
+        source_gates=SourceGates(
+            product_store,
+            lambda key: SITES[key].config.active if key in SITES else None,
+        ),
     )
     # Gate 1 G1-D (ADR-0015 §5): a Draft from the operator's Product DB selection. It composes the
     # owners above — the revalidated selection, the bound account, the current target policy, M4
@@ -1257,6 +1293,7 @@ def build_container(
         phase_c_commands=PhaseCCommandStore(db, clock),
         phase_c_reads=phase_c_reads,
         ownership=ownership,
+        supplier_names={d.profile.supplier_key: d.profile.display_name for d in suppliers},
     )
 
 
@@ -1266,10 +1303,19 @@ def _registered(collections: Sequence[SupplierCollection]) -> Iterator[Registere
     A revision records the rules that produced it, so a supplier whose image-role rules and
     manifest disagree is refused here rather than storing a revision under a stale identity.
     """
+    for problem in SITE_PROBLEMS:
+        # ADR-0030 §3: an invalid site file leaves that site out and stops nothing else.
+        logger.warning("supplier site configuration not offered: %s", problem)
     for collection in collections:
-        manifest = supplier_manifest(collection.supplier_key)
+        site = SITES.get(collection.supplier_key)
+        if site is not None and site.collection is collection:
+            # ADR-0030 §4: a site's identity is (template revision, site revision).
+            revision, fingerprint = site.extractor_revision, site.extractor_fingerprint
+        else:
+            manifest = supplier_manifest(collection.supplier_key)
+            revision, fingerprint = manifest.revision, manifest.fingerprint
         yield RegisteredCollection(
             collection=collection,
-            extractor_revision=manifest.revision,
-            extractor_fingerprint=manifest.fingerprint,
+            extractor_revision=revision,
+            extractor_fingerprint=fingerprint,
         )

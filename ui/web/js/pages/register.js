@@ -102,6 +102,10 @@ const OPERATOR = 'operator';
 
 // Server reason codes rendered as copy. The page never derives a verdict, only its wording.
 export const REASON_COPY = {
+  // ADR-0031 §4.2, ADR-0030 §7: what the supplier's own source forbids.
+  SOURCE_CHANNEL_FORBIDDEN: '공급사가 이 마켓 판매를 금지한 상품입니다',
+  SOURCE_CHANNEL_UNRESOLVED: '공급사 판매채널 문구를 확인할 수 없습니다',
+  SUPPLIER_NOT_ACTIVE: '공급사 사이트가 아직 시험 단계(RECON)라 등록할 수 없습니다',
   // B-PRICE1: the repin command's refusals.
   REGISTER_DRAFT_REVISION_MOVED: '초안이 바뀌었습니다. 화면을 새로 고친 뒤 다시 시도하세요.',
   REGISTER_REPIN_INTENT_OPEN: '이 초안의 등록 요청이 아직 진행 중이라 가격을 다시 고정할 수 없습니다.',

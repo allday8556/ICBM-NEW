@@ -198,6 +198,8 @@ def base_fields() -> dict[str, FieldFact]:
             NoticeValue(items=(NoticeItem(label="용량", text="350ml"),)), ".notice"
         ),
         "detail_description": _confirmed(TextValue(text="상세 설명"), ".detail"),
+        # ADR-0031 §2: the fake shop states no sales-channel restriction.
+        "sales_channels": _absent(".sales-channels"),
     }
 
 

@@ -1214,3 +1214,18 @@ def test_the_payload_is_the_exact_evaluated_preparation() -> None:
         build_payload(candidate())
     with pytest.raises(PayloadNotReadyError):
         build_payload(final(request(category=None)))
+
+
+@pytest.mark.parametrize(
+    "code", ["SOURCE_CHANNEL_FORBIDDEN", "SOURCE_CHANNEL_UNRESOLVED", "SUPPLIER_NOT_ACTIVE"]
+)
+def test_a_gate_the_source_puts_on_the_marketplace_blocks_and_nothing_overrides_it(
+    code: str,
+) -> None:
+    # ADR-0031 §4.1 and ADR-0030 §7: the supplier's own restriction is never overridden.
+    gate = ((ITEMS[0].item_id, code),)
+    result = candidate(unit=resolved(source_gates=gate))
+    assert codes(result) == {code}
+    assert result.status is ReadinessStatus.BLOCKED
+    covered = candidate(unit=resolved(items=COVERED, source_gates=gate))
+    assert covered.status is ReadinessStatus.BLOCKED

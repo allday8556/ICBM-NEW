@@ -124,11 +124,11 @@ payload or external call and leaves legacy Item economics unchanged.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 345 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 346 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 64 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
 | `app/interface/` | 27 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 87 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 162 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/stages/` | 163 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -136,27 +136,27 @@ payload or external call and leaves legacy Item economics unchanged.
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 178 | all canonical and historical documents |
-| `documents/acceptance/` | 69 | acceptance records (milestones, gates, adaptive, issues) |
+| `documents/` | 180 | all canonical and historical documents |
+| `documents/acceptance/` | 70 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 9 | platform and UI contracts |
-| `documents/decisions/` | 35 | ADRs and architect review records |
+| `documents/decisions/` | 36 | ADRs and architect review records |
 | `documents/evidence/` | 30 | external provider evidence catalog |
 | `documents/reference/` | 3 | this map and the path migration map |
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 52 | adapters: suppliers and marketplaces |
+| `integrations/` | 67 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 28 |  |
-| `integrations/suppliers/` | 20 |  |
-| `tests/` | 315 | tests |
+| `integrations/suppliers/` | 35 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
+| `tests/` | 326 | tests |
 | `tests/contracts/` | 10 | repository-rule and document-contract tests |
-| `tests/fixtures/` | 11 | test fixtures (byte-pinned) |
+| `tests/fixtures/` | 13 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 136 | integration tests by runtime owner |
+| `tests/integration/` | 137 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 112 | unit tests by runtime owner |
+| `tests/unit/` | 120 | unit tests by runtime owner |
 | `ui/` | 68 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 59 | the served web client |

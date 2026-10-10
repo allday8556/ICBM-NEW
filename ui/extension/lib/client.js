@@ -15,6 +15,7 @@ const POLICY_PATH = (supplierKey) => `/api/v1/collect/extension/capture-policies
 const CAPTURE_PATH = "/api/v1/collect/extension/captures";
 const QUEUE_POLICY_PATH = (supplierKey) => `/api/v1/collect/extension/queue-policies/${supplierKey}`;
 const QUEUES_PATH = "/api/v1/collect/extension/queues";
+const SUPPLIERS_PATH = "/api/v1/collect/extension/suppliers";
 const QUEUE_PATH = (queueId) => `${QUEUES_PATH}/${encodeURIComponent(queueId)}`;
 const RUN_PATH = (runId) => `/api/v1/collect/collections/${encodeURIComponent(runId)}`;
 const REVISION_PATH = (revisionId) => `/api/v1/collect/revisions/${encodeURIComponent(revisionId)}`;
@@ -139,6 +140,11 @@ async function signedJson(pairing, extensionId, { method, path, body, expected =
   } catch {
     throw new IcbmRefused("QUEUE_ANSWER_UNREADABLE");
   }
+}
+
+// The reviewed supplier hosts and their keys: the server's registry (ADR-0030 §6).
+export function fetchSuppliers(pairing, extensionId) {
+  return signedJson(pairing, extensionId, { method: "GET", path: SUPPLIERS_PATH });
 }
 
 // The supplier's reviewed product path form and its declared queue limits (ADR-0019 §8.1).
