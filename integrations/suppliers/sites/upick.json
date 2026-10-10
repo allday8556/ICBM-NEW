@@ -12,7 +12,9 @@
     "list_price": ["소비자가"],
     "minimum_price": ["폐쇄몰 최저판매가"],
     "channel_all_allowed": ["모든마켓 판매가능"],
-    "channel_closed_only": ["폐쇄몰", "오픈마켓 판매불가"],
+    "channel_closed_only": ["폐쇄몰", "폐쇄몰 전용", "오픈마켓 판매불가", "오픈마켓 판매 금지"],
+    "channel_forbid_coupang": ["쿠팡 판매 금지", "쿠팡 등록 불가", "쿠팡,토스 판매금지"],
+    "shipping_region_fee": ["추가배송비"],
     "title_suffix": ["- U-PICK B2B"]
   },
   "region_overrides": {
@@ -20,5 +22,5 @@
   },
   "status": "RECON",
   "recon_record": "documents/acceptance/suppliers/upick-recon.md",
-  "revision": "upick-1"
+  "revision": "upick-2"
 }

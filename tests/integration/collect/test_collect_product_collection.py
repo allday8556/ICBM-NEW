@@ -814,6 +814,43 @@ def test_equivalent_accepted_urls_for_one_product_are_paced_as_one_product(
         assert runs.seconds_until_readable(keys[url], interval_s=INTERVAL) == 0, url
 
 
+def test_products_named_by_a_query_are_paced_per_product(
+    collecting: Container, clock: FakeClock
+) -> None:
+    # ADR-0010 §4: 건강산 (Godomall) names every product by goodsNo behind one path. The pacing
+    # URL part keeps the supplier's safe query keys, so a second, different product is not
+    # COLLECT_SAME_PRODUCT_TOO_SOON (observed on the 건강산 preview collection, 2026-10-10).
+    from integrations.suppliers.kmretail.collection import COLLECTION as KM
+    from integrations.suppliers.registry import SITES
+
+    ggsan = SITES["ggsan"].collection
+    base = "https://www.ggsan.com/goods/goods_view.php"
+    first = f"{base}?goodsNo=1000001010&mtn=7"
+    again = f"{base}?mtn=9&goodsNo=1000001010"
+    second = f"{base}?goodsNo=1000004918"
+    keys = {url: pacing_key(ggsan, url) for url in (first, again, second)}
+    assert keys[first].url == f"{base}?goodsNo=1000001010"
+    assert keys[again] == keys[first]
+    assert keys[second].url == f"{base}?goodsNo=1000004918"
+
+    runs = CollectionRunStore(collecting.db, clock)
+    with collecting.db.write() as session:
+        run_id = runs.open(
+            session,
+            job_id="job-query-pacing",
+            correlation_id="cid-query-pacing",
+            supplier_key="ggsan",
+            source_url=first,
+        )
+    runs.reserve_product_read(run_id, key=keys[first], interval_s=INTERVAL)
+    assert runs.seconds_until_readable(keys[again], interval_s=INTERVAL) > 0
+    assert runs.seconds_until_readable(keys[second], interval_s=INTERVAL) == 0
+
+    # A supplier without safe query keys keeps exactly the key it always had.
+    km = pacing_key(KM, "https://kmretail.co.kr/product/%EC%83%81%ED%92%88/355/?utm=x")
+    assert km.url == "https://kmretail.co.kr/product/%EC%83%81%ED%92%88/355"
+
+
 # ---------------------------------------------------------------- scope and egress
 
 

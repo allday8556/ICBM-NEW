@@ -20,7 +20,7 @@ WORDED = vocabulary(
     site(
         label_overrides={
             "channel_all_allowed": ["모든마켓 판매가능"],
-            "channel_closed_only": ["폐쇄몰"],
+            "channel_closed_only": ["폐쇄몰", "오픈마켓 판매불가"],
             "channel_forbid_coupang": ["쿠팡판매 불가"],
             "title_suffix": ["- U-PICK B2B"],
         }
@@ -87,10 +87,19 @@ def test_a_channel_row_holding_only_an_image_is_held_for_review() -> None:
 
 
 def test_the_page_s_own_words_are_the_policy_text() -> None:
-    body = page(rows=row("판매가능플랫폼", "폐쇄몰 전용/오픈마켓 판매불가"), body=BUY)
+    body = page(rows=row("판매가능플랫폼", "폐쇄몰 / 오픈마켓 판매불가"), body=BUY)
     fact = parse_fields(document(body), WORDED)["sales_channels"]
     assert fact.value.scope is SalesChannelScope.CLOSED_MALL_ONLY
-    assert fact.value.policy_text == "폐쇄몰 전용/오픈마켓 판매불가"
+    assert fact.value.policy_text == "폐쇄몰 / 오픈마켓 판매불가"
+
+
+def test_a_restricting_row_with_words_no_phrase_reads_is_held() -> None:
+    # cafe24-3 (ADR-0035 NR-03, applied to every row that is not wholly allowed): every word of a
+    # restricting row must be read. cafe24-2 read this row CLOSED_MALL_ONLY with 전용 unread.
+    body = page(rows=row("판매가능플랫폼", "폐쇄몰 전용/오픈마켓 판매불가"), body=BUY)
+    assert parse_fields(document(body), WORDED)["sales_channels"].status is (
+        FieldStatus.REVIEW_REQUIRED
+    )
 
 
 def test_only_the_site_s_own_title_suffix_is_set_aside() -> None:
