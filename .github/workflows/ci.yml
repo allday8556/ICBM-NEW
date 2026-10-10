@@ -160,8 +160,10 @@ jobs:
           python-version: "3.12"
       - if: env.RUN_SUITE == 'true'
         run: python -m pip install -c constraints.txt -e ".[dev]"
+      # The suite runs in parallel across the runner's cores (pytest-xdist; owner decision
+      # 2026-10-11). `--dist load` hands out single tests, so no test may rely on another's state.
       - if: env.RUN_SUITE == 'true'
-        run: pytest -v
+        run: pytest -v -n auto --dist load
       - if: env.RUN_SUITE != 'true'
         run: echo "CI scope ${{ needs.scope.outputs.mode }} does not run the full suite"
 
