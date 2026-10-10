@@ -24,7 +24,9 @@ decision for every supplier, Issue #219 6086299406).
 states exactly one amount (``N``, ``N원``, ``N원 이상``). The parser used to take the first number
 of any cell: ``1개 13,900원 이상/ 2개 …`` read as 1 won and ``12,000원 / 15,000원`` as 12,000, a
 confidently wrong minimum. Such a cell is now ``REVIEW_REQUIRED``. Found while proving the
-``cafe24`` template against this parser (ADR-0035 U1).
+``cafe24`` template against this parser (ADR-0035 U1). The ``cafe24-3`` module
+docstring still describes the ``kmretail-4`` reading; it is refreshed with the next ``cafe24``
+revision, so that this fix does not move the template's fingerprint.
 """
 
 EXTRACTION_REVISION = "kmretail-5"
