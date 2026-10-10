@@ -318,6 +318,22 @@ explicit pricing context. A moved source or option proof therefore makes readine
 the old snapshot stays pinned as history. AtomicSKU base readiness does not silently reuse the
 legacy Item image owner; that missing identity-qualified image contract remains review-required.
 
+C-P3 extends the existing category-metadata content, and therefore its existing versioned,
+append-only adoption/review owner, with marketplace option requirements. A stored rule keeps the
+provider rule key and raw requiredness beside its reviewed role, provider semantics, semantic key,
+canonical value semantics and unit semantics. Unknown or contradictory enum meanings are recorded
+as `REVIEW_REQUIRED`; missing metadata is never inferred. Product Facts, Common Sales Options,
+AtomicSKUs, Product Information Notices and Marketplace Attributes remain separate owners.
+
+Requirement mapping is provider-zero and read-only. Provider labels are display evidence only and
+are never match keys. The mapper requires an explicit semantic key plus compatible canonical
+value/unit semantics. In particular, a capsule/tablet count inside one sellable unit maps to a
+Common Sales Option axis such as `unit_count`, while the number of sellable units in a listing maps
+only to the explicit `ListingComposition.quantity` contract. Search/notice roles do not become
+purchase options. The mapping does not mutate Product Facts, Common Sales Options or AtomicSKUs,
+does not form Cartesian combinations, and does not build or send a provider payload. An empty
+reviewed requirement set remains not applicable, preserving the legacy no-positive-option path.
+
 ### MarketplaceRegistration
 Always includes:
 

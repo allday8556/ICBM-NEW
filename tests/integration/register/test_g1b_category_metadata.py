@@ -46,6 +46,7 @@ from app.stages.register.category_metadata import (
     category_metadata_of,
     effectively_reviewed,
 )
+from app.stages.register.marketplace_requirement_mapping import adopted_requirement_metadata
 from app.stages.register.policy import StaticRegistrationMetadata, StaticRegistrationPolicy
 from app.stages.register.preflight import RegistrationPreflightService
 from tests.conftest import LOCAL
@@ -215,6 +216,107 @@ def test_an_unreviewed_then_a_reviewed_revision_persist_with_their_review_proven
     recorded = events(container)
     assert [e.after["revision_no"] for e in reversed(recorded)] == [1, 2]
     assert "brand" not in str([e.model_dump() for e in recorded])
+    current = container.category_metadata._store.current(KNOWN, TAXONOMY, CATEGORY)
+    assert current is not None
+    assert current.content["content_version"] == "registration-category-metadata/v1"
+
+
+def test_reviewed_marketplace_option_requirements_are_versioned_with_category_evidence(
+    api: TestClient, container: Container
+) -> None:
+    requirements = [
+        {
+            "provider_rule_key": "INDIVIDUAL_WEIGHT",
+            "provider_label": "개별 중량/용량",
+            "role": "PURCHASE_OPTION",
+            "provider_requiredness": "MANDATORY",
+            "requiredness": "REQUIRED",
+            "provider_semantics": "net mass of one sellable unit",
+            "semantic_key": "individual_weight",
+            "value_semantics": "MEASURE",
+            "basic_unit": "mg",
+            "usable_units": ["mg"],
+            "allowed_values": [],
+            "interpretation_state": "CONFIRMED",
+        },
+        {
+            "provider_rule_key": "AMBIGUOUS_COUNT",
+            "provider_label": "수량",
+            "role": "PURCHASE_OPTION",
+            "provider_requiredness": "MANDATORY_OR_OPTIONAL",
+            "requiredness": None,
+            "provider_semantics": "provider documentation is contradictory",
+            "semantic_key": None,
+            "value_semantics": "COUNT_PER_UNIT",
+            "basic_unit": "tablet",
+            "usable_units": ["tablet"],
+            "allowed_values": [],
+            "interpretation_state": "REVIEW_REQUIRED",
+        },
+    ]
+
+    saved = save(api, body(option_requirements=requirements))
+
+    assert saved.status_code == 200, saved.text
+    view = saved.json()
+    revision_id = view["current"]["metadata_revision"]
+    assert view["content"]["option_requirements"] == requirements
+    stored = container.category_metadata.metadata(KNOWN, TAXONOMY, CATEGORY)
+    assert stored.current is not None and stored.current.metadata_revision == revision_id
+    assert stored.content is not None
+    assert stored.content.option_requirements[1].interpretation_state == "REVIEW_REQUIRED"
+    record = container.category_metadata._store.record(KNOWN, TAXONOMY, CATEGORY)
+    assert record.current is not None
+    assert record.current.content["content_version"] == "registration-category-metadata/v2"
+    adopted = adopted_requirement_metadata(record)
+    assert adopted is not None
+    assert adopted.metadata_revision_id == revision_id
+    assert (adopted.marketplace_key, adopted.taxonomy_revision, adopted.category_id) == (
+        KNOWN,
+        TAXONOMY,
+        CATEGORY,
+    )
+    assert adopted.reviewed is True and len(adopted.requirements) == 2
+
+    missing = container.category_metadata._store.record(KNOWN, TAXONOMY, "category-without-current")
+    assert adopted_requirement_metadata(missing) is None
+
+
+@pytest.mark.parametrize(
+    ("provider_requiredness", "requiredness"),
+    (
+        ("MANDATORY_OR_OPTIONAL", "REQUIRED"),
+        ("MANDATORY", "OPTIONAL"),
+        ("OPTIONAL", "REQUIRED"),
+    ),
+)
+def test_confirmed_requirement_refuses_unknown_or_contradictory_requiredness(
+    api: TestClient,
+    container: Container,
+    config: AppConfig,
+    provider_requiredness: str,
+    requiredness: str,
+) -> None:
+    requirement = {
+        "provider_rule_key": "COUNT_PER_UNIT",
+        "provider_label": "수량",
+        "role": "PURCHASE_OPTION",
+        "provider_requiredness": provider_requiredness,
+        "requiredness": requiredness,
+        "provider_semantics": "count inside one sellable unit",
+        "semantic_key": "unit_count",
+        "value_semantics": "COUNT_PER_UNIT",
+        "basic_unit": "tablet",
+        "usable_units": ["tablet"],
+        "allowed_values": [],
+        "interpretation_state": "CONFIRMED",
+    }
+
+    refused = save(api, body(option_requirements=[requirement]))
+
+    assert refused.status_code == 422
+    assert refused.json()["error"]["code"] == "CATEGORY_METADATA_INVALID"
+    assert counts(config) == _none() and events(container) == []
 
 
 def test_an_ai_suggestion_is_never_recorded_as_reviewed(
