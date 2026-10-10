@@ -196,8 +196,14 @@ Each slice is its own PR, with the full suite, Gate 3, M0, `mypy`, ruff, the GPT
 | **G1** | The renderer: the Pillow pin, the bundled font and its licence, the five templates, the §11 presets as validated data, `render`, determinism tests. No DB, no API. | normal |
 | **G2** | The owner: its migration, the revision store with clock and audit, the guidance image store, the settings API (list, append, preview, image). | normal |
 | **G3** | The settings card of §4, with the live five-template preview and the presets. | normal |
-| **G4** | REGISTER: the preparation `guidance` choice, the resolution, the fingerprint and preflight, the Snapshot pin, composition v3 stamping, and the editor's 상세페이지 step. | HIGH_RISK |
-| **G5** | The wire and the upload: `detail-renderer/v2`, the SmartStore projection, the grant's artifact set, the upload byte source, and the DRY_RUN acceptance of a top and bottom notice end to end. | HIGH_RISK |
+| **G4** | REGISTER consumption: the preparation `guidance` choice, the resolution, the fingerprint and preflight (a resolved notice is BLOCKED as unplaced until G5), and the editor's 상세페이지 step. | HIGH_RISK |
+| **G5** | Placement, the wire and the upload: composition v3 stamping, the Snapshot pin (`registration-payload/v3`, `guidance_assets`), `detail-renderer/v2`, the SmartStore projection, the grant's artifact set, the upload byte source, and the DRY_RUN acceptance of a top and bottom notice end to end. | HIGH_RISK |
+
+**Implementation note (2026-10-10, Issue #219 `6095697467`): composition v3 and the Snapshot pin land with G5, not G4.**
+- **Why.** The SmartStore projection reads composition v1 and v2 only. Stamping v3 before the projection can place guidance would stop registration for any account whose target policy is saved again, so every placement change lands in one slice.
+- **What G4 does instead.** Until G5, a unit whose resolved guidance is non-empty is BLOCKED with `PUBLICATION_GUIDANCE_UNPLACED` (§8: a resolved guidance image with no place in the profile blocks the unit). No guidance can be partly sent.
+- **Units with no guidance.** They keep their exact candidate fingerprint, preflight, payload and Snapshot. The resolved lists of §6 enter the fingerprint whenever either placement's list is non-empty. When both are empty they add nothing, and the absence is itself the empty resolution.
+- **Invariants.** DG-05 holds from G4, and DG-06 and DG-07 from G5.
 
 **Track B's files.** G4 and G5 touch the following:
 - the B-DETAIL owner (`authoring_revisions.py`, `detail.py`, `preparation.py`, `payload.py`);
