@@ -95,6 +95,8 @@ ADR-0029 C3a moved the SmartStore-targeted recommendation panel into the shared 
 `ui/web/js/components/ai-targeted.js`; the tag panel uses it.
 ADR-0029 C3 added the category apply to the register owner, the component
 `ui/web/js/components/ai-category.js` (on the shared panel) and two integration suites.
+ADR-0033 G1 added the Detail Guidance renderer `app/capabilities/detail_guidance/` (content,
+renderer with five templates, shipping presets, the bundled OFL font) and one unit suite.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -126,8 +128,8 @@ the mapper is provider-zero, semantic/unit-based and read-only.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 341 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 58 | supporting capabilities: audit, jobs, review, live_safety, ai |
+| `app/` | 347 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 64 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
 | `app/interface/` | 27 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 87 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 164 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
@@ -152,13 +154,13 @@ the mapper is provider-zero, semantic/unit-based and read-only.
 | `integrations/` | 78 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 28 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 330 | tests |
+| `tests/` | 332 | tests |
 | `tests/contracts/` | 11 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 137 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 121 | unit tests by runtime owner |
+| `tests/unit/` | 123 | unit tests by runtime owner |
 | `ui/` | 68 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 59 | the served web client |

@@ -107,6 +107,12 @@ The new owner `app/capabilities/detail_guidance/` is marketplace-neutral. Follow
   - A test pins the SHA-256 of one rendering of each template.
 - **Preview.** It renders the five templates for the typed content and stores nothing. It returns the PNGs to the page.
 
+**Implementation note (2026-10-10, G1).**
+- **Line length.** The line limit stays at 40 characters, as above. The owner confirmed it in chat on 2026-10-10 after being shown that a phone shows the 860 px image at under half its width. To fit 40 full-width characters, the body text is drawn at 19 px and the headings at 26 px, in a 772 px text box.
+- **Font file.** The bundled font is the single variable file `NotoSansKR[wght].ttf` (Google Fonts `ofl/notosanskr`, git blob `b386890b`). Its weight axis gives the Regular (400) body and the Bold (700) headings.
+- **Pillow.** It is pinned at exactly 12.3.0.
+- **The pinning test.** It pins the SHA-256 of each template's decoded pixels, and proves the PNG bytes are equal across renderings.
+
 ## 4. Settings: 설정 › 공통 › 상세페이지 공지
 
 **Where.** This is a new settings card. For each of `상단 공지` and `하단 공지` it offers the following.

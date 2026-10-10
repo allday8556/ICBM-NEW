@@ -25,6 +25,8 @@ dependencies = [
     # SmartStore token request signature: bcrypt over client_id_timestamp with the client
     # secret as the salt (documents/contracts/platforms/smartstore/AUTH.md §4). Added for M2 PR-A.
     "bcrypt>=5.0",
+    # Detail Guidance notice images: one deterministic renderer (ADR-0033 §3).
+    "pillow==12.3.0",
 ]
 
 [project.optional-dependencies]
@@ -41,7 +43,12 @@ icbm = "app.interface.cli:main"
 include = ["app*", "integrations*"]
 
 [tool.setuptools.package-data]
-app = ["db/migrations/script.py.mako", "capabilities/ai/seed_v29.json"]
+app = [
+    "db/migrations/script.py.mako",
+    "capabilities/ai/seed_v29.json",
+    "capabilities/detail_guidance/fonts/NotoSansKR-wght.ttf",
+    "capabilities/detail_guidance/fonts/OFL.txt",
+]
 integrations = ["marketplaces/smartstore/notice_schema.json"]
 
 [tool.ruff]
