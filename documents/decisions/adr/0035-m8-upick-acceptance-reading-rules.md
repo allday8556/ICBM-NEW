@@ -77,6 +77,7 @@ This amends ADR-0031 §3, "Where the words are read".
 - **One row that states both.** A channel row whose value holds an allowed phrase *and* restrictions reads as its restrictions, `LISTED` (or `CLOSED_MALL_ONLY`).
   - Example: `모든마켓 판매가능/쿠팡,토스 판매금지` is "every marketplace except Coupang and Toss".
   - An all-allowed reading comes only from a row whose whole value is an allowed phrase. This is how `cafe24-2` and `godomall-1` already read it.
+  - Every word of such a row must be read. After the matched configured phrases and the separators (`/`, `,`, `·`) are set aside, anything left over is a statement no rule reads → `REVIEW_REQUIRED` (ADR-0031 SC-02).
   - ADR-0031 §3's "an `all_allowed` phrase together with any restricting phrase → `REVIEW_REQUIRED`" applies to *separate* statements: an all-allowed row beside a restriction in another row, the description or the name.
 - **A marketplace ICBM does not list.** A restriction naming one (토스) is kept in the fact's `policy_text`, so a later marketplace can read it. It restricts nothing today.
 - **Phrases.** U-PICK's site revision adds the phrases its pages use for Coupang: `쿠팡 판매 금지`, `쿠팡 등록 불가`, `쿠팡,토스 판매금지`.
@@ -91,7 +92,7 @@ This amends ADR-0034 §2.
   - the `godomall` template's `지역별배송비` layer.
 - **The amount is not priced.** The fact's kind and fee are what the base fee alone gives (`FIXED`, `FREE`, or the free-over `CONDITIONAL`). The surcharge applies only to orders to those regions.
 - **What stays under review:**
-  - a surcharge statement that cannot be kept as words (URL material) → `REVIEW_REQUIRED`;
+  - a surcharge statement that cannot be kept as words → `REVIEW_REQUIRED`. That means URL material, a row whose value is only an image, or words longer than 200 characters;
   - a surcharge row stated twice with different words → `REVIEW_REQUIRED`.
 - **What this replaces.** ADR-0034 §2's sentence "A region-fee layer that states any amount is held for review" is replaced by this section.
 
@@ -99,7 +100,9 @@ This amends ADR-0034 §2.
 
 This amends the money-cell rule for `minimum_sale_price` rows (ADR-0030 §2, ADR-0032).
 
-- **When it applies.** The cell is exactly a list of quantity minimums. The first is `1개 N원 이상`, and every other entry is `k개 M원 이상` with distinct quantities `k ≥ 2`. Separators are `/`, `,` or line breaks.
+- **When it applies.** The cell is exactly a list of quantity minimums. The first is `1개 N원 이상` with `N > 0`, and every other entry is `k개 M원 이상` with distinct quantities `k ≥ 2`.
+  - Separators are `/`, `,` or line breaks.
+  - A collapsed line break leaves no mark, so entries that follow each other directly are accepted.
 - **What it reads.** `minimum_sale_price` is `N`, the one-unit amount.
   - The evidence quotes the whole cell, with the reading normalized to `N`.
   - The other quantities are kept only in that evidence. They are never divided into a unit price and never applied to a single unit.
@@ -122,7 +125,7 @@ This amends the money-cell rule for `minimum_sale_price` rows (ADR-0030 §2, ADR
 | # | slice |
 | --- | --- |
 | U0 | this ADR |
-| U1 | `cafe24-3` and `godomall-2` applying §1 to §3, plus the fail-closed text fixes found in run 1 (a text made only of invisible characters is empty; a no-break space is a space); `upick-2` with the phrases of §1 and the `추가배송비` label; offline proof on reduced captures |
+| U1 | `cafe24-3` and `godomall-2` applying §1 to §3, plus the fail-closed text fixes found in run 1 (a text made only of invisible characters is empty; a no-break space is a space); `upick-2` with the phrases of §1 and the `추가배송비` region label; offline proof on reduced captures |
 | U2 | U-PICK acceptance run 2 on the redeployed build, then the run from a fresh server process; the record `documents/acceptance/suppliers/upick.md`; the flip to `ACTIVE` |
 
 Each slice finalizes in its turn of the global merge lane.
