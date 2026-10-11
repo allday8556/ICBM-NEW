@@ -14,7 +14,8 @@ corpus page of its own shape:
 - text is cleaned of the byte-order mark, the zero-width space and the word joiner, and a
   no-break space is a space: a description made only of them is held for review, a description's
   words lose them, and a title's doubled space reads as one;
-- a per-quantity minimum row reads its ``1개`` amount, where KM통상 reads the quantity 1.
+- a per-quantity minimum row reads its ``1개`` amount, where KM통상 (``kmretail-5``) holds the
+  cell for review.
 """
 
 from dataclasses import asdict
@@ -159,12 +160,11 @@ def test_the_template_reads_every_km_document_as_km_does(body: str) -> None:
             and ours_fact.value.text == clean(theirs_fact.value.text)
         )
         # cafe24-3 (ADR-0035 §3): a per-quantity minimum row reads its 1개 amount, where KM통상
-        # reads the cell's first number, the quantity 1.
+        # (kmretail-5) holds a cell that is not one amount for review.
         one_unit_minimum = (
             key == "minimum_sale_price"
             and isinstance(ours_fact.value, MoneyValue)
-            and isinstance(theirs_fact.value, MoneyValue)
-            and theirs_fact.value.amount_krw == 1
+            and theirs_fact.status is FieldStatus.REVIEW_REQUIRED
             and ours_fact.value.amount_krw == 13900
             and (ours_fact.evidence[0].observed or "").startswith("1개 ")
         )

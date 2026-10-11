@@ -32,12 +32,13 @@ def capture(number: str) -> DocumentView:
     )
 
 
-def test_upick_is_bound_in_recon_and_offered_to_connect_and_collect() -> None:
+def test_upick_is_bound_active_and_offered_to_connect_and_collect() -> None:
     assert SITE_PROBLEMS == ()
     site = SITES["upick"]
-    assert site.config.status is SiteStatus.RECON
+    # ADR-0030 PT-07: ACTIVE by the PR that cites documents/acceptance/suppliers/upick.md.
+    assert site.config.status is SiteStatus.ACTIVE
     assert site.template.revision == "cafe24-3"
-    assert site.extractor_revision == f"{site.template.revision}+upick-2"
+    assert site.extractor_revision == f"{site.template.revision}+upick-3"
     assert site.collection in COLLECTIONS
     assert site.definition in SUPPLIERS
     assert site.definition.profile.egress_hosts == {"upickb2b.com", "login2.cafe24ssl.com"}
