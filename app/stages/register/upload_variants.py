@@ -40,7 +40,7 @@ from app.capabilities.audit.service import AuditEntry, AuditLog
 from app.platform.core.clock import Clock
 from app.platform.core.correlation import get_correlation_id, new_correlation_id
 from app.platform.core.errors import InputValidationError, NotFoundError
-from app.stages.products.auto_images import file_qa
+from app.stages.products.auto_images import AUTO_QA_MAX_BYTES, file_qa
 from app.stages.products.image_model import (
     AUTO_QA_RULE_VERSION,
     CompletedDerivation,
@@ -84,10 +84,12 @@ def upload_fit_state(
     sha256: str,
     derivation_id: str | None,
     validated_source_revision_id: str,
+    role: OutputRole,
 ) -> UploadFitState:
     """Read only: whether this exact selected binary is at or over the upload-fit threshold, and
     the ``smartstore-upload-fit/v1`` variant the M4 lineage holds for exactly it under the
-    selection's validated revision, with the variant's own QA. Nothing is made here."""
+    selection's validated revision, with the variant's own QA for the ``role`` it serves.
+    Nothing is made here."""
     size = images.stored_size(asset_kind, sha256)
     if size is None or not needs_fit(size):
         return NOT_NEEDED
@@ -97,6 +99,7 @@ def upload_fit_state(
         sha256=sha256,
         derivation_id=derivation_id,
         validated_source_revision_id=validated_source_revision_id,
+        role=role,
     )
     if variant is None or needs_fit(variant.byte_size):
         return UploadFitState(needed=True)
@@ -248,6 +251,7 @@ class UploadFitVariants:
             sha256=output.sha256,
             derivation_id=output.derivation_id,
             validated_source_revision_id=revision_id,
+            role=output.role,
         )
         if not state.needed:
             return outcome(FitOutcomeKind.NOT_NEEDED)
@@ -255,7 +259,11 @@ class UploadFitVariants:
             if state.variant.qa is None:
                 # A QA rule version advanced since the variant was made: its own QA again.
                 self._record_qa(
-                    state.variant.sha256, state.variant.derivation_id, revision_id, correlation
+                    state.variant.sha256,
+                    state.variant.derivation_id,
+                    revision_id,
+                    correlation,
+                    output.role,
                 )
             return outcome(
                 FitOutcomeKind.REUSED,
@@ -303,7 +311,9 @@ class UploadFitVariants:
         except (InputValidationError, NotFoundError):
             # An input the lineage owner refuses (a derivation of another revision): no variant.
             return outcome(FitOutcomeKind.FAILED, reason=LINEAGE_REFUSED)
-        self._record_qa(record.artifact_sha256, record.derivation_id, revision_id, correlation)
+        self._record_qa(
+            record.artifact_sha256, record.derivation_id, revision_id, correlation, output.role
+        )
         return outcome(
             FitOutcomeKind.RECORDED,
             variant_sha256=record.artifact_sha256,
@@ -311,10 +321,17 @@ class UploadFitVariants:
         )
 
     def _record_qa(
-        self, sha256: str, derivation_id: str, revision_id: str, correlation: str
+        self,
+        sha256: str,
+        derivation_id: str,
+        revision_id: str,
+        correlation: str,
+        role: OutputRole,
     ) -> None:
-        # The variant is under the upload threshold by construction; its QA holds it to that.
-        verdict, findings = file_qa(self._derived.get(sha256), UPLOAD_FIT_THRESHOLD - 1)
+        """The variant's own automatic QA for the role it serves: under that role's collection cap
+        and the upload threshold, whichever is lower, and bound to that role's class."""
+        bound = min(AUTO_QA_MAX_BYTES[role], UPLOAD_FIT_THRESHOLD - 1)
+        verdict, findings = file_qa(self._derived.get(sha256), bound)
         self._images.record_qa(
             asset_kind=ImageAssetKind.DERIVED_ARTIFACT,
             sha256=sha256,
@@ -325,4 +342,5 @@ class UploadFitVariants:
             qa_rule_version=AUTO_QA_RULE_VERSION,
             decided_by=AUTO_QA_RULE_VERSION,
             correlation_id=correlation,
+            role=role,
         )

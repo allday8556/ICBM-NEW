@@ -95,7 +95,12 @@ Two facts meet here.
 > only tightens or matches the collection caps: no image is collected that v2 would refuse for its
 > size, and the representative bound tightens from 5 MiB to 5,000,000 bytes. A derived artifact an
 > operator selects is still read under the operator rule only; only the upload-fit variant reads its
-> own automatic QA.
+> own automatic QA. Because the bound depends on the role, each v2 verdict is bound to the role class
+> it was evaluated for — `REPRESENTATIVE` (the representative and additional images, one cap) or
+> `DETAIL` — as part of its QA input identity, and every lookup names the role being satisfied: a
+> verdict for one class never satisfies the other, so a 12 MB file that passed as a description image
+> is never accepted as a representative image. An upload-fit variant's verdict is bound to the role it
+> serves, under that role's cap or the threshold, whichever is lower.
 
 ### 4. Slices
 

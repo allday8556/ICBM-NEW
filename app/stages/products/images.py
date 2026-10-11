@@ -46,6 +46,7 @@ from app.platform.core.errors import AppError, ErrorClass, InputValidationError,
 from app.stages.collect.models import ProductFactsRevision, SourceAsset
 from app.stages.products.common_images import EXCLUDED, effective_supplier, verdicts
 from app.stages.products.image_model import (
+    AUTO_QA_ROLE_CLASS,
     AUTO_QA_RULE_FAMILY,
     AUTO_QA_RULE_VERSION,
     DEFAULT_QA_RULE_VERSION,
@@ -54,6 +55,7 @@ from app.stages.products.image_model import (
     DerivationInput,
     ImageAssetKind,
     ImageError,
+    OutputRole,
     QaVerdict,
     SelectedOutput,
     SourceDecision,
@@ -551,6 +553,13 @@ class ProductImageService:
                 else None
             )
             images = self._images(unit)
+            move = images.current_move(item_id)
+            selection = None if move is None else images.selection(move.selection_revision_id)
+            selected_roles = {
+                o.sha256: o.role
+                for o in (() if selection is None else selection.outputs)
+                if o.asset_kind is ImageAssetKind.SOURCE_ASSET
+            }
             found: list[CandidateImage] = []
             for ref in images.confirmed_refs(revision) if revision is not None else ():
                 assert revision is not None
@@ -561,6 +570,8 @@ class ProductImageService:
                     None,
                     revision,
                     rules=self._selected_rules(ImageAssetKind.SOURCE_ASSET),
+                    # The role the image is selected for now, else the one its page gives it.
+                    role=selected_roles.get(ref.sha256, OutputRole(ref.role.value)),
                 )
                 found.append(
                     CandidateImage(
@@ -570,8 +581,6 @@ class ProductImageService:
                         qa_verdict=None if qa is None else qa.verdict,
                     )
                 )
-            move = images.current_move(item_id)
-            selection = None if move is None else images.selection(move.selection_revision_id)
         return ImageCandidates(
             item_id=item_id,
             source_revision_id=revision,
@@ -604,9 +613,13 @@ class ProductImageService:
         qa_rule_version: str | None = None,
         decided_by: str,
         correlation_id: str | None = None,
+        role: OutputRole | None = None,
     ) -> QaRecord:
         """Record one verdict for one exact binary under one rule and input. The same verdict
-        again is the same result; a different one for the same exact input is a conflict."""
+        again is the same result; a different one for the same exact input is a conflict.
+
+        An automatic rule verdict depends on the role it was evaluated for (ADR-0037 §1, §3), so it
+        names that role and its input is bound to the role's class; no other verdict names one."""
         correlation = correlation_id or get_correlation_id() or new_correlation_id()
         try:
             codes = validate_findings(findings)
@@ -618,12 +631,14 @@ class ProductImageService:
                 "a derived verdict names its derivation, and only it does",
             )
         rule = qa_rule_version or self.qa_rule_version
-        input_fingerprint = qa_input_fingerprint(
-            asset_kind=asset_kind,
-            sha256=sha256,
-            derivation_id=derivation_id,
-            validated_source_revision_id=validated_source_revision_id,
-            qa_rule_version=rule,
+        if (rule == AUTO_QA_RULE_VERSION) != (role is not None):
+            raise _refusal(
+                "PRODUCTS_IMAGE_QA_ROLE_INVALID",
+                "an automatic verdict names the role it was evaluated for, and only it does",
+            )
+        role_class = None if role is None else AUTO_QA_ROLE_CLASS[role]
+        input_fingerprint = self._input_fingerprint(
+            asset_kind, sha256, derivation_id, validated_source_revision_id, rule, role
         )
         with self._store.transaction() as unit:
             images = self._images(unit)
@@ -673,6 +688,8 @@ class ProductImageService:
                         "qa_rule_version": record.qa_rule_version,
                         "qa_input_fingerprint": record.qa_input_fingerprint,
                         "findings": list(record.findings),
+                        # The role class an automatic verdict is bound to (ADR-0037 §3).
+                        **({} if role_class is None else {"role_class": role_class.value}),
                     },
                     correlation_id=correlation,
                 ),
@@ -713,9 +730,10 @@ class ProductImageService:
         sha256: str,
         derivation_id: str | None,
         validated_source_revision_id: str,
+        role: OutputRole,
     ) -> QaRecord | None:
         """The verdict for this exact binary under the QA rule in force, else its automatic rule
-        QA (a source image only), if one exists."""
+        QA for exactly ``role``'s class (a source image only), if one exists."""
         with self._store.reading() as unit:
             return self._effective_qa(
                 self._images(unit),
@@ -724,6 +742,7 @@ class ProductImageService:
                 derivation_id,
                 validated_source_revision_id,
                 rules=self._selected_rules(asset_kind),
+                role=role,
             )
 
     def stored_size(self, asset_kind: ImageAssetKind, sha256: str) -> int | None:
@@ -739,10 +758,12 @@ class ProductImageService:
         sha256: str,
         derivation_id: str | None,
         validated_source_revision_id: str,
+        role: OutputRole,
     ) -> DerivedVariant | None:
         """The artifact one recipe version made from exactly this selected binary under the
-        selection's validated revision, with the artifact's own QA (ADR-0037 §2: a caller's
-        content-addressed variant is reused, never re-made). Read only; nothing is made here."""
+        selection's validated revision, with the artifact's own QA for the ``role`` it serves
+        (ADR-0037 §2: a caller's content-addressed variant is reused, never re-made). Read only;
+        nothing is made here."""
         with self._store.reading() as unit:
             images = self._images(unit)
             found = images.derivation_of(
@@ -762,6 +783,7 @@ class ProductImageService:
                 found.derivation_id,
                 validated_source_revision_id,
                 rules=(self.qa_rule_version, AUTO_QA_RULE_VERSION),
+                role=role,
             )
             return DerivedVariant(
                 derivation_id=found.derivation_id,
@@ -789,9 +811,12 @@ class ProductImageService:
         revision_id: str,
         *,
         rules: Sequence[str],
+        role: OutputRole,
     ) -> QaRecord | None:
         """The first verdict for this exact input under ``rules``, in order: the operator's verdict
-        under the rule in force supersedes an automatic rule QA. Each caller names its rules."""
+        under the rule in force supersedes an automatic rule QA. Each caller names its rules and
+        the role being satisfied; an automatic verdict counts only for that role's class
+        (ADR-0037 §1, §3), so one evaluated for another role never satisfies it."""
         for rule in rules:
             found = images.qa_by_input(
                 asset_kind=asset_kind,
@@ -799,17 +824,36 @@ class ProductImageService:
                 derivation_id=derivation_id,
                 validated_source_revision_id=revision_id,
                 qa_rule_version=rule,
-                qa_input_fingerprint=qa_input_fingerprint(
-                    asset_kind=asset_kind,
-                    sha256=sha256,
-                    derivation_id=derivation_id,
-                    validated_source_revision_id=revision_id,
-                    qa_rule_version=rule,
+                qa_input_fingerprint=self._input_fingerprint(
+                    asset_kind, sha256, derivation_id, revision_id, rule, role
                 ),
             )
             if found is not None:
                 return found
         return None
+
+    @staticmethod
+    def _input_fingerprint(
+        asset_kind: ImageAssetKind,
+        sha256: str,
+        derivation_id: str | None,
+        revision_id: str,
+        rule: str,
+        role: OutputRole | None,
+    ) -> str:
+        """A verdict's input: role-bound for the automatic rule in force, unchanged otherwise."""
+        return qa_input_fingerprint(
+            asset_kind=asset_kind,
+            sha256=sha256,
+            derivation_id=derivation_id,
+            validated_source_revision_id=revision_id,
+            qa_rule_version=rule,
+            role_class=(
+                AUTO_QA_ROLE_CLASS[role]
+                if role is not None and rule == AUTO_QA_RULE_VERSION
+                else None
+            ),
+        )
 
     # ------------------------------------------------------------------ readiness input
 
@@ -906,6 +950,7 @@ class ProductImageService:
                 output.derivation_id,
                 current_revision_id,
                 rules=self._selected_rules(output.asset_kind),
+                role=output.role,
             )
             if qa is None:
                 verdicts.append(None)
@@ -917,9 +962,13 @@ class ProductImageService:
                         derivation_id=output.derivation_id,
                     )
                     # An automatic verdict never counts for a derived artifact an operator
-                    # selected (``_selected_rules``), so it is no earlier verdict either.
-                    if output.asset_kind is ImageAssetKind.SOURCE_ASSET
-                    or not record.qa_rule_version.startswith(AUTO_QA_RULE_FAMILY)
+                    # selected (``_selected_rules``), so it is no earlier verdict either; nor is
+                    # one under the rule in force that was evaluated for another role class.
+                    if record.qa_rule_version != AUTO_QA_RULE_VERSION
+                    and (
+                        output.asset_kind is ImageAssetKind.SOURCE_ASSET
+                        or not record.qa_rule_version.startswith(AUTO_QA_RULE_FAMILY)
+                    )
                 ]
                 reasons.append(
                     Reason(IMAGE_QA_STALE, ReadinessStatus.STALE, subject)

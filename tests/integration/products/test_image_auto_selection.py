@@ -112,6 +112,7 @@ def test_the_rule_selects_with_automatic_qa_and_the_item_is_no_longer_missing_im
         sha256=selection.outputs[0].sha256,
         derivation_id=None,
         validated_source_revision_id=selection.source_revision_id,
+        role=selection.outputs[0].role,
     )
     assert qa is not None and qa.qa_rule_version == AUTO_QA_RULE_VERSION
     assert qa.verdict is QaVerdict.PASS
@@ -294,6 +295,7 @@ def test_a_v1_automatic_qa_is_stale_until_the_unchanged_rule_runs_again(
             sha256=output.sha256,
             derivation_id=None,
             validated_source_revision_id=selection.source_revision_id,
+            role=output.role,
         )
         assert qa is not None
         assert (qa.qa_rule_version, qa.verdict) == ("image-qa-auto/v2", QaVerdict.PASS)

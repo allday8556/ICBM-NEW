@@ -480,6 +480,7 @@ class RegistrationPreflightService:
                     sha256=output.sha256,
                     derivation_id=output.derivation_id,
                     validated_source_revision_id=selection.source_revision_id,
+                    role=output.role,
                 )
                 if marketplace_key in UPLOAD_FIT_MARKETPLACES
                 else NOT_NEEDED
@@ -512,6 +513,7 @@ class RegistrationPreflightService:
                 sha256=output.sha256,
                 derivation_id=output.derivation_id,
                 validated_source_revision_id=selection.source_revision_id,
+                role=output.role,
             )
             images.append(
                 PublicationImage(

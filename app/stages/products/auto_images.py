@@ -20,14 +20,15 @@ failed image is never a candidate, and its failure stays the revision's own:
   used and that are not a blocked, or an undecided, supplier common image;
 * the same SHA-256 is used once; an image of any other slot is left out.
 
-**Automatic QA** (``image-qa-auto/v2``, Issue #219 §4, ADR-0037 §1, §3): each selected source image
-gets a verdict from its stored file facts only — its bytes are stored, its media type is an image
-type ICBM handles, its size is within the collection cap of the role it is selected for and its
-dimensions were decoded. A file that fails a check is ``REVIEW_REQUIRED`` with the check as a
-finding; nothing is ever ``FAIL`` on the rule's word. An operator's verdict under the rule in force
-supersedes it. An upload-fit variant (ADR-0037 §3) gets the same checks of its own bytes
-(:func:`file_qa`), under the byte bound of the upload it is made for; it never inherits its
-source's QA.
+**Automatic QA** (``image-qa-auto/v2``, Issue #219 §4, ADR-0037 §1, §3): each selected source
+image gets a verdict, bound to the role class it is selected for (``AUTO_QA_ROLE_CLASS``: a verdict
+for one class never satisfies another), from its stored file facts only — its bytes are stored, its
+media type is an image type ICBM handles, its size is within the collection cap of the role it is
+selected for and its dimensions were decoded. A file that fails a check is ``REVIEW_REQUIRED`` with
+the check as a finding; nothing is ever ``FAIL`` on the rule's word. An operator's verdict under the
+rule in force supersedes it. An upload-fit variant (ADR-0037 §3) gets the same checks of its own
+bytes (:func:`file_qa`), for the role it serves and under the byte bound of the upload it is made
+for; it never inherits its source's QA.
 """
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -395,11 +396,15 @@ class ImageAutoSelector:
     def _record_auto_qa(self, selection: SelectionRecord, correlation: str) -> None:
         with self._store.reading() as unit:
             facts = {
-                output.sha256: auto_qa(unit.session.get(SourceAsset, output.sha256), output.role)
+                output.sha256: (
+                    output.role,
+                    auto_qa(unit.session.get(SourceAsset, output.sha256), output.role),
+                )
                 for output in selection.outputs
                 if output.asset_kind is ImageAssetKind.SOURCE_ASSET
             }
-        for sha, (verdict, findings) in sorted(facts.items()):
+        for sha, (role, (verdict, findings)) in sorted(facts.items()):
+            # The verdict is bound to the role it was evaluated for (ADR-0037 §1, §3).
             self._images.record_qa(
                 asset_kind=ImageAssetKind.SOURCE_ASSET,
                 sha256=sha,
@@ -410,6 +415,7 @@ class ImageAutoSelector:
                 qa_rule_version=AUTO_QA_RULE_VERSION,
                 decided_by=AUTO_QA_RULE_VERSION,
                 correlation_id=correlation,
+                role=role,
             )
 
     def auto_select_all(

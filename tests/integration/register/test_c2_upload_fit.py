@@ -395,6 +395,7 @@ def test_a_25_mb_description_image_is_uploaded_as_its_upload_fit_variant(
         sha256=unit.detail,
         derivation_id=None,
         validated_source_revision_id=selection.source_revision_id,
+        role=OutputRole.DETAIL,
     )
     assert variant_read is not None and variant_read.sha256 == variant_sha
     qa = variant_read.qa
@@ -405,6 +406,7 @@ def test_a_25_mb_description_image_is_uploaded_as_its_upload_fit_variant(
             sha256=variant_sha,
             derivation_id=derivation_id,
             validated_source_revision_id=selection.source_revision_id,
+            role=OutputRole.DETAIL,
         )
         is None
     )

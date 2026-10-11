@@ -41,6 +41,7 @@ from app.stages.products.image_model import (
     ImageAssetKind,
     OperationOutcome,
     OperationRecord,
+    OutputRole,
     QaVerdict,
     SelectedOutput,
     SelectionMoveReason,
@@ -969,6 +970,7 @@ def test_qa_is_bound_to_the_exact_binary(container: Container, listing: Listing)
             sha256=b.artifact_sha256,
             derivation_id=b.derivation_id,
             validated_source_revision_id=revision,
+            role=OutputRole.REPRESENTATIVE,
         )
         is None
     )
@@ -1456,6 +1458,7 @@ def test_an_operator_selected_derived_artifact_never_reads_an_automatic_qa(
         verdict=QaVerdict.PASS,
         qa_rule_version=AUTO_QA_RULE_VERSION,
         decided_by=AUTO_QA_RULE_VERSION,
+        role=OutputRole.DETAIL,
     )
     assert (
         container.images.qa_for_selected_asset(
@@ -1463,6 +1466,7 @@ def test_an_operator_selected_derived_artifact_never_reads_an_automatic_qa(
             sha256=derived.artifact_sha256,
             derivation_id=derived.derivation_id,
             validated_source_revision_id=revision,
+            role=OutputRole.DETAIL,
         )
         is None
     )
@@ -1476,6 +1480,116 @@ def test_an_operator_selected_derived_artifact_never_reads_an_automatic_qa(
         sha256=listing.images[1],
         derivation_id=None,
         validated_source_revision_id=revision,
+        role=OutputRole.DETAIL,
     )
     assert variant is not None and variant.qa is not None
     assert variant.qa.qa_rule_version == AUTO_QA_RULE_VERSION
+
+
+def test_an_automatic_verdict_counts_only_for_the_role_class_it_was_evaluated_for(
+    container: Container, shop: Shop
+) -> None:
+    """ADR-0037 §1, §3: ``image-qa-auto/v2`` judges bytes against the cap of a role, so its verdict
+    is bound to the role class it was evaluated for. A 12 MB file that passed as a description
+    image never satisfies a representative or additional slot, whose cap is 5,000,000 bytes."""
+    from app.stages.collect.models import SourceAsset
+    from app.stages.products.auto_images import auto_qa
+
+    listing = Listing.create(container, shop, salts=("x" * 12_000_000, "d0", "d1"))
+    revision = listing.revision.revision_id
+    big, small = listing.images[0], listing.images[1]
+    size = container.images.stored_size(ImageAssetKind.SOURCE_ASSET, big)
+    assert size is not None and size > 12_000_000
+    with container.db.read() as session:
+        stored = session.get(SourceAsset, big)
+        assert stored is not None
+        as_detail = auto_qa(stored, OutputRole.DETAIL)
+        as_representative = auto_qa(stored, OutputRole.REPRESENTATIVE)
+    assert as_detail == (QaVerdict.PASS, ())
+    assert as_representative == (QaVerdict.REVIEW_REQUIRED, ("AUTO_QA_BYTE_SIZE",))
+
+    def select(big_role: OutputRole, small_role: OutputRole) -> None:
+        container.images.record_operator_selection(
+            listing.item,
+            source_revision_id=revision,
+            decisions=[
+                SourceDecision(REP, 0, big, SourceDecisionKind.USE_SOURCE),
+                SourceDecision(DET, 0, small, SourceDecisionKind.USE_SOURCE),
+                SourceDecision(DET, 1, listing.images[2], SourceDecisionKind.EXCLUDE),
+            ],
+            outputs=[SelectedOutput(small_role, DET, 0), SelectedOutput(big_role, REP, 0)],
+            decided_by="operator-1",
+        )
+
+    def automatic(role: OutputRole, verdict: tuple[QaVerdict, tuple[str, ...]]) -> None:
+        container.images.record_qa(
+            asset_kind=ImageAssetKind.SOURCE_ASSET,
+            sha256=big,
+            derivation_id=None,
+            validated_source_revision_id=revision,
+            verdict=verdict[0],
+            findings=verdict[1],
+            qa_rule_version=AUTO_QA_RULE_VERSION,
+            decided_by=AUTO_QA_RULE_VERSION,
+            role=role,
+        )
+
+    def qa_of(role: OutputRole) -> Any:
+        return container.images.qa_for_selected_asset(
+            asset_kind=ImageAssetKind.SOURCE_ASSET,
+            sha256=big,
+            derivation_id=None,
+            validated_source_revision_id=revision,
+            role=role,
+        )
+
+    def image_codes() -> list[tuple[str, str | None]]:
+        found = _codes(container.product_readiness.base_readiness(listing.item))
+        return [(code, subject) for code, subject in found if code.startswith("IMAGE_")]
+
+    container.images.record_qa(
+        asset_kind=ImageAssetKind.SOURCE_ASSET,
+        sha256=small,
+        derivation_id=None,
+        validated_source_revision_id=revision,
+        verdict=QaVerdict.PASS,
+        decided_by="qa-1",
+    )
+    # The right role: the 12 MB file selected as a description image, its DETAIL verdict PASS.
+    select(OutputRole.DETAIL, OutputRole.REPRESENTATIVE)
+    automatic(OutputRole.DETAIL, as_detail)
+    assert image_codes() == []
+    assert qa_of(OutputRole.DETAIL) is not None
+
+    # The same file selected as the representative image: the DETAIL verdict never satisfies it.
+    select(OutputRole.REPRESENTATIVE, OutputRole.DETAIL)
+    assert qa_of(OutputRole.REPRESENTATIVE) is None
+    assert qa_of(OutputRole.ADDITIONAL) is None
+    assert image_codes() == [(IMAGE_QA_MISSING, "REPRESENTATIVE:1")]
+    # Its own verdict for the representative class is REVIEW: over the 5,000,000-byte cap.
+    automatic(OutputRole.REPRESENTATIVE, as_representative)
+    assert set(image_codes()) == {
+        (IMAGE_QA_REVIEW_REQUIRED, "REPRESENTATIVE:1"),
+        ("IMAGE_FINDING_AUTO_QA_BYTE_SIZE", "REPRESENTATIVE:1"),
+    }
+    # An additional image shares the representative class (one cap), and its verdict.
+    shared = qa_of(OutputRole.ADDITIONAL)
+    assert shared is not None and shared.verdict is QaVerdict.REVIEW_REQUIRED
+    # The DETAIL verdict is still the description image's alone.
+    detail = qa_of(OutputRole.DETAIL)
+    assert detail is not None and detail.verdict is QaVerdict.PASS
+
+    # An automatic verdict names its role, and only it does.
+    for role, rule in ((None, AUTO_QA_RULE_VERSION), (OutputRole.DETAIL, None)):
+        with pytest.raises(InputValidationError) as refused:
+            container.images.record_qa(
+                asset_kind=ImageAssetKind.SOURCE_ASSET,
+                sha256=small,
+                derivation_id=None,
+                validated_source_revision_id=revision,
+                verdict=QaVerdict.PASS,
+                qa_rule_version=rule,
+                decided_by="qa-1",
+                role=role,
+            )
+        assert refused.value.code == "PRODUCTS_IMAGE_QA_ROLE_INVALID"
