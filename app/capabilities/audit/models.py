@@ -157,6 +157,9 @@ class AuditEventType(StrEnum):
     # Identity, placement, kind, sequence, template, flag, period, fingerprint and image hash only;
     # never the notice text, which lives in the revision row.
     DETAIL_GUIDANCE_REVISED = "DETAIL_GUIDANCE_REVISED"
+    # ADR-0037 §2: no upload-fit variant could be made for one oversize selected image on a
+    # preparation save. Item, role, position, input identity and a bounded failure code only.
+    REGISTER_UPLOAD_FIT_FAILED = "REGISTER_UPLOAD_FIT_FAILED"
 
 
 class AuditOutcome(StrEnum):

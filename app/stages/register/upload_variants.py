@@ -18,7 +18,10 @@ other derivation stays an operator decision.
 **Made once, reused.** A variant already recorded for the same input under the same validated
 revision is reused, never re-made; equal bytes share one artifact. An image the recipe cannot fit,
 or cannot decode, gets nothing — REGISTER then names it ``IMAGE_UPLOAD_FIT_FAILED`` and nothing is
-uploaded for it (IC-06).
+uploaded for it (IC-06). **A failure never fails the save**: whatever goes wrong while one image is
+fitted — the recipe's refusal, an unreadable input, the lineage owner's refusal or an unexpected
+error — that image gets no variant, the failure is logged and audited
+(``REGISTER_UPLOAD_FIT_FAILED``, bounded codes only), and the next image is fitted.
 
 **Its own QA.** Each variant gets the automatic rule QA of its own stored bytes under the rule in
 force (``image-qa-auto/v2``, :func:`~app.stages.products.auto_images.file_qa`), bounded by the
@@ -26,11 +29,14 @@ upload threshold; it never inherits its source's verdict.
 """
 
 import hashlib
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Final, Protocol
 
+from app.capabilities.audit.models import AuditEventType, AuditOutcome
+from app.capabilities.audit.service import AuditEntry, AuditLog
 from app.platform.core.clock import Clock
 from app.platform.core.correlation import get_correlation_id, new_correlation_id
 from app.platform.core.errors import InputValidationError, NotFoundError
@@ -97,6 +103,14 @@ def upload_fit_state(
     return UploadFitState(needed=True, variant=variant)
 
 
+logger = logging.getLogger("icbm.register.upload_fit")
+
+# Why an image got no variant, beside the recipe's own FitFailure codes.
+SOURCE_UNREADABLE: Final = "SOURCE_UNREADABLE"
+LINEAGE_REFUSED: Final = "LINEAGE_REFUSED"
+UNEXPECTED_ERROR: Final = "UNEXPECTED_ERROR"
+
+
 class ArtifactBytes(Protocol):
     """One lineage store: the exact verified bytes of a stored binary, and its stored record."""
 
@@ -123,6 +137,8 @@ class FitOutcome:
     failure: FitFailure | None = None
     variant_sha256: str | None = None
     variant_derivation_id: str | None = None
+    # A FAILED outcome's bounded code: a FitFailure value, or why nothing reached the recipe.
+    reason: str | None = None
 
 
 class UploadFitVariants:
@@ -135,11 +151,13 @@ class UploadFitVariants:
         sources: ArtifactBytes,
         derived: ArtifactBytes,
         clock: Clock,
+        audit: AuditLog | None = None,
     ) -> None:
         self._images = images
         self._sources = sources
         self._derived = derived
         self._clock = clock
+        self._audit = audit
 
     def fit_selected(
         self, item_ids: Sequence[str], *, correlation_id: str | None = None
@@ -151,11 +169,64 @@ class UploadFitVariants:
             selection = self._images.current_selection(item_id)
             if selection is None:
                 continue
-            outcomes.extend(
-                self._fit(item_id, selection.source_revision_id, output, correlation)
-                for output in selection.outputs
-            )
+            for output in selection.outputs:
+                found = self._fit_safely(item_id, selection.source_revision_id, output, correlation)
+                if found.outcome is FitOutcomeKind.FAILED:
+                    self._report(found, selection.source_revision_id, correlation)
+                outcomes.append(found)
         return tuple(outcomes)
+
+    def _fit_safely(
+        self, item_id: str, revision_id: str, output: SelectedImage, correlation: str
+    ) -> FitOutcome:
+        """One image's fit; an unexpected error is that image's failure, never the save's."""
+        try:
+            return self._fit(item_id, revision_id, output, correlation)
+        except Exception:
+            logger.exception(
+                "register.upload_fit_unexpected_error",
+                extra={"item_id": item_id, "sha256": output.sha256},
+            )
+            return FitOutcome(
+                item_id,
+                output.role,
+                output.position,
+                output.asset_kind,
+                output.sha256,
+                FitOutcomeKind.FAILED,
+                reason=UNEXPECTED_ERROR,
+            )
+
+    def _report(self, found: FitOutcome, revision_id: str, correlation: str) -> None:
+        """Log and audit one image that got no variant. Reporting never fails the save either."""
+        details = {
+            "item_id": found.item_id,
+            "role": found.role.value,
+            "position": found.position,
+            "asset_kind": found.asset_kind.value,
+            "sha256": found.sha256,
+            "validated_source_revision_id": revision_id,
+            "recipe": UPLOAD_FIT_VERSION,
+            "reason": found.reason,
+        }
+        logger.warning("register.upload_fit_failed", extra=details)
+        if self._audit is None:
+            return
+        try:
+            self._audit.append(
+                AuditEntry(
+                    event_type=AuditEventType.REGISTER_UPLOAD_FIT_FAILED,
+                    action="upload_fit.fit",
+                    actor=UPLOAD_FIT_VERSION,
+                    outcome=AuditOutcome.RECORDED,
+                    target_ref=found.sha256,
+                    reason_code=found.reason,
+                    details=details,
+                    correlation_id=correlation,
+                )
+            )
+        except Exception:
+            logger.exception("register.upload_fit_audit_failed", extra=details)
 
     def _fit(
         self, item_id: str, revision_id: str, output: SelectedImage, correlation: str
@@ -195,10 +266,12 @@ class UploadFitVariants:
         try:
             data = store.read(output.sha256)
         except NotFoundError:
-            return outcome(FitOutcomeKind.FAILED)
+            return outcome(FitOutcomeKind.FAILED, reason=SOURCE_UNREADABLE)
         result = fit(data)
         if isinstance(result, FitRefused):
-            return outcome(FitOutcomeKind.FAILED, failure=result.failure)
+            return outcome(
+                FitOutcomeKind.FAILED, failure=result.failure, reason=result.failure.value
+            )
         produced = hashlib.sha256(result.content).hexdigest()
         source = DerivationInput(output.asset_kind, output.sha256, output.derivation_id)
         now = self._clock.now()
@@ -208,7 +281,7 @@ class UploadFitVariants:
                     output=result.content,
                     validated_source_revision_id=revision_id,
                     inputs=(source,),
-                    transformation_spec=transformation_spec(result.quality),
+                    transformation_spec=transformation_spec(result.quality, result.colour),
                     transformation_version=UPLOAD_FIT_VERSION,
                     policy_version=None,
                     operations=(
@@ -229,7 +302,7 @@ class UploadFitVariants:
             )
         except (InputValidationError, NotFoundError):
             # An input the lineage owner refuses (a derivation of another revision): no variant.
-            return outcome(FitOutcomeKind.FAILED)
+            return outcome(FitOutcomeKind.FAILED, reason=LINEAGE_REFUSED)
         self._record_qa(record.artifact_sha256, record.derivation_id, revision_id, correlation)
         return outcome(
             FitOutcomeKind.RECORDED,

@@ -34,6 +34,7 @@ from app.stages.collect.imagedecode import HeaderImageDecoder
 from app.stages.collect.revisions import ProductFactsRevisionStore, StoredRevision
 from app.stages.collect.runs import CollectionRunStore
 from app.stages.products.image_model import (
+    AUTO_QA_RULE_VERSION,
     CompletedDerivation,
     DerivationInput,
     ExecutionClass,
@@ -1410,3 +1411,71 @@ def test_the_image_checks_match_the_orm(config: AppConfig) -> None:
             for check in metadata.tables[table].constraints:
                 if isinstance(check, CheckConstraint):
                     assert f"CHECK ({check.sqltext})" in ddl, f"{table}: {check.name}"
+
+
+# ---------------------------------------------------------------- ADR-0037 C2: QA rule scope
+
+
+def test_an_operator_selected_derived_artifact_never_reads_an_automatic_qa(
+    container: Container, listing: Listing
+) -> None:
+    """ADR-0013 §9 amendment: the automatic QA counts for a selected source image only. A derived
+    artifact an operator selects, holding nothing but an automatic verdict, is IMAGE_QA_MISSING;
+    only the upload-fit variant read (``derived_variant``, ADR-0037 §3) reads its own."""
+    revision = listing.revision.revision_id
+    derived = container.images.record_completed_derivation(
+        completed(revision, [source_input(listing.images[1])], png("auto-only")),
+        decided_by="editor",
+    )
+    container.images.record_operator_selection(
+        listing.item,
+        source_revision_id=revision,
+        decisions=[
+            SourceDecision(REP, 0, listing.images[0], SourceDecisionKind.USE_SOURCE),
+            SourceDecision(
+                DET, 0, listing.images[1], SourceDecisionKind.USE_DERIVED, derived.derivation_id
+            ),
+            SourceDecision(DET, 1, listing.images[2], SourceDecisionKind.EXCLUDE),
+        ],
+        outputs=[SelectedOutput(REP, REP, 0), SelectedOutput(DET, DET, 0)],
+        decided_by="operator-1",
+    )
+    container.images.record_qa(
+        asset_kind=ImageAssetKind.SOURCE_ASSET,
+        sha256=listing.images[0],
+        derivation_id=None,
+        validated_source_revision_id=revision,
+        verdict=QaVerdict.PASS,
+        decided_by="qa-1",
+    )
+    container.images.record_qa(
+        asset_kind=ImageAssetKind.DERIVED_ARTIFACT,
+        sha256=derived.artifact_sha256,
+        derivation_id=derived.derivation_id,
+        validated_source_revision_id=revision,
+        verdict=QaVerdict.PASS,
+        qa_rule_version=AUTO_QA_RULE_VERSION,
+        decided_by=AUTO_QA_RULE_VERSION,
+    )
+    assert (
+        container.images.qa_for_selected_asset(
+            asset_kind=ImageAssetKind.DERIVED_ARTIFACT,
+            sha256=derived.artifact_sha256,
+            derivation_id=derived.derivation_id,
+            validated_source_revision_id=revision,
+        )
+        is None
+    )
+    codes = _codes(container.product_readiness.base_readiness(listing.item))
+    assert (IMAGE_QA_MISSING, "DETAIL:1") in codes
+    assert (IMAGE_QA_MISSING, "REPRESENTATIVE:0") not in codes
+    # The upload-fit read of the same derivation is the one path that reads its own automatic QA.
+    variant = container.images.derived_variant(
+        transformation_version="test-crop/v1",
+        asset_kind=ImageAssetKind.SOURCE_ASSET,
+        sha256=listing.images[1],
+        derivation_id=None,
+        validated_source_revision_id=revision,
+    )
+    assert variant is not None and variant.qa is not None
+    assert variant.qa.qa_rule_version == AUTO_QA_RULE_VERSION

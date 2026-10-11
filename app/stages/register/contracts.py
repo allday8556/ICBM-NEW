@@ -104,6 +104,7 @@ class UploadFitView(BaseModel):
     recipe: str
     source_asset_kind: str
     source_sha256: str
+    source_derivation_id: str | None = None
     width: int
     height: int
     byte_size: int

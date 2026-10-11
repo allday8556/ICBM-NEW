@@ -191,8 +191,9 @@ PUBLICATION_DETAIL_IMAGES_UNPLACED: Final = "PUBLICATION_DETAIL_IMAGES_UNPLACED"
 PUBLICATION_GUIDANCE_UNPLACED: Final = "PUBLICATION_GUIDANCE_UNPLACED"
 PUBLICATION_ASSET_QA_NOT_PASSED: Final = "PUBLICATION_ASSET_QA_NOT_PASSED"
 # ADR-0037 §2 (IC-06): an image at or over SmartStore's upload-fit threshold for which no
-# ``smartstore-upload-fit/v1`` variant exists — nothing fits, or it cannot be decoded. Nothing is
-# uploaded for it, and nothing smaller is guessed.
+# ``smartstore-upload-fit/v1`` variant exists — none could be made (nothing fits, it cannot be
+# decoded), or none was made yet (the selection changed after the last save; a save makes it).
+# Nothing is uploaded for it, and nothing smaller is guessed.
 IMAGE_UPLOAD_FIT_FAILED: Final = "IMAGE_UPLOAD_FIT_FAILED"
 PROVIDER_ASSET_IDENTITY_MISSING: Final = "PROVIDER_ASSET_IDENTITY_MISSING"
 PREPARED_ASSET_CANDIDATE_MISMATCH: Final = "PREPARED_ASSET_CANDIDATE_MISMATCH"
@@ -653,7 +654,8 @@ class PublicationImage:
     ADR-0037 §2: where the selected binary is too large for the marketplace's upload, the image is
     its upload-fit variant — that exact artifact, with its own QA — and ``upload_fit`` names the
     selected binary it stands in for. ``upload_fit_failed`` is a selected binary that needs a
-    variant and has none: it is never uploaded (``IMAGE_UPLOAD_FIT_FAILED``)."""
+    variant and has none — none could be made, or none was made yet: it is never uploaded
+    (``IMAGE_UPLOAD_FIT_FAILED``)."""
 
     role: OutputRole
     position: int

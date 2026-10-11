@@ -682,9 +682,10 @@ def build_container(
     )
     # M4 PR-E: derived image lineage, operator image selection and exact-binary QA. Derived
     # bytes live in their own namespace, never among the source assets.
+    derived_images = DerivedImageStore(config.derived_images_dir, db, HeaderImageDecoder())
     images = ProductImageService(
         store=product_store,
-        artifacts=DerivedImageStore(config.derived_images_dir, db, HeaderImageDecoder()),
+        artifacts=derived_images,
         audit=audit,
         clock=clock,
     )
@@ -693,8 +694,9 @@ def build_container(
     upload_fit = UploadFitVariants(
         images=images,
         sources=source_assets,
-        derived=DerivedImageStore(config.derived_images_dir, db, HeaderImageDecoder()),
+        derived=derived_images,
         clock=clock,
+        audit=audit,
     )
     # Issue #219: the operator's BLOCK / KEEP decisions on supplier common images and their
     # detection over each supplier's collection history.
@@ -1019,7 +1021,7 @@ def build_container(
         mode=execution_mode,
         connect=smartstore.connect,
         sources=source_assets,
-        derived=DerivedImageStore(config.derived_images_dir, db, HeaderImageDecoder()),
+        derived=derived_images,
         # ADR-0033 §8: the recorded Detail Guidance images, the third byte source.
         guidance=detail_guidance_store,
     )

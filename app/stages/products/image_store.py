@@ -341,7 +341,12 @@ class ImageUnit:
     ) -> DerivationRecord | None:
         """The first recorded derivation of one recipe version over exactly one input, validated
         against one revision (ADR-0037 §2: a content-addressed variant is reused, never re-made).
-        Several — a concurrent retry — resolve to the earliest, in a stable order."""
+
+        Concurrency: a derivation's identity (``derivation_fingerprint``) includes ``produced_at``,
+        so two saves that both find none can each record one — provenance is never merged. Both
+        share one content-addressed artifact, and every reader resolves to the earliest, in a
+        stable order (``recorded_at``, then ``derivation_id``), so the unit publishes one variant.
+        """
         source_kind = source.kind is ImageAssetKind.SOURCE_ASSET
         inputs = DerivedImageDerivationInput
         row = self.session.scalars(

@@ -1,10 +1,13 @@
 """ADR-0037 §2: the ``smartstore-upload-fit/v1`` recipe, pure (IC-02, IC-04, IC-06)."""
 
+import hashlib
 import io
 import random
+import struct
 
+import PIL
 import pytest
-from PIL import Image
+from PIL import Image, ImageCms
 
 from app.stages.products.image_model import ImageAssetKind, OutputRole, QaVerdict
 from app.stages.register import upload_fit
@@ -19,6 +22,7 @@ from app.stages.register.upload_fit import (
     UPLOAD_FIT_QUALITIES,
     UPLOAD_FIT_THRESHOLD,
     UPLOAD_FIT_VERSION,
+    Colour,
     FitFailure,
     FitRefused,
     FitResult,
@@ -62,6 +66,22 @@ def test_the_same_input_gives_the_same_bytes() -> None:
     assert first.content == _fitted(bytes(data)).content
 
 
+# The golden variant of one seeded input (IC-04 across processes and machines). It changes
+# together with ``pillow==12.3.0`` in ``pyproject.toml``: a Pillow upgrade re-pins it, and the
+# recorded ``encoder`` of a variant made since then names the new version.
+GOLDEN_INPUT_SHA256 = "3fde62684f227b6abcc9a85d9cce0d155579621a6d507247819e689df00bb57c"
+GOLDEN_VARIANT_SHA256 = "782fdd42c53d4af55ff3098613d7d43f7e5fcc9c4ab5c5d82a86ddb46429435e"
+
+
+def test_the_golden_variant_of_a_seeded_input_is_pinned() -> None:
+    assert PIL.__version__ == "12.3.0"
+    data = noise_jpeg(1600, 900, 90, seed=2026)
+    assert hashlib.sha256(data).hexdigest() == GOLDEN_INPUT_SHA256
+    result = _fitted(data)
+    assert (result.width, result.height, result.quality) == (1000, 562, 90)
+    assert hashlib.sha256(result.content).hexdigest() == GOLDEN_VARIANT_SHA256
+
+
 def test_a_25_mb_class_jpeg_fits_under_the_threshold_at_most_1000_px_wide() -> None:
     data = noise_jpeg(4000, 5400, 95)
     assert 20_000_000 < len(data) < 30_000_000 and needs_fit(len(data))
@@ -73,6 +93,14 @@ def test_a_25_mb_class_jpeg_fits_under_the_threshold_at_most_1000_px_wide() -> N
     assert (decoded.format, decoded.mode, decoded.size) == ("JPEG", "RGB", (1000, 1350))
     # Baseline, never progressive.
     assert "progressive" not in decoded.info and "progression" not in decoded.info
+
+
+def test_an_image_between_the_threshold_and_10_mb_is_fitted() -> None:
+    # Under SmartStore's 10^7-byte call limit, yet with no room for the multipart envelope.
+    data = noise_jpeg(2400, 3450, 95)
+    assert UPLOAD_FIT_THRESHOLD <= len(data) < 10_000_000 and needs_fit(len(data))
+    result = _fitted(data)
+    assert len(result.content) < UPLOAD_FIT_THRESHOLD and result.width == 1000
 
 
 def test_a_narrow_image_keeps_its_width_and_steps_down_the_quality() -> None:
@@ -96,18 +124,88 @@ def test_metadata_is_dropped_and_the_orientation_applied() -> None:
     assert "exif" not in decoded.info and "icc_profile" not in decoded.info
     # Shown upright: 600 x 1200 before scaling, so it needs no resize.
     assert (result.width, result.height) == (600, 1200)
+    # A profile the engine cannot read is never claimed as converted.
+    assert result.colour is Colour.ASSUMED_SRGB
+    assert transformation_spec(result.quality, result.colour)["colour"] == "ASSUMED_SRGB"
 
 
-def test_an_embedded_profile_is_converted_to_srgb() -> None:
-    from PIL import ImageCms
+def _s15(value: float) -> bytes:
+    return struct.pack(">i", round(value * 65536))
 
-    profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("LAB")).tobytes()
-    image = Image.new("RGB", (1200, 400), (200, 30, 30))
+
+def _xyz(x: float, y: float, z: float) -> bytes:
+    return b"XYZ " + bytes(4) + _s15(x) + _s15(y) + _s15(z)
+
+
+def _curve(gamma: float) -> bytes:
+    return b"curv" + bytes(4) + struct.pack(">IH", 1, round(gamma * 256)) + bytes(2)
+
+
+def _desc(text: str) -> bytes:
+    raw = text.encode("ascii") + b"\x00"
+    body = b"desc" + bytes(4) + struct.pack(">I", len(raw)) + raw
+    body += struct.pack(">IIHB", 0, 0, 0, 0) + bytes(67)
+    return body + bytes(-len(body) % 4)
+
+
+def adobe_rgb_like_profile() -> bytes:
+    """A minimal ICC v2 RGB matrix/TRC display profile with Adobe RGB (1998) primaries adapted to
+    the D50 PCS and a 2.2 gamma: a real non-sRGB RGB profile. Pillow can build only sRGB, LAB and
+    XYZ profiles, so it is written out here, tag by tag."""
+    tags = [
+        (b"desc", _desc("Adobe RGB-like test profile")),
+        (b"wtpt", _xyz(0.9642, 1.0, 0.8249)),
+        (b"rXYZ", _xyz(0.6097, 0.3111, 0.0195)),
+        (b"gXYZ", _xyz(0.2053, 0.6257, 0.0609)),
+        (b"bXYZ", _xyz(0.1492, 0.0632, 0.7446)),
+        (b"rTRC", _curve(2.2)),
+        (b"gTRC", _curve(2.2)),
+        (b"bTRC", _curve(2.2)),
+    ]
+    start = 128 + 4 + 12 * len(tags)
+    table, data = struct.pack(">I", len(tags)), b""
+    for signature, body in tags:
+        table += signature + struct.pack(">II", start + len(data), len(body))
+        data += body
+    header = (
+        struct.pack(">I", start + len(data))
+        + b"lcms"
+        + struct.pack(">I", 0x02100000)
+        + b"mntrRGB XYZ "
+        + bytes(12)
+        + b"acsp"
+        + bytes(24)
+        + struct.pack(">I", 0)
+        + _s15(0.9642)
+        + _s15(1.0)
+        + _s15(0.8249)
+    )
+    return header + bytes(128 - len(header)) + table + data
+
+
+def _flat(colour: tuple[int, int, int], **save: object) -> bytes:
     buffer = io.BytesIO()
-    image.save(buffer, "JPEG", quality=95, icc_profile=profile)
-    result = _fitted(buffer.getvalue())
-    decoded = Image.open(io.BytesIO(result.content))
+    Image.new("RGB", (1200, 400), colour).save(buffer, "PNG", **save)
+    return buffer.getvalue()
+
+
+def test_an_embedded_non_srgb_profile_is_converted_to_srgb() -> None:
+    profile = adobe_rgb_like_profile()
+    assert "Adobe RGB-like" in ImageCms.getProfileDescription(
+        ImageCms.ImageCmsProfile(io.BytesIO(profile))
+    )
+    colour = (60, 200, 60)
+    converted = _fitted(_flat(colour, icc_profile=profile))
+    untouched = _fitted(_flat(colour))
+    assert converted.colour is Colour.SRGB and untouched.colour is Colour.SRGB
+    decoded = Image.open(io.BytesIO(converted.content))
     assert decoded.mode == "RGB" and "icc_profile" not in decoded.info
+    shown = decoded.getpixel((500, 100))
+    plain = Image.open(io.BytesIO(untouched.content)).getpixel((500, 100))
+    assert isinstance(shown, tuple) and isinstance(plain, tuple)
+    # The same pixel values in a wider gamut are a more saturated green in sRGB.
+    assert abs(plain[0] - colour[0]) <= 3
+    assert shown[0] < plain[0] - 30 and shown[2] < plain[2] - 15
 
 
 def test_transparency_is_flattened_onto_white() -> None:
@@ -140,6 +238,9 @@ def test_the_recorded_spec_is_short_codes_and_integers() -> None:
     spec = transformation_spec(85)
     assert spec["recipe"] == "smartstore-upload-fit" and spec["quality"] == 85
     assert spec["threshold_bytes"] == UPLOAD_FIT_THRESHOLD
+    assert spec["colour"] == "SRGB"
+    # A later Pillow upgrade shows in every new variant's lineage.
+    assert spec["encoder"] == f"pillow/{PIL.__version__}"
     for value in spec.values():
         assert isinstance(value, str | int | list)
 

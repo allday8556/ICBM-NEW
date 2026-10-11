@@ -515,16 +515,18 @@ class RegistrationPreparationService:
         )
         cid = self._correlation(correlation_id)
         inputs = self._render_guidance(inputs, actor=actor, correlation_id=cid)
-        self._fit_uploads(current.marketplace_key, item_ids, correlation_id=cid)
         encoded = encode_inputs(inputs)
         with self._registrations.transaction() as unit:
-            return unit.revise_preparation(
+            revised = unit.revise_preparation(
                 preparation_id,
                 item_ids=item_ids,
                 inputs=encoded,
                 authored_by=actor,
                 correlation_id=cid,
             )
+        # Only the Items of the revision the store validated and wrote, never the caller's list.
+        self._fit_uploads(revised.marketplace_key, revised.current.item_ids, correlation_id=cid)
+        return revised
 
     def _render_guidance(
         self, inputs: AuthoredInputs, *, actor: str, correlation_id: str
@@ -559,11 +561,11 @@ class RegistrationPreparationService:
     def _fit_uploads(
         self, marketplace_key: str, item_ids: Sequence[str], *, correlation_id: str
     ) -> None:
-        """ADR-0037 §2: before the revision is written — as a CUSTOM notice is rendered — the M4
-        image owner makes, or reuses, the ``smartstore-upload-fit/v1`` variant of each of the
-        unit's selected images at or over the upload-fit threshold. Variants are content-addressed
-        derived artifacts with their own lineage, so a refused write leaves at most an unused,
-        reusable one. An image nothing fits gets none, and the preflight names it
+        """ADR-0037 §2: on a save — as a CUSTOM notice is rendered (ADR-0033 G5) — the
+        ``smartstore-upload-fit/v1`` variant of each of the validated unit's selected images at or
+        over the upload-fit threshold is made, or reused, and recorded in the M4 lineage. Variants
+        are content-addressed derived artifacts with their own lineage. An image nothing fits gets
+        none — logged and audited by the producer — and the preflight names it
         (``IMAGE_UPLOAD_FIT_FAILED``); the save itself is never refused for it."""
         if self._upload_fit is None or marketplace_key not in UPLOAD_FIT_MARKETPLACES:
             return

@@ -12,14 +12,18 @@ Pure: bytes in, bytes out. No database, no clock, no file and no network. The re
 2. apply the EXIF orientation, so the variant shows what the source shows, then drop every piece
    of metadata — EXIF, ICC, comments — by never passing any to the encoder;
 3. convert to sRGB: an embedded ICC profile is converted with the colour-management engine, an
-   image without one is taken as sRGB already; transparency is flattened onto white;
+   image without one is taken as sRGB already; a profile the engine cannot read is not guessed
+   at either — the pixels are taken as sRGB and the variant records ``ASSUMED_SRGB``;
+   transparency is flattened onto white;
 4. if wider than :data:`UPLOAD_FIT_MAX_WIDTH`, scale down to that width with LANCZOS, keeping the
    aspect ratio;
 5. encode baseline JPEG (``optimize=False``, ``progressive=False``, 4:2:0 subsampling) at each of
    :data:`UPLOAD_FIT_QUALITIES` in order, and keep the first result under
    :data:`UPLOAD_FIT_THRESHOLD`.
 
-**Deterministic** (IC-04): the same input bytes and recipe version give the same output bytes.
+**Deterministic** (IC-04): the same input bytes and recipe version give the same output bytes,
+under the pinned encoder. The encoder version is recorded with every variant (``encoder``), and a
+golden test pins one variant's SHA-256, so a Pillow upgrade shows in the lineage and in CI.
 Nothing smaller is guessed: an image no quality step fits, or one that cannot be decoded, is a
 :class:`FitRefused` and its unit is ``REVIEW_REQUIRED`` (IC-06).
 """
@@ -30,6 +34,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
+import PIL
 from PIL import Image, ImageCms, ImageOps
 
 UPLOAD_FIT_RECIPE: Final = "smartstore-upload-fit"
@@ -46,6 +51,15 @@ UPLOAD_FIT_MEDIA_TYPE: Final = "image/jpeg"
 UPLOAD_FIT_CAPABILITY: Final = "IMAGE_UPLOAD_FIT"
 # The marketplaces whose image upload this recipe fits (ADR-0037 §2).
 UPLOAD_FIT_MARKETPLACES: Final = frozenset({"smartstore"})
+# The pinned decoder and encoder (``pyproject.toml``), recorded with every variant.
+UPLOAD_FIT_ENCODER: Final = f"pillow/{PIL.__version__}"
+
+
+class Colour(StrEnum):
+    """How the variant's pixels came to be sRGB."""
+
+    SRGB = "SRGB"  # converted from the embedded profile, or no profile: sRGB by convention
+    ASSUMED_SRGB = "ASSUMED_SRGB"  # an embedded profile the engine could not read
 
 
 class FitFailure(StrEnum):
@@ -61,6 +75,7 @@ class FitResult:
     width: int
     height: int
     quality: int
+    colour: Colour = Colour.SRGB
 
 
 @dataclass(frozen=True)
@@ -73,10 +88,11 @@ def needs_fit(byte_size: int) -> bool:
     return byte_size >= UPLOAD_FIT_THRESHOLD
 
 
-def transformation_spec(quality: int) -> Mapping[str, object]:
+def transformation_spec(quality: int, colour: Colour = Colour.SRGB) -> Mapping[str, object]:
     """The recipe as recorded with a variant's derivation: short codes and integers only."""
     return {
         "recipe": UPLOAD_FIT_RECIPE,
+        "encoder": UPLOAD_FIT_ENCODER,
         "threshold_bytes": UPLOAD_FIT_THRESHOLD,
         "max_width": UPLOAD_FIT_MAX_WIDTH,
         "resample": "LANCZOS",
@@ -84,7 +100,7 @@ def transformation_spec(quality: int) -> Mapping[str, object]:
         "qualities": list(UPLOAD_FIT_QUALITIES),
         "quality": quality,
         "subsampling": "4:2:0",
-        "colour": "SRGB",
+        "colour": colour.value,
         "orientation": "APPLIED",
         "metadata": "DROPPED",
         "frame": "FIRST",
@@ -123,8 +139,10 @@ def _flattened(image: Image.Image) -> Image.Image:
     return image
 
 
-def _srgb(image: Image.Image, icc: bytes | None) -> Image.Image:
-    """sRGB, by the embedded profile when it can be read; otherwise the pixels are taken as sRGB."""
+def _srgb(image: Image.Image, icc: bytes | None) -> tuple[Image.Image, Colour]:
+    """sRGB, by the embedded profile when it can be read; otherwise the pixels are taken as sRGB,
+    and a profile that could not be read is recorded as ``ASSUMED_SRGB``."""
+    colour = Colour.SRGB
     if icc:
         try:
             source = ImageCms.ImageCmsProfile(io.BytesIO(icc))
@@ -136,10 +154,11 @@ def _srgb(image: Image.Image, icc: bytes | None) -> Image.Image:
                 outputMode="RGB",
             )
             if converted is not None:
-                return converted
+                return converted, Colour.SRGB
         except (ImageCms.PyCMSError, OSError, ValueError, TypeError):
             pass
-    return image if image.mode == "RGB" else image.convert("RGB")
+        colour = Colour.ASSUMED_SRGB
+    return (image if image.mode == "RGB" else image.convert("RGB")), colour
 
 
 def fit(data: bytes) -> FitResult | FitRefused:
@@ -149,7 +168,7 @@ def fit(data: bytes) -> FitResult | FitRefused:
         return FitRefused(FitFailure.UNDECODABLE)
     try:
         icc = image.info.get("icc_profile")
-        image = _srgb(_flattened(image), icc if isinstance(icc, bytes) else None)
+        image, colour = _srgb(_flattened(image), icc if isinstance(icc, bytes) else None)
         width, height = image.size
         if width > UPLOAD_FIT_MAX_WIDTH:
             height = max(1, round(height * UPLOAD_FIT_MAX_WIDTH / width))
@@ -167,7 +186,7 @@ def fit(data: bytes) -> FitResult | FitRefused:
             )
             content = buffer.getvalue()
             if len(content) < UPLOAD_FIT_THRESHOLD:
-                return FitResult(content, width, height, quality)
+                return FitResult(content, width, height, quality, colour)
     except _DECODE_ERRORS:
         # A file whose header decoded but whose pixels do not.
         return FitRefused(FitFailure.UNDECODABLE)

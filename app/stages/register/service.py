@@ -1772,6 +1772,7 @@ def _frozen_upload_fit(value: Any) -> UploadFitView | None:
         recipe=str(value.get("recipe", "")),
         source_asset_kind=str(value.get("source_asset_kind", "")),
         source_sha256=str(value.get("source_sha256", "")),
+        source_derivation_id=_text(value.get("source_derivation_id")),
         width=int(value.get("width", 0)),
         height=int(value.get("height", 0)),
         byte_size=int(value.get("byte_size", 0)),

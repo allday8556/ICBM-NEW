@@ -29,6 +29,7 @@ import httpx
 import pytest
 from PIL import Image
 
+from app.capabilities.audit.models import AuditEventType
 from app.capabilities.live_safety.assets import AssetUploadService, PreparationCandidateGate
 from app.capabilities.live_safety.model import WireHostPolicy
 from app.capabilities.live_safety.stack import SafetyStack
@@ -52,6 +53,7 @@ from app.stages.products.image_model import (
 )
 from app.stages.products.image_store import DerivedImageStore
 from app.stages.products.model import ReadinessStatus
+from app.stages.register import upload_fit, upload_variants
 from app.stages.register.authoring import AuthoredInputs
 from app.stages.register.authoring_revisions import AuthoringRevisionKind
 from app.stages.register.model import ListingShape
@@ -77,6 +79,7 @@ from tests.support.product_support import Collections, FakeDecoder, context, raw
 from tests.support.register_support import (
     CATEGORY,
     CID,
+    MARKET,
     OPERATOR,
     TAXONOMY,
     FakeCapability,
@@ -183,26 +186,31 @@ def _inputs(stamped: dict[str, Any], composition: str) -> AuthoredInputs:
     )
 
 
-def _unit(container: Container, config: AppConfig, detail_bytes: bytes) -> Unit:
+def _unit(
+    container: Container,
+    config: AppConfig,
+    detail_bytes: bytes,
+    marketplace: str = SMARTSTORE,
+) -> Unit:
     """One SmartStore unit, authored through the application's own preparation owner against the
     owner-held category mapping and the detail composition the server stamps for SmartStore."""
-    account = establish(container, config, SMARTSTORE, "uid-smartstore-c2")
+    account = establish(container, config, marketplace, f"uid-{marketplace}-c2")
     with container.db.write() as session:
         stamped = container.authoring_revisions.stamp(
-            session, SMARTSTORE, TAXONOMY, correlation_id=CID
+            session, marketplace, TAXONOMY, correlation_id=CID
         )
     composition = stamped["detail_composition_revision"]
     current = container.authoring_revisions.current(
-        AuthoringRevisionKind.DETAIL_COMPOSITION, SMARTSTORE
+        AuthoringRevisionKind.DETAIL_COMPOSITION, marketplace
     )
     assert current is not None and current.revision_id == composition
-    pricing = context(marketplace_key=SMARTSTORE)
+    pricing = context(marketplace_key=marketplace)
     served = container.registration_preflight
     served._policies = StaticRegistrationPolicy(
         (
             target(
                 account,
-                marketplace_key=SMARTSTORE,
+                marketplace_key=marketplace,
                 pricing_context=pricing,
                 category_mapping_revision=stamped["category_mapping_revision"],
                 detail_composition_revision=composition,
@@ -211,14 +219,14 @@ def _unit(container: Container, config: AppConfig, detail_bytes: bytes) -> Unit:
             ),
         )
     )
-    served._metadata = StaticRegistrationMetadata((metadata(),), marketplace_key=SMARTSTORE)
+    served._metadata = StaticRegistrationMetadata((metadata(),), marketplace_key=marketplace)
     served._capability = FakeCapability()
     item_id, representative, detail = _item(container, config, detail_bytes)
     priced = container.pricing.price(item_id, pricing).snapshot
     assert priced is not None
     with container.registrations.transaction() as unit:
         draft = unit.create_draft(
-            SMARTSTORE,
+            marketplace,
             account,
             ListingShape.SINGLE_LISTING_WITH_OPTIONS,
             created_by=OPERATOR,
@@ -379,14 +387,27 @@ def test_a_25_mb_description_image_is_uploaded_as_its_upload_fit_variant(
     selection = container.images.current_selection(unit.item_id)
     assert selection is not None
     assert {o.sha256 for o in selection.outputs} == {unit.representative, unit.detail}
-    # The variant's QA is its own: the automatic rule's, under the rule in force.
-    qa = container.images.qa_for_selected_asset(
-        asset_kind=ImageAssetKind.DERIVED_ARTIFACT,
-        sha256=variant_sha,
-        derivation_id=derivation_id,
+    # The variant's QA is its own: the automatic rule's, under the rule in force, read only by
+    # the upload-fit path — a selected derived artifact never reads an automatic verdict.
+    variant_read = container.images.derived_variant(
+        transformation_version=UPLOAD_FIT_VERSION,
+        asset_kind=ImageAssetKind.SOURCE_ASSET,
+        sha256=unit.detail,
+        derivation_id=None,
         validated_source_revision_id=selection.source_revision_id,
     )
+    assert variant_read is not None and variant_read.sha256 == variant_sha
+    qa = variant_read.qa
     assert qa is not None and qa.verdict is QaVerdict.PASS
+    assert (
+        container.images.qa_for_selected_asset(
+            asset_kind=ImageAssetKind.DERIVED_ARTIFACT,
+            sha256=variant_sha,
+            derivation_id=derivation_id,
+            validated_source_revision_id=selection.source_revision_id,
+        )
+        is None
+    )
     assert qa.qa_rule_version == AUTO_QA_RULE_VERSION == "image-qa-auto/v2"
 
     # ---- 2. The candidate publishes the variant in place of the selected source image (IC-05).
@@ -539,3 +560,117 @@ def test_an_oversize_image_the_recipe_cannot_decode_is_never_uploaded(
             ],
         )
     assert refused.value.code == "LIVE_GRANT_CANDIDATE_NOT_READY"
+
+
+def _failures(config: AppConfig) -> list[tuple[Any, ...]]:
+    with contextlib.closing(raw(config)) as connection:
+        return connection.execute(
+            "SELECT target_ref, reason_code, details_json FROM audit_events"
+            " WHERE event_type = ? ORDER BY seq",
+            (AuditEventType.REGISTER_UPLOAD_FIT_FAILED.value,),
+        ).fetchall()
+
+
+def test_an_undecodable_failure_is_logged_and_audited(
+    container: Container, config: AppConfig
+) -> None:
+    unit = _unit(container, config, b"\x89PNG" + bytes(UPLOAD_FIT_THRESHOLD))
+    ((target_ref, reason, details),) = _failures(config)
+    assert (target_ref, reason) == (unit.detail, "UNDECODABLE")
+    assert json.loads(details)["item_id"] == unit.item_id
+
+
+def test_an_image_no_quality_step_fits_is_never_uploaded(
+    container: Container, config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Nothing smaller is guessed: with no quality step left the recipe fits nothing (NOT_FITTED).
+    monkeypatch.setattr(upload_fit, "UPLOAD_FIT_QUALITIES", ())
+    unit = _unit(container, config, big_jpeg())
+    assert _derivations(config) == []
+    ((target_ref, reason, _details),) = _failures(config)
+    assert (target_ref, reason) == (unit.detail, "NOT_FITTED")
+    candidate = container.registration_preparations.stage_candidate(unit.preparation_id)
+    assert candidate.status is ReadinessStatus.REVIEW_REQUIRED
+    assert IMAGE_UPLOAD_FIT_FAILED in candidate.codes
+    image = _detail_image(candidate.resolved.items[0].images)
+    assert (image.asset_kind, image.sha256, image.upload_fit) == (
+        ImageAssetKind.SOURCE_ASSET,
+        unit.detail,
+        None,
+    )
+    assert image.upload_fit_failed
+
+
+def test_an_unexpected_error_fails_one_image_and_never_the_save(
+    container: Container, config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(data: bytes) -> Any:
+        raise RuntimeError("an encoder fault")
+
+    monkeypatch.setattr(upload_variants, "fit", broken)
+    unit = _unit(container, config, big_jpeg())
+    assert container.registrations.preparation(unit.preparation_id) is not None
+    ((target_ref, reason, _details),) = _failures(config)
+    assert (target_ref, reason) == (unit.detail, "UNEXPECTED_ERROR")
+    candidate = container.registration_preparations.stage_candidate(unit.preparation_id)
+    assert IMAGE_UPLOAD_FIT_FAILED in candidate.codes
+
+
+def test_an_image_between_9_5_and_10_mb_is_fitted(container: Container, config: AppConfig) -> None:
+    buffer = io.BytesIO()
+    width, height = 2400, 3450
+    noise = random.Random(41).randbytes(width * height * 3)
+    Image.frombytes("RGB", (width, height), noise).save(buffer, "JPEG", quality=95)
+    data = buffer.getvalue()
+    assert UPLOAD_FIT_THRESHOLD <= len(data) < 10_000_000, len(data)
+    unit = _unit(container, config, data)
+    ((_derivation, variant_sha, *_rest),) = _derivations(config)
+    candidate = container.registration_preparations.stage_candidate(unit.preparation_id)
+    assert candidate.status is ReadinessStatus.READY, candidate.codes
+    image = _detail_image(candidate.resolved.items[0].images)
+    assert (image.asset_kind, image.sha256) == (ImageAssetKind.DERIVED_ARTIFACT, variant_sha)
+
+
+def test_a_reused_variant_without_qa_under_the_rule_in_force_is_qad_again(
+    container: Container, config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.stages.products import images
+
+    # The variant made, and QA'd, under an earlier automatic rule version.
+    with monkeypatch.context() as earlier:
+        earlier.setattr(upload_variants, "AUTO_QA_RULE_VERSION", "image-qa-auto/v1")
+        earlier.setattr(images, "AUTO_QA_RULE_VERSION", "image-qa-auto/v1")
+        unit = _unit(container, config, big_jpeg())
+    (first,) = _derivations(config)
+    stale = container.registration_preparations.stage_candidate(unit.preparation_id)
+    image = _detail_image(stale.resolved.items[0].images)
+    assert image.sha256 == first[1] and image.qa_verdict is None
+    assert "PUBLICATION_ASSET_QA_NOT_PASSED" in stale.codes
+    # Saving again reuses the variant and records its own QA under the rule in force.
+    container.registration_preparations.update(
+        unit.preparation_id,
+        item_ids=[unit.item_id],
+        inputs=AuthoredInputs(stale.request.category, stale.request.listing, stale.request.detail),
+        actor=OPERATOR,
+    )
+    assert _derivations(config) == [first]
+    again = container.registration_preparations.stage_candidate(unit.preparation_id)
+    assert again.status is ReadinessStatus.READY, again.codes
+    recovered = _detail_image(again.resolved.items[0].images)
+    assert recovered.sha256 == first[1] and recovered.qa_verdict is QaVerdict.PASS
+
+
+def test_another_marketplace_makes_no_variant_and_publishes_the_source(
+    container: Container, config: AppConfig
+) -> None:
+    unit = _unit(container, config, big_jpeg(), marketplace=MARKET)
+    assert _derivations(config) == [] and _failures(config) == []
+    candidate = container.registration_preparations.stage_candidate(unit.preparation_id)
+    assert IMAGE_UPLOAD_FIT_FAILED not in candidate.codes
+    image = _detail_image(candidate.resolved.items[0].images)
+    assert (image.asset_kind, image.sha256, image.upload_fit, image.upload_fit_failed) == (
+        ImageAssetKind.SOURCE_ASSET,
+        unit.detail,
+        None,
+        False,
+    )

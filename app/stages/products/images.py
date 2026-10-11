@@ -29,8 +29,9 @@ commit together.
 source revision, one QA rule version and one input fingerprint. A verdict never transfers to
 another SHA, another derivation or another revision, and one exact input has one verdict. Readiness
 reads the verdict under the rule in force, and without one the automatic rule QA of an
-auto-selected source image (``image-qa-auto/v2``, Issue #219 §4) or of an upload-fit variant
-made for it (ADR-0037 §3).
+auto-selected source image (``image-qa-auto/v2``, Issue #219 §4). Only the upload-fit variant
+read (:meth:`ProductImageService.derived_variant`, ADR-0037 §3) reads a derived artifact's own
+automatic QA; a derived artifact an operator selects never does.
 """
 
 import logging
@@ -45,6 +46,7 @@ from app.platform.core.errors import AppError, ErrorClass, InputValidationError,
 from app.stages.collect.models import ProductFactsRevision, SourceAsset
 from app.stages.products.common_images import EXCLUDED, effective_supplier, verdicts
 from app.stages.products.image_model import (
+    AUTO_QA_RULE_FAMILY,
     AUTO_QA_RULE_VERSION,
     DEFAULT_QA_RULE_VERSION,
     CompletedDerivation,
@@ -553,7 +555,12 @@ class ProductImageService:
             for ref in images.confirmed_refs(revision) if revision is not None else ():
                 assert revision is not None
                 qa = self._effective_qa(
-                    images, ImageAssetKind.SOURCE_ASSET, ref.sha256, None, revision
+                    images,
+                    ImageAssetKind.SOURCE_ASSET,
+                    ref.sha256,
+                    None,
+                    revision,
+                    rules=self._selected_rules(ImageAssetKind.SOURCE_ASSET),
                 )
                 found.append(
                     CandidateImage(
@@ -711,7 +718,12 @@ class ProductImageService:
         QA (a source image only), if one exists."""
         with self._store.reading() as unit:
             return self._effective_qa(
-                self._images(unit), asset_kind, sha256, derivation_id, validated_source_revision_id
+                self._images(unit),
+                asset_kind,
+                sha256,
+                derivation_id,
+                validated_source_revision_id,
+                rules=self._selected_rules(asset_kind),
             )
 
     def stored_size(self, asset_kind: ImageAssetKind, sha256: str) -> int | None:
@@ -741,12 +753,15 @@ class ProductImageService:
             artifact = None if found is None else images.artifact(found.artifact_sha256)
             if found is None or artifact is None:
                 return None
+            # ADR-0037 §3: an upload-fit variant's own automatic QA counts for it, and only on this
+            # path; a derived artifact an operator selects never reads one (``_selected_rules``).
             qa = self._effective_qa(
                 images,
                 ImageAssetKind.DERIVED_ARTIFACT,
                 found.artifact_sha256,
                 found.derivation_id,
                 validated_source_revision_id,
+                rules=(self.qa_rule_version, AUTO_QA_RULE_VERSION),
             )
             return DerivedVariant(
                 derivation_id=found.derivation_id,
@@ -757,6 +772,14 @@ class ProductImageService:
                 qa=qa,
             )
 
+    def _selected_rules(self, asset_kind: ImageAssetKind) -> tuple[str, ...]:
+        """The QA rules a selected binary is read under (ADR-0013 §9 amendment): the operator rule
+        in force, then — for a source image only — the automatic rule QA. A derived artifact an
+        operator selected is never satisfied by an automatic verdict."""
+        if asset_kind is ImageAssetKind.SOURCE_ASSET:
+            return (self.qa_rule_version, AUTO_QA_RULE_VERSION)
+        return (self.qa_rule_version,)
+
     def _effective_qa(
         self,
         images: ImageUnit,
@@ -764,11 +787,12 @@ class ProductImageService:
         sha256: str,
         derivation_id: str | None,
         revision_id: str,
+        *,
+        rules: Sequence[str],
     ) -> QaRecord | None:
-        """The operator's verdict under the rule in force supersedes the automatic rule QA. That
-        covers an auto-selected source image (Issue #219 §4) and an upload-fit variant, whose QA is
-        its own (ADR-0037 §3); no other artifact is ever given one."""
-        for rule in (self.qa_rule_version, AUTO_QA_RULE_VERSION):
+        """The first verdict for this exact input under ``rules``, in order: the operator's verdict
+        under the rule in force supersedes an automatic rule QA. Each caller names its rules."""
+        for rule in rules:
             found = images.qa_by_input(
                 asset_kind=asset_kind,
                 sha256=sha256,
@@ -876,15 +900,27 @@ class ProductImageService:
                 ):
                     reasons.append(Reason(IMAGE_DERIVATION_STALE, ReadinessStatus.STALE, subject))
             qa = self._effective_qa(
-                images, output.asset_kind, output.sha256, output.derivation_id, current_revision_id
+                images,
+                output.asset_kind,
+                output.sha256,
+                output.derivation_id,
+                current_revision_id,
+                rules=self._selected_rules(output.asset_kind),
             )
             if qa is None:
                 verdicts.append(None)
-                earlier = images.qa_for_asset(
-                    asset_kind=output.asset_kind,
-                    sha256=output.sha256,
-                    derivation_id=output.derivation_id,
-                )
+                earlier = [
+                    record
+                    for record in images.qa_for_asset(
+                        asset_kind=output.asset_kind,
+                        sha256=output.sha256,
+                        derivation_id=output.derivation_id,
+                    )
+                    # An automatic verdict never counts for a derived artifact an operator
+                    # selected (``_selected_rules``), so it is no earlier verdict either.
+                    if output.asset_kind is ImageAssetKind.SOURCE_ASSET
+                    or not record.qa_rule_version.startswith(AUTO_QA_RULE_FAMILY)
+                ]
                 reasons.append(
                     Reason(IMAGE_QA_STALE, ReadinessStatus.STALE, subject)
                     if earlier

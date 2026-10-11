@@ -29,6 +29,8 @@ DEFAULT_QA_RULE_VERSION: Final = "image-qa/v1"
 # supersedes it. v2 (ADR-0037 §1, §3): the byte bound is the collection cap of the image's role,
 # and an upload-fit variant gets the same file checks under its upload threshold.
 AUTO_QA_RULE_VERSION: Final = "image-qa-auto/v2"
+# Every version of the automatic rule QA shares this prefix.
+AUTO_QA_RULE_FAMILY: Final = "image-qa-auto/"
 
 MAX_INPUTS: Final = 16
 MAX_OPERATIONS: Final = 16
