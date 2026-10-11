@@ -53,3 +53,5 @@ def test_market_scope_date_windows_and_fake_response_retention_are_explicit() ->
     assert 'days=31, name="return query"' in source
     assert "FrozenEnvelope" in source
     assert "field(repr=False)" in source
+    assert '"goodsDeliveryCode"' in source
+    assert '"shipmentBoxId"' in source

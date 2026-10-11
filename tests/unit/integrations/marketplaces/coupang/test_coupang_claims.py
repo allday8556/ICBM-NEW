@@ -20,6 +20,7 @@ from integrations.marketplaces.coupang.claims import (
     ExchangeId,
     OrderId,
     ReceiptId,
+    ShipmentBoxId,
 )
 from integrations.marketplaces.coupang.fake_transport import FakeResponse, FakeTransport
 
@@ -165,7 +166,12 @@ def test_exchange_family_preserves_exact_paths_queries_and_bodies() -> None:
         max_per_page=15,
     )
     rejected = client.reject_exchange(ExchangeId(40362), reason="SOLDOUT")
-    uploaded = client.upload_exchange_waybill(ExchangeId(40362))
+    uploaded = client.upload_exchange_waybill(
+        ExchangeId(40362),
+        shipment_box_id=ShipmentBoxId(123456789012345678),
+        goods_delivery_code="CJGLS",
+        invoice_number="680405450931",
+    )
 
     assert [result.endpoint for result in (confirmed, listed, rejected, uploaded)] == [
         ClaimEndpoint.CONFIRM_EXCHANGE_RECEIPT,
@@ -195,7 +201,15 @@ def test_exchange_family_preserves_exact_paths_queries_and_bodies() -> None:
         "exchangeRejectCode": "SOLDOUT",
         "vendorId": "A0001",
     }
-    assert transport.requests[3].body == b""
+    assert json.loads(transport.requests[3].body) == [
+        {
+            "exchangeId": "40362",
+            "goodsDeliveryCode": "CJGLS",
+            "invoiceNumber": "680405450931",
+            "shipmentBoxId": "123456789012345678",
+            "vendorId": "A0001",
+        }
+    ]
 
 
 def test_request_validation_fails_before_the_fake_transport() -> None:
@@ -215,6 +229,13 @@ def test_request_validation_fails_before_the_fake_transport() -> None:
         client.list_exchanges("2026-01-01T00:00:00", "2026-01-02T00:00:00", status="UNKNOWN")
     with pytest.raises(CoupangClaimContractError, match="SOLDOUT or WITHDRAW"):
         client.reject_exchange(ExchangeId(1), reason="UNKNOWN")
+    with pytest.raises(CoupangClaimContractError, match="shipmentBoxId"):
+        client.upload_exchange_waybill(
+            ExchangeId(1),
+            shipment_box_id=ShipmentBoxId(0),
+            goods_delivery_code="CJGLS",
+            invoice_number="123",
+        )
     assert transport.requests == []
 
 
@@ -228,7 +249,12 @@ def test_kr_only_endpoints_are_blocked_for_tw_before_transport() -> None:
             "RETURN", ReceiptId(1), delivery_company_code="KDEXP", invoice_number="123"
         )
     with pytest.raises(CoupangClaimContractError, match="KR only"):
-        client.upload_exchange_waybill(ExchangeId(1))
+        client.upload_exchange_waybill(
+            ExchangeId(1),
+            shipment_box_id=ShipmentBoxId(1),
+            goods_delivery_code="CJGLS",
+            invoice_number="123",
+        )
     assert transport.requests == []
 
 

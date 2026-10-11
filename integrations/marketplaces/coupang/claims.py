@@ -28,6 +28,7 @@ from integrations.marketplaces.coupang.fake_transport import FakeRequest, FakeTr
 ReceiptId = NewType("ReceiptId", int)
 ExchangeId = NewType("ExchangeId", int)
 OrderId = NewType("OrderId", int)
+ShipmentBoxId = NewType("ShipmentBoxId", int)
 
 _V4 = "/v2/providers/openapi/apis/api/v4/vendors"
 _V6 = "/v2/providers/openapi/apis/api/v6/vendors"
@@ -152,7 +153,7 @@ class CoupangClaimClient:
         path: str,
         *,
         query: str = "",
-        document: Mapping[str, object] | None = None,
+        document: Mapping[str, object] | Sequence[Mapping[str, object]] | None = None,
     ) -> ClaimResult:
         target = RequestTarget(method, path, query)
         body = (
@@ -416,13 +417,30 @@ class CoupangClaimClient:
             },
         )
 
-    def upload_exchange_waybill(self, exchange_id: ExchangeId) -> ClaimResult:
+    def upload_exchange_waybill(
+        self,
+        exchange_id: ExchangeId,
+        *,
+        shipment_box_id: ShipmentBoxId,
+        goods_delivery_code: str,
+        invoice_number: str,
+    ) -> ClaimResult:
         self._kr_only()
         identity = _positive(exchange_id, "exchangeId")
+        shipment = _positive(shipment_box_id, "shipmentBoxId")
         return self._call(
             ClaimEndpoint.UPLOAD_EXCHANGE_WAYBILL,
             Method.POST,
             f"{self._path('v4')}/exchangeRequests/{identity}/invoices",
+            document=[
+                {
+                    "exchangeId": str(identity),
+                    "vendorId": self._context.credentials.vendor_id,
+                    "shipmentBoxId": str(shipment),
+                    "goodsDeliveryCode": _text(goods_delivery_code, "goodsDeliveryCode"),
+                    "invoiceNumber": _text(invoice_number, "invoiceNumber"),
+                }
+            ],
         )
 
 
@@ -435,4 +453,5 @@ __all__ = [
     "FrozenEnvelope",
     "OrderId",
     "ReceiptId",
+    "ShipmentBoxId",
 ]
