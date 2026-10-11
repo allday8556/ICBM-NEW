@@ -88,6 +88,7 @@ from app.stages.register.contracts import (
     ScopeBrakeView,
     SnapshotView,
     UnitView,
+    UploadFitView,
 )
 from app.stages.register.execution import (
     ACTIVE_JOB_STATES,
@@ -1723,6 +1724,7 @@ def _frozen_assets(payload: Mapping[str, Any]) -> dict[str, tuple[AssetView, ...
                 qa_verdict=_text(asset.get("qa_verdict")),
                 qa_result_id=_text(asset.get("qa_result_id")),
                 provider_asset_prepared=asset.get("provider_asset_ref") is not None,
+                upload_fit=_frozen_upload_fit(asset.get("upload_fit")),
             )
             for asset in (assets if isinstance(assets, list) else [])
             if isinstance(asset, Mapping)
@@ -1757,8 +1759,26 @@ def _current_assets(fact: Any) -> tuple[AssetView, ...]:
             derivation_id=image.derivation_id,
             qa_verdict=None if image.qa_verdict is None else image.qa_verdict.value,
             qa_result_id=image.qa_result_id,
+            upload_fit=None
+            if image.upload_fit is None
+            else _frozen_upload_fit(image.upload_fit.canonical()),
         )
         for image in fact.images
+    )
+
+
+def _frozen_upload_fit(value: Any) -> UploadFitView | None:
+    """ADR-0037 §3: an asset's upload-fit lineage, as the evaluation or the Snapshot holds it."""
+    if not isinstance(value, Mapping):
+        return None
+    return UploadFitView(
+        recipe=str(value.get("recipe", "")),
+        source_asset_kind=str(value.get("source_asset_kind", "")),
+        source_sha256=str(value.get("source_sha256", "")),
+        source_derivation_id=_text(value.get("source_derivation_id")),
+        width=int(value.get("width", 0)),
+        height=int(value.get("height", 0)),
+        byte_size=int(value.get("byte_size", 0)),
     )
 
 

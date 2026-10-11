@@ -13,7 +13,10 @@ What it reads, and from whom:
   CONNECT service or a provider caller;
 - base and target pricing readiness, the current price for the target context and the current
   procurement: the M4 readiness and pricing owners; the selected images and their exact-binary QA:
-  the M4 image owner. Nothing is priced, selected or recorded here;
+  the M4 image owner. Nothing is priced, selected or recorded here. For a SmartStore unit, a
+  selected binary at or over the upload-fit threshold is published as its recorded
+  ``smartstore-upload-fit/v1`` variant, with the variant's own QA (ADR-0037 §2, §3); one with no
+  variant is marked, never uploaded as it is;
 - the category metadata: a :class:`~app.stages.register.policy.RegistrationMetadataSource`;
 - the detail-composition profile the target names (B-DETAIL): the authoring-revision owner,
   through :class:`DetailProfileSource`;
@@ -32,6 +35,7 @@ from app.platform.core.errors import AppError, NotFoundError, PolicyBlockedError
 from app.platform.db.database import DatabaseWriteReentryError
 from app.stages.connect.accounts import AccountBinding, binding_state
 from app.stages.connect.marketplace.contracts import MarketplaceCapabilityView
+from app.stages.products.image_model import ImageAssetKind
 from app.stages.products.images import ProductImageService
 from app.stages.products.pricing_service import ProductPricingService
 from app.stages.products.readiness import ProductReadinessService, Readiness
@@ -69,11 +73,14 @@ from app.stages.register.preparation import (
     ReadinessInput,
     ResolvedItem,
     ResolvedUnit,
+    UploadFit,
     evaluate,
     resolve_unit,
 )
 from app.stages.register.preparation import listing_identity as _identity
 from app.stages.register.store import RegistrationStore, RegistrationUnit
+from app.stages.register.upload_fit import UPLOAD_FIT_MARKETPLACES, UPLOAD_FIT_VERSION
+from app.stages.register.upload_variants import NOT_NEEDED, upload_fit_state
 
 
 class CapabilityReader(Protocol):
@@ -401,7 +408,7 @@ class RegistrationPreflightService:
             )
         binding = procurement.binding
         member = procurement.member
-        selection_revision_id, images = self._publication(item_id)
+        selection_revision_id, images = self._publication(item_id, target.marketplace_key)
         return ResolvedItem(
             item_id=item_id,
             ordinal=ordinals[item_id],
@@ -451,19 +458,62 @@ class RegistrationPreflightService:
             price_guard=record.price_guard,
         )
 
-    def _publication(self, item_id: str) -> tuple[str | None, tuple[PublicationImage, ...]]:
+    def _publication(
+        self, item_id: str, marketplace_key: str
+    ) -> tuple[str | None, tuple[PublicationImage, ...]]:
         """The Item's current operator image selection and each exact binary's QA verdict under
-        the selection's validated revision (M4 owner, read only)."""
+        the selection's validated revision (M4 owner, read only).
+
+        ADR-0037 §2: for a marketplace whose upload the recipe fits, a selected binary at or over
+        the threshold is published as its recorded upload-fit variant — the exact artifact a grant
+        names and the upload sends — with the variant's own QA; one without a variant is marked
+        ``upload_fit_failed`` and stays unpublishable."""
         selection = self._images.current_selection(item_id)
         if selection is None:
             return None, ()
         images = []
         for output in selection.outputs:
+            fit = (
+                upload_fit_state(
+                    self._images,
+                    asset_kind=output.asset_kind,
+                    sha256=output.sha256,
+                    derivation_id=output.derivation_id,
+                    validated_source_revision_id=selection.source_revision_id,
+                    role=output.role,
+                )
+                if marketplace_key in UPLOAD_FIT_MARKETPLACES
+                else NOT_NEEDED
+            )
+            variant = fit.variant
+            if variant is not None:
+                images.append(
+                    PublicationImage(
+                        role=output.role,
+                        position=output.position,
+                        asset_kind=ImageAssetKind.DERIVED_ARTIFACT,
+                        sha256=variant.sha256,
+                        derivation_id=variant.derivation_id,
+                        qa_result_id=None if variant.qa is None else variant.qa.qa_result_id,
+                        qa_verdict=None if variant.qa is None else variant.qa.verdict,
+                        upload_fit=UploadFit(
+                            recipe=UPLOAD_FIT_VERSION,
+                            source_asset_kind=output.asset_kind,
+                            source_sha256=output.sha256,
+                            source_derivation_id=output.derivation_id,
+                            width=variant.width,
+                            height=variant.height,
+                            byte_size=variant.byte_size,
+                        ),
+                    )
+                )
+                continue
             qa = self._images.qa_for_selected_asset(
                 asset_kind=output.asset_kind,
                 sha256=output.sha256,
                 derivation_id=output.derivation_id,
                 validated_source_revision_id=selection.source_revision_id,
+                role=output.role,
             )
             images.append(
                 PublicationImage(
@@ -474,6 +524,7 @@ class RegistrationPreflightService:
                     derivation_id=output.derivation_id,
                     qa_result_id=None if qa is None else qa.qa_result_id,
                     qa_verdict=None if qa is None else qa.verdict,
+                    upload_fit_failed=fit.needed,
                 )
             )
         return selection.selection_revision_id, tuple(images)

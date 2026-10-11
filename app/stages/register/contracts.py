@@ -97,6 +97,19 @@ class AttemptView(BaseModel):
     started_at: datetime | None
 
 
+class UploadFitView(BaseModel):
+    """ADR-0037 §3: the upload-fit variant an asset is: the selected binary it stands in for, and
+    the variant's own size and dimensions. Server facts only; the screen derives nothing."""
+
+    recipe: str
+    source_asset_kind: str
+    source_sha256: str
+    source_derivation_id: str | None = None
+    width: int
+    height: int
+    byte_size: int
+
+
 class AssetView(BaseModel):
     """One selected publication asset of an Item, by its exact local identity (§5, R1).
 
@@ -113,6 +126,8 @@ class AssetView(BaseModel):
     qa_result_id: str | None
     # Whether a provider-issued identity was frozen for it. The reference itself is never exposed.
     provider_asset_prepared: bool = False
+    # ADR-0037 §3: set when the asset is an upload-fit variant of the selected binary.
+    upload_fit: UploadFitView | None = None
 
 
 class ReasonView(BaseModel):
