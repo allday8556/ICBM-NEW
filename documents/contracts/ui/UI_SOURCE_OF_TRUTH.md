@@ -172,6 +172,14 @@ authorization.
 > **B-PREVIEW (owner decisions `5975647306`).** The kept "marketplace preview" is the frozen-Snapshot
 > preview (ADR-0014 §22 amendment note): the prototype's category name path and shipping fee have
 > no Snapshot source and are not shown; provider image URLs are never shown.
+> Since ADR-0033 G6 a composition-v3 Snapshot's preview also shows its frozen notices in the order
+> `detail-renderer/v2` draws them: the `상단 공지` slots (`data-role="preview-guidance-top"`) before
+> `상세 이미지`, the body paragraphs after it, and the `하단 공지` slots
+> (`data-role="preview-guidance-bottom"`) last. Each slot is the notice's image from the Detail
+> Guidance owner's local image route (never a provider URL, never stored in the Snapshot), labelled
+> `기간 공지` with its period, `상시 공지` or `이 상품 공지`, or plain `공지` when the owner no longer
+> holds that frozen revision as its newest, and whether its marketplace upload is prepared. A
+> placement without a notice, and every v1/v2 preview, shows no slot and is unchanged.
 
 > **B-EDITOR (Issue #127 direction; 2026-10-07).** The kept "product detail editor" is the
 > registration unit's workspace in Registration Management. It has four sections — 상품 정보, 이미지,
@@ -365,7 +373,7 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
   2. `대표이미지`: the Item image editor. The bulk `배경 이미지 제거 / 리사이즈 / 이미지 편집 / 이미지 자동번역` are inert. `자동 선택 다시 실행` is the image owner's own.
   3. `옵션·가격`: the repin and the Items table. The price facts no read states read `데이터 없음`, and the option tools are inert.
   4. `상품정보고시`: the category requirements and their fields.
-  5. `상세페이지`: the image-editor mode. `HTML 방식` is inert. The body is the authoring form's. `미리보기` opens the snapshot preview. The top and bottom notices (ADR-0033 §5, G4):
+  5. `상세페이지`: the image-editor mode. `HTML 방식` is inert. The body is the authoring form's. `미리보기` opens the snapshot preview, frozen notices included (G6). The top and bottom notices (ADR-0033 §5, G4):
      - `상단 공지` and `하단 공지` each show the notices the server resolves for the unit now (`GET /api/v1/register/detail-guidance`), in order — the active period notices, then the product's own notice or the store-wide standing one — each with its image, `기간 공지 / 상시 공지 / 이 상품 공지` and its template. With none, the group says so.
      - `기본값 / 끄기 / 직접 작성` choose the placement's mode. A changed mode says it applies once the preparation is saved; the list stays the server's for the saved choice.
      - `직접 작성` shows the settings card's own editor (`components/guidance-editor.js`): the same inputs, five-template live preview and `국내배송 / 해외배송` presets. The save is refused locally, sending nothing, until its text and template are chosen; the server validates and draws the text when the preparation is saved.

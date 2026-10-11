@@ -102,6 +102,7 @@ from app.stages.register.execution import (
     target_ref,
 )
 from app.stages.register.guidance import (
+    GUIDANCE_IMAGE_PATH,
     PLACEMENTS,
     GuidanceChoice,
     GuidanceMode,
@@ -281,8 +282,15 @@ class RegisterService:
         payload = store.snapshot_payload(registration_snapshot_id)
         if snapshot is None or payload is None:
             raise NotFoundError("REGISTER_SNAPSHOT_NOT_FOUND", "no such registration snapshot")
+        # ADR-0033 G6: the Detail Guidance owner's newest revisions, read only to label a frozen
+        # notice slot with its kind and period; the slots themselves are the frozen plan's.
+        revisions = () if self._preflight is None else self._preflight.guidance_revisions()
         return preview(
-            registration_snapshot_id, snapshot.payload_hash, payload, self._preview_projection
+            registration_snapshot_id,
+            snapshot.payload_hash,
+            payload,
+            self._preview_projection,
+            guidance_revisions=revisions,
         )
 
     def pre_send_units(self) -> tuple[UnitView, ...]:
@@ -1564,11 +1572,6 @@ def _preflight_view(result: Any, *, source: str, matches: bool | None) -> Prefli
         dependency_fingerprint=result.dependency_fingerprint,
         fingerprint_matches_snapshot=matches,
     )
-
-
-# The Detail Guidance owner's image route (``app.capabilities.detail_guidance.service``), which
-# serves every recorded guidance image, a product's own included. A contract test pins the two.
-GUIDANCE_IMAGE_PATH = "/api/v1/settings/detail-guidance/images/{sha256}"
 
 
 def _placement_view(choice: PlacementChoice) -> GuidancePlacementView:
