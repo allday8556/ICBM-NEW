@@ -740,3 +740,48 @@ def test_a_dripping_host_is_cut_off_at_the_total_deadline(storefront: Storefront
     assert drip.status is None and drip.failure is PublicReadFailure.TIMEOUT
     assert drip.content == b""
     assert now[0] < 20  # stopped near the deadline, not after the whole drip
+
+
+def test_the_network_transport_cuts_a_dripping_header_at_the_total_deadline() -> None:
+    """The real socket path: a server that drips its status line and headers a byte at a time
+    (each wait well inside httpx's per-wait timeout) is cut off when the read's total deadline
+    passes, before any response object exists. Loopback only; nothing leaves the machine."""
+    import socket
+    import threading
+    import time
+
+    import httpx
+
+    from integrations.suppliers.transport.gateway import _READ_DEADLINE, _DeadlineTransport
+
+    server = socket.create_server(("127.0.0.1", 0))
+    port = server.getsockname()[1]
+    stop = threading.Event()
+
+    def drip() -> None:
+        conn, _ = server.accept()
+        with conn:
+            conn.recv(4096)
+            for byte in b"HTTP/1.1 200 OK\r\nX-Slow: " + b"x" * 1_000:
+                if stop.is_set():
+                    return
+                try:
+                    conn.sendall(bytes([byte]))
+                except OSError:
+                    return
+                time.sleep(0.05)
+
+    threading.Thread(target=drip, daemon=True).start()
+    token = _READ_DEADLINE.set(time.monotonic() + 1.0)
+    started = time.monotonic()
+    try:
+        with (
+            httpx.Client(transport=_DeadlineTransport(time.monotonic), timeout=10) as client,
+            pytest.raises(httpx.TimeoutException),
+        ):
+            client.get(f"http://127.0.0.1:{port}/")
+    finally:
+        _READ_DEADLINE.reset(token)
+        stop.set()
+        server.close()
+    assert time.monotonic() - started < 3  # the 50 s drip was cut near the 1 s deadline

@@ -20,11 +20,13 @@ import ipaddress
 import logging
 import socket
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
+import httpcore
 import httpx
 
 from app.platform.core.egress import EGRESS, EgressBlockedError
@@ -290,6 +292,94 @@ def _resolve_addresses(host: str) -> tuple[str, ...]:
     return tuple(sorted({str(info[4][0]).split("%", 1)[0] for info in infos}))
 
 
+# The monotonic instant the current public read must end by; None outside a read.
+_READ_DEADLINE: ContextVar[float | None] = ContextVar("icbm_public_read_deadline", default=None)
+
+
+class _DeadlineStream(httpcore.NetworkStream):
+    """A socket whose every wait is cut to the time left before the read's total deadline:
+    connecting, TLS, request, headers and body alike, so dripping any of them cannot outlast it."""
+
+    def __init__(self, inner: httpcore.NetworkStream, clock: Callable[[], float]) -> None:
+        self._inner = inner
+        self._clock = clock
+
+    def _left(self, timeout: float | None, expired: type[Exception]) -> float | None:
+        return _time_left(timeout, self._clock, expired)
+
+    def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        return self._inner.read(max_bytes, self._left(timeout, httpcore.ReadTimeout))
+
+    def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        self._inner.write(buffer, self._left(timeout, httpcore.WriteTimeout))
+
+    def close(self) -> None:
+        self._inner.close()
+
+    def start_tls(
+        self,
+        ssl_context: Any,
+        server_hostname: str | None = None,
+        timeout: float | None = None,
+    ) -> httpcore.NetworkStream:
+        left = self._left(timeout, httpcore.ConnectTimeout)
+        return _DeadlineStream(
+            self._inner.start_tls(ssl_context, server_hostname, left), self._clock
+        )
+
+    def get_extra_info(self, info: str) -> Any:
+        return self._inner.get_extra_info(info)
+
+
+def _time_left(
+    timeout: float | None, clock: Callable[[], float], expired: type[Exception]
+) -> float | None:
+    deadline = _READ_DEADLINE.get()
+    if deadline is None:
+        return timeout
+    left = deadline - clock()
+    if left <= 0:
+        raise expired("the public read passed its total deadline")
+    return left if timeout is None else min(timeout, left)
+
+
+class _DeadlineBackend(httpcore.NetworkBackend):
+    def __init__(self, clock: Callable[[], float]) -> None:
+        self._inner = httpcore.SyncBackend()
+        self._clock = clock
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[Any] | None = None,
+    ) -> httpcore.NetworkStream:
+        left = _time_left(timeout, self._clock, httpcore.ConnectTimeout)
+        stream = self._inner.connect_tcp(host, port, left, local_address, socket_options)
+        return _DeadlineStream(stream, self._clock)
+
+    def connect_unix_socket(
+        self, path: str, timeout: float | None = None, socket_options: Iterable[Any] | None = None
+    ) -> httpcore.NetworkStream:
+        raise httpcore.ConnectError("a public read never uses a unix socket")
+
+    def sleep(self, seconds: float) -> None:
+        self._inner.sleep(seconds)
+
+
+class _DeadlineTransport(httpx.HTTPTransport):
+    """The network transport of public reads: httpx's own, over a deadline-bounded backend."""
+
+    def __init__(self, clock: Callable[[], float]) -> None:
+        super().__init__(trust_env=False)
+        self._pool = httpcore.ConnectionPool(
+            ssl_context=httpx.create_ssl_context(trust_env=False),
+            network_backend=_DeadlineBackend(clock),
+        )
+
+
 def is_public_address(address: str) -> bool:
     """A globally routable unicast address: never loopback, private, link-local, shared,
     reserved, multicast or unspecified, including in an IPv4-mapped IPv6 form."""
@@ -355,7 +445,8 @@ class PolicedPublicReader:
                 timeout=self._timeout_s,
                 follow_redirects=False,
                 trust_env=False,
-                transport=self._http_transport,
+                # The network transport bounds every socket wait by the read's total deadline.
+                transport=self._http_transport or _DeadlineTransport(self._monotonic),
                 headers={
                     "User-Agent": DEFAULT_USER_AGENT,
                     "Accept-Language": "ko-KR,ko;q=0.9",
@@ -392,8 +483,10 @@ class PolicedPublicReader:
     ) -> PublicRead:
         started, started_mono = datetime.now(UTC), time.monotonic()
         # httpx's timeout bounds each wait, not the whole read: a host that drips bytes would hold a
-        # read open forever. The read as a whole ends at this deadline.
+        # read open forever. The read as a whole ends at this deadline: the network transport cuts
+        # every socket wait to it (connect, TLS, headers, body), and the body loop checks it too.
         deadline = self._monotonic() + self._timeout_s
+        token = _READ_DEADLINE.set(deadline)
         failure: PublicReadFailure | None = None
         status: int | None = None
         content = b""
@@ -446,6 +539,8 @@ class PolicedPublicReader:
             failure = (
                 PublicReadFailure.EGRESS_BLOCKED if blocked else PublicReadFailure.NETWORK_ERROR
             )
+        finally:
+            _READ_DEADLINE.reset(token)
         result = failure.value if failure is not None else f"HTTP_{status}"
         self._observe(lane, path, result, status, started=started, started_mono=started_mono)
         if failure is not None or status is None:
