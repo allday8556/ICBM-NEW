@@ -39,6 +39,7 @@ from app.stages.products.image_model import ImageAssetKind
 from app.stages.products.images import ProductImageService
 from app.stages.products.pricing_service import ProductPricingService
 from app.stages.products.readiness import ProductReadinessService, Readiness
+from app.stages.products.source_gates import SourceReading
 from app.stages.register.detail import DetailProfile
 from app.stages.register.guidance import (
     DEFAULT_CHOICE,
@@ -118,10 +119,8 @@ class RegistrationPreflightService:
         policies: RegistrationPolicySource,
         detail_profiles: DetailProfileSource | None = None,
         adopted_items: Callable[[str, Sequence[str]], tuple[str, ...]] | None = None,
-        source_gates: Callable[[str, Sequence[str]], tuple[tuple[str, str], ...]] | None = None,
+        source_gates: Callable[[str, Sequence[str]], SourceReading] | None = None,
         guidance: GuidanceSource | None = None,
-        sales_policies: Callable[[Sequence[str]], tuple[tuple[str, str, int, str], ...]]
-        | None = None,
     ) -> None:
         self._registrations = registrations
         # ADR-0033 G4: the Detail Guidance owner's notices. None when not wired: nothing resolves.
@@ -137,12 +136,10 @@ class RegistrationPreflightService:
         # the given ones — a listing ICBM did not create but operates. None when not wired.
         self._adopted_items = adopted_items
         # ADR-0031 §4, ADR-0030 §7: the gates the Items' sources put on a marketplace, read by the
-        # Product owner (``app.stages.products.source_gates``). None when not wired.
+        # Product owner (``SourceGates.read``) together with the sales-policy revision each Item's
+        # supplier has (ADR-0039 §1, SP-03): one read, so the gates and the pin the preparation
+        # fingerprints are one revision's. None when not wired.
         self._source_gates = source_gates
-        # ADR-0039 §1 (SP-03): the sales-policy revision each Item's supplier has, read by the
-        # Product owner (``SourceGates.policy_pins``) for the preparation to pin. None when not
-        # wired.
-        self._sales_policies = sales_policies
 
     def candidate(
         self, request: PreflightRequest, *, identity_generation: int | None = None
@@ -267,6 +264,11 @@ class RegistrationPreflightService:
                 draft.marketplace_key, target.taxonomy_revision, category.category_id
             )
         )
+        reading = (
+            SourceReading((), ())
+            if self._source_gates is None
+            else self._source_gates(draft.marketplace_key, unit_ids)
+        )
         return ResolvedUnit(
             marketplace_key=draft.marketplace_key,
             marketplace_account_id=draft.marketplace_account_id,
@@ -286,18 +288,12 @@ class RegistrationPreflightService:
                 if self._adopted_items is None
                 else tuple(self._adopted_items(draft.marketplace_key, unit_ids))
             ),
-            source_gates=(
-                ()
-                if self._source_gates is None
-                else tuple(self._source_gates(draft.marketplace_key, unit_ids))
-            ),
+            source_gates=reading.gates,
             metadata=metadata,
             target=target,
             detail_profile=self.detail_profile(target.detail_composition_revision),
             guidance=self.guidance(guidance, preparation_revision_id),
-            sales_policies=(
-                () if self._sales_policies is None else tuple(self._sales_policies(unit_ids))
-            ),
+            sales_policies=reading.pins,
         )
 
     def guidance(

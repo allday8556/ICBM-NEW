@@ -22,6 +22,7 @@ import contextlib
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from alembic import command
@@ -135,8 +136,7 @@ def _gated(container: Container, account: str) -> Preparation:
         capability=prep.capability,
         metadata=prep.metadata,
         policies=prep.policies,
-        source_gates=gates,
-        sales_policies=gates.policy_pins,
+        source_gates=gates.read,
     )
     return replace(prep, service=service)
 
@@ -163,7 +163,7 @@ def test_a_supplier_with_no_revision_uses_the_defaults_and_pins_nothing(
     item = _item(container, config, sales_channels=_channels(SalesChannelScope.CLOSED_MALL_ONLY))
     gates = SourceGates(container.product_store, lambda key: None)
     assert gates(MARKET, [item.item_id]) == ((item.item_id, SOURCE_CHANNEL_FORBIDDEN),)
-    assert gates.policy_pins([item.item_id]) == ()
+    assert gates.read(MARKET, [item.item_id]).pins == ()
     assert count(config, "supplier_sales_policy_revisions") == 0
 
 
@@ -183,8 +183,33 @@ def test_a_save_appends_one_audited_revision(container: Container, config: AppCo
     assert events == [(OPERATOR, SUPPLIER, CID), (OPERATOR, SUPPLIER, CID)]
     gates = SourceGates(container.product_store, lambda key: None)
     item = _item(container, config)
-    assert gates.policy_pins([item.item_id]) == (
+    assert gates.read(MARKET, [item.item_id]).pins == (
         (item.item_id, SUPPLIER, 2, container.sales_policies.policy(SUPPLIER).fingerprint),
+    )
+
+
+def test_the_gates_and_the_pin_come_from_one_read_of_one_revision(
+    container: Container, config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # SP-03: a warning is never paired with the pin of an enforcing revision saved in between.
+    assert _save(container, None, channels=False) == 1
+    item = _item(container, config, sales_channels=_channels(SalesChannelScope.CLOSED_MALL_ONLY))
+    store = container.product_store
+    units = 0
+    reading = store.reading
+
+    def counted() -> Any:
+        nonlocal units
+        units += 1
+        return reading()
+
+    monkeypatch.setattr(store, "reading", counted)
+    gates = SourceGates(store, lambda key: None)
+    read = gates.read(MARKET, [item.item_id])
+    assert units == 1
+    assert read.gates == ((item.item_id, SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED),)
+    assert read.pins == (
+        (item.item_id, SUPPLIER, 1, container.sales_policies.policy(SUPPLIER).fingerprint),
     )
 
 

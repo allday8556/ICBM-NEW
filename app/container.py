@@ -892,11 +892,9 @@ def build_container(
         # ADR-0031 §4, ADR-0030 §7: a forbidden or unread sales channel, or a RECON supplier;
         # ADR-0036 OB-10: an onboarded site that is not ACTIVE as well;
         # ADR-0039 §2: a warning instead where the supplier's channel policy is not applied.
-        source_gates=source_gates,
+        source_gates=source_gates.read,
         # ADR-0033 G4: the store-wide Detail Guidance notices a product's choice resolves to.
         guidance=detail_guidance_store,
-        # ADR-0039 §1: the sales-policy revision each Item's supplier has, pinned (SP-03).
-        sales_policies=source_gates.policy_pins,
     )
     # Gate 1 G1-D (ADR-0015 §5): a Draft from the operator's Product DB selection. It composes the
     # owners above — the revalidated selection, the bound account, the current target policy, M4

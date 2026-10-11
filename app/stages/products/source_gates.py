@@ -21,12 +21,13 @@ user's choice, per supplier (``app.stages.products.sales_policy``). With
 ``SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED``: non-blocking warnings (:data:`SOURCE_GATE_WARNINGS`)
 that still show the restriction (SP-04). The fact itself is read exactly as before (SP-01), and
 every marketplace's REGISTER reads the policy through this one seam.
-:meth:`SourceGates.policy_pins` names the policy revision each Item's supplier has, for the
-preparation to pin (SP-03).
+:meth:`SourceGates.read` returns the gates together with the policy revision each Item's supplier
+has, for the preparation to pin (SP-03): both from one read of one revision, so a policy saved
+between them can never pair a warning with the pin of an enforcing revision.
 """
 
 from collections.abc import Callable, Sequence
-from typing import Final
+from typing import Final, NamedTuple
 
 from sqlalchemy import select
 
@@ -34,7 +35,7 @@ from app.stages.collect.facts import FieldStatus, SalesChannelScope, SalesChanne
 from app.stages.collect.models import ProductFactsRevision
 from app.stages.products.models import SourceProduct
 from app.stages.products.pricing_service import current_procurement
-from app.stages.products.sales_policy import sales_policy_of
+from app.stages.products.sales_policy import SalesPolicy, sales_policy_of
 from app.stages.products.store import ProductFoundationStore
 
 SOURCE_CHANNEL_FORBIDDEN: Final = "SOURCE_CHANNEL_FORBIDDEN"
@@ -88,6 +89,17 @@ def _channel_verdict(status: FieldStatus, value: object, marketplace_key: str) -
     return None
 
 
+class SourceReading(NamedTuple):
+    """One read of the Items' sources for one marketplace (ADR-0039 §1, §2).
+
+    ``gates`` are ``(item_id, code)``; ``pins`` are ``(item_id, supplier_key, revision_no,
+    fingerprint)`` of the sales-policy revision those gates were decided under. A supplier with no
+    revision — the defaults — names no pin."""
+
+    gates: tuple[tuple[str, str], ...]
+    pins: tuple[tuple[str, str, int, str], ...]
+
+
 class SourceGates:
     """The source-side gates of Items, for one marketplace."""
 
@@ -103,7 +115,14 @@ class SourceGates:
         self, marketplace_key: str, item_ids: Sequence[str]
     ) -> tuple[tuple[str, str], ...]:
         """``(item_id, code)`` for every gate the Items' sources put on ``marketplace_key``."""
+        return self.read(marketplace_key, item_ids).gates
+
+    def read(self, marketplace_key: str, item_ids: Sequence[str]) -> SourceReading:
+        """The gates and the sales-policy pins, from one unit of work (SP-03): each supplier's
+        policy is read once, and the same revision decides its gates and names its pin."""
         gates: list[tuple[str, str]] = []
+        pins: list[tuple[str, str, int, str]] = []
+        policies: dict[str, SalesPolicy] = {}
         with self._store.reading() as unit:
             for item_id in item_ids:
                 procurement = current_procurement(unit, item_id)
@@ -125,6 +144,15 @@ class SourceGates:
                         )
                     ).scalar_one_or_none()
                 )
+                policy = None
+                if supplier_key is not None:
+                    policy = policies.get(supplier_key)
+                    if policy is None:
+                        policy = sales_policy_of(unit.session, supplier_key)
+                        policies[supplier_key] = policy
+                    pin = policy.pin()
+                    if pin is not None:
+                        pins.append((item_id, *pin))
                 active = None if supplier_key is None else self._site_active(supplier_key)
                 from_template = extractor is not None and TEMPLATE_REVISION_JOIN in extractor
                 if active is False or (from_template and active is not True):
@@ -136,36 +164,10 @@ class SourceGates:
                 )
                 if reading is None:
                     continue  # recorded before ADR-0031: the field did not exist (§6)
-                apply = (
-                    True
-                    if supplier_key is None
-                    else sales_policy_of(unit.session, supplier_key).apply_channel_restrictions
-                )
+                apply = True if policy is None else policy.apply_channel_restrictions
                 verdict = channel_verdict(
                     reading.status, reading.value, marketplace_key, apply_restrictions=apply
                 )
                 if verdict is not None:
                     gates.append((item_id, verdict))
-        return tuple(gates)
-
-    def policy_pins(self, item_ids: Sequence[str]) -> tuple[tuple[str, str, int, str], ...]:
-        """``(item_id, supplier_key, revision_no, fingerprint)`` of the sales-policy revision each
-        Item's supplier has now (ADR-0039 §1, SP-03). A supplier with no revision — the defaults —
-        names nothing, so an Item never configured keeps its earlier preparation fingerprint."""
-        pins: list[tuple[str, str, int, str]] = []
-        with self._store.reading() as unit:
-            for item_id in item_ids:
-                member = current_procurement(unit, item_id).member
-                if member is None:
-                    continue
-                supplier_key = unit.session.execute(
-                    select(SourceProduct.supplier_key).where(
-                        SourceProduct.source_product_uid == member.source_product_uid
-                    )
-                ).scalar_one_or_none()
-                if supplier_key is None:
-                    continue
-                pin = sales_policy_of(unit.session, supplier_key).pin()
-                if pin is not None:
-                    pins.append((item_id, *pin))
-        return tuple(pins)
+        return SourceReading(tuple(gates), tuple(pins))
