@@ -308,6 +308,11 @@ class ProductReadinessService:
                 reasons.extend(
                     Reason(guard.value, ReadinessStatus.BLOCKED) for guard in current.guard_reasons
                 )
+        if evaluation.inputs is not None and evaluation.inputs.minimum_waived:
+            # ADR-0039 §3, SP-04: the same warning as the Item path.
+            reasons.append(
+                Reason(MINIMUM_SALE_PRICE_NOT_APPLIED, ReadinessStatus.READY, "minimum_sale_price")
+            )
         ordered = _ordered(reasons)
         return Readiness(
             layer=ReadinessLayer.PRICING,

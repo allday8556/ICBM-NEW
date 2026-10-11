@@ -19,6 +19,8 @@ ADR-0039 §1, §3. Two changes, nothing else. It follows ADR-0036 O1's ``0060_su
   every existing snapshot reads ``minimum_applied = 1`` with no stated minimum — exactly what it
   priced. The CHECK ties them: an applied snapshot names no separate stated minimum, and a snapshot
   that did not apply the minimum priced without one (``minimum_sale_price_krw IS NULL``).
+- **``atomic_sku_pricing_snapshots``**: the same two columns and CHECKs, for the AtomicSKU (v2)
+  path, which reads the same policy.
 
 The database refuses an update or a delete of a policy revision and a gap in its numbering.
 
@@ -38,6 +40,7 @@ depends_on: str | Sequence[str] | None = None
 
 POLICIES = "supplier_sales_policy_revisions"
 SNAPSHOTS = "pricing_snapshots"
+ATOMIC_SNAPSHOTS = "atomic_sku_pricing_snapshots"
 
 # Frozen with this revision (``app.stages.products.models.MINIMUM_APPLIED_FLAG`` and
 # ``MINIMUM_POLICY_RECORDED``).
@@ -106,22 +109,26 @@ def upgrade() -> None:
     _trigger(POLICIES, "no_delete", "DELETE", _raise(f"a {POLICIES} row is never deleted", "1"))
     # Two columns with column CHECKs: SQLite adds them in place and rewrites no row, so the
     # snapshot's append-only triggers never fire. Every existing snapshot applied the minimum.
-    op.execute(
-        f"ALTER TABLE {SNAPSHOTS} ADD COLUMN minimum_applied BOOLEAN NOT NULL DEFAULT 1"
-        f" CONSTRAINT ck_{SNAPSHOTS}_minimum_applied_flag CHECK ({MINIMUM_APPLIED_FLAG})"
-    )
-    op.execute(
-        f"ALTER TABLE {SNAPSHOTS} ADD COLUMN stated_minimum_sale_price_krw INTEGER"
-        f" CONSTRAINT ck_{SNAPSHOTS}_minimum_policy_recorded CHECK ({MINIMUM_POLICY_RECORDED})"
-    )
+    for table in (SNAPSHOTS, ATOMIC_SNAPSHOTS):
+        op.execute(
+            f"ALTER TABLE {table} ADD COLUMN minimum_applied BOOLEAN NOT NULL DEFAULT 1"
+            f" CONSTRAINT ck_{table}_minimum_applied_flag CHECK ({MINIMUM_APPLIED_FLAG})"
+        )
+        op.execute(
+            f"ALTER TABLE {table} ADD COLUMN stated_minimum_sale_price_krw INTEGER"
+            f" CONSTRAINT ck_{table}_minimum_policy_recorded CHECK ({MINIMUM_POLICY_RECORDED})"
+        )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
     revisions = bind.execute(sa.text(f"SELECT COUNT(*) FROM {POLICIES}")).scalar_one()
-    waived = bind.execute(
-        sa.text(f"SELECT COUNT(*) FROM {SNAPSHOTS} WHERE minimum_applied = 0")
-    ).scalar_one()
+    waived = sum(
+        bind.execute(
+            sa.text(f"SELECT COUNT(*) FROM {table} WHERE minimum_applied = 0")
+        ).scalar_one()
+        for table in (SNAPSHOTS, ATOMIC_SNAPSHOTS)
+    )
     if revisions or waived:
         raise RuntimeError(
             f"cannot remove the supplier sales policy: {revisions} policy revision(s) in"
@@ -129,6 +136,7 @@ def downgrade() -> None:
             " held; an operator's policy history and pricing evidence are never silently destroyed"
         )
     # The stated minimum's CHECK names minimum_applied, so it goes first.
-    op.execute(f"ALTER TABLE {SNAPSHOTS} DROP COLUMN stated_minimum_sale_price_krw")
-    op.execute(f"ALTER TABLE {SNAPSHOTS} DROP COLUMN minimum_applied")
+    for table in (ATOMIC_SNAPSHOTS, SNAPSHOTS):
+        op.execute(f"ALTER TABLE {table} DROP COLUMN stated_minimum_sale_price_krw")
+        op.execute(f"ALTER TABLE {table} DROP COLUMN minimum_applied")
     op.drop_table(POLICIES)
