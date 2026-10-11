@@ -155,12 +155,12 @@ contains no provider transport, and grants no credentials or LIVE authority.
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 186 | all canonical and historical documents |
+| `documents/` | 187 | all canonical and historical documents |
 | `documents/acceptance/` | 73 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 11 | platform and UI contracts |
-| `documents/decisions/` | 37 | ADRs and architect review records |
+| `documents/decisions/` | 38 | ADRs and architect review records |
 | `documents/evidence/` | 30 | external provider evidence catalog |
 | `documents/reference/` | 3 | this map and the path migration map |
 | `documents/reviews/` | 4 | Claude proposal channel |
