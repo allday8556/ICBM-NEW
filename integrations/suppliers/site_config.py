@@ -147,13 +147,17 @@ def _hosts(value: Any, what: str) -> frozenset[str]:
 
 
 def _word(value: Any, what: str) -> str:
-    """A plain word or phrase: no pattern syntax, no markup, nothing but what a page would print."""
+    """A plain word or phrase: no pattern syntax, no markup, nothing but what a page would print.
+
+    Round brackets are allowed: pages print them (건강산's ``(1개)``, ADR-0035 §4), and a site
+    word is only ever matched as a literal substring, never compiled. The characters that only a
+    pattern or markup would use stay refused (PT-01)."""
     if (
         not isinstance(value, str)
         or not value
         or value != value.strip()
         or len(value) > _WORD_LIMIT
-        or any(ch in value for ch in "<>{}[]()\\|*+?^$")
+        or any(ch in value for ch in "<>{}[]\\|*+?^$")
     ):
         raise _fail(f"{what} holds a plain word only")
     return value

@@ -1,6 +1,8 @@
 """Reading a Cafe24 product document as structure (ADR-0010 §3, ADR-0030 §4).
 
-Carried over unchanged from KM통상's parser, which was a Cafe24 reader in all but name.
+Carried over from KM통상's parser, which was a Cafe24 reader in all but name. One stated difference
+(``cafe24-3``, ADR-0035): text is cleaned of invisible characters and a no-break space is a space,
+so a text made only of invisible characters is empty.
 
 Site knowledge is allowed to know where this storefront states a fact; it is not allowed to know
 how a document was fetched. This turns immutable bytes into elements, attributes and text, and
@@ -51,8 +53,22 @@ def _hides(values: Mapping[str, str]) -> bool:
     return any(marker in style for marker in HIDDEN_STYLES)
 
 
+# Characters a page may write that show nothing and join nothing: a byte-order mark, the
+# zero-width space and the word joiner (ADR-0035, U-PICK acceptance run 1). They are no words, so a
+# text made only of them is empty. The zero-width joiner and non-joiner are kept: they join an
+# emoji sequence or a script's letters, and removing them would change what is shown. A no-break
+# space is a space.
+INVISIBLE = "\ufeff\u200b\u2060"
+_UNSHOWN = str.maketrans({**dict.fromkeys(INVISIBLE, None), "\u00a0": " "})
+
+
+def clean(text: str) -> str:
+    """Text as a reader sees it: invisible characters removed and whitespace collapsed."""
+    return " ".join(text.translate(_UNSHOWN).split())
+
+
 def _collapse(words: Iterator[str]) -> str:
-    return " ".join("".join(words).split())
+    return clean("".join(words))
 
 
 @dataclass

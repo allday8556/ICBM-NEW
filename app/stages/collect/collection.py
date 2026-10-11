@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Protocol
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from app.capabilities.jobs.policy import RetryPolicy
 from app.capabilities.jobs.registry import JobContext, JobDefinition, TerminalJob
@@ -1021,11 +1021,23 @@ def pacing_key(collection: SupplierCollection, product_url: str) -> PacingKey:
 
     A hint is never an identity. It can only make a collection wait; what a revision is recorded
     under still comes from the document the supplier served.
+
+    ADR-0010 §4: a supplier whose product is named by a query (Godomall's
+    ``goods_view.php?goodsNo=…``) keeps its safe query keys in the URL part, sorted, so two
+    different products behind one path never pace each other. Every other query key is dropped,
+    and a URL without a safe key has exactly the key it always had.
     """
     parts = urlsplit(product_url)
+    safe = collection.profile.safe_query_keys.get(parts.hostname or "", frozenset())
+    kept = sorted(
+        (name, value)
+        for name, value in parse_qsl(parts.query, keep_blank_values=True)
+        if name in safe
+    )
+    query = f"?{urlencode(kept)}" if kept else ""
     return PacingKey(
         supplier_key=collection.supplier_key,
-        url=f"https://{parts.hostname}{parts.path.rstrip('/')}",
+        url=f"https://{parts.hostname}{parts.path.rstrip('/')}{query}",
         source_product_id=collection.url_product_hint(product_url),
     )
 
