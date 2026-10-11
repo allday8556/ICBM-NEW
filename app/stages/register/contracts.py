@@ -159,6 +159,10 @@ class ItemView(BaseModel):
     price_basis: str | None
     registration_item_key: str | None
     publication_assets: tuple[AssetView, ...] = ()
+    # ADR-0039 §3 (SP-04): whether the pinned price applied the supplier's minimum resale price,
+    # and the minimum the source stated when it did not — shown beside the price, never priced.
+    minimum_applied: bool | None = None
+    stated_minimum_sale_price_krw: int | None = None
     # The option fields this Item was frozen with, by name only (§4). Empty for a preparation:
     # nothing durable holds an option an operator has not frozen yet.
     option_keys: tuple[str, ...] = ()

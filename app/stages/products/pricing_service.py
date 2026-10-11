@@ -18,14 +18,20 @@ supplied context.
 ``price`` is idempotent: when the current snapshot for the Item and exact context already has the
 current dependency fingerprint, nothing is written. Otherwise a new immutable snapshot, its
 current-pointer move and both audit events commit in one unit of work, or none of them does.
+
+The member's supplier's sales policy (ADR-0039 §3) decides whether the minimum sale price is a
+pricing input; it is read in the same unit of work and pinned in the dependency fingerprint only
+when the minimum is not applied. The AtomicSKU (v2) path reads it the same way, through the member
+its source binding names.
 """
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.capabilities.audit.models import AuditEventType, AuditOutcome
 from app.capabilities.audit.service import AuditEntry, AuditLog
@@ -54,6 +60,7 @@ from app.stages.products.model import (
     Reason,
     composition_signature,
 )
+from app.stages.products.models import SourceProduct
 from app.stages.products.pricing import (
     PRICING_RULE_VERSION,
     Calculation,
@@ -65,6 +72,7 @@ from app.stages.products.pricing import (
     source_inputs,
 )
 from app.stages.products.pricing_store import PricingMove, PricingSnapshotRecord, PricingUnit
+from app.stages.products.sales_policy import sales_policy_of
 from app.stages.products.store import (
     BindingRecord,
     ItemDetail,
@@ -471,12 +479,20 @@ class ProductPricingService:
         stored = self._revisions.get(dependencies.source_revision_id)
         if stored is None:  # pragma: no cover - a foreign key guarantees the revision
             raise NotFoundError("COLLECT_REVISION_UNKNOWN", "the bound revision is missing")
+        # ADR-0039 §3: the member's supplier's sales policy, read in this unit of work.
+        apply_minimum = self._applies_minimum(unit, procurement)
+        dependencies = replace(dependencies, minimum_applied=apply_minimum)
         if dependencies.binding_kind == BindingKind.SOURCE_OFFER.value:
             # The bound offer's own total; the generic prices are never read (ruling 5738760913).
             assert procurement.offer is not None  # no reason means the offer fits
-            inputs = offer_source_inputs(stored.fields, procurement.offer.terms, stored.currency)
+            inputs = offer_source_inputs(
+                stored.fields,
+                procurement.offer.terms,
+                stored.currency,
+                apply_minimum=apply_minimum,
+            )
         else:
-            inputs = source_inputs(stored.fields)
+            inputs = source_inputs(stored.fields, apply_minimum=apply_minimum)
         if isinstance(inputs, tuple):
             return _with(base, reasons=inputs)
         calculation = calculate(inputs, context)
@@ -493,6 +509,37 @@ class ProductPricingService:
             calculation=calculation,
             current_snapshot=current,
         )
+
+    def _applies_minimum_to(self, session: Session, group_member_id: str) -> bool:
+        """Whether the sales policy of a group member's supplier applies the minimum sale price
+        (ADR-0039 §3), for the AtomicSKU path. The defaults apply it."""
+        member = ProductFoundationUnit(session, self._clock).member_detail(group_member_id)
+        if member is None:  # pragma: no cover - a binding's foreign key names a member
+            return True
+        supplier_key = session.scalar(
+            select(SourceProduct.supplier_key).where(
+                SourceProduct.source_product_uid == member.source_product_uid
+            )
+        )
+        if supplier_key is None:  # pragma: no cover - a member always names its source product
+            return True
+        return sales_policy_of(session, supplier_key).apply_minimum_price
+
+    @staticmethod
+    def _applies_minimum(unit: ProductFoundationUnit, procurement: Procurement) -> bool:
+        """Whether the sales policy of the member's supplier applies the minimum sale price
+        (ADR-0039 §3). The defaults apply it."""
+        member = procurement.member
+        if member is None:  # pragma: no cover - dependencies exist only for a confirmed member
+            return True
+        supplier_key = unit.session.scalar(
+            select(SourceProduct.supplier_key).where(
+                SourceProduct.source_product_uid == member.source_product_uid
+            )
+        )
+        if supplier_key is None:  # pragma: no cover - a member always names its source product
+            return True
+        return sales_policy_of(unit.session, supplier_key).apply_minimum_price
 
     def _current_atomic_snapshot(
         self,
@@ -579,14 +626,13 @@ class ProductPricingService:
         stored = self._revisions.get(dependencies.source_revision_id)
         if stored is None:  # pragma: no cover - foreign keys guarantee the revision
             raise NotFoundError("COLLECT_REVISION_UNKNOWN", "the bound revision is missing")
-        source = source_inputs(stored.fields)
+        # ADR-0039 §3: the bound member's supplier's sales policy, read in this unit of work.
+        apply_minimum = self._applies_minimum_to(unit.session, dependencies.binding.group_member_id)
+        dependencies = replace(dependencies, minimum_applied=apply_minimum)
+        source = source_inputs(stored.fields, apply_minimum=apply_minimum)
         if isinstance(source, tuple):
             return _with_atomic(base, reasons=source)
-        inputs = SourceInputs(
-            purchase_cost_krw=dependencies.binding.purchase_cost_krw,
-            supplier_shipping_krw=source.supplier_shipping_krw,
-            minimum_sale_price_krw=source.minimum_sale_price_krw,
-        )
+        inputs = replace(source, purchase_cost_krw=dependencies.binding.purchase_cost_krw)
         calculation = calculate(inputs, context)
         if isinstance(calculation, Reason):
             return _with_atomic(base, reasons=(calculation,))
@@ -663,6 +709,15 @@ def _recorded_entry(
             "final_sale_price_krw": snapshot.final_sale_price_krw,
             "expected_net_profit_krw": snapshot.expected_net_profit_krw,
             "expected_net_margin_bp": snapshot.expected_net_margin_bp,
+            # ADR-0039 §3: named only when the supplier's minimum was not applied.
+            **(
+                {}
+                if snapshot.minimum_applied
+                else {
+                    "minimum_applied": False,
+                    "stated_minimum_sale_price_krw": snapshot.stated_minimum_sale_price_krw,
+                }
+            ),
         },
         correlation_id=correlation,
     )
@@ -714,6 +769,15 @@ def _atomic_recorded_entry(snapshot: AtomicPricingSnapshotRecord, correlation: s
             "final_sale_price_krw": snapshot.final_sale_price_krw,
             "price_basis": snapshot.price_basis.value,
             "guard_reasons": [reason.value for reason in snapshot.guard_reasons],
+            # ADR-0039 §3: named only when the supplier's minimum was not applied.
+            **(
+                {}
+                if snapshot.minimum_applied
+                else {
+                    "minimum_applied": False,
+                    "stated_minimum_sale_price_krw": snapshot.stated_minimum_sale_price_krw,
+                }
+            ),
         },
         correlation_id=correlation,
     )

@@ -1,6 +1,7 @@
 """C-P2 AtomicSKU-qualified source economics and pricing, provider-zero."""
 
 import contextlib
+import json
 import sqlite3
 import uuid
 from collections.abc import Sequence
@@ -10,7 +11,7 @@ import pytest
 from app.config import AppConfig, database_path
 from app.container import Container
 from app.platform.core.errors import InputValidationError
-from app.stages.collect.facts import OptionAxis, OptionConfiguration, OptionsValue
+from app.stages.collect.facts import FieldFact, OptionAxis, OptionConfiguration, OptionsValue
 from app.stages.products.atomic_sku import (
     AtomicSKUConfigurationSpec,
     AtomicSKUSelectionSpec,
@@ -25,9 +26,11 @@ from app.stages.products.common_options import (
     CommonSalesOptionValueSpec,
 )
 from app.stages.products.model import CompositionSpec, MoveReason, ReadinessStatus
+from app.stages.products.pricing import MINIMUM_SALE_PRICE_NOT_APPLIED, PriceBasis
 from app.stages.products.pricing_service import PricingOutcome
+from app.stages.products.sales_policy import SaveSalesPolicyRequest
 from tests.support.collect_support import collected, confirmed
-from tests.support.product_support import context, product
+from tests.support.product_support import SUPPLIER, context, minimum, product
 
 pytestmark = pytest.mark.integration
 
@@ -37,9 +40,11 @@ def _build(
     configurations: Sequence[OptionConfiguration],
     *,
     composition: CompositionSpec | None = None,
+    minimum_sale_price: FieldFact | None = None,
 ):  # type: ignore[no-untyped-def]
     fields = product(
         price=10_000,
+        minimum_sale_price=minimum_sale_price,
         options=confirmed(
             OptionsValue(
                 axes=(OptionAxis(name="용량", values=("300mg", "500mg")),),
@@ -203,6 +208,72 @@ def test_each_atomic_sku_has_exact_cost_and_its_own_pricing_snapshot(
     same = container.pricing.price_atomic_sku(items[0].atomic_sku_item_id, ctx)
     assert same.outcome is PricingOutcome.UNCHANGED
     assert same.snapshot == snapshots[0]
+
+
+def test_a_supplier_minimum_the_policy_does_not_apply_is_kept_beside_the_atomic_price(
+    container: Container, config: AppConfig
+) -> None:
+    # ADR-0039 §3: the AtomicSKU path reads the bound member's supplier's sales policy as well.
+    _group, _revision, _source, (item,) = _build(
+        container,
+        (
+            OptionConfiguration(
+                selections=("300mg",), supplier_sku_id="sku-a", additional_price_krw=0
+            ),
+        ),
+        minimum_sale_price=minimum(50_000),
+    )
+    container.atomic_sku_economics.bind_source_configuration(
+        item.atomic_sku_item_id, decided_by="owner", correlation_id="bind"
+    )
+    ctx = context()
+    applied = container.pricing.price_atomic_sku(item.atomic_sku_item_id, ctx)
+    assert applied.snapshot is not None
+    assert applied.snapshot.price_basis is PriceBasis.MINIMUM_SALE_PRICE
+    assert applied.snapshot.minimum_applied and applied.snapshot.final_sale_price_krw == 50_000
+
+    def policy(expected: int | None, *, minimum_price: bool) -> None:
+        container.sales_policies.save(
+            SUPPLIER,
+            SaveSalesPolicyRequest(
+                expected_revision_no=expected,
+                apply_channel_restrictions=True,
+                apply_minimum_price=minimum_price,
+            ),
+            actor="owner",
+            correlation_id="policy",
+        )
+
+    policy(None, minimum_price=False)
+    stale = container.product_readiness.atomic_pricing_readiness(item.atomic_sku_item_id, ctx)
+    assert stale.status is ReadinessStatus.STALE  # the policy is in the dependency fingerprint
+    waived = container.pricing.price_atomic_sku(item.atomic_sku_item_id, ctx)
+    assert waived.outcome is PricingOutcome.RECORDED and waived.snapshot is not None
+    assert waived.snapshot.price_basis is PriceBasis.TARGET_MARGIN
+    assert waived.snapshot.minimum_sale_price_krw is None
+    assert not waived.snapshot.minimum_applied
+    assert waived.snapshot.stated_minimum_sale_price_krw == 50_000
+    assert waived.snapshot.final_sale_price_krw < 50_000
+    ready = container.product_readiness.atomic_pricing_readiness(item.atomic_sku_item_id, ctx)
+    assert ready.status is ReadinessStatus.READY
+    assert MINIMUM_SALE_PRICE_NOT_APPLIED in {reason.code for reason in ready.reasons}
+    with contextlib.closing(sqlite3.connect(database_path(config.data_dir))) as raw:
+        details = raw.execute(
+            "SELECT details_json FROM audit_events WHERE target_ref = ?",
+            (waived.snapshot.pricing_snapshot_id,),
+        ).fetchone()
+    assert details is not None
+    recorded = json.loads(details[0])
+    assert (recorded["minimum_applied"], recorded["stated_minimum_sale_price_krw"]) == (
+        False,
+        50_000,
+    )
+
+    policy(1, minimum_price=True)
+    again = container.pricing.price_atomic_sku(item.atomic_sku_item_id, ctx)
+    assert again.outcome is PricingOutcome.RECORDED and again.snapshot is not None
+    assert again.snapshot.minimum_applied and again.snapshot.final_sale_price_krw == 50_000
+    assert again.snapshot.dependency_fingerprint == applied.snapshot.dependency_fingerprint
 
 
 def test_missing_option_delta_is_review_required_not_fabricated(container: Container) -> None:
