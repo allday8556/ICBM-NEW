@@ -258,6 +258,7 @@ def bind(site: SiteConfig, extraction_revision: str) -> SiteBinding:
             limits=CollectionLimits(
                 max_image_refs=int(limits["max_image_refs"]),
                 max_image_bytes=int(limits["max_image_bytes"]),
+                max_detail_image_bytes=int(limits["max_detail_image_bytes"]),
                 max_image_requests_per_run=int(limits["max_image_requests_per_run"]),
                 max_new_image_bytes_per_run=int(limits["max_new_image_bytes_per_run"]),
                 same_product_interval_s=float(limits["same_product_interval_s"]),

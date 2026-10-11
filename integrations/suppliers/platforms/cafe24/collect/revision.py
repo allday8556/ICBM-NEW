@@ -31,6 +31,15 @@ KM통상's parser reads a first value, a guess or nothing, the template fails cl
 - text is cleaned of the byte-order mark, the zero-width space and the word joiner, and a no-break
   space is a space, in page text and in the declared title, so a text made only of them is empty,
   and a title with a doubled space still matches its row plus the site's suffix.
+
+``cafe24-4`` (2026-10-11, ADR-0037 §1, the owner's caps by role, Issue #219 ``6103784916``):
+- an image is capped by its canonical role: 5 MB (5,000,000 bytes) for a ``REPRESENTATIVE`` image,
+  the representative and the additional images, and 30 MB (30,000,000 bytes) for a ``DETAIL``
+  (description) image; an image over its role's cap is ``OVERSIZE`` and never stored;
+- the per-product run total rises from 24 MiB to 120 MB (120,000,000 bytes); an image over what
+  the run has left is ``BUDGET_EXHAUSTED``, as before.
+No reading changes. The ``facts`` module docstring now states KM통상's ``kmretail-5`` minimum
+reading, which ``cafe24-3`` left at ``kmretail-4``'s.
 """
 
-EXTRACTION_REVISION = "cafe24-3"
+EXTRACTION_REVISION = "cafe24-4"

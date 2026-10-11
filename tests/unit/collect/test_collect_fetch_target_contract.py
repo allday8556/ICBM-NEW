@@ -54,6 +54,7 @@ def _profile() -> CollectionProfile:
         limits=CollectionLimits(
             max_image_refs=20,
             max_image_bytes=512,
+            max_detail_image_bytes=512,
             max_image_requests_per_run=10,
             max_new_image_bytes_per_run=4096,
             same_product_interval_s=60.0,

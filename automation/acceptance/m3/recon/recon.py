@@ -146,6 +146,7 @@ def recon_profile(
         limits=CollectionLimits(
             max_image_refs=cap,
             max_image_bytes=RECON_IMAGE_BYTES,
+            max_detail_image_bytes=RECON_IMAGE_BYTES,
             max_image_requests_per_run=cap,
             max_new_image_bytes_per_run=cap * RECON_IMAGE_BYTES,
             same_product_interval_s=SAME_PRODUCT_INTERVAL_S,
