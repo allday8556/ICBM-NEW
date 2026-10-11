@@ -158,6 +158,9 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     # G5 only a composition revision older than the SmartStore v3 profile).
     "PUBLICATION_GUIDANCE_UNPLACED": (_X, None),
     "PUBLICATION_ASSET_QA_NOT_PASSED": (_X, None),
+    # ADR-0037 §2: no upload-fit variant could be made for an oversize image; the operator chooses
+    # another image (or saves the preparation again after the selection changed).
+    "IMAGE_UPLOAD_FIT_FAILED": (_F, _IMAGES),
     "PROVIDER_ASSET_IDENTITY_MISSING": (_X, None),
     "PREPARED_ASSET_CANDIDATE_MISMATCH": (_X, None),
     "PREPARED_ASSET_PROFILE_MISMATCH": (_X, None),

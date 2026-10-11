@@ -8,12 +8,14 @@ import pytest
 from app.capabilities.live_safety.assets import TransmissionPrecluded
 from app.capabilities.live_safety.model import UploadAttemptState
 from app.stages.products.image_model import ImageAssetKind
+from app.stages.register.upload_fit import UPLOAD_FIT_THRESHOLD
 from integrations.marketplaces.smartstore.assets import (
     ImageUploadAdapter,
     SmartStoreAssetSender,
     upload_request,
 )
 from integrations.marketplaces.smartstore.caller import (
+    IMAGE_UPLOAD_MAX_BYTES,
     SmartStoreCallError,
     SmartStoreEndpointCaller,
 )
@@ -106,6 +108,8 @@ def test_only_documented_url_leaves_cross_the_response_boundary() -> None:
         {"filename": "artifact\r\nx.jpg"},
         {"media_type": "application/octet-stream"},
         {"content": b""},
+        # ADR-0037 IC-02: an artifact at or over the upload-fit threshold never reaches the wire.
+        {"content": bytes(IMAGE_UPLOAD_MAX_BYTES)},
         {"credential_generation": 0},
     ],
 )
@@ -121,6 +125,24 @@ def test_unusable_artifact_or_session_fails_before_transport(change: dict[str, A
             candidate_fingerprint="c" * 64,
         )
     assert provider.requests == []
+
+
+def test_the_wire_bound_is_the_upload_fit_threshold() -> None:
+    """ADR-0037 IC-02: the wire refuses exactly what the upload-fit recipe fits, so only a variant
+    or an image under the threshold can be sent; one byte less still goes."""
+    assert IMAGE_UPLOAD_MAX_BYTES == UPLOAD_FIT_THRESHOLD == 9_500_000
+    provider = Provider(httpx.Response(200, json={"images": [{"url": REF}]}))
+    outcome = adapter(provider).upload(
+        request(content=bytes(IMAGE_UPLOAD_MAX_BYTES - 1)),
+        asset_kind=ImageAssetKind.DERIVED_ARTIFACT,
+        sha256="a" * 64,
+        derivation_id="d" * 8,
+        asset_profile="smartstore-main/v1",
+        candidate_fingerprint="c" * 64,
+    )
+    assert outcome.asset is not None
+    (sent,) = provider.requests
+    assert len(sent.content) < 10**7
 
 
 def test_response_failure_is_upload_unknown_and_is_not_retried() -> None:
@@ -276,8 +298,9 @@ def test_a_possibly_transmitted_failure_is_unknown_and_never_retried(
         {"file_name": "../artifact.jpg"},
         {"media_type": "application/octet-stream"},
         {"content": b""},
+        {"content": bytes(IMAGE_UPLOAD_MAX_BYTES)},
     ],
-    ids=["unsafe-name", "not-an-image", "empty"],
+    ids=["unsafe-name", "not-an-image", "empty", "over-the-upload-fit-threshold"],
 )
 def test_a_local_refusal_proves_nothing_left_the_process(change: dict[str, Any]) -> None:
     provider = Provider(httpx.Response(200, json={"images": [{"url": REF}]}))

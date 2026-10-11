@@ -163,6 +163,8 @@ export const REASON_COPY = {
   // ADR-0033 §8: a resolved top or bottom notice the unit's composition does not place. Since G5
   // the SmartStore composition (v3) places both; an older composition revision does not.
   PUBLICATION_GUIDANCE_UNPLACED: '이 상품의 상세페이지 구성은 상·하단 공지를 넣지 못합니다. 등록 정책을 다시 저장한 뒤 준비 내용을 저장하면 공지가 들어갑니다. 이 상품에서 그 공지를 끄면 이 사유는 사라집니다.',
+  // ADR-0037 §2: an image over SmartStore's upload limit with no upload-fit variant.
+  IMAGE_UPLOAD_FIT_FAILED: '9.5MB 넘는 이미지의 업로드용 압축본이 없습니다. 아직 없다면 준비 내용을 저장하면 다시 만듭니다. 저장 후에도 남으면 줄일 수 없는 이미지이니 다른 이미지를 고르세요.',
   GUIDANCE_TEXT_INVALID: '쓸 수 없는 공지 문구입니다. 상세페이지 단계의 직접 작성 문구를 확인하세요.',
   GUIDANCE_TEXT_TOO_WIDE: '공지 문구 중 템플릿 글상자보다 넓은 줄이 있습니다.',
   GUIDANCE_TEMPLATE_UNKNOWN: '알 수 없는 공지 템플릿입니다.',
@@ -417,9 +419,20 @@ export function itemRow(item) {
           'span',
           { class: 'mini', 'data-asset': asset.sha256, 'data-qa': asset.qa_verdict ?? 'NONE' },
           `${asset.role} ${asset.sha256.slice(0, 8)} ${asset.qa_verdict ?? 'QA 없음'}`,
+          asset.upload_fit ? uploadFitLabel(asset.upload_fit) : null,
         ),
       ),
     ),
+  );
+}
+
+// ADR-0037 §3: the image is uploaded as its upload-fit variant; the server says which one.
+function uploadFitLabel(fit) {
+  const mb = (fit.byte_size / 1_000_000).toFixed(1);
+  return h(
+    'span',
+    { class: 'chip', 'data-upload-fit': fit.source_sha256 },
+    `업로드용 압축본 · ${fit.width}×${fit.height} · ${mb}MB`,
   );
 }
 

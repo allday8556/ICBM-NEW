@@ -87,6 +87,21 @@ Two facts meet here.
   - A variant never inherits the source's QA.
 - The registration screens show, beside each image that uses one, that an upload-fit variant was used, with its size and dimensions.
 
+> **Amendment note (C2, 2026-10-11).** The automatic image QA in force is **`image-qa-auto/v2`**.
+> Its byte check is role-aware: an image selected as `REPRESENTATIVE` or `ADDITIONAL` passes up to
+> 5,000,000 bytes and a `DETAIL` image up to 30,000,000 bytes — the §1 collection caps of its role —
+> and an upload-fit variant is checked under the 9,500,000-byte threshold of §2. Under ADR-0013 §9 a
+> changed rule is a new version, so a v1 verdict reads as stale and is never carried forward. v2
+> only tightens or matches the collection caps: no image is collected that v2 would refuse for its
+> size, and the representative bound tightens from 5 MiB to 5,000,000 bytes. A derived artifact an
+> operator selects is still read under the operator rule only; only the upload-fit variant reads its
+> own automatic QA. Because the bound depends on the role, each v2 verdict is bound to the role class
+> it was evaluated for — `REPRESENTATIVE` (the representative and additional images, one cap) or
+> `DETAIL` — as part of its QA input identity, and every lookup names the role being satisfied: a
+> verdict for one class never satisfies the other, so a 12 MB file that passed as a description image
+> is never accepted as a representative image. An upload-fit variant's verdict is bound to the role it
+> serves, under that role's cap or the threshold, whichever is lower.
+
 ### 4. Slices
 
 | # | slice |
