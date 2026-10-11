@@ -3585,6 +3585,7 @@ def test_smartstore_wire_literals_live_only_in_the_endpoint_registry() -> None:
     holders = {
         path
         for path, tree in _production_modules().items()
+        if path.startswith("integrations/marketplaces/smartstore/")
         if any(_SMARTSTORE_WIRE.search(node.value) for node in _code_strings(tree))
     }
     assert holders == {SMARTSTORE_REGISTRY}

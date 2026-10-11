@@ -41,6 +41,10 @@ SOURCE_PRODUCT: Final = "PRODUCT"
 GUIDANCE_CHOICE_INVALID: Final = "REGISTER_GUIDANCE_CHOICE_INVALID"
 # A CUSTOM notice was submitted but no Detail Guidance owner is wired to render it.
 GUIDANCE_UNAVAILABLE: Final = "REGISTER_GUIDANCE_UNAVAILABLE"
+# The Detail Guidance owner's image route (``app.capabilities.detail_guidance.service``), which
+# serves every recorded guidance image, a product's own included. A contract test pins the two.
+# A local ICBM route, never a provider URL: only a read view builds it, never a Snapshot.
+GUIDANCE_IMAGE_PATH: Final = "/api/v1/settings/detail-guidance/images/{sha256}"
 
 
 class GuidanceMode(StrEnum):
