@@ -340,7 +340,8 @@ class OptionConfiguration(FactValue):
 
 class OptionsValue(FactValue):
     """Source option axes and configurations in source order. Count, grade and weight stay
-    distinct values; a product whose page proves it has no option control has zero axes."""
+    distinct values. A product whose page proves it has no option control states no value: its
+    options are ``ABSENT`` (ADR-0013 ruling B; ADR-0010 §7 as amended, Issue #219 6097082224)."""
 
     axes: tuple[OptionAxis, ...]
     configurations: tuple[OptionConfiguration, ...] = ()

@@ -49,7 +49,6 @@ from app.stages.collect.facts import (
     MoneyValue,
     NoticeItem,
     NoticeValue,
-    OptionsValue,
     PricesValue,
     ShippingKind,
     ShippingValue,
@@ -518,13 +517,18 @@ class _Pass:
             if element.tag == "select" and element.presented
         ]
         if not selects:
-            # The page proves it has no option control: zero axes, CONFIRMED (ADR-0010 §7).
+            # The page proves it has no option control: that stated absence is ``ABSENT``, the
+            # Product DB's proof of "no options" (ADR-0013 ruling B, M3.md §2.1; ADR-0010 §7 as
+            # amended by owner decision Issue #219 6097082224), as KM통상 and the Cafe24 and
+            # Godomall templates read it. The control-state proof is kept as its evidence.
             return FieldFact(
-                FieldStatus.CONFIRMED,
-                OptionsValue(axes=()),
+                FieldStatus.ABSENT,
+                None,
                 (
                     _marker(
-                        EvidenceKind.CONTROL_STATE, f"{where}:no-control", FieldStatus.CONFIRMED
+                        EvidenceKind.CONTROL_STATE,
+                        f"{where}:absent:no-control",
+                        FieldStatus.ABSENT,
                     ),
                 ),
             )
