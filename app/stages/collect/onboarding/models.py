@@ -9,10 +9,12 @@
   newest row of a ``(host, role)`` decides it. Only the bootstrap storefront host has no trial.
 - ``onboarding_word_revisions``: words per template slot, numbered from one, with a fingerprint.
 - ``onboarding_policy_reads``: the robots.txt and terms reads shown at add time, acknowledged.
-- ``onboarding_trials``: one trial read (§5): never a ``ProductFactsRevision`` (OB-02).
+- ``onboarding_trials``: one trial read (§5), with the fingerprint of the facts it showed:
+  never a ``ProductFactsRevision`` (OB-02).
 - ``onboarding_verifications``: the operator's verification of one trial's facts.
 
-The database refuses an update or a delete of any row. ``store.OnboardingStore`` is the only
+The database refuses an update or a delete of any row, and a transition to ``ACTIVE`` that the
+trials and verifications do not prove (ADR-0036 §7, OB-04). ``store.OnboardingStore`` is the only
 writer. No credential is ever stored here (OB-05).
 """
 
@@ -104,6 +106,7 @@ class OnboardingTrial(Base):
         CheckConstraint("template_revision <> ''", name="template_revision_present"),
         CheckConstraint("words_seq >= 0", name="words_seq_known"),
         CheckConstraint(_hex64("capture_sha256"), name="capture_sha256_hex"),
+        CheckConstraint(_hex64("facts_fingerprint"), name="facts_fingerprint_hex"),
         CheckConstraint(_json("field_status_json", "object"), name="field_status_is_object"),
         CheckConstraint(_json("unread_rows_json", "array"), name="unread_rows_is_array"),
         CheckConstraint(_json("observed_hosts_json", "array"), name="observed_hosts_is_array"),
@@ -119,6 +122,8 @@ class OnboardingTrial(Base):
     template_revision: Mapped[str] = mapped_column(String(64))
     words_seq: Mapped[int] = mapped_column(Integer)
     capture_sha256: Mapped[str] = mapped_column(String(64))
+    # The fingerprint of the facts the trial showed; a verification names exactly this (§7).
+    facts_fingerprint: Mapped[str] = mapped_column(String(64))
     field_status_json: Mapped[str] = mapped_column(Text)
     unread_rows_json: Mapped[str] = mapped_column(Text)
     observed_hosts_json: Mapped[str] = mapped_column(Text)

@@ -7,7 +7,10 @@ fingerprints only: never a credential, a word, a reason the operator typed or pa
 
 - ``create`` writes the identity, the first state ``DRAFT`` and the bootstrap storefront host,
   the origin's own host, which passes the host guard first (OB-01).
-- ``transition`` appends one allowed edge of the state log (§3, §7).
+- ``transition`` appends one allowed edge of the state log (§3, §7). ``RECON → ACTIVE`` is
+  appended only when the trials and verifications prove it (§7 D2, OB-04, ``activation``); the
+  database refuses an unproven ``ACTIVE`` as well. Trials and verifications have no writer before
+  O3 and O5, so in O1 no site can become ``ACTIVE``.
 - ``save_words`` appends a words revision checked by the site-word rules and the template's own
   slots (OB-03). A words change to an ``ACTIVE`` site appends ``RECON`` in the same unit (OB-04).
 - ``confirm_host`` and ``disable_host`` append host rows. A confirmed host other than the
@@ -22,6 +25,7 @@ import logging
 import re
 import uuid
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from typing import Any, Final
 
 from sqlalchemy import func, select
@@ -32,12 +36,14 @@ from app.capabilities.audit.service import AuditEntry, AuditLog
 from app.platform.core.clock import Clock
 from app.platform.core.errors import AppError, ErrorClass, InputValidationError, NotFoundError
 from app.platform.db.database import Database
+from app.stages.collect.facts import FIELD_REGISTRY, FieldLevel, FieldStatus
 from app.stages.collect.onboarding.hosts import onboarding_host, onboarding_origin
 from app.stages.collect.onboarding.models import (
     OnboardedSupplier,
     OnboardingHost,
     OnboardingTransition,
     OnboardingTrial,
+    OnboardingVerification,
     OnboardingWordRevision,
 )
 from app.stages.collect.onboarding.site import (
@@ -74,6 +80,16 @@ ONBOARDING_HOST_UNKNOWN: Final = "ONBOARDING_HOST_UNKNOWN"
 ONBOARDING_ROLE_UNKNOWN: Final = "ONBOARDING_ROLE_UNKNOWN"
 ONBOARDING_REASON_INVALID: Final = "ONBOARDING_REASON_INVALID"
 ONBOARDING_EVIDENCE_INVALID: Final = "ONBOARDING_EVIDENCE_INVALID"
+ONBOARDING_ACTIVATION_NOT_PROVEN: Final = "ONBOARDING_ACTIVATION_NOT_PROVEN"
+
+# ADR-0036 §2 D2: three distinct samples prove a words revision.
+ACTIVATION_SAMPLES: Final = 3
+# The fields every proving trial reads: the fact registry's CORE fields (ADR-0030 §2).
+CORE_FIELDS: Final = tuple(
+    key for key, spec in FIELD_REGISTRY.items() if spec.level is FieldLevel.CORE
+)
+_VERIFIED: Final = "CORRECT"
+_REFUTED: Final = "WRONG"
 
 _SLUG_LIMIT: Final = 28
 _REASON_LIMIT: Final = 200
@@ -81,6 +97,43 @@ _EVIDENCE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _EVIDENCE_LIMIT: Final = 32
 
 Listener = Callable[[str], None]
+
+
+@dataclass(frozen=True)
+class ActivationProof:
+    """What the trials under the current words revision prove (ADR-0036 §7).
+
+    A trial proves its sample when it ran under the current words revision and template revision,
+    read every core field ``CONFIRMED``, has no structural problem, and carries an operator
+    verification ``CORRECT`` of exactly the facts it showed and no ``WRONG`` one."""
+
+    words_seq: int
+    # Trials under the current words revision and template revision.
+    trials: int
+    # The distinct sample URL keys a trial proves, and one verification id for each.
+    proven_samples: tuple[str, ...]
+    evidence: tuple[str, ...]
+    # Trials under the current words that fail each condition (a trial may fail several).
+    core_unread: int
+    unverified: int
+    refuted: int
+    structural_open: int
+
+    @property
+    def proven(self) -> bool:
+        return len(self.proven_samples) >= ACTIVATION_SAMPLES and self.structural_open == 0
+
+    def details(self) -> dict[str, Any]:
+        return {
+            "words_seq": self.words_seq,
+            "required_samples": ACTIVATION_SAMPLES,
+            "proven_samples": len(self.proven_samples),
+            "trials": self.trials,
+            "core_unread": self.core_unread,
+            "unverified": self.unverified,
+            "refuted": self.refuted,
+            "structural_open": self.structural_open,
+        }
 
 
 class OnboardingConflictError(AppError):
@@ -243,7 +296,10 @@ class OnboardingStore:
         evidence: Iterable[str] = (),
     ) -> OnboardingRecord:
         """Append one allowed edge: ``DRAFT → RECON``, ``RECON → ACTIVE``, ``ACTIVE → RECON``,
-        or any state but ``DISABLED`` → ``DISABLED`` (§3, §7)."""
+        or any state but ``DISABLED`` → ``DISABLED`` (§3, §7).
+
+        ``ACTIVE`` is refused with ``ONBOARDING_ACTIVATION_NOT_PROVEN`` unless the trials prove it
+        (:meth:`activation`); its evidence then also names one verification per proven sample."""
         target = OnboardingState(to_state)
         why = _reason(reason)
         ids = _evidence(evidence)
@@ -255,6 +311,16 @@ class OnboardingStore:
                     "the supplier cannot move to that state from its current one",
                     details={"from": record.state.value, "to": target.value},
                 )
+            if target is OnboardingState.ACTIVE:
+                proof = self._activation(session, record)
+                if not proof.proven:
+                    raise OnboardingConflictError(
+                        ONBOARDING_ACTIVATION_NOT_PROVEN,
+                        f"approval needs {ACTIVATION_SAMPLES} distinct verified samples under the"
+                        " current words, with every core field read and no structural problem",
+                        details=proof.details(),
+                    )
+                ids = _evidence([*ids, *(e for e in proof.evidence if e not in ids)])
             self._append_transition(session, record, target, actor, why, ids)
             record = _current(session, key)
         self._changed(key)
@@ -398,6 +464,11 @@ class OnboardingStore:
 
     # ------------------------------------------------------------------ reads
 
+    def activation(self, key: str) -> ActivationProof:
+        """What the trials under the current words revision prove now (§7)."""
+        with self._db.read() as session:
+            return self._activation(session, _current(session, key))
+
     def current(self, key: str) -> OnboardingRecord:
         with self._db.read() as session:
             return _current(session, key)
@@ -411,6 +482,53 @@ class OnboardingStore:
             return tuple(_current(session, key) for key in keys)
 
     # ------------------------------------------------------------------ internals
+
+    def _activation(self, session: Session, record: OnboardingRecord) -> ActivationProof:
+        revision = self.template(record.template).revision
+        trials = session.scalars(
+            select(OnboardingTrial)
+            .where(
+                OnboardingTrial.supplier_key == record.supplier_key,
+                OnboardingTrial.words_seq == record.words_seq,
+            )
+            .order_by(OnboardingTrial.created_at, OnboardingTrial.trial_id)
+        ).all()
+        structural_open = sum(1 for t in trials if _json_list(t.structural_json))
+        current = [t for t in trials if t.template_revision == revision]
+        verifications: dict[str, list[OnboardingVerification]] = {}
+        for row in session.scalars(
+            select(OnboardingVerification)
+            .where(OnboardingVerification.trial_id.in_([t.trial_id for t in current]))
+            .order_by(OnboardingVerification.verification_id)
+        ):
+            verifications.setdefault(row.trial_id, []).append(row)
+        proven: dict[str, str] = {}
+        core_unread = unverified = refuted = 0
+        for trial in current:
+            statuses = _json_object(trial.field_status_json)
+            core_read = all(statuses.get(f) == FieldStatus.CONFIRMED.value for f in CORE_FIELDS)
+            shown = [
+                v
+                for v in verifications.get(trial.trial_id, [])
+                if v.shown_fingerprint == trial.facts_fingerprint
+            ]
+            correct = [v for v in shown if v.verdict == _VERIFIED]
+            wrong = any(v.verdict == _REFUTED for v in shown)
+            core_unread += not core_read
+            refuted += wrong
+            unverified += not correct and not wrong
+            if core_read and correct and not wrong and not _json_list(trial.structural_json):
+                proven.setdefault(trial.sample_url_key, correct[0].verification_id)
+        return ActivationProof(
+            words_seq=record.words_seq,
+            trials=len(current),
+            proven_samples=tuple(sorted(proven)),
+            evidence=tuple(proven[sample] for sample in sorted(proven)),
+            core_unread=core_unread,
+            unverified=unverified,
+            refuted=refuted,
+            structural_open=structural_open,
+        )
 
     def _free_key(self, session: Session, host: str) -> str:
         base = f"{SITE_KEY_PREFIX}{_slug(host)}"
@@ -568,6 +686,22 @@ def _role(value: HostRole | str) -> HostRole:
             ONBOARDING_ROLE_UNKNOWN,
             "a host's role is storefront, login or image",
         ) from None
+
+
+def _json_list(text: str) -> list[Any]:
+    try:
+        value = json.loads(text)
+    except ValueError:
+        return ["unreadable"]
+    return value if isinstance(value, list) else ["unreadable"]
+
+
+def _json_object(text: str) -> dict[str, Any]:
+    try:
+        value = json.loads(text)
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def _observed(session: Session, key: str, trial_id: str, host: str) -> bool:

@@ -11,7 +11,12 @@ ADR-0036 §3. It adds seven tables and touches no existing table, row, trigger o
 - `onboarding_transitions`: the append-only state log. The numbering opens at one with `DRAFT`
   and moves by exactly one; each row leaves the state the row before it reached, along an allowed
   edge only (`DRAFT → RECON`, `RECON → ACTIVE`, `ACTIVE → RECON`, any other state `→ DISABLED`).
-  The newest row is the current state.
+  The newest row is the current state. **`ACTIVE` is entered only when proven** (§7 D2,
+  OB-04): at least 3 distinct sample URLs have a trial under the current words revision with
+  every core field `CONFIRMED`, no structural problem and an operator verification `CORRECT` of
+  exactly what the trial showed (its facts fingerprint), and no `WRONG` one; and no trial under the
+  current words has an open structural problem. Until O3 and O5 write trials and verifications,
+  `ACTIVE` is therefore unreachable.
 - `onboarding_hosts`: one row per confirmation or disable of a `(host, role)`, numbered per
   supplier. A confirmed host names the trial that observed it, which must be the same supplier's;
   only the storefront role may have none, for the bootstrap host (OB-01).
@@ -19,7 +24,8 @@ ADR-0036 §3. It adds seven tables and touches no existing table, row, trigger o
   their fingerprint.
 - `onboarding_policy_reads`, `onboarding_trials`, `onboarding_verifications`: the policy reads,
   trial reads and the operator's verifications (§3, §5, §7). Their writers land with O2, O3 and
-  O5; a verification names a trial of its own supplier.
+  O5; a verification names a trial of its own supplier. A trial carries the fingerprint of the
+  facts it showed, and a verification the fingerprint of what the operator was shown.
 
 The database refuses an update or a delete of any row in the seven tables.
 
@@ -60,6 +66,10 @@ HOST_FORM = "length(host) BETWEEN 3 AND 253 AND host NOT GLOB '*[^a-z0-9.-]*' AN
 TEMPLATES = "template IN ('cafe24', 'godomall')"
 STATES = "('DRAFT', 'RECON', 'ACTIVE', 'DISABLED')"
 ROLES = "role IN ('storefront', 'login', 'image')"
+# The CORE fields of the fact registry (``app.stages.collect.facts.FIELD_REGISTRY``), frozen with
+# this revision: an ACTIVE site's proving trials read every one of them (ADR-0036 §2 D2).
+CORE_FIELDS = ("original_name", "prices", "options", "images", "stock")
+ACTIVATION_SAMPLES = 3
 # ADR-0036 §3, §7: the edges of the state log.
 EDGES = (
     "(NEW.from_state = 'DRAFT' AND NEW.to_state IN ('RECON', 'DISABLED'))"
@@ -166,6 +176,7 @@ def upgrade() -> None:
         sa.Column("template_revision", sa.String(length=64), nullable=False),
         sa.Column("words_seq", sa.Integer(), nullable=False),
         sa.Column("capture_sha256", sa.String(length=64), nullable=False),
+        sa.Column("facts_fingerprint", sa.String(length=64), nullable=False),
         sa.Column("field_status_json", sa.Text(), nullable=False),
         sa.Column("unread_rows_json", sa.Text(), nullable=False),
         sa.Column("observed_hosts_json", sa.Text(), nullable=False),
@@ -176,6 +187,7 @@ def upgrade() -> None:
         _check(TRIALS, "template_revision <> ''", "template_revision_present"),
         _check(TRIALS, "words_seq >= 0", "words_seq_known"),
         _check(TRIALS, _hex64("capture_sha256"), "capture_sha256_hex"),
+        _check(TRIALS, _hex64("facts_fingerprint"), "facts_fingerprint_hex"),
         _check(TRIALS, _json("field_status_json", "object"), "field_status_is_object"),
         _check(TRIALS, _json("unread_rows_json", "array"), "unread_rows_is_array"),
         _check(TRIALS, _json("observed_hosts_json", "array"), "observed_hosts_is_array"),
@@ -269,6 +281,28 @@ def upgrade() -> None:
     _install_triggers()
 
 
+_CURRENT_WORDS = (
+    f"(SELECT COALESCE(MAX(w.seq), 0) FROM {WORDS} w WHERE w.supplier_key = NEW.supplier_key)"
+)
+_CORE_READ = " AND ".join(
+    f"json_extract(t.field_status_json, '$.{field}') = 'CONFIRMED'" for field in CORE_FIELDS
+)
+# ADR-0036 §7: the conditions of approval, as the database can judge them.
+_UNPROVEN = (
+    "NEW.to_state = 'ACTIVE' AND ("
+    f"(SELECT COUNT(DISTINCT t.sample_url_key) FROM {TRIALS} t"
+    f" WHERE t.supplier_key = NEW.supplier_key AND t.words_seq = {_CURRENT_WORDS}"
+    f" AND json_array_length(t.structural_json) = 0 AND {_CORE_READ}"
+    f" AND EXISTS (SELECT 1 FROM {VERIFICATIONS} v WHERE v.trial_id = t.trial_id"
+    " AND v.verdict = 'CORRECT' AND v.shown_fingerprint = t.facts_fingerprint)"
+    f" AND NOT EXISTS (SELECT 1 FROM {VERIFICATIONS} v WHERE v.trial_id = t.trial_id"
+    " AND v.verdict = 'WRONG' AND v.shown_fingerprint = t.facts_fingerprint)"
+    f") < {ACTIVATION_SAMPLES}"
+    f" OR EXISTS (SELECT 1 FROM {TRIALS} t WHERE t.supplier_key = NEW.supplier_key"
+    f" AND t.words_seq = {_CURRENT_WORDS} AND json_array_length(t.structural_json) > 0))"
+)
+
+
 def _install_triggers() -> None:
     _numbered(TRANSITIONS)
     _trigger(
@@ -290,6 +324,12 @@ def _install_triggers() -> None:
             f"{TRANSITIONS}: the transition is not an allowed edge",
             f"NEW.seq > 1 AND NOT ({EDGES})",
         ),
+    )
+    _trigger(
+        TRANSITIONS,
+        "active_is_proven",
+        "INSERT",
+        _raise(f"{TRANSITIONS}: ACTIVE is entered only when proven", _UNPROVEN),
     )
     _numbered(HOSTS)
     _trigger(

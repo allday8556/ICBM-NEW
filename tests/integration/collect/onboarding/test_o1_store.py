@@ -5,7 +5,8 @@ fetches; no gateway is ever asked to send a request, and the extension capture i
 service directly. Proven here:
 
 - ``create`` writes a ``DRAFT`` identity and its bootstrap storefront host, after the OB-01 guard;
-- the state log takes the allowed edges only, in the store and in the database;
+- the state log takes the allowed edges only, in the store and in the database, and ``ACTIVE``
+  only when 3 distinct verified samples under the current words prove it (§7 D2, OB-04);
 - a words revision passes the site-word rules and the template's own slots, numbered with an
   optimistic sequence, and a change to an ``ACTIVE`` site returns it to ``RECON`` (OB-04);
 - every onboarding table refuses UPDATE and DELETE, and the downgrade fails closed;
@@ -46,6 +47,9 @@ from app.stages.collect.onboarding.hosts import (
 )
 from app.stages.collect.onboarding.site import HostRole, OnboardingState, onboarded_site
 from app.stages.collect.onboarding.store import (
+    ACTIVATION_SAMPLES,
+    CORE_FIELDS,
+    ONBOARDING_ACTIVATION_NOT_PROVEN,
     ONBOARDING_HOST_TAKEN,
     ONBOARDING_HOST_UNOBSERVED,
     ONBOARDING_SUPPLIER_DISABLED,
@@ -81,6 +85,7 @@ TABLES = (
 )
 WORDS = {"purchase_price": ["공급가"], "list_price": ["권장소비자가"]}
 BEFORE = "0059_detail_guidance_placement"
+MIGRATIONS = Path(__file__).resolve().parents[4] / "app/platform/db/migrations/versions"
 HEAD = "0061_supplier_onboarding"
 
 
@@ -106,20 +111,41 @@ def cafe24(container: Container) -> str:
     ).supplier_key
 
 
-def trial(config: AppConfig, key: str, hosts: list[str]) -> str:
-    """A trial row as O3's writer will append it; O1 has no trial writer of its own."""
+ALL_CORE_READ = dict.fromkeys(CORE_FIELDS, "CONFIRMED")
+FACTS = "c" * 64
+
+
+def trial(
+    config: AppConfig,
+    key: str,
+    hosts: tuple[str, ...] = (),
+    *,
+    sample: str = CAFE24_PRODUCT,
+    words_seq: int = 0,
+    statuses: dict[str, str] | None = None,
+    structural: list[str] | None = None,
+    template_revision: str | None = None,
+) -> str:
+    """A trial row as O3's writer will append it. This is a test fixture: O1 has no trial
+    writer, and the store stays the only production writer."""
     trial_id = str(uuid.uuid4())
     with raw(config) as connection:
         connection.execute(
-            "INSERT INTO onboarding_trials VALUES (?, ?, ?, ?, ?, ?, '{}', '[]', ?, '[]', ?, ?)",
+            "INSERT INTO onboarding_trials (trial_id, supplier_key, sample_url_key,"
+            " template_revision, words_seq, capture_sha256, facts_fingerprint, field_status_json,"
+            " unread_rows_json, observed_hosts_json, structural_json, created_by, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?)",
             (
                 trial_id,
                 key,
-                CAFE24_PRODUCT,
-                TEMPLATES["cafe24"].revision,
-                0,
+                sample,
+                template_revision or TEMPLATES["cafe24"].revision,
+                words_seq,
                 "a" * 64,
+                FACTS,
+                json.dumps(ALL_CORE_READ if statuses is None else statuses),
                 json.dumps([{"host": h, "role": "image"} for h in hosts]),
+                json.dumps(structural or []),
                 OPERATOR,
                 "2026-10-12 00:00:00",
             ),
@@ -127,11 +153,35 @@ def trial(config: AppConfig, key: str, hosts: list[str]) -> str:
     return trial_id
 
 
-def activate(container: Container, key: str) -> None:
-    container.onboarding.transition(key, OnboardingState.RECON, actor=OPERATOR)
-    container.onboarding.transition(
-        key, OnboardingState.ACTIVE, actor=OPERATOR, evidence=["v1", "v2", "v3"]
-    )
+def verify(
+    config: AppConfig, key: str, trial_id: str, verdict: str = "CORRECT", shown: str = FACTS
+) -> str:
+    """An operator verification as O5's writer will append it (a test fixture, as above)."""
+    verification_id = str(uuid.uuid4())
+    with raw(config) as connection:
+        connection.execute(
+            "INSERT INTO onboarding_verifications (verification_id, trial_id, supplier_key,"
+            " shown_fingerprint, verdict, verified_by, verified_at)"
+            " VALUES (?, ?, ?, ?, ?, 'operator', '2026-10-12 00:00:00')",
+            (verification_id, trial_id, key, shown, verdict),
+        )
+    return verification_id
+
+
+def prove(config: AppConfig, key: str, words_seq: int, samples: int = 3) -> list[str]:
+    """``samples`` distinct verified samples under ``words_seq``; their verification ids."""
+    return [
+        verify(config, key, trial(config, key, sample=f"{CAFE24_PRODUCT}?n={n}", words_seq=seq))
+        for n, seq in ((n, words_seq) for n in range(samples))
+    ]
+
+
+def activate(container: Container, config: AppConfig, key: str) -> None:
+    record = container.onboarding.current(key)
+    if record.state is OnboardingState.DRAFT:
+        container.onboarding.transition(key, OnboardingState.RECON, actor=OPERATOR)
+    prove(config, key, record.words_seq)
+    container.onboarding.transition(key, OnboardingState.ACTIVE, actor=OPERATOR)
 
 
 def refused(code: str, call: object) -> AppError:
@@ -239,9 +289,12 @@ def test_a_repository_storefront_or_a_second_onboarding_of_one_origin_is_refused
 # ---------------------------------------------------------------- the state log
 
 
-def test_the_state_log_takes_the_allowed_edges_only(container: Container) -> None:
+def test_the_state_log_takes_the_allowed_edges_only(
+    container: Container, config: AppConfig
+) -> None:
     key = cafe24(container)
     store = container.onboarding
+    prove(config, key, 0)
     refused(ONBOARDING_TRANSITION_REFUSED, lambda: store.transition(key, "ACTIVE", actor=OPERATOR))
     assert store.transition(key, OnboardingState.RECON, actor=OPERATOR).state_seq == 2
     refused(ONBOARDING_TRANSITION_REFUSED, lambda: store.transition(key, "DRAFT", actor=OPERATOR))
@@ -287,9 +340,9 @@ def test_the_database_refuses_a_state_edge_the_store_would_refuse(
             )
 
     with pytest.raises(sqlite3.IntegrityError, match="allowed edge"):
-        insert(2, "DRAFT", "ACTIVE")
+        insert(2, "DRAFT", "DRAFT")
     with pytest.raises(sqlite3.IntegrityError, match="leaves the state"):
-        insert(2, "RECON", "ACTIVE")
+        insert(2, "RECON", "DISABLED")
     with pytest.raises(sqlite3.IntegrityError, match=r"follows|leaves"):
         insert(3, "DRAFT", "RECON")
     insert(2, "DRAFT", "RECON")
@@ -342,12 +395,166 @@ def test_words_are_plain_words_in_the_template_slots_with_an_optimistic_sequence
     assert "공급가" not in json.dumps(audited, ensure_ascii=False), "no word reaches the audit log"
 
 
-def test_a_words_change_returns_an_active_site_to_recon(container: Container) -> None:
+def test_a_words_change_returns_an_active_site_to_recon(
+    container: Container, config: AppConfig
+) -> None:
     key = cafe24(container)
-    activate(container, key)
+    activate(container, config, key)
     changed = container.onboarding.save_words(key, WORDS, expected_seq=0, actor=OPERATOR)
     assert changed.state is OnboardingState.RECON and changed.state_seq == 4
     assert container.supplier_catalog.collectable(key) is False
+    # The samples verified under words 0 prove nothing about words 1 (OB-04).
+    proof = container.onboarding.activation(key)
+    assert (proof.words_seq, proof.trials, proof.proven) == (1, 0, False)
+    refused(
+        ONBOARDING_ACTIVATION_NOT_PROVEN,
+        lambda: container.onboarding.transition(key, "ACTIVE", actor=OPERATOR),
+    )
+    activate(container, config, key)
+    assert container.onboarding.current(key).state is OnboardingState.ACTIVE
+
+
+# ---------------------------------------------------------------- the ACTIVE gate (§7, OB-04)
+
+
+def recon(container: Container) -> str:
+    key = cafe24(container)
+    container.onboarding.transition(key, OnboardingState.RECON, actor=OPERATOR)
+    return key
+
+
+def not_proven(container: Container, key: str) -> dict[str, object]:
+    error = refused(
+        ONBOARDING_ACTIVATION_NOT_PROVEN,
+        lambda: container.onboarding.transition(key, "ACTIVE", actor=OPERATOR),
+    )
+    assert container.onboarding.current(key).state is OnboardingState.RECON
+    assert container.supplier_catalog.collectable(key) is False
+    return error.details
+
+
+def test_active_is_entered_with_three_verified_samples_named_as_evidence(
+    container: Container, config: AppConfig
+) -> None:
+    key = recon(container)
+    assert ACTIVATION_SAMPLES == 3
+    assert set(CORE_FIELDS) == {"original_name", "prices", "options", "images", "stock"}
+    # The database gate freezes the same list with the migration.
+    migration = (MIGRATIONS / "0061_supplier_onboarding.py").read_text("utf-8")
+    frozen = ", ".join(f'"{field}"' for field in CORE_FIELDS)
+    assert f"CORE_FIELDS = ({frozen})" in migration
+    verifications = prove(config, key, 0)
+    proof = container.onboarding.activation(key)
+    assert proof.proven and len(proof.proven_samples) == 3
+    assert sorted(proof.evidence) == sorted(verifications)
+    container.onboarding.transition(key, "ACTIVE", actor=OPERATOR, evidence=["ui-click"])
+    with raw(config) as connection:
+        evidence = connection.execute(
+            "SELECT evidence_json FROM onboarding_transitions WHERE to_state = 'ACTIVE'"
+        ).fetchone()[0]
+    assert json.loads(evidence)[0] == "ui-click"
+    assert sorted(json.loads(evidence)[1:]) == sorted(verifications)
+
+
+def test_fewer_than_three_distinct_samples_do_not_prove_active(
+    container: Container, config: AppConfig
+) -> None:
+    key = recon(container)
+    prove(config, key, 0, samples=2)
+    # A second verified trial of a sample already proven is not a third sample.
+    verify(config, key, trial(config, key, sample=f"{CAFE24_PRODUCT}?n=0"))
+    details = not_proven(container, key)
+    assert details["proven_samples"] == 2 and details["trials"] == 3
+    assert details["required_samples"] == 3
+
+
+def test_trials_under_an_old_words_revision_do_not_prove_active(
+    container: Container, config: AppConfig
+) -> None:
+    key = recon(container)
+    prove(config, key, 0)
+    container.onboarding.save_words(key, WORDS, expected_seq=0, actor=OPERATOR)
+    details = not_proven(container, key)
+    assert (details["words_seq"], details["trials"], details["proven_samples"]) == (1, 0, 0)
+    # Nor do trials of another template revision under the current words.
+    for n in range(3):
+        sample = f"{CAFE24_PRODUCT}?old={n}"
+        stale = trial(config, key, sample=sample, words_seq=1, template_revision="cafe24-0")
+        verify(config, key, stale)
+    assert not_proven(container, key)["proven_samples"] == 0
+
+
+def test_an_unread_core_field_does_not_prove_a_sample(
+    container: Container, config: AppConfig
+) -> None:
+    key = recon(container)
+    prove(config, key, 0, samples=2)
+    for status in ("REVIEW_REQUIRED", "ABSENT", None):
+        statuses = dict(ALL_CORE_READ)
+        if status is None:
+            del statuses["stock"]
+        else:
+            statuses["prices"] = status
+        unread = trial(config, key, sample=f"{CAFE24_PRODUCT}?s={status}", statuses=statuses)
+        verify(config, key, unread)
+    details = not_proven(container, key)
+    assert (details["proven_samples"], details["core_unread"]) == (2, 3)
+
+
+def test_a_wrong_or_mismatched_verification_does_not_prove_a_sample(
+    container: Container, config: AppConfig
+) -> None:
+    key = recon(container)
+    prove(config, key, 0, samples=2)
+    refuted = trial(config, key, sample=f"{CAFE24_PRODUCT}?n=wrong")
+    verify(config, key, refuted, "CORRECT")
+    verify(config, key, refuted, "WRONG")
+    mismatched = trial(config, key, sample=f"{CAFE24_PRODUCT}?n=other")
+    verify(config, key, mismatched, "CORRECT", shown="d" * 64)
+    unverified = trial(config, key, sample=f"{CAFE24_PRODUCT}?n=none")
+    details = not_proven(container, key)
+    assert details["proven_samples"] == 2 and details["refuted"] == 1
+    assert details["unverified"] == 2
+    assert unverified
+
+
+def test_an_open_structural_problem_blocks_active(container: Container, config: AppConfig) -> None:
+    key = recon(container)
+    prove(config, key, 0)
+    flagged = trial(config, key, sample=f"{CAFE24_PRODUCT}?n=s", structural=["price_block"])
+    verify(config, key, flagged)
+    details = not_proven(container, key)
+    assert (details["proven_samples"], details["structural_open"]) == (3, 1)
+
+
+def test_the_database_refuses_an_unproven_active(container: Container, config: AppConfig) -> None:
+    key = recon(container)
+
+    def insert() -> None:
+        with raw(config) as connection:
+            connection.execute(
+                "INSERT INTO onboarding_transitions VALUES (?, ?, 3, 'RECON', 'ACTIVE', 'x', '',"
+                " '[]', '2026-10-12 00:00:00')",
+                (str(uuid.uuid4()), key),
+            )
+
+    prove(config, key, 0, samples=2)
+    with pytest.raises(sqlite3.IntegrityError, match="only when proven"):
+        insert()
+    refuted = trial(config, key, sample=f"{CAFE24_PRODUCT}?n=wrong")
+    verify(config, key, refuted, "CORRECT")
+    verify(config, key, refuted, "WRONG")
+    with pytest.raises(sqlite3.IntegrityError, match="only when proven"):
+        insert()
+    third = trial(config, key, sample=f"{CAFE24_PRODUCT}?n=third")
+    verify(config, key, third)
+    flagged = trial(config, key, sample=f"{CAFE24_PRODUCT}?n=s", structural=["script_rendered"])
+    with pytest.raises(sqlite3.IntegrityError, match="only when proven"):
+        insert()
+    assert flagged
+    container.onboarding.save_words(key, WORDS, expected_seq=0, actor=OPERATOR)
+    prove(config, key, 1)
+    insert()
 
 
 # ---------------------------------------------------------------- immutability and migration
@@ -358,7 +565,7 @@ def test_every_onboarding_table_refuses_update_and_delete(
 ) -> None:
     key = cafe24(container)
     container.onboarding.save_words(key, WORDS, expected_seq=0, actor=OPERATOR)
-    trial_id = trial(config, key, ["img.onboard-cdn.com"])
+    trial_id = trial(config, key, ("img.onboard-cdn.com",))
     with raw(config) as connection:
         connection.execute(
             "INSERT INTO onboarding_policy_reads VALUES (?, ?, 'ROBOTS', '/robots.txt', 200, NULL,"
@@ -384,7 +591,7 @@ def test_a_verification_or_host_names_a_trial_of_its_own_supplier(
 ) -> None:
     first = cafe24(container)
     other = cafe24_second(container)
-    trial_id = trial(config, first, ["img.onboard-cdn.com"])
+    trial_id = trial(config, first, ("img.onboard-cdn.com",))
     with raw(config) as connection, pytest.raises(sqlite3.IntegrityError, match="own supplier"):
         connection.execute(
             "INSERT INTO onboarding_verifications VALUES (?, ?, ?, ?, 'CORRECT', 'operator',"
@@ -553,7 +760,7 @@ def test_collection_and_capture_refuse_a_site_until_it_is_active(
         assert container.connect.supplier_connection(key).supplier_key == key
     assert count(config, "collection_runs") == 0 and count(config, "jobs") == 0
 
-    container.onboarding.transition(key, OnboardingState.ACTIVE, actor=OPERATOR, evidence=["v"])
+    activate(container, config, key)
     assert catalog.collectable(key) is True and catalog.site_active(key) is True
     assert key in container.collection.supplier_keys()
     assert container.extension_queues.supplier_hosts()[CAFE24_HOST] == key
@@ -603,7 +810,7 @@ def test_egress_is_exactly_the_confirmed_hosts_and_disabled_withdraws_them(
             key, "img.onboard-cdn.com", "image", observed_trial_id=None, actor=OPERATOR
         ),
     )
-    trial_id = trial(config, key, ["img.onboard-cdn.com"])
+    trial_id = trial(config, key, ("img.onboard-cdn.com",))
     refused(
         ONBOARDING_HOST_UNOBSERVED,
         lambda: container.onboarding.confirm_host(
