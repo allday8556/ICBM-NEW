@@ -62,6 +62,18 @@ pytestmark = pytest.mark.integration
 CLIENT = {"X-ICBM-Client": "pytest"}
 TABLES = ("detail_guidances", "guidance_image_artifacts", "detail_guidance_revisions")
 BEFORE = "0057_m65_dispatch_stage"
+# Tables later revisions add, which a step down below 0058 removes first (ADR-0036 O1).
+LATER_TABLES = frozenset(
+    {
+        "onboarded_suppliers",
+        "onboarding_transitions",
+        "onboarding_trials",
+        "onboarding_hosts",
+        "onboarding_word_revisions",
+        "onboarding_policy_reads",
+        "onboarding_verifications",
+    }
+)
 TOP: dict[str, Any] = {"blocks": [{"heading": "당일발송", "lines": ["12시 이전 주문시 당일발송"]}]}
 BOTTOM: dict[str, Any] = {
     "blocks": [
@@ -663,7 +675,7 @@ def test_0058_is_additive_starts_empty_and_its_downgrade_fails_closed(tmp_path: 
         assert [raw.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in TABLES] == [0] * 3
     # Empty, it steps down to exactly the tables it added, and back up.
     command.downgrade(alembic_config(url), BEFORE)
-    assert before - tables() == set(TABLES)
+    assert before - tables() - LATER_TABLES == set(TABLES)
     command.upgrade(alembic_config(url), "head")
     assert tables() == before
     sha = "e" * 64
@@ -680,6 +692,7 @@ def test_0058_is_additive_starts_empty_and_its_downgrade_fails_closed(tmp_path: 
         raw.commit()
     with pytest.raises(RuntimeError, match="never silently destroyed"):
         command.downgrade(alembic_config(url), BEFORE)
-    assert tables() == before
+    # Each revision steps down in its own unit: the empty later tables are gone, these stay.
+    assert tables() == before - LATER_TABLES
     with contextlib.closing(sqlite3.connect(database)) as raw:
         assert raw.execute("SELECT COUNT(*) FROM detail_guidance_revisions").fetchone()[0] == 1

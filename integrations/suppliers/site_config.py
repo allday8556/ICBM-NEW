@@ -208,6 +208,19 @@ def _limits(value: Any) -> Mapping[str, float]:
     return MappingProxyType(limits)
 
 
+def plain_word(value: Any, what: str) -> str:
+    """The site-word rule (PT-01) for a value that did not come from a site file: an onboarded
+    site's display name or one of its words (ADR-0036 §6). Raises :class:`SiteConfigError`."""
+    return _word(value, what)
+
+
+def label_words(value: Any) -> Mapping[str, tuple[str, ...]]:
+    """Slot-to-words, checked exactly as a site file's ``label_overrides`` is: slot names of the
+    slot form, 1 to 12 plain words each (PT-01). Whether the template has each slot is the
+    template's own check (``integrations/suppliers/sites.py``). Raises :class:`SiteConfigError`."""
+    return _labels(value)
+
+
 def parse_site(raw: bytes, file_stem: str) -> SiteConfig:
     """Validate one site file strictly. ``file_stem`` is the file's name without ``.json``."""
     try:
