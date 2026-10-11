@@ -32,6 +32,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3",
+    # Parallel test runs, locally and in CI (owner decision 2026-10-11).
+    "pytest-xdist>=3.8",
     "ruff>=0.6",
     "mypy>=1.11",
 ]
