@@ -1,4 +1,4 @@
-"""Persistence of supplier onboarding (ADR-0036 §3), migration 0061.
+"""Persistence of supplier onboarding (ADR-0036 §3), migration 0060.
 
 - ``onboarded_suppliers``: the immutable identity of one onboarded site — its key
   (``site-<slug>``, never a repository key), display name, ``https`` origin and template.
@@ -34,7 +34,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.platform.db.base import Base
 from app.platform.db.types import UTCDateTime
 
-# Frozen with migration 0061.
+# Frozen with migration 0060.
 KEY_FORM = (
     "length(supplier_key) BETWEEN 6 AND 40 AND supplier_key GLOB 'site-[a-z0-9]*'"
     " AND supplier_key NOT GLOB '*[^a-z0-9-]*'"

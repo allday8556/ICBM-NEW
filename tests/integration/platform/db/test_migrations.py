@@ -208,7 +208,7 @@ CANONICAL_TABLES = (
     "onboarding_policy_reads",
     "onboarding_verifications",
 )
-HEAD = "0061_supplier_onboarding"
+HEAD = "0060_supplier_onboarding"
 
 
 def _url(path: Path) -> str:

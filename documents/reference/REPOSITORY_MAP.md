@@ -114,7 +114,7 @@ ADR-0033 G6 shows the frozen notices as image slots in the Registration Manageme
 added two integration suites; no migration.
 ADR-0036 O1 added the supplier onboarding owner `app/stages/collect/onboarding/` (its models, host
 guard, append-only store, the database-built site configuration and the running supplier registry
-that merges repository and onboarded sites and rebinds one at run time), migration `0061` and one
+that merges repository and onboarded sites and rebinds one at run time), migration `0060` and one
 integration suite.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and

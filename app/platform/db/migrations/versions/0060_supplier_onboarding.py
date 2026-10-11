@@ -1,7 +1,7 @@
 """ADR-0036 O1: the supplier onboarding owner — identities, states, hosts, words and trials.
 
-Revision ID: 0061_supplier_onboarding
-Revises: 0059_detail_guidance_placement (to be re-pointed onto 0060_supplier_sales_policy)
+Revision ID: 0060_supplier_onboarding
+Revises: 0059_detail_guidance_placement
 Create Date: 2026-10-12
 
 ADR-0036 §3. It adds seven tables and touches no existing table, row, trigger or index.
@@ -40,8 +40,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0061_supplier_onboarding"
-# TODO(lane): re-point onto 0060_supplier_sales_policy when it lands.
+revision: str = "0060_supplier_onboarding"
 down_revision: str | None = "0059_detail_guidance_placement"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

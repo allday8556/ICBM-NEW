@@ -86,7 +86,7 @@ TABLES = (
 WORDS = {"purchase_price": ["공급가"], "list_price": ["권장소비자가"]}
 BEFORE = "0059_detail_guidance_placement"
 MIGRATIONS = Path(__file__).resolve().parents[4] / "app/platform/db/migrations/versions"
-HEAD = "0061_supplier_onboarding"
+HEAD = "0060_supplier_onboarding"
 
 
 @contextlib.contextmanager
@@ -440,7 +440,7 @@ def test_active_is_entered_with_three_verified_samples_named_as_evidence(
     assert ACTIVATION_SAMPLES == 3
     assert set(CORE_FIELDS) == {"original_name", "prices", "options", "images", "stock"}
     # The database gate freezes the same list with the migration.
-    migration = (MIGRATIONS / "0061_supplier_onboarding.py").read_text("utf-8")
+    migration = (MIGRATIONS / "0060_supplier_onboarding.py").read_text("utf-8")
     frozen = ", ".join(f'"{field}"' for field in CORE_FIELDS)
     assert f"CORE_FIELDS = ({frozen})" in migration
     verifications = prove(config, key, 0)
@@ -610,7 +610,7 @@ def _url(path: Path) -> str:
     return f"sqlite:///{path.as_posix()}"
 
 
-def test_0061_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None:
+def test_0060_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None:
     database = tmp_path / "icbm.db"
     url = _url(database)
     upgrade_to_head(url)
