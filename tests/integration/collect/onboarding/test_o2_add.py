@@ -655,3 +655,38 @@ def test_robots_rules_are_judged_for_the_star_group_by_longest_match(
 
     summary = summarise_robots(robots, "/product/")
     assert (summary.disallows_products, summary.disallows_all) == (products, everything)
+
+
+def test_the_reader_asks_for_identity_and_refuses_a_compressed_answer_unread(
+    storefront: Storefront,
+) -> None:
+    """A compression bomb cannot grow past the cap: only uncompressed bodies are asked for, a
+    content-encoded answer is refused without decompressing it, and the cap counts raw bytes."""
+    import gzip
+
+    import httpx
+
+    from integrations.suppliers.base import PublicReadFailure
+    from integrations.suppliers.transport.gateway import PolicedPublicReader
+    from integrations.suppliers.transport.pacing import RequestPacer
+
+    bomb = gzip.compress(b"<html>" + b"A" * 5_000_000)
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("accept-encoding", ""))
+        if request.url.path == "/bomb":
+            return httpx.Response(200, content=bomb, headers={"content-encoding": "gzip"})
+        return httpx.Response(200, content=b"x" * 50)
+
+    reader = PolicedPublicReader(
+        pacer=RequestPacer(sleep=lambda _: None),
+        http_transport=httpx.MockTransport(handler),
+        resolve=storefront.resolve,
+        max_bytes=10,
+    )
+    bomb_read, plain = reader.read(CAFE24_HOST, ("/bomb", "/"))
+    assert seen == ["identity", "identity"]
+    assert bomb_read.status is None and bomb_read.failure is PublicReadFailure.ENCODED_REFUSED
+    assert bomb_read.content == b""
+    assert plain.status == 200 and plain.truncated and len(plain.content) == 10

@@ -352,7 +352,13 @@ class PolicedPublicReader:
                 follow_redirects=False,
                 trust_env=False,
                 transport=self._http_transport,
-                headers={"User-Agent": DEFAULT_USER_AGENT, "Accept-Language": "ko-KR,ko;q=0.9"},
+                headers={
+                    "User-Agent": DEFAULT_USER_AGENT,
+                    "Accept-Language": "ko-KR,ko;q=0.9",
+                    # Only uncompressed bodies: the byte cap counts the bytes received (raw), and a
+                    # content-encoded answer is refused unread rather than decompressed.
+                    "Accept-Encoding": "identity",
+                },
             ) as client:
                 results = []
                 for path in paths:
@@ -384,15 +390,26 @@ class PolicedPublicReader:
         try:
             with client.stream("GET", f"https://{host}{path}") as response:
                 status = response.status_code
-                chunks: list[bytes] = []
-                size = 0
-                for chunk in response.iter_bytes():
-                    chunks.append(chunk)
-                    size += len(chunk)
-                    if size > self._max_bytes:
-                        truncated = True
-                        break
-                content = b"".join(chunks)[: self._max_bytes]
+                encoding = response.headers.get("content-encoding", "identity").strip().lower()
+                if encoding not in ("", "identity"):
+                    failure = PublicReadFailure.ENCODED_REFUSED
+                else:
+                    chunks: list[bytes] = []
+                    size = 0
+                    try:
+                        # Raw bytes as received: never decompressed, so the cap bounds memory.
+                        for chunk in response.iter_raw(chunk_size=65_536):
+                            chunks.append(chunk)
+                            size += len(chunk)
+                            if size > self._max_bytes:
+                                truncated = True
+                                break
+                    except httpx.StreamConsumed:
+                        # A transport that hands over an already-read body (identity-encoded,
+                        # as checked above): the same cap applies to it.
+                        chunks, size = [response.content], len(response.content)
+                        truncated = size > self._max_bytes
+                    content = b"".join(chunks)[: self._max_bytes]
                 location = response.headers.get("location") if status in _REDIRECTS else None
                 charset = response.charset_encoding
         except EgressBlockedError:

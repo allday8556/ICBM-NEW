@@ -158,6 +158,9 @@ class PublicReadFailure(StrEnum):
     EGRESS_BLOCKED = "EGRESS_BLOCKED"
     TIMEOUT = "TIMEOUT"
     NETWORK_ERROR = "NETWORK_ERROR"
+    # The answer was content-encoded (gzip, br, ...) although only identity was asked for: it is
+    # never decompressed, so a compression bomb cannot grow past the byte cap.
+    ENCODED_REFUSED = "ENCODED_REFUSED"
 
 
 @dataclass(frozen=True)
