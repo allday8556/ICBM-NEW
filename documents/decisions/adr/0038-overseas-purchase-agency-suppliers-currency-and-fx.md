@@ -1,8 +1,6 @@
 # ADR-0038 — Overseas 구매대행 suppliers: source currency, FX snapshot, landed cost and SmartStore cross-border fields
 
-Status: **PROPOSED** 2026-10-11, drafted before reconnaissance. It becomes ACCEPTED when:
-- the owner answers §8;
-- reconnaissance of 1688 and Super Delivery confirms §2 (scheduled 2026-10-12).
+Status: **PROPOSED** 2026-10-11. Its owner questions are answered (§8). It becomes ACCEPTED once reconnaissance of 1688 and Super Delivery confirms §1–§2 (scheduled 2026-10-12).
 
 This is the currency and FX-snapshot ADR that ARCHITECTURE §6 and ROADMAP §14.3 require before any second-currency supplier.
 
@@ -125,10 +123,12 @@ Answered (`6109161005`):
 - delivery days have a default the user can change;
 - the USD 150 threshold is patched by ICBM.
 
-Open: per-item duty. The proposal is phased:
+Per-item duty, confirmed and phased:
 1. a default rate in settings, plus a per-product override (this ADR);
 2. a duty table by SmartStore category, maintained and patched by ICBM;
 3. optionally, an AI HS-code suggestion that the user confirms.
+
+Phase 1 is in this ADR. Phase 2 follows. Phase 3 is optional.
 
 ## Invariants
 
