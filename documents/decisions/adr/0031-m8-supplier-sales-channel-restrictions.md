@@ -116,6 +116,12 @@ The registration preflight reads `sales_channels` from the current source revisi
 | `REVIEW_REQUIRED` | unknown | `SOURCE_CHANNEL_UNRESOLVED` (blocking) |
 
 - `SOURCE_CHANNEL_FORBIDDEN` cannot be overridden. The operator can only drop the product or ask the supplier.
+
+  > **Amendment note (ADR-0039 §2).** Not overridable per product. Per supplier, the user may choose
+  > not to apply the supplier's channel policy (`apply_channel_restrictions = false`); the refusal
+  > then becomes a non-blocking warning that still shows the restriction (owner, Issue #219
+  > `6109161005`, `6109184868`). The default is to apply it.
+
 - `SOURCE_CHANNEL_UNRESOLVED` clears only when a newer source revision reads the statement, after the site's words are corrected or the page changes. No operator click turns an unread statement into an allowed one.
 
 #### 4.2 Where it is shown
