@@ -1145,3 +1145,18 @@ def test_start_up_binds_fail_closed(
     assert first not in restarted.capture_policies and restarted.problems()[first]
     assert restarted.collectable(first) is False and restarted.site_active(first) is False
     assert second in restarted.definitions and restarted.collectable(second) is True
+
+
+def test_options_stated_absent_is_read_and_proves_a_sample(
+    container: Container, config: AppConfig
+) -> None:
+    """A product without options reads ``options = ABSENT`` (ADR-0013 ruling B): no template ever
+    confirms an option axis, so ABSENT is the read status of that field. Any other core field
+    ABSENT still proves nothing (see the unread-core test)."""
+    key = recon(container)
+    statuses = dict(ALL_CORE_READ)
+    statuses["options"] = "ABSENT"
+    for n in range(3):
+        verify(config, key, trial(config, key, sample=f"{CAFE24_PRODUCT}?o={n}", statuses=statuses))
+    container.onboarding.transition(key, OnboardingState.ACTIVE, actor=OPERATOR)
+    assert container.onboarding.current(key).state is OnboardingState.ACTIVE

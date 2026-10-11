@@ -88,6 +88,15 @@ ACTIVATION_SAMPLES: Final = 3
 CORE_FIELDS: Final = tuple(
     key for key, spec in FIELD_REGISTRY.items() if spec.level is FieldLevel.CORE
 )
+# A core field is read when CONFIRMED. The options field is read when ABSENT as well: that is the
+# page's own statement that the product has no options (ADR-0013 ruling B), and no template ever
+# confirms an option axis. Every other core field must be CONFIRMED (ADR-0036 §7, D2).
+READ_STATUSES: Final[Mapping[str, frozenset[str]]] = {
+    field: frozenset({FieldStatus.CONFIRMED.value, FieldStatus.ABSENT.value})
+    if field == "options"
+    else frozenset({FieldStatus.CONFIRMED.value})
+    for field in CORE_FIELDS
+}
 _VERIFIED: Final = "CORRECT"
 _REFUTED: Final = "WRONG"
 
@@ -522,7 +531,7 @@ class OnboardingStore:
         core_unread = unverified = refuted = 0
         for trial in current:
             statuses = _json_object(trial.field_status_json)
-            core_read = all(statuses.get(f) == FieldStatus.CONFIRMED.value for f in CORE_FIELDS)
+            core_read = all(statuses.get(f) in READ_STATUSES[f] for f in CORE_FIELDS)
             shown = [
                 v
                 for v in verifications.get(trial.trial_id, [])

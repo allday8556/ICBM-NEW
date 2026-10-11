@@ -15,7 +15,8 @@ ADR-0036 §3. It adds seven tables and touches no existing table, row, trigger o
   OB-04): the row names the template revision its proof was judged under, and at least 3
   distinct sample URLs have a trial under that template revision and the current words revision
   with
-  every core field `CONFIRMED`, no structural problem and an operator verification `CORRECT` of
+  every core field read (`CONFIRMED`; the options field also `ABSENT`, the stated "no options" of
+  ADR-0013 ruling B), no structural problem and an operator verification `CORRECT` of
   exactly what the trial showed (its facts fingerprint), and no `WRONG` one; and no trial under the
   same words and template revision has an open structural problem. Until O3 and O5 write trials and verifications,
   `ACTIVE` is therefore unreachable.
@@ -74,6 +75,11 @@ ACTIVE_NAMES_TEMPLATE = (
     "to_state <> 'ACTIVE' OR (template_revision IS NOT NULL AND template_revision <> '')"
 )
 CORE_FIELDS = ("original_name", "prices", "options", "images", "stock")
+# A core field is read when CONFIRMED; the options field also when ABSENT, the page's own statement
+# that the product has no options (ADR-0013 ruling B): no template ever confirms an option axis.
+READ_STATUSES = {
+    field: "'CONFIRMED', 'ABSENT'" if field == "options" else "'CONFIRMED'" for field in CORE_FIELDS
+}
 ACTIVATION_SAMPLES = 3
 # ADR-0036 §3, §7: the edges of the state log.
 EDGES = (
@@ -292,7 +298,8 @@ _CURRENT_WORDS = (
     f"(SELECT COALESCE(MAX(w.seq), 0) FROM {WORDS} w WHERE w.supplier_key = NEW.supplier_key)"
 )
 _CORE_READ = " AND ".join(
-    f"json_extract(t.field_status_json, '$.{field}') = 'CONFIRMED'" for field in CORE_FIELDS
+    f"json_extract(t.field_status_json, '$.{field}') IN ({READ_STATUSES[field]})"
+    for field in CORE_FIELDS
 )
 # The trials the proof is judged on: this supplier's, under the current words revision and the
 # template revision the ACTIVE row names. A trial of an older template proves nothing and blocks
