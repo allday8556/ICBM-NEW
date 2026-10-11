@@ -430,7 +430,7 @@ _BELOW = (
 )
 
 
-# ADR-0039 §3, frozen by migration 0060: an applied snapshot names no separate stated minimum, and
+# ADR-0039 §3, frozen by migration 0061: an applied snapshot names no separate stated minimum, and
 # one that did not apply the minimum priced without it.
 MINIMUM_APPLIED_FLAG = "minimum_applied IN (0, 1)"
 MINIMUM_POLICY_RECORDED = (
@@ -512,7 +512,7 @@ class PricingSnapshot(Base):
             f" AND json_array_length(guard_reasons_json) = ({_LOSS}) + ({_BELOW})",
             name="guard_reasons_exact",
         ),
-        # ADR-0039 §3 (migration 0060): whether the supplier's minimum resale price was applied.
+        # ADR-0039 §3 (migration 0061): whether the supplier's minimum resale price was applied.
         CheckConstraint(MINIMUM_APPLIED_FLAG, name="minimum_applied_flag"),
         CheckConstraint(MINIMUM_POLICY_RECORDED, name="minimum_policy_recorded"),
     )

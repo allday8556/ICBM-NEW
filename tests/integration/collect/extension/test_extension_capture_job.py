@@ -516,10 +516,15 @@ def test_an_unclassified_failure_never_carries_its_own_text(
     with _process(config, clock, gateway) as app:
         run_id = _accept(app)
         known = app.collection._collections["kmretail"]
-        monkeypatch.setitem(
-            app.collection._collections,
-            "kmretail",
-            replace(known, collection=replace(known.collection, fields=leak)),
+        # The service reads the running registry's live view (ADR-0036 §4); the leaking parser
+        # is injected into a private copy of it.
+        monkeypatch.setattr(
+            app.collection,
+            "_collections",
+            {
+                **app.collection._collections,
+                "kmretail": replace(known, collection=replace(known.collection, fields=leak)),
+            },
         )
         result = app.runner.run_next()
         assert result is not None and result.state is JobState.DEAD

@@ -14,6 +14,7 @@ from app.stages.collect.adaptive.phase_c_capture import (
 )
 from app.stages.collect.adaptive.shadow import models as _adaptive_shadow_models  # noqa: F401
 from app.stages.collect.adaptive.store import models as _adaptive_models  # noqa: F401
+from app.stages.collect.onboarding import models as _onboarding_models  # noqa: F401
 from app.stages.connect import account_models as _account_models  # noqa: F401
 from app.stages.connect import models as _connect_models  # noqa: F401
 from app.stages.connect.marketplace import models as _marketplace_models  # noqa: F401

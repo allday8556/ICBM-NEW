@@ -450,10 +450,10 @@ def test_the_api_reads_saves_and_refuses(client: TestClient, config: AppConfig) 
     assert "SUPPLIER_SALES_POLICY" in settings["editable_surfaces"]
 
 
-# ---------------------------------------------------------------- migration 0060
+# ---------------------------------------------------------------- migration 0061
 
 
-def test_0060_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None:
+def test_0061_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None:
     database = tmp_path / "icbm.db"
     url = f"sqlite:///{database.as_posix()}"
     upgrade_to_head(url)
@@ -471,7 +471,7 @@ def test_0060_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     assert "supplier_sales_policy_revisions" in tables
     assert columns[-2:] == ["minimum_applied", "stated_minimum_sale_price_krw"]
     # Empty, it steps down to exactly what it added, and back up.
-    command.downgrade(alembic_config(url), "0059_detail_guidance_placement")
+    command.downgrade(alembic_config(url), "0060_supplier_onboarding")
     assert shape() == (tables - {"supplier_sales_policy_revisions"}, columns[:-2])
     command.upgrade(alembic_config(url), "head")
     assert shape() == (tables, columns)
@@ -483,5 +483,5 @@ def test_0060_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         )
         connection.commit()
     with pytest.raises(RuntimeError, match="never silently destroyed"):
-        command.downgrade(alembic_config(url), "0059_detail_guidance_placement")
+        command.downgrade(alembic_config(url), "0060_supplier_onboarding")
     assert shape() == (tables, columns)

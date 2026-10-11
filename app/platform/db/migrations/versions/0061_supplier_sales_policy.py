@@ -1,11 +1,10 @@
 """ADR-0039 P1: the per-supplier sales policy and the pricing snapshot's minimum pin.
 
-Revision ID: 0060_supplier_sales_policy
-Revises: 0059_detail_guidance_placement
+Revision ID: 0061_supplier_sales_policy
+Revises: 0060_supplier_onboarding
 Create Date: 2026-10-11
 
-ADR-0039 §1, §3. Two changes, nothing else. (0060 is reserved by Track A; this revision follows
-the current head.)
+ADR-0039 §1, §3. Two changes, nothing else. It follows ADR-0036 O1's ``0060_supplier_onboarding``.
 
 - **``supplier_sales_policy_revisions``** (ADR-0039 §1). The append-only revisions of one
   supplier's sales policy, keyed by ``supplier_key``. Each holds the two switches —
@@ -32,8 +31,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0060_supplier_sales_policy"
-down_revision: str | None = "0059_detail_guidance_placement"
+revision: str = "0061_supplier_sales_policy"
+down_revision: str | None = "0060_supplier_onboarding"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

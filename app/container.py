@@ -8,6 +8,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import integrations.suppliers as supplier_packages
 from app.capabilities.ai import platform_category, platform_tags
@@ -101,6 +102,8 @@ from app.stages.collect.extension.policy import CapturePolicySource
 from app.stages.collect.extension.queue import ExtensionQueues
 from app.stages.collect.extension.service import ExtensionCaptureService, ReportSink
 from app.stages.collect.imagedecode import HeaderImageDecoder
+from app.stages.collect.onboarding.catalog import SupplierCatalog
+from app.stages.collect.onboarding.store import OnboardingStore
 from app.stages.collect.readback import SourceTruthReadback
 from app.stages.collect.revisions import ProductFactsRevisionStore
 from app.stages.collect.runs import CollectionRunStore
@@ -216,7 +219,7 @@ from integrations.suppliers.kmretail import PROFILE as KM_PROFILE
 from integrations.suppliers.kmretail.collect.images import OG_IMAGE_RULE as KM_OG_IMAGE_RULE
 from integrations.suppliers.kmretail.collect.images import ROLE_RULES as KM_ROLE_RULES
 from integrations.suppliers.registry import COLLECTIONS, SITE_PROBLEMS, SITES, SUPPLIERS
-from integrations.suppliers.sites import capture_policy_bytes
+from integrations.suppliers.sites import PACKAGED_HOSTS, capture_policy_bytes
 from integrations.suppliers.transport.collection import DeferredCollectionGateway
 from integrations.suppliers.transport.gateway import PolicedSupplierGateway
 
@@ -348,6 +351,10 @@ class Container:
     phase_c_commands: PhaseCCommandStore
     phase_c_reads: PhaseCReadAccounting
     ownership: DataDirLease
+    # ADR-0036 O1: the supplier onboarding owner and the running supplier registry that merges
+    # the repository suppliers with the onboarded sites and rebinds one at run time.
+    onboarding: OnboardingStore
+    supplier_catalog: SupplierCatalog
     # Each configured supplier's display name, by key (ADR-0030 §11 S2: the screens' lists).
     supplier_names: Mapping[str, str] = field(default_factory=dict)
 
@@ -370,15 +377,19 @@ def adoption_conventions() -> dict[str, str]:
     return conventions
 
 
-def supplier_image_roles() -> dict[str, dict[str, ImageSlot]]:
-    """Each supplier's published image role rules, as the image auto-selection reads them
-    (Issue #219): rule name → slot. A layout or unrecognised role is no product image."""
-    slot_of = {
+def _image_slot(role: str) -> ImageSlot | None:
+    return {
         SupplierImageRole.PRIMARY.value: ImageSlot.REPRESENTATIVE,
         SupplierImageRole.THUMBNAIL.value: ImageSlot.ADDITIONAL,
         SupplierImageRole.DETAIL.value: ImageSlot.DETAIL,
         SupplierImageRole.PRODUCT_AUX.value: ImageSlot.AUXILIARY,
-    }.get
+    }.get(role)
+
+
+def supplier_image_roles() -> dict[str, dict[str, ImageSlot]]:
+    """Each supplier's published image role rules, as the image auto-selection reads them
+    (Issue #219): rule name → slot. A layout or unrecognised role is no product image."""
+    slot_of = _image_slot
     return {
         KM_PROFILE.supplier_key: slot_table(
             ((rule.rule_id, rule.role.value) for rule in (*KM_ROLE_RULES, KM_OG_IMAGE_RULE)),
@@ -387,6 +398,33 @@ def supplier_image_roles() -> dict[str, dict[str, ImageSlot]]:
         # ADR-0030 §6: a site's rule names are its template's.
         **{key: slot_table(site.template.role_table, slot_of) for key, site in SITES.items()},
     }
+
+
+class _CatalogImageRoles:
+    """The repository suppliers' role tables, and each bound onboarded site's template table
+    (ADR-0036 §1: an onboarded site's rule names are its template's, as a repository site's are)."""
+
+    def __init__(self, fixed: StaticSupplierImageRoles, catalog: SupplierCatalog) -> None:
+        self._fixed = fixed
+        self._catalog = catalog
+
+    def slots(self, supplier_key: str) -> Mapping[str, ImageSlot] | None:
+        fixed = self._fixed.slots(supplier_key)
+        if fixed is not None:
+            return fixed
+        entry = self._catalog.onboarded(supplier_key)
+        if entry is None or not entry.offered or entry.bound is None:
+            return None
+        return slot_table(entry.bound.template.role_table, _image_slot)
+
+
+def _repository_hosts(suppliers: Sequence[SupplierDefinition]) -> set[str]:
+    hosts = set(PACKAGED_HOSTS) | {site.config.storefront_host for site in SITES.values()}
+    for definition in suppliers:
+        host = urlsplit(definition.profile.base_url).hostname
+        if host is not None:
+            hosts.add(host)
+    return hosts
 
 
 def build_container(
@@ -419,6 +457,27 @@ def build_container(
     clock = clock or SystemClock()
     db = Database(config.database_url)
     audit = AuditLog(db, clock)
+    registered_collections = (
+        tuple(_registered(COLLECTIONS)) if collections is None else tuple(collections)
+    )
+    # ADR-0036 O1: the onboarding owner, and the running supplier registry. The repository
+    # suppliers are bound exactly as before (OB-07); each onboarded site is bound from its records
+    # now and rebound whenever the store changes it, so every service below reads the supplier set
+    # through the catalog's live views and needs no restart.
+    onboarding = OnboardingStore(
+        db,
+        clock,
+        audit,
+        reserved_keys={d.profile.supplier_key for d in suppliers} | set(SITES),
+        reserved_hosts=_repository_hosts(suppliers),
+    )
+    supplier_catalog = SupplierCatalog(
+        definitions=suppliers,
+        collections=registered_collections,
+        capture_policies={key: capture_policy_bytes(site) for key, site in SITES.items()},
+        repository_active=lambda key: SITES[key].config.active if key in SITES else None,
+        store=onboarding,
+    )
 
     registry = JobRegistry()
     registry.register(FAILING_JOB)
@@ -453,7 +512,7 @@ def build_container(
         credentials=SupplierCredentialStore(secrets),
         sessions=SupplierSessionStore(config.runtime_dir / SESSIONS_DIR_NAME, secrets),
         gateway=supplier_gateway or PolicedSupplierGateway(browser_channel=config.browser_channel),
-        suppliers=suppliers,
+        suppliers=supplier_catalog.definitions,
         marketplaces=MARKETPLACE_IDENTITIES,
     )
     registry.register(connect.job_definition())
@@ -548,9 +607,6 @@ def build_container(
     atomic_sku_items = AtomicSKUItemStore(db, clock)
     atomic_sku_economics = AtomicSKUEconomicsStore(db, clock)
     materializer = ProductMaterializer(db=db, store=product_store, revisions=revisions, audit=audit)
-    registered_collections = (
-        tuple(_registered(COLLECTIONS)) if collections is None else tuple(collections)
-    )
     # Adaptive Collector (ADR-0017; P2 persistence, P3 shadow foundation). A supplier is admitted
     # only with a registered CONNECT definition and a registered COLLECT access envelope. No
     # supplier has a switch entry, so every run freezes DISABLED and the shadow never runs until
@@ -634,7 +690,8 @@ def build_container(
         recorder=source_asset_recorder,
         sessions=collection_sessions or connect,
         gateway=collection_gateway or DeferredCollectionGateway(),
-        collections=registered_collections,
+        collections=supplier_catalog.collections,
+        collectable=supplier_catalog.collectable,
         after_recorded=after_recorded,
         shadow=ShadowRunner(adaptive_profiles, shadow_evidence, hook_manifests),
         capture=CaptureRunner(capture_store),
@@ -651,7 +708,11 @@ def build_container(
     # ADR-0019 §8.1 (E3): the list queue. Every queue read is issued here, durably, before it
     # happens; a ticketed capture claims its item in the ingest's own write unit.
     extension_queues = ExtensionQueues(
-        db=db, clock=clock, runs=runs, collections=registered_collections
+        db=db,
+        clock=clock,
+        runs=runs,
+        collections=supplier_catalog.collections,
+        collectable=supplier_catalog.collectable,
     )
     extension_capture = ExtensionCaptureService(
         db=db,
@@ -660,16 +721,17 @@ def build_container(
         runs=runs,
         policies=CapturePolicySource(
             capture_policy_root or SUPPLIER_PACKAGES,
-            sites={key: capture_policy_bytes(site) for key, site in SITES.items()},
+            sites=supplier_catalog.capture_policies,
         ),
         buffer=CaptureBuffer(),
         final_scan=_server_final_scan,
         # The buffer is a handoff inside one process (ADR-0002 Option A; ruling 5906712259 N-1).
         worker_in_process=worker.IN_PROCESS,
         recorder=collection,
-        collections=registered_collections,
+        collections=supplier_catalog.collections,
         report_sink=extension_report_sink,
         queue_tickets=extension_queues,
+        collectable=supplier_catalog.collectable,
     )
     registry.register(extension_capture.job_definition())
 
@@ -719,7 +781,9 @@ def build_container(
     auto_images = ImageAutoSelector(
         store=product_store,
         images=images,
-        roles=StaticSupplierImageRoles(supplier_image_roles()),
+        roles=_CatalogImageRoles(
+            StaticSupplierImageRoles(supplier_image_roles()), supplier_catalog
+        ),
         audit=audit,
         clock=clock,
     )
@@ -806,10 +870,8 @@ def build_container(
     )
     # The source-side gates of Items (ADR-0031 §4, ADR-0030 §7) under each supplier's sales policy
     # (ADR-0039 §2): the one seam every marketplace's REGISTER reads.
-    source_gates = SourceGates(
-        product_store,
-        lambda key: SITES[key].config.active if key in SITES else None,
-    )
+    # ADR-0036 OB-10: an onboarded site that is not ACTIVE is gated as well.
+    source_gates = SourceGates(product_store, supplier_catalog.site_active)
     # M5 PR-C (ADR-0014 §3): the derived preflight and the Snapshot builder. No provider is behind
     # either; both sources it reads are the durable owners above.
     registration_preflight = RegistrationPreflightService(
@@ -828,6 +890,7 @@ def build_container(
         # M6-E (ADR-0024 §5): no second listing of an adopted Item.
         adopted_items=adoptions.adopted_items,
         # ADR-0031 §4, ADR-0030 §7: a forbidden or unread sales channel, or a RECON supplier;
+        # ADR-0036 OB-10: an onboarded site that is not ACTIVE as well;
         # ADR-0039 §2: a warning instead where the supplier's channel policy is not applied.
         source_gates=source_gates,
         # ADR-0033 G4: the store-wide Detail Guidance notices a product's choice resolves to.
@@ -1242,7 +1305,7 @@ def build_container(
         review=ReviewService(ReviewCounts(review_items, review_reconciler)),
         execution_mode=execution_mode,
         editable_surfaces=editable_surfaces(),
-        collection_suppliers=collection.supplier_keys(),
+        collection_suppliers=collection.supplier_keys,
     )
     return Container(
         listing_sync=listing_sync,
@@ -1341,7 +1404,9 @@ def build_container(
         phase_c_commands=PhaseCCommandStore(db, clock),
         phase_c_reads=phase_c_reads,
         ownership=ownership,
-        supplier_names={d.profile.supplier_key: d.profile.display_name for d in suppliers},
+        onboarding=onboarding,
+        supplier_catalog=supplier_catalog,
+        supplier_names=supplier_catalog.names,
     )
 
 

@@ -15,7 +15,7 @@ product data is read or written here.
 
 import logging
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -108,9 +108,11 @@ class ConnectService:
         credentials: SupplierCredentialStore,
         sessions: SupplierSessionStore,
         gateway: SupplierGateway,
-        suppliers: Sequence[SupplierDefinition],
+        suppliers: Sequence[SupplierDefinition] | Mapping[str, SupplierDefinition],
         marketplaces: Sequence[MarketplaceIdentity],
     ) -> None:
+        """``suppliers`` is a fixed sequence, or the running supplier registry's live view by key
+        (ADR-0036 §4): an onboarded supplier rebound at run time is read from it on every call."""
         self._db = db
         self._clock = clock
         self._audit = audit
@@ -118,12 +120,17 @@ class ConnectService:
         self._credentials = credentials
         self._sessions = sessions
         self._gateway = gateway
-        self._definitions: dict[str, SupplierDefinition] = {}
-        for definition in suppliers:
-            key = definition.profile.supplier_key
-            if key in self._definitions:
-                raise ValueError(f"duplicate supplier definition: {key}")
-            self._definitions[key] = definition
+        self._definitions: Mapping[str, SupplierDefinition]
+        if isinstance(suppliers, Mapping):
+            self._definitions = suppliers
+        else:
+            fixed: dict[str, SupplierDefinition] = {}
+            for definition in suppliers:
+                key = definition.profile.supplier_key
+                if key in fixed:
+                    raise ValueError(f"duplicate supplier definition: {key}")
+                fixed[key] = definition
+            self._definitions = fixed
         self._marketplaces = tuple(marketplaces)
         self._flights = SingleFlightAuth()
 

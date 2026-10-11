@@ -49,7 +49,12 @@ from app.platform.core.errors import (
     RateLimitedError,
 )
 from app.platform.db.database import Database
-from app.stages.collect.collection import CollectionResult, RegisteredCollection
+from app.stages.collect.collection import (
+    CollectionResult,
+    RegisteredCollection,
+    registered_by_key,
+    require_collectable,
+)
 from app.stages.collect.extension.buffer import BufferedCapture, CaptureBuffer
 from app.stages.collect.extension.capture import (
     CAPTURED_CONTENT_TYPE,
@@ -203,9 +208,10 @@ class ExtensionCaptureService:
         final_scan: FinalScan,
         worker_in_process: bool,
         recorder: CapturedDocumentRecorder,
-        collections: Sequence[RegisteredCollection] = (),
+        collections: Sequence[RegisteredCollection] | Mapping[str, RegisteredCollection] = (),
         report_sink: ReportSink | None = None,
         queue_tickets: QueueTickets | None = None,
+        collectable: Callable[[str], bool] | None = None,
     ) -> None:
         self._db = db
         self._clock = clock
@@ -217,7 +223,9 @@ class ExtensionCaptureService:
         # The in-process buffer is a handoff between the request and the worker of one process
         # (ADR-0002 Option A). Where the worker is not in this process, nothing is accepted.
         self._worker_in_process = worker_in_process
-        self._collections = {registered.supplier_key: registered for registered in collections}
+        self._collections = registered_by_key(collections)
+        # ADR-0036 OB-10: an onboarded site that is not ACTIVE is refused before any run opens.
+        self._collectable = collectable
         # The collection owner records the document: this owner appends nothing itself.
         self._recorder = recorder
         self._report_sink = report_sink
@@ -567,11 +575,13 @@ class ExtensionCaptureService:
 
     def _registered(self, supplier_key: str) -> RegisteredCollection:
         try:
-            return self._collections[supplier_key]
+            registered = self._collections[supplier_key]
         except KeyError:
             raise NotFoundError(
                 "COLLECT_SUPPLIER_UNKNOWN", f"no collection definition for {supplier_key!r}"
             ) from None
+        require_collectable(self._collectable, supplier_key)
+        return registered
 
 
 def extension_profile(profile: CollectionProfile) -> CollectionProfile:

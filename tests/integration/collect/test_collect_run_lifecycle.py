@@ -210,6 +210,9 @@ def breaking(where: str) -> Callable[[Container], None]:
 
     def inject(container: Container) -> None:
         service = container.collection
+        # The service reads the running registry's live view (ADR-0036 §4); the broken step is
+        # injected into a private copy of it.
+        service._collections = dict(service._collections)
         if where == "parser roles":
             registered_collection = service._collections[SUPPLIER_KEY]
             service._collections[SUPPLIER_KEY] = replace(
