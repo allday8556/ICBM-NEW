@@ -48,7 +48,13 @@ def _client(count: int, *, market: Market = Market.KR) -> tuple[CoupangOrderClie
     return CoupangOrderClient(Authenticator(Clock()), context, transport), transport
 
 
-def _waybill(*, split: bool = False, invoice: str = "123456", date: str = "") -> Waybill:
+def _waybill(
+    *,
+    split: bool = False,
+    pre_split_shipped: bool = False,
+    invoice: str = "123456",
+    date: str = "",
+) -> Waybill:
     return Waybill(
         ShipmentBoxId(100),
         OrderId(200),
@@ -56,7 +62,7 @@ def _waybill(*, split: bool = False, invoice: str = "123456", date: str = "") ->
         "KDEXP",
         invoice,
         split,
-        False,
+        pre_split_shipped,
         date,
     )
 
@@ -161,7 +167,8 @@ def test_kr_only_mutations_use_exact_v4_paths_and_documents() -> None:
     update = json.loads(transport.requests[3].body)["orderSheetInvoiceApplyDtos"][0]
     upload = json.loads(transport.requests[4].body)["orderSheetInvoiceApplyDtos"][0]
     assert update["invoiceNumber"] == 123456
-    assert update["splitShipping"] == "False"
+    assert update["splitShipping"] == "false"
+    assert update["preSplitShipped"] == "false"
     assert upload["invoiceNumber"] == "123456"
     assert upload["splitShipping"] is False
 
@@ -169,15 +176,19 @@ def test_kr_only_mutations_use_exact_v4_paths_and_documents() -> None:
 def test_split_waybill_keeps_the_documented_invoice_or_date_exclusivity() -> None:
     dated = _waybill(split=True, invoice="", date="2026-01-04")
     numbered = _waybill(split=True, invoice="123456", date="")
+    previously_split = _waybill(split=True, pre_split_shipped=True)
 
     assert dated.upload_document()["estimatedShippingDate"] == "2026-01-04"
     assert numbered.upload_document()["invoiceNumber"] == "123456"
+    assert previously_split.update_document()["preSplitShipped"] == "true"
     with pytest.raises(CoupangOrderContractError, match="exactly one"):
         _waybill(split=True, invoice="123456", date="2026-01-04")
     with pytest.raises(CoupangOrderContractError, match="exactly one"):
         _waybill(split=True, invoice="", date="")
     with pytest.raises(CoupangOrderContractError, match="invoice number"):
         dated.update_document()
+    with pytest.raises(CoupangOrderContractError, match="requires splitShipping"):
+        _waybill(pre_split_shipped=True)
 
 
 def test_request_validation_fails_before_the_fake_transport() -> None:

@@ -154,8 +154,8 @@ class Waybill:
         if not self.invoice_number:
             raise CoupangOrderContractError("waybill update needs an invoice number")
         value["invoiceNumber"] = int(self.invoice_number)
-        value["splitShipping"] = str(self.split_shipping)
-        value["preSplitShipped"] = str(self.pre_split_shipped)
+        value["splitShipping"] = str(self.split_shipping).lower()
+        value["preSplitShipped"] = str(self.pre_split_shipped).lower()
         return value
 
 
