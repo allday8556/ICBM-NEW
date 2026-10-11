@@ -113,6 +113,8 @@ class RegistrationPreflightService:
         adopted_items: Callable[[str, Sequence[str]], tuple[str, ...]] | None = None,
         source_gates: Callable[[str, Sequence[str]], tuple[tuple[str, str], ...]] | None = None,
         guidance: GuidanceSource | None = None,
+        sales_policies: Callable[[Sequence[str]], tuple[tuple[str, str, int, str], ...]]
+        | None = None,
     ) -> None:
         self._registrations = registrations
         # ADR-0033 G4: the Detail Guidance owner's notices. None when not wired: nothing resolves.
@@ -130,6 +132,10 @@ class RegistrationPreflightService:
         # ADR-0031 §4, ADR-0030 §7: the gates the Items' sources put on a marketplace, read by the
         # Product owner (``app.stages.products.source_gates``). None when not wired.
         self._source_gates = source_gates
+        # ADR-0039 §1 (SP-03): the sales-policy revision each Item's supplier has, read by the
+        # Product owner (``SourceGates.policy_pins``) for the preparation to pin. None when not
+        # wired.
+        self._sales_policies = sales_policies
 
     def candidate(
         self, request: PreflightRequest, *, identity_generation: int | None = None
@@ -282,6 +288,9 @@ class RegistrationPreflightService:
             target=target,
             detail_profile=self.detail_profile(target.detail_composition_revision),
             guidance=self.guidance(guidance, preparation_revision_id),
+            sales_policies=(
+                () if self._sales_policies is None else tuple(self._sales_policies(unit_ids))
+            ),
         )
 
     def guidance(

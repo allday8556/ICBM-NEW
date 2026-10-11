@@ -553,6 +553,8 @@ ADAPTIVE_TABLES = (
     "detail_guidances",
     "guidance_image_artifacts",
     "detail_guidance_revisions",
+    # ADR-0039 §1 (0061): the supplier sales-policy revisions.
+    "supplier_sales_policy_revisions",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

@@ -13,6 +13,16 @@ Two source-side gates, read for the registration preflight and nowhere decided t
 
 Every marketplace ICBM registers to is an open marketplace, so ``CLOSED_MALL_ONLY`` forbids each
 of them (SC-03). It reads; it writes nothing.
+
+**The supplier's sales policy** (ADR-0039 §2). Whether the channel statement is enforced is the
+user's choice, per supplier (``app.stages.products.sales_policy``). With
+``apply_channel_restrictions`` false a forbidding statement is
+``SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED`` and an unread one
+``SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED``: non-blocking warnings (:data:`SOURCE_GATE_WARNINGS`)
+that still show the restriction (SP-04). The fact itself is read exactly as before (SP-01), and
+every marketplace's REGISTER reads the policy through this one seam.
+:meth:`SourceGates.policy_pins` names the policy revision each Item's supplier has, for the
+preparation to pin (SP-03).
 """
 
 from collections.abc import Callable, Sequence
@@ -24,21 +34,49 @@ from app.stages.collect.facts import FieldStatus, SalesChannelScope, SalesChanne
 from app.stages.collect.models import ProductFactsRevision
 from app.stages.products.models import SourceProduct
 from app.stages.products.pricing_service import current_procurement
+from app.stages.products.sales_policy import sales_policy_of
 from app.stages.products.store import ProductFoundationStore
 
 SOURCE_CHANNEL_FORBIDDEN: Final = "SOURCE_CHANNEL_FORBIDDEN"
 SOURCE_CHANNEL_UNRESOLVED: Final = "SOURCE_CHANNEL_UNRESOLVED"
 SUPPLIER_NOT_ACTIVE: Final = "SUPPLIER_NOT_ACTIVE"
+# ADR-0039 §2: the same two readings, for a supplier whose channel policy the user chose not to
+# apply. Each is a non-blocking warning.
+SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED: Final = "SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED"
+SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED: Final = "SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED"
 SALES_CHANNELS_FIELD: Final = "sales_channels"
+SOURCE_GATE_WARNINGS: Final = frozenset(
+    {SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED, SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED}
+)
 SOURCE_GATE_CODES: Final = frozenset(
     {SOURCE_CHANNEL_FORBIDDEN, SOURCE_CHANNEL_UNRESOLVED, SUPPLIER_NOT_ACTIVE}
+    | SOURCE_GATE_WARNINGS
 )
+# What a forbidding or unread statement becomes when the supplier's channel policy is not applied.
+_NOT_APPLIED: Final = {
+    SOURCE_CHANNEL_FORBIDDEN: SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED,
+    SOURCE_CHANNEL_UNRESOLVED: SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED,
+}
 # A platform template's extraction revision joins the template and the site (ADR-0030 §4).
 TEMPLATE_REVISION_JOIN: Final = "+"
 
 
-def channel_verdict(status: FieldStatus, value: object, marketplace_key: str) -> str | None:
-    """ADR-0031 §4.1's table: the gate a sales-channel reading puts on one marketplace."""
+def channel_verdict(
+    status: FieldStatus,
+    value: object,
+    marketplace_key: str,
+    *,
+    apply_restrictions: bool = True,
+) -> str | None:
+    """ADR-0031 §4.1's table, amended by ADR-0039 §2: the gate a sales-channel reading puts on
+    one marketplace. With ``apply_restrictions`` false the same reading is its warning."""
+    verdict = _channel_verdict(status, value, marketplace_key)
+    if verdict is None or apply_restrictions:
+        return verdict
+    return _NOT_APPLIED[verdict]
+
+
+def _channel_verdict(status: FieldStatus, value: object, marketplace_key: str) -> str | None:
     if status is FieldStatus.ABSENT:
         return None
     if status is not FieldStatus.CONFIRMED or not isinstance(value, SalesChannelsValue):
@@ -98,7 +136,36 @@ class SourceGates:
                 )
                 if reading is None:
                     continue  # recorded before ADR-0031: the field did not exist (§6)
-                verdict = channel_verdict(reading.status, reading.value, marketplace_key)
+                apply = (
+                    True
+                    if supplier_key is None
+                    else sales_policy_of(unit.session, supplier_key).apply_channel_restrictions
+                )
+                verdict = channel_verdict(
+                    reading.status, reading.value, marketplace_key, apply_restrictions=apply
+                )
                 if verdict is not None:
                     gates.append((item_id, verdict))
         return tuple(gates)
+
+    def policy_pins(self, item_ids: Sequence[str]) -> tuple[tuple[str, str, int, str], ...]:
+        """``(item_id, supplier_key, revision_no, fingerprint)`` of the sales-policy revision each
+        Item's supplier has now (ADR-0039 §1, SP-03). A supplier with no revision — the defaults —
+        names nothing, so an Item never configured keeps its earlier preparation fingerprint."""
+        pins: list[tuple[str, str, int, str]] = []
+        with self._store.reading() as unit:
+            for item_id in item_ids:
+                member = current_procurement(unit, item_id).member
+                if member is None:
+                    continue
+                supplier_key = unit.session.execute(
+                    select(SourceProduct.supplier_key).where(
+                        SourceProduct.source_product_uid == member.source_product_uid
+                    )
+                ).scalar_one_or_none()
+                if supplier_key is None:
+                    continue
+                pin = sales_policy_of(unit.session, supplier_key).pin()
+                if pin is not None:
+                    pins.append((item_id, *pin))
+        return tuple(pins)

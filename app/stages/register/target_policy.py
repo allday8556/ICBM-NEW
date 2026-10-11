@@ -53,6 +53,7 @@ from app.platform.core.errors import InputValidationError, NotFoundError
 from app.platform.db.database import Database
 from app.stages.connect.accounts import AccountBinding, MarketplaceAccountStore, binding_state
 from app.stages.products.pricing import PricingContextInput, PricingError, Rounding
+from app.stages.products.sales_policy import SALES_POLICY_SURFACE
 from app.stages.register import sanitize
 from app.stages.register.authoring_revisions import AuthoringRevisionStore
 from app.stages.register.model import RegistrationConflictError, canonical_json, sanitized_digest
@@ -95,6 +96,9 @@ class EditableSurface(StrEnum):
     AI_PROMPT_REGISTRY = "AI_PROMPT_REGISTRY"
     # ADR-0033 G3: the detail page's top and bottom notices (the Detail Guidance owner).
     DETAIL_GUIDANCE = "DETAIL_GUIDANCE"
+    # ADR-0039 §4: each supplier's sales policy, saved from the supplier card (수집관리 › 공급처
+    # 관리) through its own contract (``app.stages.products.sales_policy``).
+    SUPPLIER_SALES_POLICY = SALES_POLICY_SURFACE
 
 
 # ------------------------------------------------------------------ the application contract
@@ -754,10 +758,11 @@ def _revision_view(record: PolicyRevisionRecord, *, current: bool) -> TargetPoli
 
 def editable_surfaces() -> Sequence[EditableSurface]:
     """The Settings surfaces this application accepts a save for (ADR-0015 §2, §3; ADR-0026 §8;
-    ADR-0033 §4)."""
+    ADR-0033 §4; ADR-0039 §4)."""
     return (
         EditableSurface.REGISTRATION_TARGET_POLICY,
         EditableSurface.REGISTRATION_CATEGORY_METADATA,
         EditableSurface.AI_PROMPT_REGISTRY,
         EditableSurface.DETAIL_GUIDANCE,
+        EditableSurface.SUPPLIER_SALES_POLICY,
     )

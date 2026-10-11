@@ -663,7 +663,8 @@ def test_0058_is_additive_starts_empty_and_its_downgrade_fails_closed(tmp_path: 
         assert [raw.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in TABLES] == [0] * 3
     # Empty, it steps down to exactly the tables it added, and back up.
     command.downgrade(alembic_config(url), BEFORE)
-    assert before - tables() == set(TABLES)
+    # 0061 (ADR-0039) follows it, and its empty table steps down with it.
+    assert before - tables() == set(TABLES) | {"supplier_sales_policy_revisions"}
     command.upgrade(alembic_config(url), "head")
     assert tables() == before
     sha = "e" * 64
@@ -680,6 +681,7 @@ def test_0058_is_additive_starts_empty_and_its_downgrade_fails_closed(tmp_path: 
         raw.commit()
     with pytest.raises(RuntimeError, match="never silently destroyed"):
         command.downgrade(alembic_config(url), BEFORE)
-    assert tables() == before
+    # The empty 0061 (ADR-0039) above it stepped down first; every notice table is kept.
+    assert tables() == before - {"supplier_sales_policy_revisions"}
     with contextlib.closing(sqlite3.connect(database)) as raw:
         assert raw.execute("SELECT COUNT(*) FROM detail_guidance_revisions").fetchone()[0] == 1

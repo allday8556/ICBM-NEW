@@ -146,11 +146,11 @@ contains no provider transport, and grants no credentials or LIVE authority.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 355 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 359 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 68 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
-| `app/interface/` | 28 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 89 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 165 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/interface/` | 29 | operator surfaces: HTTP api, screens, cli |
+| `app/platform/` | 90 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 167 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -172,13 +172,13 @@ contains no provider transport, and grants no credentials or LIVE authority.
 | `integrations/` | 84 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 34 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 350 | tests |
+| `tests/` | 353 | tests |
 | `tests/contracts/` | 14 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 145 | integration tests by runtime owner |
+| `tests/integration/` | 147 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 130 | unit tests by runtime owner |
+| `tests/unit/` | 131 | unit tests by runtime owner |
 | `ui/` | 70 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 61 | the served web client |

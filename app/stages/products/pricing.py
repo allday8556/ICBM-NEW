@@ -35,6 +35,15 @@ FO-02), and nothing is multiplied by a quantity or divided into a unit price.
   ``minimum_sale_price`` names no offer, so a SOURCE_OFFER is priced only when it is ABSENT: a
   stated or unsettled one is REVIEW_REQUIRED. It is never applied to every quantity and never
   multiplied by one.
+
+**The supplier's sales policy** (ADR-0039 §3). Whether the minimum sale price is applied is the
+user's choice, per supplier (``app.stages.products.sales_policy``). With ``apply_minimum`` false
+the minimum is not a pricing input: :class:`SourceInputs` carries ``minimum_sale_price_krw=None``,
+the price is the target-margin price, and an unread or offer-unbound minimum no longer stops
+pricing. The minimum the source stated is kept beside the price (``stated_minimum_sale_price_krw``)
+and the snapshot records ``minimum_applied=False``; a statement it could not read is
+``minimum_unresolved``. Either is the warning ``PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED`` (SP-04).
+The applied path, and every fingerprint it produces, is unchanged.
 """
 
 import hashlib
@@ -235,6 +244,9 @@ TARGET_MARGIN_UNREACHABLE = "PRICING_TARGET_MARGIN_UNREACHABLE"
 # sale price that names no offer.
 QUANTITY_OFFER_UNRESOLVED = "PRICING_QUANTITY_OFFER_UNRESOLVED"
 MINIMUM_SALE_PRICE_NOT_OFFER_BOUND = "PRICING_MINIMUM_SALE_PRICE_NOT_OFFER_BOUND"
+# ADR-0039 §3: a minimum the source states (or could not be read) that the supplier's sales policy
+# does not apply. A non-blocking warning, never a reason not to price.
+MINIMUM_SALE_PRICE_NOT_APPLIED = "PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED"
 
 SourceField = OfferField
 
@@ -247,6 +259,20 @@ class SourceInputs:
     purchase_cost_krw: int
     supplier_shipping_krw: int
     minimum_sale_price_krw: int | None
+    # ADR-0039 §3: False when the supplier's sales policy does not apply the minimum. Then
+    # ``minimum_sale_price_krw`` is None, ``stated_minimum_sale_price_krw`` is the minimum the
+    # source stated (None when none could be read) and ``minimum_unresolved`` says a statement
+    # exists that no rule could read.
+    minimum_applied: bool = True
+    stated_minimum_sale_price_krw: int | None = None
+    minimum_unresolved: bool = False
+
+    @property
+    def minimum_waived(self) -> bool:
+        """Whether a minimum the source states, read or not, goes unapplied (the warning)."""
+        return not self.minimum_applied and (
+            self.stated_minimum_sale_price_krw is not None or self.minimum_unresolved
+        )
 
 
 def _review(code: str, subject: str) -> Reason:
@@ -282,8 +308,29 @@ def _supplier_shipping(fields: Mapping[str, SourceField], reasons: list[Reason])
     return None
 
 
-def source_inputs(fields: Mapping[str, SourceField]) -> SourceInputs | tuple[Reason, ...]:
-    """The BASE_PRODUCT pricing inputs, or every reason they cannot be read unambiguously."""
+def _stated_minimum(fields: Mapping[str, SourceField]) -> tuple[int | None, bool]:
+    """ADR-0039 §3: the minimum a source states, for a policy that does not apply it — the
+    positive amount it states exactly, and whether a statement exists that could not be read."""
+    stated = fields.get("minimum_sale_price")
+    if stated is not None and stated.status is FieldStatus.ABSENT:
+        return None, False
+    if (
+        stated is not None
+        and stated.status is FieldStatus.CONFIRMED
+        and isinstance(stated.value, MoneyValue)
+        and stated.value.amount_krw > 0
+    ):
+        return stated.value.amount_krw, False
+    return None, True
+
+
+def source_inputs(
+    fields: Mapping[str, SourceField], *, apply_minimum: bool = True
+) -> SourceInputs | tuple[Reason, ...]:
+    """The BASE_PRODUCT pricing inputs, or every reason they cannot be read unambiguously.
+
+    With ``apply_minimum`` false (ADR-0039 §3) the minimum sale price is not an input: it neither
+    sets the price nor stops pricing, and the minimum the source stated is carried beside it."""
     reasons: list[Reason] = []
 
     purchase = None
@@ -300,6 +347,12 @@ def source_inputs(fields: Mapping[str, SourceField]) -> SourceInputs | tuple[Rea
         purchase = chosen.amount_krw
 
     shipping_fee = _supplier_shipping(fields, reasons)
+
+    if not apply_minimum:
+        if reasons or purchase is None or shipping_fee is None:
+            return tuple(reasons)
+        amount, unresolved = _stated_minimum(fields)
+        return SourceInputs(purchase, shipping_fee, None, False, amount, unresolved)
 
     minimum = None
     stated = fields.get("minimum_sale_price")
@@ -319,12 +372,18 @@ def source_inputs(fields: Mapping[str, SourceField]) -> SourceInputs | tuple[Rea
 
 
 def offer_source_inputs(
-    fields: Mapping[str, SourceField], offer: OfferTerms, currency: str
+    fields: Mapping[str, SourceField],
+    offer: OfferTerms,
+    currency: str,
+    *,
+    apply_minimum: bool = True,
 ) -> SourceInputs | tuple[Reason, ...]:
     """The SOURCE_OFFER pricing inputs, or every reason they cannot be read unambiguously.
 
     The purchase cost is the bound offer's own total, and only while the revision still states
-    that exact tier as a product-level offer. The generic ``prices`` field is never read.
+    that exact tier as a product-level offer. The generic ``prices`` field is never read. With
+    ``apply_minimum`` false (ADR-0039 §3) the generic minimum is not an input either, so it no
+    longer stops pricing; the minimum the source stated is carried beside the price.
     """
     reasons: list[Reason] = []
     evidence, stated = product_level_offers(fields, currency)
@@ -332,6 +391,12 @@ def offer_source_inputs(
         reasons.append(_review(QUANTITY_OFFER_UNRESOLVED, "quantity_tiers"))
 
     shipping_fee = _supplier_shipping(fields, reasons)
+
+    if not apply_minimum:
+        if reasons or shipping_fee is None:
+            return tuple(reasons)
+        amount, unresolved = _stated_minimum(fields)
+        return SourceInputs(offer.total_price_krw, shipping_fee, None, False, amount, unresolved)
 
     minimum = fields.get("minimum_sale_price")
     if minimum is None:
@@ -466,10 +531,15 @@ class PricingDependencies:
     quantity_offer_id: str | None
     fulfillment_quantity: int
     source_revision_id: str
+    # ADR-0039 §3 (SP-03): whether the supplier's sales policy applies the minimum sale price.
+    minimum_applied: bool = True
 
     def fingerprint(self, context: PricingContextInput) -> str:
         return digest(
             {
+                # Named only when the minimum is not applied, so every snapshot priced under the
+                # default policy keeps its fingerprint, and a policy change reprices the Item.
+                **({} if self.minimum_applied else {"minimum_applied": False}),
                 "version": DEPENDENCY_VERSION,
                 "pricing_rule_version": PRICING_RULE_VERSION,
                 "item_id": self.item_id,

@@ -18,6 +18,8 @@ import { reviewItemsBlock } from '../components/review-items.js';
 
 const ENDPOINT = '/api/v1/screens/collect';
 const CONNECT = '/api/v1/connect/suppliers';
+// ADR-0039: each supplier's sales policy (whether ICBM enforces the supplier's own policy).
+const SALES_POLICY = '/api/v1/suppliers';
 const TITLE = '수집관리';
 const VIEWS = [
   ['jobs', '수집'],
@@ -130,6 +132,98 @@ function autoConnectToggle(supplier) {
     }
   });
   return control;
+}
+
+// ADR-0039 §4: the supplier card's 「판매정책」. The server holds the policy and its history; the
+// card shows the current switches and who changed them when, and saves through the policy's own
+// contract with the revision it was read at. A moved policy is refused by the server and read again.
+// The switches change enforcement only: the supplier's words are still shown wherever they apply.
+const SALES_POLICY_SWITCHES = [
+  ['apply_channel_restrictions', '판매채널 제한 적용'],
+  ['apply_minimum_price', '최저판매가 적용'],
+];
+const SALES_POLICY_NOTE = '끄면 공급사 정책을 경고로만 표시하고, 그에 따른 판매 위험은 판매자 책임입니다';
+const SALES_POLICY_COPY = {
+  SALES_POLICY_REVISION_MOVED: '다른 곳에서 판매정책이 바뀌었습니다. 새로 불러온 값을 확인한 뒤 다시 저장하세요.',
+  SALES_POLICY_UNCHANGED: '바뀐 판매정책이 없습니다.',
+  SALES_POLICY_SUPPLIER_UNKNOWN: '판매정책을 둘 수 없는 공급처입니다.',
+};
+
+function salesPolicyUrl(supplier) {
+  return `${SALES_POLICY}/${encodeURIComponent(supplier.supplier_key)}/sales-policy`;
+}
+
+function salesPolicyChanged(policy) {
+  if (policy.revision_no === null || policy.revision_no === undefined) return '기본값 (모두 적용 · 변경 기록 없음)';
+  return `${policy.changed_by ?? '-'} · ${policy.changed_at ? dotDateTime(policy.changed_at) : '-'} · ${policy.revision_no}차 변경`;
+}
+
+function salesPolicySection(supplier) {
+  const body = h('div', { class: 'supplier-sales-policy-body' }, h('span', { class: 'mini' }, '판매정책을 불러오는 중…'));
+  const section = h(
+    'div',
+    { class: 'supplier-sales-policy', 'data-role': 'sales-policy', 'data-supplier': supplier.supplier_key },
+    h('b', {}, '판매정책'),
+    body,
+  );
+  const render = (policy) => {
+    const wanted = Object.fromEntries(SALES_POLICY_SWITCHES.map(([key]) => [key, policy[key]]));
+    const save = h('button', { type: 'button', class: 'btn', 'data-action': 'save-sales-policy', disabled: true }, '판매정책 저장');
+    const dirty = () => SALES_POLICY_SWITCHES.some(([key]) => wanted[key] !== policy[key]);
+    const switches = SALES_POLICY_SWITCHES.map(([key, label]) => {
+      const control = h('button', {
+        type: 'button',
+        role: 'switch',
+        class: wanted[key] ? 'toggle' : 'toggle off',
+        'aria-checked': String(wanted[key]),
+        'aria-label': label,
+        'data-switch': key,
+      });
+      control.addEventListener('click', () => {
+        wanted[key] = !wanted[key];
+        control.className = wanted[key] ? 'toggle' : 'toggle off';
+        control.setAttribute('aria-checked', String(wanted[key]));
+        save.disabled = !dirty();
+      });
+      return h('div', { class: 'kv' }, h('span', {}, label), control);
+    });
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      try {
+        const saved = await sendJson('PUT', salesPolicyUrl(supplier), {
+          expected_revision_no: policy.revision_no ?? null,
+          ...wanted,
+        });
+        toast('판매정책', '저장했습니다.');
+        render(saved);
+      } catch (error) {
+        const code = error?.error?.code;
+        toast('판매정책', SALES_POLICY_COPY[code] ?? errorMessage(error));
+        // The server's policy is read again: a refused save never leaves a stale view behind.
+        load();
+      }
+    });
+    section.dataset.revision = policy.revision_no === null || policy.revision_no === undefined ? '' : String(policy.revision_no);
+    body.replaceChildren(
+      ...switches,
+      h('div', { class: 'kv', 'data-role': 'sales-policy-changed' }, h('span', {}, '변경'), h('b', {}, salesPolicyChanged(policy))),
+      h('div', { class: 'note', 'data-role': 'sales-policy-note' }, SALES_POLICY_NOTE),
+      h('div', { class: 'supplier-actions' }, save),
+    );
+  };
+  const load = () =>
+    getJson(salesPolicyUrl(supplier))
+      .then((policy) => {
+        section.dataset.state = 'ready';
+        render(policy);
+      })
+      .catch((error) => {
+        section.dataset.state = 'error';
+        const code = error?.error?.code;
+        body.replaceChildren(h('span', { class: 'mini' }, SALES_POLICY_COPY[code] ?? errorMessage(error)));
+      });
+  load();
+  return section;
 }
 
 // The stored password is only ever represented by this UI-only indicator. It is not an input
@@ -266,6 +360,7 @@ function supplierCard(supplier, ctx) {
       kv('마지막 수집', '-'),
     ),
     commonLine,
+    salesPolicySection(supplier),
     failing ? h('div', { class: 'note' }, ERROR_COPY[supplier.last_error_code] ?? supplier.last_error_code) : null,
     h(
       'div',

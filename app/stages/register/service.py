@@ -1260,6 +1260,10 @@ class RegisterService:
             pricing_snapshot_id=pricing_snapshot_id,
             sale_price_krw=None if pin is None else pin.final_sale_price_krw,
             price_basis=None if pin is None else pin.price_basis.value,
+            minimum_applied=None if pin is None else pin.minimum_applied,
+            stated_minimum_sale_price_krw=(
+                None if pin is None else pin.stated_minimum_sale_price_krw
+            ),
             registration_item_key=registration_item_key,
             publication_assets=publication_assets,
             option_keys=option_keys,

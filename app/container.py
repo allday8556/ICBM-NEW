@@ -148,6 +148,7 @@ from app.stages.products.images import ProductImageService
 from app.stages.products.materialization import Materialization, ProductMaterializer
 from app.stages.products.pricing_service import ProductPricingService
 from app.stages.products.readiness import ProductReadinessService
+from app.stages.products.sales_policy import SalesPolicyService, SalesPolicyStore
 from app.stages.products.service import ProductsService
 from app.stages.products.source_gates import SourceGates
 from app.stages.products.store import ProductFoundationStore
@@ -288,6 +289,8 @@ class Container:
     ai_provider: ProviderProfileService
     # ADR-0033 G2: Settings' 상세페이지 공지 — the Detail Guidance owner and its image store.
     detail_guidance: DetailGuidanceService
+    # ADR-0039 §1, §4: each supplier's sales policy, saved from the supplier card.
+    sales_policies: SalesPolicyService
     category_metadata: CategoryMetadataService
     category_catalog: CategoryCatalogService
     # Settings delivery policy: the seller's address book, read on request and never stored.
@@ -692,6 +695,14 @@ def build_container(
     common_images = SupplierCommonImageService(
         db, audit, clock, configured_suppliers=collection.supplier_keys
     )
+    # ADR-0039: whether ICBM applies each supplier's own sales policy (channel restrictions, minimum
+    # resale price). The pricing owner and the source gates read it in their own units of work; a
+    # supplier is known when CONNECT or COLLECT is configured for it (the supplier cards' keys).
+    supplier_keys = frozenset(definition.profile.supplier_key for definition in suppliers)
+    sales_policies = SalesPolicyService(
+        SalesPolicyStore(db, clock, audit),
+        lambda: supplier_keys | set(collection.supplier_keys()),
+    )
     # Issue #219: the image auto-selection rule over each supplier's own published role rules, and
     # its automatic QA. An operator's selection always supersedes it.
     auto_images = ImageAutoSelector(
@@ -782,6 +793,12 @@ def build_container(
         frozenset(m.key for m in MARKETPLACE_IDENTITIES),
         category_catalog,
     )
+    # The source-side gates of Items (ADR-0031 §4, ADR-0030 §7) under each supplier's sales policy
+    # (ADR-0039 §2): the one seam every marketplace's REGISTER reads.
+    source_gates = SourceGates(
+        product_store,
+        lambda key: SITES[key].config.active if key in SITES else None,
+    )
     # M5 PR-C (ADR-0014 §3): the derived preflight and the Snapshot builder. No provider is behind
     # either; both sources it reads are the durable owners above.
     registration_preflight = RegistrationPreflightService(
@@ -799,13 +816,13 @@ def build_container(
         detail_profiles=authoring_revisions,
         # M6-E (ADR-0024 §5): no second listing of an adopted Item.
         adopted_items=adoptions.adopted_items,
-        # ADR-0031 §4, ADR-0030 §7: a forbidden or unread sales channel, or a RECON supplier.
-        source_gates=SourceGates(
-            product_store,
-            lambda key: SITES[key].config.active if key in SITES else None,
-        ),
+        # ADR-0031 §4, ADR-0030 §7: a forbidden or unread sales channel, or a RECON supplier;
+        # ADR-0039 §2: a warning instead where the supplier's channel policy is not applied.
+        source_gates=source_gates,
         # ADR-0033 G4: the store-wide Detail Guidance notices a product's choice resolves to.
         guidance=detail_guidance_store,
+        # ADR-0039 §1: the sales-policy revision each Item's supplier has, pinned (SP-03).
+        sales_policies=source_gates.policy_pins,
     )
     # Gate 1 G1-D (ADR-0015 §5): a Draft from the operator's Product DB selection. It composes the
     # owners above — the revalidated selection, the bound account, the current target policy, M4
@@ -1271,6 +1288,7 @@ def build_container(
         ai_execution=ai_execution,
         ai_provider=ai_provider,
         detail_guidance=detail_guidance,
+        sales_policies=sales_policies,
         category_metadata=category_metadata,
         category_catalog=category_catalog,
         smartstore_addressbook=SmartStoreAddressBookSource(
