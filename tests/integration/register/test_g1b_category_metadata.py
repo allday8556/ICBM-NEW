@@ -608,7 +608,7 @@ def test_0020_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "detail_guidances",
         "guidance_image_artifacts",
         "detail_guidance_revisions",
-        # ADR-0039 §1 (0061): the supplier sales-policy revisions.
+        # ADR-0039 §1 (0060): the supplier sales-policy revisions.
         "supplier_sales_policy_revisions",
     }
     command.upgrade(alembic_config(url), "head")

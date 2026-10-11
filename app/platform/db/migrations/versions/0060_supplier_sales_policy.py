@@ -1,6 +1,6 @@
 """ADR-0039 P1: the per-supplier sales policy and the pricing snapshot's minimum pin.
 
-Revision ID: 0061_supplier_sales_policy
+Revision ID: 0060_supplier_sales_policy
 Revises: 0059_detail_guidance_placement
 Create Date: 2026-10-11
 
@@ -32,7 +32,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0061_supplier_sales_policy"
+revision: str = "0060_supplier_sales_policy"
 down_revision: str | None = "0059_detail_guidance_placement"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

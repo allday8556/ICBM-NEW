@@ -1,4 +1,4 @@
-"""Persistence of the per-supplier sales policy (ADR-0039 §1; migration 0061).
+"""Persistence of the per-supplier sales policy (ADR-0039 §1; migration 0060).
 
 One table, ``supplier_sales_policy_revisions``: the append-only revisions of one supplier's sales
 policy, keyed by ``supplier_key``. The newest revision is the supplier's policy; a supplier with no

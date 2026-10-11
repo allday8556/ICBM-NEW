@@ -1277,7 +1277,7 @@ LATER_COLUMNS = frozenset(
         "transport_kind",
         "capture_policy_revision",
         "capture_policy_digest",
-        # 0061 (ADR-0039 §3): the pricing snapshot's minimum policy, appended in place.
+        # 0060 (ADR-0039 §3): the pricing snapshot's minimum policy, appended in place.
         "minimum_applied",
         "stated_minimum_sale_price_krw",
     }

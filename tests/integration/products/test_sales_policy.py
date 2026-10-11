@@ -450,10 +450,10 @@ def test_the_api_reads_saves_and_refuses(client: TestClient, config: AppConfig) 
     assert "SUPPLIER_SALES_POLICY" in settings["editable_surfaces"]
 
 
-# ---------------------------------------------------------------- migration 0061
+# ---------------------------------------------------------------- migration 0060
 
 
-def test_0061_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None:
+def test_0060_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None:
     database = tmp_path / "icbm.db"
     url = f"sqlite:///{database.as_posix()}"
     upgrade_to_head(url)

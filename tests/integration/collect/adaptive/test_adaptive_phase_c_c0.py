@@ -1225,7 +1225,7 @@ def test_0027_is_additive_and_its_downgrade_never_destroys_capture_evidence(
         # GUIDANCE_ARTIFACT upload kind in the attempt's asset-kind CHECK.
         "registration_snapshots",
         "asset_upload_attempts",
-        # Migration 0061 (ADR-0039 §3) adds the pricing snapshot's minimum-policy columns.
+        # Migration 0060 (ADR-0039 §3) adds the pricing snapshot's minimum-policy columns.
         "pricing_snapshots",
     }
     assert {"adaptive_capture_requests", "adaptive_capture_candidates"} <= set(after) - set(before)

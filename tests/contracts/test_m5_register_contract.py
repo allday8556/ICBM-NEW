@@ -269,7 +269,7 @@ DETAIL_GUIDANCE = "0058_detail_guidance"
 DETAIL_GUIDANCE_PLACEMENT = "0059_detail_guidance_placement"
 # ADR-0039 §1, §3: the per-supplier sales policy and the pricing snapshot's minimum pin. Product
 # state, never registration state. (0060 is reserved by Track A.)
-SUPPLIER_SALES_POLICY = "0061_supplier_sales_policy"
+SUPPLIER_SALES_POLICY = "0060_supplier_sales_policy"
 SCHEMA_HEAD = SUPPLIER_SALES_POLICY
 AFTER_M5 = (
     "0021_g2_review_items",
