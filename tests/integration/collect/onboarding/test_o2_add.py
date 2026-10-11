@@ -5,7 +5,9 @@ real bootstrap reader runs over a mock transport and a fixed resolver, and the s
 the fake CONNECT gateway. Proven here:
 
 - detection reads the home page once and each template's login page once, through one grant for
-  the entered host only, and classifies cafe24 / godomall / unsupported from markers only;
+  the entered host only, and classifies cafe24 / godomall / unsupported from markers only; an
+  unsupported site stops ("a template is needed") and a template is never forced onto it; only an
+  ambiguous detection offers a choice, between its matched templates only;
 - a name that resolves to a loopback or private address is refused before any HTTP read;
 - the policy reads are robots.txt and the template's terms page (two, within the cap of 3), shown
   with their warnings, stored acknowledged with the draft, and never a refusal;
@@ -36,6 +38,7 @@ from app.stages.collect.onboarding.service import (
     ONBOARDING_POLICY_NOT_ACKNOWLEDGED,
     ONBOARDING_RECON_NOT_READY,
     ONBOARDING_TEMPLATE_NEEDED,
+    ONBOARDING_TEMPLATE_NOT_DETECTED,
 )
 from app.stages.collect.onboarding.store import (
     ONBOARDING_HOST_TAKEN,
@@ -52,6 +55,7 @@ from tests.support.onboarding_support import (
     ROBOTS_ALL,
     ROBOTS_PRODUCTS,
     Storefront,
+    ambiguous_site,
     cafe24_site,
     godomall_site,
     plain_site,
@@ -67,6 +71,7 @@ CAFE24_ORIGIN = f"https://{CAFE24_HOST}"
 CAFE24_KEY = "site-shop-onboard-sample-co-kr"
 GODOMALL_HOST = "www.godo-sample.com"
 PLAIN_HOST = "plain-sample.co.kr"
+BOTH_HOST = "both.onboard-sample.co.kr"
 DETECTION_READS = ("/", "/member/login.html", "/member/login.php")
 TABLES = (
     "onboarded_suppliers",
@@ -83,6 +88,7 @@ def storefront() -> Storefront:
             CAFE24_HOST: cafe24_site(),
             GODOMALL_HOST: godomall_site(),
             PLAIN_HOST: plain_site(),
+            BOTH_HOST: ambiguous_site(),
         }
     )
 
@@ -206,13 +212,13 @@ def test_a_storefront_without_template_markers_is_unsupported(storefront: Storef
 
 
 def test_both_templates_matching_is_ambiguous_and_unsupported(storefront: Storefront) -> None:
-    pages = cafe24_site()
-    pages["/"] = (200, pages["/"][1] + godomall_site()["/"][1], {})
-    pages["/member/login.php"] = godomall_site()["/member/login.php"]
-    storefront.sites["both.onboard-sample.co.kr"] = pages
-    found = detect(storefront.reader(), "both.onboard-sample.co.kr", TEMPLATES)
+    found = detect(storefront.reader(), BOTH_HOST, TEMPLATES)
     assert found.platform == UNSUPPORTED and found.reason is not None
     assert found.reason.value == "AMBIGUOUS"
+    assert found.choices == ("cafe24", "godomall")
+    # Only an ambiguous detection offers a choice; every other unsupported outcome offers none.
+    assert detect(storefront.reader(), PLAIN_HOST, TEMPLATES).choices == ()
+    assert detect(storefront.reader(), CAFE24_HOST, TEMPLATES).choices == ("cafe24",)
 
 
 @pytest.mark.parametrize("address", ["127.0.0.1", "10.0.0.5", "169.254.169.254", "::1", "fd00::1"])
@@ -238,6 +244,9 @@ def test_a_redirecting_home_page_suggests_its_target(
     assert detection["detected"] == UNSUPPORTED and detection["reason"] == "HOME_REDIRECT"
     assert detection["suggested_origin"] == CAFE24_ORIGIN
     assert detection["policy"] == [] and detection["policy_reads"] == 0
+    assert detection["choices"] == []
+    refused = create_api(api, detection, template="cafe24")
+    assert error_code(refused) == ONBOARDING_TEMPLATE_NEEDED
 
 
 # ---------------------------------------------------------------- policy reads (§4 step 3)
@@ -377,36 +386,76 @@ def test_a_repository_storefront_and_a_duplicate_are_refused_before_any_read(
     assert len(storefront.requests) == before
 
 
-def test_an_unknown_or_mismatched_detection_is_refused(api: TestClient, config: AppConfig) -> None:
+def test_an_unknown_or_mismatched_detection_is_refused(
+    api: TestClient, storefront: Storefront, config: AppConfig
+) -> None:
     detection = detect_api(api, CAFE24_ORIGIN)
     unknown = create_api(api, detection, detection_id="0" * 32)
     assert unknown.status_code == 404  # type: ignore[attr-defined]
     other = create_api(api, detection, origin=f"https://{GODOMALL_HOST}")
     assert error_code(other) == ONBOARDING_DETECTION_MISMATCH
     platform = create_api(api, detection, template="godomall")
-    assert error_code(platform) == ONBOARDING_DETECTION_MISMATCH
+    assert error_code(platform) == ONBOARDING_TEMPLATE_NOT_DETECTED
+    assert platform.json()["error"]["details"] == {"choices": ["cafe24"]}  # type: ignore[attr-defined]
+    # A detected site offers no other template either: nothing more is read.
+    before = len(storefront.requests)
+    response = api.post(
+        "/api/v1/onboarding/detect",
+        json={"origin": CAFE24_ORIGIN, "template": "godomall"},
+        headers=HEADERS,
+    )
+    assert error_code(response) == ONBOARDING_TEMPLATE_NOT_DETECTED
+    assert len(storefront.requests) == before
     unknown_template = create_api(api, detection, template="shopify")
     assert unknown_template.status_code == 422  # type: ignore[attr-defined]
     assert count(config, "onboarded_suppliers") == 0
 
 
-def test_an_unsupported_site_stops_unless_the_operator_chooses_a_template(
+def test_a_site_without_template_markers_stops_and_a_template_is_never_forced(
     api: TestClient, storefront: Storefront, config: AppConfig
 ) -> None:
     detection = detect_api(api, f"https://{PLAIN_HOST}")
-    assert detection["detected"] == UNSUPPORTED and detection["policy_template"] is None
+    assert detection["detected"] == UNSUPPORTED and detection["reason"] == "NO_MARKERS"
+    assert detection["policy_template"] is None and detection["choices"] == []
     assert detection["policy"] == []
     assert storefront.paths(PLAIN_HOST) == list(DETECTION_READS)
-    refused = create_api(api, detection, template="cafe24")
-    assert error_code(refused) == ONBOARDING_TEMPLATE_NEEDED
+    for template in ("cafe24", "godomall"):
+        refused = create_api(api, detection, template=template)
+        assert error_code(refused) == ONBOARDING_TEMPLATE_NEEDED
+        forced = api.post(
+            "/api/v1/onboarding/detect",
+            json={"origin": f"https://{PLAIN_HOST}", "template": template},
+            headers=HEADERS,
+        )
+        assert forced.status_code == 422 and error_code(forced) == ONBOARDING_TEMPLATE_NOT_DETECTED
+        assert forced.json()["error"]["details"] == {"choices": []}
+    # No policy document was read for a template the site does not carry.
+    assert storefront.paths(PLAIN_HOST) == list(DETECTION_READS)
     assert count(config, "onboarded_suppliers") == 0
-    # The operator's own choice: only the policy reads of that template are made.
-    chosen = detect_api(api, f"https://{PLAIN_HOST}", template="godomall")
+
+
+def test_an_ambiguous_site_offers_a_choice_between_its_matches_only(
+    api: TestClient, storefront: Storefront, config: AppConfig
+) -> None:
+    detection = detect_api(api, f"https://{BOTH_HOST}")
+    assert detection["detected"] == UNSUPPORTED and detection["reason"] == "AMBIGUOUS"
+    assert detection["choices"] == ["cafe24", "godomall"]
+    assert detection["policy_template"] is None and detection["policy"] == []
+    # Nothing is saved before the operator chooses.
+    unchosen = create_api(api, detection, template="cafe24")
+    assert error_code(unchosen) == ONBOARDING_DETECTION_MISMATCH
+    chosen = detect_api(api, f"https://{BOTH_HOST}", template="godomall")
     assert chosen["chosen"] == "godomall" and chosen["policy_template"] == "godomall"
-    assert chosen["detected"] == UNSUPPORTED and chosen["policy_reads"] == 2
+    assert chosen["choices"] == ["cafe24", "godomall"]
     # The earlier detection is reused: no home or login page is read again.
-    assert chosen["reads"] == 0
-    assert storefront.paths(PLAIN_HOST)[3:] == ["/robots.txt", "/service/agreement.php"]
+    assert chosen["reads"] == 0 and chosen["policy_reads"] == 2
+    assert storefront.paths(BOTH_HOST) == [
+        *DETECTION_READS,
+        "/robots.txt",
+        "/service/agreement.php",
+    ]
+    other = create_api(api, chosen, template="cafe24")
+    assert error_code(other) == ONBOARDING_DETECTION_MISMATCH
     created = create_api(api, chosen)
     assert created.status_code == 201, created.text  # type: ignore[attr-defined]
     assert created.json()["template"] == "godomall"  # type: ignore[attr-defined]
@@ -414,7 +463,10 @@ def test_an_unsupported_site_stops_unless_the_operator_chooses_a_template(
         config,
         "SELECT details_json FROM audit_events WHERE action = 'ONBOARDING_SUPPLIER_CREATED'",
     )
-    assert json.loads(str(details[0]))["detected"] == UNSUPPORTED
+    audited = json.loads(str(details[0]))
+    assert audited["detected"] == UNSUPPORTED and audited["confirmed"] == "godomall"
+    assert "godomall_login_form" in audited["markers"]
+    assert not any(m.startswith("cafe24") for m in audited["markers"])
 
 
 # ---------------------------------------------------------------- CONNECT and RECON (§4 4–5)

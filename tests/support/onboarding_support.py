@@ -67,6 +67,15 @@ def godomall_site(robots: str | None = ROBOTS_OPEN) -> dict[str, Page]:
     return pages
 
 
+def ambiguous_site() -> dict[str, Page]:
+    """A storefront carrying both templates' markers on its home page and both login forms."""
+    pages = cafe24_site()
+    pages["/"] = (200, CAFE24_HOME + GODOMALL_HOME, {})
+    pages["/member/login.php"] = (200, GODOMALL_LOGIN, {})
+    pages["/service/agreement.php"] = (200, TERMS, {})
+    return pages
+
+
 def plain_site() -> dict[str, Page]:
     return {"/": (200, PLAIN_HOME, {}), "/robots.txt": (200, ROBOTS_OPEN, {})}
 

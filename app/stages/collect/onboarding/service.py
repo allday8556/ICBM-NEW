@@ -2,9 +2,12 @@
 
 1. **Detect** (``detect``): the operator's origin passes the host guard (OB-01) and the repository
    and duplicate checks *before* any read; then one home read and one read of each template's
-   login page decide the platform, and robots.txt and the detected (or operator-chosen) template's
-   terms page are read. Nothing is written: the pass is held in this process for a short time
-   under a ``detection_id``, so 「저장」 confirms exactly what the operator was shown.
+   login page decide the platform, and robots.txt and that template's terms page are read.
+   *Unsupported* stops there with "a template is needed" (§4 step 2). Only when both templates'
+   markers matched (``AMBIGUOUS``) does the operator choose, and only between those, so a
+   template is never forced onto a site that does not carry its markers. Nothing is written: the
+   pass is held in this process for a short time under a ``detection_id``, so 「저장」 confirms
+   exactly what the operator was shown.
 2. **Save** (``create``): the operator confirms the platform and acknowledges the policy reads; the
    store writes the ``DRAFT`` identity, its bootstrap storefront host and the acknowledged policy
    reads in one unit. The login is then saved through CONNECT's own credential route for the new
@@ -67,6 +70,7 @@ from integrations.suppliers.sites import TEMPLATES
 ONBOARDING_DETECTION_UNKNOWN: Final = "ONBOARDING_DETECTION_UNKNOWN"
 ONBOARDING_DETECTION_MISMATCH: Final = "ONBOARDING_DETECTION_MISMATCH"
 ONBOARDING_TEMPLATE_NEEDED: Final = "ONBOARDING_TEMPLATE_NEEDED"
+ONBOARDING_TEMPLATE_NOT_DETECTED: Final = "ONBOARDING_TEMPLATE_NOT_DETECTED"
 ONBOARDING_POLICY_NOT_ACKNOWLEDGED: Final = "ONBOARDING_POLICY_NOT_ACKNOWLEDGED"
 ONBOARDING_POLICY_UNREAD: Final = "ONBOARDING_POLICY_UNREAD"
 ONBOARDING_RECON_NOT_READY: Final = "ONBOARDING_RECON_NOT_READY"
@@ -127,6 +131,14 @@ class OnboardingService:
         reads = 0 if detection is not None else None
         if detection is None:
             detection = detect(self._reader, host, self._templates)
+        if chosen is not None and chosen not in detection.choices:
+            # §4 step 2: a choice exists only between the templates an AMBIGUOUS detection
+            # matched. Anything else stops at "a template is needed"; nothing more is read.
+            raise InputValidationError(
+                ONBOARDING_TEMPLATE_NOT_DETECTED,
+                "only a template whose markers this storefront carries can be confirmed",
+                details={"choices": list(detection.choices)},
+            )
         policy_template = chosen or (detection.platform if detection.supported else None)
         policy: tuple[PolicyDocument, ...] = ()
         if policy_template is not None:
@@ -157,6 +169,7 @@ class OnboardingService:
             ],
             policy=[_policy_view(normalised, document) for document in policy],
             templates=self.supported,
+            choices=list(detection.choices),
             reads=detection.reads if reads is None else reads,
             policy_reads=len(policy),
             expires_at=now + DETECTION_TTL,
@@ -199,10 +212,17 @@ class OnboardingService:
                 ONBOARDING_DETECTION_MISMATCH, "the platform check was for another origin"
             )
         confirmed = self._supported(template)
-        if pending.view.policy_template is None:
+        choices = pending.detection.choices
+        if not choices:
             raise InputValidationError(
                 ONBOARDING_TEMPLATE_NEEDED,
-                "no template recognised this storefront; choose a template or a template is needed",
+                "no template recognised this storefront: a template is needed",
+            )
+        if confirmed not in choices:
+            raise InputValidationError(
+                ONBOARDING_TEMPLATE_NOT_DETECTED,
+                "only a template whose markers this storefront carries can be confirmed",
+                details={"choices": list(choices)},
             )
         if confirmed != pending.view.policy_template:
             raise InputValidationError(
@@ -233,7 +253,7 @@ class OnboardingService:
             actor=actor,
             policy_reads=reads,
             detected=pending.detection.platform,
-            markers=pending.detection.marker_names,
+            markers=pending.detection.markers_of(confirmed),
         )
         with self._lock:
             self._pending.pop(detection_id, None)

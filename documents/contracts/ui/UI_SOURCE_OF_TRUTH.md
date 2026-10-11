@@ -486,9 +486,10 @@ v29's `+ 공급처 추가` and its `새 공급처 추가` card open v29's `suppl
   terms page. The modal shows the detected platform (`Cafe24` / `고도몰` / `지원하지 않는 플랫폼`),
   the marker names that decided it, the robots.txt lines and both documents' status with a link
   to open them, and every warning (`주의`). A warning never blocks: the seller reads it and decides.
-  An unsupported site says a template is needed; the operator may still choose a supported
-  template, which reads only that template's policy documents again. A home page that redirects
-  offers `…로 다시 확인`.
+  An unsupported site stops with `템플릿이 필요합니다` and 저장 stays disabled: no template is ever
+  forced onto a site that does not carry its markers. Only when both templates' markers matched
+  (`AMBIGUOUS`) does a `플랫폼` select offer exactly those templates; a choice reads only that
+  template's policy documents. A home page that redirects offers `…로 다시 확인`.
 - **저장.** Enabled only after the acknowledgement checkbox. It creates the draft
   (`POST /api/v1/onboarding/suppliers`: name, origin, the confirmed template, the detection id and
   the acknowledgement) and then saves the login through CONNECT's existing

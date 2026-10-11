@@ -3,7 +3,9 @@
 **Detection.** One read of the storefront's home page and one of each template's login page, all
 through the common transport's bootstrap reader (one egress grant, for the entered host only).
 A template is detected when its home-page markers *and* its login-form markers are both present;
-exactly one detected template is the answer, anything else is *unsupported*. Markers are the
+exactly one detected template is the answer, anything else is *unsupported*. Only when more than
+one template matched (``AMBIGUOUS``) does the operator choose, and only among those; every other
+unsupported outcome stops with "a template is needed" (§4 step 2). Markers are the
 template packages' own data (``PlatformDetection``): their names are the evidence, and nothing
 else is read from a page (no fact, no text kept).
 
@@ -76,11 +78,26 @@ class Detection:
         return self.platform != UNSUPPORTED
 
     @property
+    def choices(self) -> tuple[str, ...]:
+        """The templates the operator may confirm (ADR-0036 §4 step 2): the detected one, or, when
+        detection is ``AMBIGUOUS``, exactly the templates whose markers all matched. Every other
+        unsupported outcome stops with "a template is needed": a template is never forced onto a
+        site that does not carry its markers."""
+        if self.supported:
+            return (self.platform,)
+        if self.reason is UnsupportedReason.AMBIGUOUS:
+            return tuple(e.platform for e in self.evidence if e.matched)
+        return ()
+
+    @property
     def marker_names(self) -> tuple[str, ...]:
+        return self.markers_of(self.platform)
+
+    def markers_of(self, platform: str) -> tuple[str, ...]:
         return tuple(
             name
             for e in self.evidence
-            if e.platform == self.platform
+            if e.platform == platform
             for name in (*e.home_markers, *e.login_markers)
         )
 

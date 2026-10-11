@@ -52,13 +52,16 @@ class DetectionView(BaseModel):
     home_status: int | None
     # Where the home page redirected, when it did and the target is an acceptable origin.
     suggested_origin: str | None
-    # The template the operator chose instead of the detected one, if any.
+    # The template the operator chose between the matches of an AMBIGUOUS detection, if any.
     chosen: str | None
     # The template whose policy documents were read: what 「저장」 confirms.
     policy_template: str | None
     evidence: list[TemplateEvidenceView]
     policy: list[PolicyDocumentView]
     templates: list[str]
+    # What 「저장」 may confirm: the detected template, or the templates an AMBIGUOUS detection
+    # matched. Empty: the site stops with "a template is needed" (ADR-0036 §4 step 2).
+    choices: list[str]
     reads: int
     policy_reads: int
     expires_at: datetime

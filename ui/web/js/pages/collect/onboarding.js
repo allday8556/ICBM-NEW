@@ -29,10 +29,10 @@ export const ONBOARDING_CHIP = {
 const PLATFORM_LABEL = { cafe24: 'Cafe24', godomall: '고도몰', unsupported: '지원하지 않는 플랫폼' };
 
 const UNSUPPORTED_COPY = {
-  HOME_UNREAD: '홈 페이지를 읽지 못했습니다. 도메인을 확인하세요.',
-  HOME_REDIRECT: '홈 페이지가 다른 주소로 이동합니다.',
-  NO_MARKERS: 'Cafe24·고도몰 템플릿의 표시를 찾지 못했습니다. 이 사이트는 템플릿이 필요합니다.',
-  AMBIGUOUS: '두 템플릿의 표시가 함께 보여 플랫폼을 정하지 못했습니다. 직접 선택할 수 있습니다.',
+  HOME_UNREAD: '홈 페이지를 읽지 못했습니다. 템플릿이 필요합니다. 도메인을 확인하세요.',
+  HOME_REDIRECT: '홈 페이지가 다른 주소로 이동합니다. 템플릿이 필요합니다. 이동한 주소로 다시 확인하세요.',
+  NO_MARKERS: 'Cafe24·고도몰 템플릿의 표시를 찾지 못했습니다. 템플릿이 필요합니다.',
+  AMBIGUOUS: '두 템플릿의 표시가 함께 보여 플랫폼을 정하지 못했습니다. 표시가 확인된 플랫폼 중에서 선택하세요.',
 };
 
 const WARNING_COPY = {
@@ -51,6 +51,7 @@ const ERROR_COPY = {
   ONBOARDING_DETECTION_UNKNOWN: '플랫폼 확인이 만료되었습니다. 다시 확인하세요.',
   ONBOARDING_DETECTION_MISMATCH: '도메인이나 플랫폼이 확인한 내용과 다릅니다. 다시 확인하세요.',
   ONBOARDING_TEMPLATE_NEEDED: '지원 템플릿이 없는 사이트입니다. 템플릿이 필요합니다.',
+  ONBOARDING_TEMPLATE_NOT_DETECTED: '이 사이트에서 표시가 확인된 플랫폼만 선택할 수 있습니다.',
   ONBOARDING_POLICY_NOT_ACKNOWLEDGED: 'robots.txt·이용약관 확인에 체크하세요.',
   ONBOARDING_POLICY_UNREAD: 'robots.txt와 이용약관을 모두 읽지 못했습니다. 잠시 후 다시 확인하세요.',
   ONBOARDING_RECON_NOT_READY: '로그인 정보 저장과 연결 테스트 성공 뒤에 사이트 분석으로 넘어갑니다.',
@@ -159,18 +160,27 @@ export function openAddSupplier(ctx, { waitForJob, errorMessage }) {
 
   const render = (d) => {
     const confirmed = d.policy_template;
-    const select = h(
-      'select',
-      { 'data-role': 'platform-choice', 'aria-label': '플랫폼', disabled: Boolean(state.key) },
-      h('option', { value: '' }, confirmed ? `${PLATFORM_LABEL[confirmed]} (확인됨)` : '선택'),
-      d.templates.filter((t) => t !== confirmed).map((t) => h('option', { value: t }, `${PLATFORM_LABEL[t] ?? t}로 직접 선택`)),
-    );
-    select.addEventListener('change', () => {
-      if (select.value) detectNow(select.value);
-    });
+    // ADR-0036 §4 step 2: a choice exists only when an AMBIGUOUS detection matched more than one
+    // template, and only between those. Every other unsupported outcome stops: a template is needed.
+    const ambiguous = d.reason === 'AMBIGUOUS' && d.choices.length > 1;
+    let platformRow = null;
+    if (ambiguous) {
+      const select = h(
+        'select',
+        { 'data-role': 'platform-choice', 'aria-label': '플랫폼', disabled: Boolean(state.key) },
+        h('option', { value: '' }, '선택'),
+        d.choices.map((t) => h('option', { value: t, selected: t === confirmed }, PLATFORM_LABEL[t] ?? t)),
+      );
+      select.addEventListener('change', () => {
+        if (select.value && select.value !== confirmed) detectNow(select.value);
+      });
+      platformRow = h('div', { class: 'form-row' }, h('label', {}, '플랫폼'), select);
+    } else if (confirmed) {
+      platformRow = h('div', { class: 'kv' }, h('span', {}, '플랫폼'), h('b', {}, `${PLATFORM_LABEL[confirmed] ?? confirmed} (확인됨)`));
+    }
     const detected = d.detected;
     const tone = detected === 'unsupported' ? 'bad' : 'good';
-    const markers = d.evidence.filter((e) => e.platform === detected).flatMap((e) => [...e.home_markers, ...e.login_markers]);
+    const markers = d.evidence.filter((e) => (ambiguous ? d.choices.includes(e.platform) : e.platform === detected)).flatMap((e) => [...e.home_markers, ...e.login_markers]);
     result.replaceChildren(
       h(
         'div',
@@ -179,7 +189,13 @@ export function openAddSupplier(ctx, { waitForJob, errorMessage }) {
         h('span', { class: `chip ${tone}`, 'data-detected': detected }, PLATFORM_LABEL[detected] ?? detected),
       ),
       markers.length ? h('div', { class: 'mini onboarding-evidence' }, `근거: ${markers.join(', ')}`) : null,
-      detected === 'unsupported' ? h('div', { class: 'note', 'data-role': 'unsupported' }, UNSUPPORTED_COPY[d.reason] ?? '템플릿이 필요합니다.') : null,
+      detected === 'unsupported'
+        ? h(
+            'div',
+            { class: 'note', 'data-role': ambiguous ? 'ambiguous' : 'template-needed' },
+            UNSUPPORTED_COPY[d.reason] ?? '템플릿이 필요합니다.',
+          )
+        : null,
       d.suggested_origin
         ? h(
             'button',
@@ -195,8 +211,7 @@ export function openAddSupplier(ctx, { waitForJob, errorMessage }) {
             `${d.suggested_origin}로 다시 확인`,
           )
         : null,
-      h('div', { class: 'form-row' }, h('label', {}, '플랫폼'), select),
-      d.chosen ? h('div', { class: 'mini' }, `운영자 선택: ${PLATFORM_LABEL[d.chosen] ?? d.chosen} (감지 결과와 다를 수 있습니다)`) : null,
+      platformRow,
       d.policy.length
         ? h('div', { class: 'onboarding-policy', 'data-role': 'policy' }, d.policy.map(policyBlock))
         : null,

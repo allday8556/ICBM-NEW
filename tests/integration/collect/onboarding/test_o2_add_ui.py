@@ -10,6 +10,8 @@ and connects through the fake CONNECT gateway. Proven here:
 - 「저장」 creates the draft and saves the login through CONNECT's credential route, sending the
   password exactly once and clearing it; 「연결 테스트」 passes and the card shows 분석 중;
 - 사이트 분석 and 수집 규칙 stay inert; the password is never shown;
+- an unsupported site shows "템플릿이 필요합니다" with no choice and no 저장; an ambiguous
+  one offers exactly its two matched templates;
 - neither the screen nor the open modal scrolls horizontally at 1920×1080 or at 390×844.
 """
 
@@ -28,13 +30,21 @@ from app.main import create_app
 from tests.conftest import LOCAL
 from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.fake_suppliers import KMRETAIL_PAGES, PASSWORD, USERNAME, FakeGateway
-from tests.support.onboarding_support import ROBOTS_PRODUCTS, Storefront, cafe24_site
+from tests.support.onboarding_support import (
+    ROBOTS_PRODUCTS,
+    Storefront,
+    ambiguous_site,
+    cafe24_site,
+    plain_site,
+)
 
 pytestmark = pytest.mark.integration
 
 SUPPLIERS = f"{LOCAL}/#/collect?view=suppliers"
 HOST = "shop.onboard-sample.co.kr"
 KEY = "site-shop-onboard-sample-co-kr"
+PLAIN_HOST = "plain-sample.co.kr"
+BOTH_HOST = "both.onboard-sample.co.kr"
 FORWARDED = ("x-icbm-client", "content-type", "accept")
 MODAL = ".modal"
 
@@ -54,7 +64,13 @@ def browser() -> Iterator[Browser]:
 
 @pytest.fixture
 def storefront() -> Storefront:
-    return Storefront(sites={HOST: cafe24_site(ROBOTS_PRODUCTS)})
+    return Storefront(
+        sites={
+            HOST: cafe24_site(ROBOTS_PRODUCTS),
+            PLAIN_HOST: plain_site(),
+            BOTH_HOST: ambiguous_site(),
+        }
+    )
 
 
 @pytest.fixture
@@ -113,14 +129,14 @@ def _no_horizontal_scroll(page: Page) -> None:
     assert overflow == {"page": 0, "card": 0}, overflow
 
 
-def _detect(page: Page) -> None:
+def _detect(page: Page, host: str = HOST, expect: str = "[data-detected='cafe24']") -> None:
     modal = page.locator(MODAL)
     modal.get_by_role("textbox", name="공급처명", exact=True).fill("온보드 샘플")
-    modal.get_by_role("textbox", name="도메인", exact=True).fill(f"https://{HOST}")
+    modal.get_by_role("textbox", name="도메인", exact=True).fill(f"https://{host}")
     modal.get_by_role("textbox", name="ID", exact=True).fill(USERNAME)
     modal.locator("input[type=password]").fill(PASSWORD)
     modal.locator("[data-action='detect-platform']").click()
-    page.wait_for_selector("[data-detected='cafe24']", timeout=15_000)
+    page.wait_for_selector(expect, timeout=15_000)
 
 
 def test_a_supplier_is_added_saved_tested_and_shown_in_analysis(
@@ -200,3 +216,36 @@ def test_the_add_card_opens_the_modal_without_horizontal_scroll(
         _no_horizontal_scroll(page)
         page.keyboard.press("Escape")
     assert [w[:2] for w in writes] == [("POST", "/api/v1/onboarding/detect")]
+
+
+def test_an_unsupported_site_stops_and_an_ambiguous_one_offers_only_its_matches(
+    browser: Browser, client: TestClient
+) -> None:
+    writes: list[tuple[str, str, str]] = []
+    with _page(browser, client, writes, 1920, 1080) as page:
+        page.locator("[data-action='add-supplier']").click()
+        modal = page.locator(MODAL)
+        # NO_MARKERS: "a template is needed", no choice offered, nothing can be saved.
+        _detect(page, PLAIN_HOST, "[data-detected='unsupported']")
+        assert "템플릿이 필요합니다" in modal.locator("[data-role='template-needed']").inner_text()
+        assert modal.locator("[data-role='platform-choice']").count() == 0
+        assert modal.locator("[data-role='policy']").count() == 0
+        assert modal.locator("[data-role='policy-ack']").count() == 0
+        assert modal.locator("[data-action='save-supplier']").is_disabled()
+
+        # AMBIGUOUS: a choice between exactly the two matched templates.
+        modal.get_by_role("textbox", name="도메인", exact=True).fill(f"https://{BOTH_HOST}")
+        modal.locator("[data-action='detect-platform']").click()
+        page.wait_for_selector("[data-role='ambiguous']", timeout=15_000)
+        choice = modal.locator("[data-role='platform-choice']")
+        options = choice.locator("option").all_inner_texts()
+        assert options == ["선택", "Cafe24", "고도몰"]
+        assert modal.locator("[data-action='save-supplier']").is_disabled()
+        choice.select_option("godomall")
+        page.wait_for_selector("[data-policy='TERMS']", timeout=15_000)
+        assert modal.locator("[data-role='platform-choice']").input_value() == "godomall"
+        modal.locator("[data-role='policy-ack']").check()
+        assert modal.locator("[data-action='save-supplier']").is_enabled()
+        _no_horizontal_scroll(page)
+    assert [w[:2] for w in writes] == [("POST", "/api/v1/onboarding/detect")] * 3
+    assert json.loads(writes[2][2]) == {"origin": f"https://{BOTH_HOST}", "template": "godomall"}
