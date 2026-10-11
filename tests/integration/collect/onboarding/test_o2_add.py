@@ -690,3 +690,35 @@ def test_the_reader_asks_for_identity_and_refuses_a_compressed_answer_unread(
     assert bomb_read.status is None and bomb_read.failure is PublicReadFailure.ENCODED_REFUSED
     assert bomb_read.content == b""
     assert plain.status == 200 and plain.truncated and len(plain.content) == 10
+
+
+def test_a_dripping_host_is_cut_off_at_the_total_deadline(storefront: Storefront) -> None:
+    """httpx's timeout bounds each wait; a host that keeps dripping bytes is still cut off once the
+    whole read passes its deadline, and nothing it sent is kept."""
+    import httpx
+
+    from integrations.suppliers.base import PublicReadFailure
+    from integrations.suppliers.transport.gateway import PolicedPublicReader
+    from integrations.suppliers.transport.pacing import RequestPacer
+
+    now = [0.0]
+
+    class Drip(httpx.SyncByteStream):
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            for _ in range(1_000):
+                now[0] += 1.0  # each byte arrives one (fake) second after the last
+                yield b"x"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=Drip())
+
+    reader = PolicedPublicReader(
+        pacer=RequestPacer(sleep=lambda _: None),
+        http_transport=httpx.MockTransport(handler),
+        resolve=storefront.resolve,
+        timeout_s=10,
+        monotonic=lambda: now[0],
+    )
+    (drip,) = reader.read(CAFE24_HOST, ("/",))
+    assert drip.status is None and drip.failure is PublicReadFailure.TIMEOUT
+    assert drip.content == b""

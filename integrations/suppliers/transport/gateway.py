@@ -321,8 +321,11 @@ class PolicedPublicReader:
         max_bytes: int = PUBLIC_READ_MAX_BYTES,
         timeout_s: float = PUBLIC_READ_TIMEOUT_S,
         interval_s: float = PUBLIC_READ_INTERVAL_S,
+        # The clock of the total per-read deadline; tests substitute a fake one.
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._pacer = pacer or RequestPacer()
+        self._monotonic = monotonic
         self._http_transport = http_transport
         self._resolve = resolve or _resolve_addresses
         self._max_bytes = max_bytes
@@ -381,6 +384,9 @@ class PolicedPublicReader:
 
     def _one(self, client: httpx.Client, lane: SupplierProfile, host: str, path: str) -> PublicRead:
         started, started_mono = datetime.now(UTC), time.monotonic()
+        # httpx's timeout bounds each wait, not the whole read: a host that drips bytes would hold a
+        # read open forever. The read as a whole ends at this deadline.
+        deadline = self._monotonic() + self._timeout_s
         failure: PublicReadFailure | None = None
         status: int | None = None
         content = b""
@@ -399,6 +405,9 @@ class PolicedPublicReader:
                     try:
                         # Raw bytes as received: never decompressed, so the cap bounds memory.
                         for chunk in response.iter_raw(chunk_size=65_536):
+                            if self._monotonic() > deadline:
+                                failure = PublicReadFailure.TIMEOUT
+                                break
                             chunks.append(chunk)
                             size += len(chunk)
                             if size > self._max_bytes:
