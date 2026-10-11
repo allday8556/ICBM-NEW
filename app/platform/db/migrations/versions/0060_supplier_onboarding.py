@@ -1,7 +1,7 @@
 """ADR-0036 O1: the supplier onboarding owner — identities, states, hosts, words and trials.
 
-Revision ID: 0061_supplier_onboarding
-Revises: 0059_detail_guidance_placement (to be re-pointed onto 0060_supplier_sales_policy)
+Revision ID: 0060_supplier_onboarding
+Revises: 0059_detail_guidance_placement
 Create Date: 2026-10-12
 
 ADR-0036 §3. It adds seven tables and touches no existing table, row, trigger or index.
@@ -12,10 +12,13 @@ ADR-0036 §3. It adds seven tables and touches no existing table, row, trigger o
   and moves by exactly one; each row leaves the state the row before it reached, along an allowed
   edge only (`DRAFT → RECON`, `RECON → ACTIVE`, `ACTIVE → RECON`, any other state `→ DISABLED`).
   The newest row is the current state. **`ACTIVE` is entered only when proven** (§7 D2,
-  OB-04): at least 3 distinct sample URLs have a trial under the current words revision with
-  every core field `CONFIRMED`, no structural problem and an operator verification `CORRECT` of
+  OB-04): the row names the template revision its proof was judged under, and at least 3
+  distinct sample URLs have a trial under that template revision and the current words revision
+  with
+  every core field read (`CONFIRMED`; the options field also `ABSENT`, the stated "no options" of
+  ADR-0013 ruling B), no structural problem and an operator verification `CORRECT` of
   exactly what the trial showed (its facts fingerprint), and no `WRONG` one; and no trial under the
-  current words has an open structural problem. Until O3 and O5 write trials and verifications,
+  same words and template revision has an open structural problem. Until O3 and O5 write trials and verifications,
   `ACTIVE` is therefore unreachable.
 - `onboarding_hosts`: one row per confirmation or disable of a `(host, role)`, numbered per
   supplier. A confirmed host names the trial that observed it, which must be the same supplier's;
@@ -40,8 +43,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0061_supplier_onboarding"
-# TODO(lane): re-point onto 0060_supplier_sales_policy when it lands.
+revision: str = "0060_supplier_onboarding"
 down_revision: str | None = "0059_detail_guidance_placement"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -68,7 +70,16 @@ STATES = "('DRAFT', 'RECON', 'ACTIVE', 'DISABLED')"
 ROLES = "role IN ('storefront', 'login', 'image')"
 # The CORE fields of the fact registry (``app.stages.collect.facts.FIELD_REGISTRY``), frozen with
 # this revision: an ACTIVE site's proving trials read every one of them (ADR-0036 §2 D2).
+# An ACTIVE row names the template revision its proof was judged under (ADR-0036 §7).
+ACTIVE_NAMES_TEMPLATE = (
+    "to_state <> 'ACTIVE' OR (template_revision IS NOT NULL AND template_revision <> '')"
+)
 CORE_FIELDS = ("original_name", "prices", "options", "images", "stock")
+# A core field is read when CONFIRMED; the options field also when ABSENT, the page's own statement
+# that the product has no options (ADR-0013 ruling B): no template ever confirms an option axis.
+READ_STATUSES = {
+    field: "'CONFIRMED', 'ABSENT'" if field == "options" else "'CONFIRMED'" for field in CORE_FIELDS
+}
 ACTIVATION_SAMPLES = 3
 # ADR-0036 §3, §7: the edges of the state log.
 EDGES = (
@@ -154,6 +165,7 @@ def upgrade() -> None:
         sa.Column("reason", sa.String(length=200), nullable=False),
         sa.Column("evidence_json", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("template_revision", sa.String(length=64), nullable=True),
         _check(TRANSITIONS, "seq >= 1", "seq_positive"),
         _check(TRANSITIONS, f"to_state IN {STATES}", "to_state_known"),
         _check(
@@ -164,6 +176,7 @@ def upgrade() -> None:
         ),
         _check(TRANSITIONS, "actor <> ''", "actor_present"),
         _check(TRANSITIONS, _json("evidence_json", "array"), "evidence_is_array"),
+        _check(TRANSITIONS, ACTIVE_NAMES_TEMPLATE, "active_names_template"),
         _supplier_fk(TRANSITIONS),
         sa.PrimaryKeyConstraint("transition_id", name=op.f(f"pk_{TRANSITIONS}")),
         sa.UniqueConstraint("supplier_key", "seq", name=op.f(f"uq_{TRANSITIONS}_supplier_key_seq")),
@@ -285,21 +298,29 @@ _CURRENT_WORDS = (
     f"(SELECT COALESCE(MAX(w.seq), 0) FROM {WORDS} w WHERE w.supplier_key = NEW.supplier_key)"
 )
 _CORE_READ = " AND ".join(
-    f"json_extract(t.field_status_json, '$.{field}') = 'CONFIRMED'" for field in CORE_FIELDS
+    f"json_extract(t.field_status_json, '$.{field}') IN ({READ_STATUSES[field]})"
+    for field in CORE_FIELDS
+)
+# The trials the proof is judged on: this supplier's, under the current words revision and the
+# template revision the ACTIVE row names. A trial of an older template proves nothing and blocks
+# nothing once the template is fixed.
+_CURRENT_TRIAL = (
+    f"t.supplier_key = NEW.supplier_key AND t.words_seq = {_CURRENT_WORDS}"
+    " AND t.template_revision = NEW.template_revision"
 )
 # ADR-0036 §7: the conditions of approval, as the database can judge them.
 _UNPROVEN = (
-    "NEW.to_state = 'ACTIVE' AND ("
-    f"(SELECT COUNT(DISTINCT t.sample_url_key) FROM {TRIALS} t"
-    f" WHERE t.supplier_key = NEW.supplier_key AND t.words_seq = {_CURRENT_WORDS}"
+    "NEW.to_state = 'ACTIVE' AND (NEW.template_revision IS NULL"
+    f" OR (SELECT COUNT(DISTINCT t.sample_url_key) FROM {TRIALS} t"
+    f" WHERE {_CURRENT_TRIAL}"
     f" AND json_array_length(t.structural_json) = 0 AND {_CORE_READ}"
     f" AND EXISTS (SELECT 1 FROM {VERIFICATIONS} v WHERE v.trial_id = t.trial_id"
     " AND v.verdict = 'CORRECT' AND v.shown_fingerprint = t.facts_fingerprint)"
     f" AND NOT EXISTS (SELECT 1 FROM {VERIFICATIONS} v WHERE v.trial_id = t.trial_id"
     " AND v.verdict = 'WRONG' AND v.shown_fingerprint = t.facts_fingerprint)"
     f") < {ACTIVATION_SAMPLES}"
-    f" OR EXISTS (SELECT 1 FROM {TRIALS} t WHERE t.supplier_key = NEW.supplier_key"
-    f" AND t.words_seq = {_CURRENT_WORDS} AND json_array_length(t.structural_json) > 0))"
+    f" OR EXISTS (SELECT 1 FROM {TRIALS} t WHERE {_CURRENT_TRIAL}"
+    " AND json_array_length(t.structural_json) > 0))"
 )
 
 

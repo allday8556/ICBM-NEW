@@ -1,6 +1,6 @@
 """Provider-zero Coupang Open API contracts.
 
 No module in this package opens a socket or grants endpoint adoption. C-AUTH-1 owns the signing,
-credential/context, error-classification and fake-transport boundaries. Catalog, products, and
-orders add fake-only request/response contracts on top of that boundary.
+credential/context, error-classification and fake-transport boundaries. Catalog, products, orders,
+claims, and logistics add fake-only request/response contracts on top of that boundary.
 """

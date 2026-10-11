@@ -415,7 +415,7 @@ class _CatalogImageRoles:
         if fixed is not None:
             return fixed
         entry = self._catalog.onboarded(supplier_key)
-        if entry is None or entry.bound is None:
+        if entry is None or not entry.offered or entry.bound is None:
             return None
         return slot_table(entry.bound.template.role_table, _image_slot)
 

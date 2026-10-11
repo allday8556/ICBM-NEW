@@ -1,4 +1,4 @@
-"""Persistence of supplier onboarding (ADR-0036 §3), migration 0061.
+"""Persistence of supplier onboarding (ADR-0036 §3), migration 0060.
 
 - ``onboarded_suppliers``: the immutable identity of one onboarded site — its key
   (``site-<slug>``, never a repository key), display name, ``https`` origin and template.
@@ -34,7 +34,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.platform.db.base import Base
 from app.platform.db.types import UTCDateTime
 
-# Frozen with migration 0061.
+# Frozen with migration 0060.
 KEY_FORM = (
     "length(supplier_key) BETWEEN 6 AND 40 AND supplier_key GLOB 'site-[a-z0-9]*'"
     " AND supplier_key NOT GLOB '*[^a-z0-9-]*'"
@@ -43,6 +43,9 @@ HOST_FORM = "length(host) BETWEEN 3 AND 253 AND host NOT GLOB '*[^a-z0-9.-]*' AN
 TEMPLATES = "template IN ('cafe24', 'godomall')"
 STATES = "('DRAFT', 'RECON', 'ACTIVE', 'DISABLED')"
 ROLES = "role IN ('storefront', 'login', 'image')"
+ACTIVE_NAMES_TEMPLATE = (
+    "to_state <> 'ACTIVE' OR (template_revision IS NOT NULL AND template_revision <> '')"
+)
 
 
 def _hex64(column: str) -> str:
@@ -84,6 +87,7 @@ class OnboardingTransition(Base):
         ),
         CheckConstraint("actor <> ''", name="actor_present"),
         CheckConstraint(_json("evidence_json", "array"), name="evidence_is_array"),
+        CheckConstraint(ACTIVE_NAMES_TEMPLATE, name="active_names_template"),
     )
 
     transition_id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -97,6 +101,8 @@ class OnboardingTransition(Base):
     reason: Mapped[str] = mapped_column(String(200))
     evidence_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # An ACTIVE row's template revision: the one its proof was judged under (ADR-0036 §7).
+    template_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class OnboardingTrial(Base):

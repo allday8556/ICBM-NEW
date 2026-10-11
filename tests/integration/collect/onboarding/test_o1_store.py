@@ -27,6 +27,7 @@ import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from alembic import command
@@ -38,6 +39,7 @@ from app.platform.db.database import create_sqlite_engine
 from app.platform.db.migrate import alembic_config, current_revision, upgrade_to_head
 from app.stages.collect.collection import SUPPLIER_NOT_ACTIVE
 from app.stages.collect.extension.capture import CaptureEnvelope
+from app.stages.collect.onboarding import catalog as catalog_module
 from app.stages.collect.onboarding.catalog import SupplierCatalog
 from app.stages.collect.onboarding.hosts import (
     ONBOARDING_HOST_REFUSED,
@@ -62,6 +64,7 @@ from app.stages.collect.onboarding.store import (
 )
 from integrations.suppliers.collection import DocumentView, ReadKind
 from integrations.suppliers.registry import COLLECTIONS, SITES
+from integrations.suppliers.site_config import SiteConfig
 from integrations.suppliers.sites import TEMPLATES, bind_site, bind_sites
 from tests.support.jobs_support import FakeClock
 
@@ -86,7 +89,7 @@ TABLES = (
 WORDS = {"purchase_price": ["공급가"], "list_price": ["권장소비자가"]}
 BEFORE = "0059_detail_guidance_placement"
 MIGRATIONS = Path(__file__).resolve().parents[4] / "app/platform/db/migrations/versions"
-HEAD = "0061_supplier_onboarding"
+HEAD = "0060_supplier_onboarding"
 
 
 @contextlib.contextmanager
@@ -168,12 +171,49 @@ def verify(
     return verification_id
 
 
-def prove(config: AppConfig, key: str, words_seq: int, samples: int = 3) -> list[str]:
+def prove(
+    config: AppConfig,
+    key: str,
+    words_seq: int,
+    samples: int = 3,
+    template_revision: str | None = None,
+) -> list[str]:
     """``samples`` distinct verified samples under ``words_seq``; their verification ids."""
     return [
-        verify(config, key, trial(config, key, sample=f"{CAFE24_PRODUCT}?n={n}", words_seq=seq))
-        for n, seq in ((n, words_seq) for n in range(samples))
+        verify(
+            config,
+            key,
+            trial(
+                config,
+                key,
+                sample=f"{CAFE24_PRODUCT}?n={n}&t={template_revision}",
+                words_seq=words_seq,
+                template_revision=template_revision,
+            ),
+        )
+        for n in range(samples)
     ]
+
+
+OLD_TEMPLATE = "cafe24-0"
+
+
+def insert_transition(
+    config: AppConfig,
+    key: str,
+    seq: int,
+    before: str | None,
+    after: str,
+    template_revision: str | None = None,
+) -> None:
+    """A raw state-log row, past the store: only the database's own rules judge it."""
+    with raw(config) as connection:
+        connection.execute(
+            "INSERT INTO onboarding_transitions (transition_id, supplier_key, seq, from_state,"
+            " to_state, actor, reason, evidence_json, created_at, template_revision)"
+            " VALUES (?, ?, ?, ?, ?, 'x', '', '[]', '2026-10-12 00:00:00', ?)",
+            (str(uuid.uuid4()), key, seq, before, after, template_revision),
+        )
 
 
 def activate(container: Container, config: AppConfig, key: str) -> None:
@@ -332,12 +372,7 @@ def test_the_database_refuses_a_state_edge_the_store_would_refuse(
     key = cafe24(container)
 
     def insert(seq: int, before: str | None, after: str) -> None:
-        with raw(config) as connection:
-            connection.execute(
-                "INSERT INTO onboarding_transitions VALUES (?, ?, ?, ?, ?, 'x', '', '[]',"
-                " '2026-10-12 00:00:00')",
-                (str(uuid.uuid4()), key, seq, before, after),
-            )
+        insert_transition(config, key, seq, before, after)
 
     with pytest.raises(sqlite3.IntegrityError, match="allowed edge"):
         insert(2, "DRAFT", "DRAFT")
@@ -440,7 +475,7 @@ def test_active_is_entered_with_three_verified_samples_named_as_evidence(
     assert ACTIVATION_SAMPLES == 3
     assert set(CORE_FIELDS) == {"original_name", "prices", "options", "images", "stock"}
     # The database gate freezes the same list with the migration.
-    migration = (MIGRATIONS / "0061_supplier_onboarding.py").read_text("utf-8")
+    migration = (MIGRATIONS / "0060_supplier_onboarding.py").read_text("utf-8")
     frozen = ", ".join(f'"{field}"' for field in CORE_FIELDS)
     assert f"CORE_FIELDS = ({frozen})" in migration
     verifications = prove(config, key, 0)
@@ -462,7 +497,7 @@ def test_fewer_than_three_distinct_samples_do_not_prove_active(
     key = recon(container)
     prove(config, key, 0, samples=2)
     # A second verified trial of a sample already proven is not a third sample.
-    verify(config, key, trial(config, key, sample=f"{CAFE24_PRODUCT}?n=0"))
+    verify(config, key, trial(config, key, sample=f"{CAFE24_PRODUCT}?n=0&t=None"))
     details = not_proven(container, key)
     assert details["proven_samples"] == 2 and details["trials"] == 3
     assert details["required_samples"] == 3
@@ -531,12 +566,7 @@ def test_the_database_refuses_an_unproven_active(container: Container, config: A
     key = recon(container)
 
     def insert() -> None:
-        with raw(config) as connection:
-            connection.execute(
-                "INSERT INTO onboarding_transitions VALUES (?, ?, 3, 'RECON', 'ACTIVE', 'x', '',"
-                " '[]', '2026-10-12 00:00:00')",
-                (str(uuid.uuid4()), key),
-            )
+        insert_transition(config, key, 3, "RECON", "ACTIVE", TEMPLATES["cafe24"].revision)
 
     prove(config, key, 0, samples=2)
     with pytest.raises(sqlite3.IntegrityError, match="only when proven"):
@@ -555,6 +585,74 @@ def test_the_database_refuses_an_unproven_active(container: Container, config: A
     container.onboarding.save_words(key, WORDS, expected_seq=0, actor=OPERATOR)
     prove(config, key, 1)
     insert()
+
+
+def test_an_active_row_names_its_template_revision(container: Container, config: AppConfig) -> None:
+    key = recon(container)
+    prove(config, key, 0)
+    # Fully proven, yet a raw ACTIVE row that names no template revision is refused.
+    for missing in (None, ""):
+        with pytest.raises(sqlite3.IntegrityError):
+            insert_transition(config, key, 3, "RECON", "ACTIVE", missing)
+    container.onboarding.transition(key, "ACTIVE", actor=OPERATOR)
+    with raw(config) as connection:
+        rows = connection.execute(
+            "SELECT to_state, template_revision FROM onboarding_transitions ORDER BY seq"
+        ).fetchall()
+    assert rows == [
+        ("DRAFT", None),
+        ("RECON", None),
+        ("ACTIVE", TEMPLATES["cafe24"].revision),
+    ]
+
+
+def test_an_old_template_structural_trial_does_not_block_the_fixed_template(
+    container: Container, config: AppConfig
+) -> None:
+    key = recon(container)
+    flagged = trial(
+        config,
+        key,
+        sample=f"{CAFE24_PRODUCT}?n=old",
+        structural=["price_block"],
+        template_revision=OLD_TEMPLATE,
+    )
+    verify(config, key, flagged)
+    prove(config, key, 0)
+    proof = container.onboarding.activation(key)
+    assert proof.proven and proof.structural_open == 0
+    # The database judges the same trials the same way.
+    insert_transition(config, key, 3, "RECON", "ACTIVE", TEMPLATES["cafe24"].revision)
+    assert container.onboarding.current(key).state is OnboardingState.ACTIVE
+
+
+def test_an_old_template_structural_trial_does_not_block_in_the_store(
+    container: Container, config: AppConfig
+) -> None:
+    key = recon(container)
+    trial(config, key, sample=f"{CAFE24_PRODUCT}?n=old", structural=["x"], template_revision="z-1")
+    prove(config, key, 0)
+    assert container.onboarding.transition(key, "ACTIVE", actor=OPERATOR).state is (
+        OnboardingState.ACTIVE
+    )
+
+
+def test_old_template_samples_do_not_prove_active(container: Container, config: AppConfig) -> None:
+    key = recon(container)
+    prove(config, key, 0, template_revision=OLD_TEMPLATE)
+    details = not_proven(container, key)
+    assert (details["trials"], details["proven_samples"]) == (0, 0)
+    assert details["template_revision"] == TEMPLATES["cafe24"].revision
+    # The database refuses an ACTIVE row naming the current template on old-template samples.
+    with pytest.raises(sqlite3.IntegrityError, match="only when proven"):
+        insert_transition(config, key, 3, "RECON", "ACTIVE", TEMPLATES["cafe24"].revision)
+    # A current-template structural problem still blocks, in both.
+    prove(config, key, 0)
+    flagged = trial(config, key, sample=f"{CAFE24_PRODUCT}?n=s", structural=["script_rendered"])
+    assert flagged
+    assert not_proven(container, key)["structural_open"] == 1
+    with pytest.raises(sqlite3.IntegrityError, match="only when proven"):
+        insert_transition(config, key, 3, "RECON", "ACTIVE", TEMPLATES["cafe24"].revision)
 
 
 # ---------------------------------------------------------------- immutability and migration
@@ -610,7 +708,7 @@ def _url(path: Path) -> str:
     return f"sqlite:///{path.as_posix()}"
 
 
-def test_0061_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None:
+def test_0060_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None:
     database = tmp_path / "icbm.db"
     url = _url(database)
     upgrade_to_head(url)
@@ -886,3 +984,179 @@ def test_repository_sites_keep_their_identities_and_their_recon_rule(
         repository_active=lambda key: False if key == "upick" else None,
     )
     assert recon.collectable("upick") is True and recon.site_active("upick") is False
+
+
+# ---------------------------------------------------------------- fail-closed rebinding
+
+
+IMAGE_HOST = "img.onboard-cdn.com"
+
+
+def fail_binding_of(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
+    """The binder raises for ``key`` only, as an unexpected template or binder bug would."""
+    real = catalog_module.bind_site
+
+    def bind(site: SiteConfig, *args: Any, **kwargs: Any) -> Any:
+        if site.supplier_key == key:
+            raise RuntimeError("binder bug")
+        return real(site, *args, **kwargs)
+
+    monkeypatch.setattr(catalog_module, "bind_site", bind)
+
+
+def withdrawn(container: Container, key: str, *, failed: bool = True) -> None:
+    url = CAFE24_PRODUCT
+    catalog = container.supplier_catalog
+    assert key not in catalog.definitions and key not in catalog.collections
+    assert key not in catalog.capture_policies and key not in container.supplier_names
+    assert catalog.collectable(key) is False and catalog.site_active(key) is False
+    entry = catalog.onboarded(key)
+    assert entry is not None and entry.bound is None and not entry.offered
+    if failed:
+        # Why it is withdrawn is kept; a DISABLED site is withdrawn by its state, not a failure.
+        assert catalog.problems()[key]
+    # No egress grant is left for any of its hosts: no definition or collection names them.
+    hosts = {CAFE24_HOST, IMAGE_HOST}
+    assert not any(hosts & d.profile.egress_hosts for d in catalog.definitions.values())
+    assert not any(hosts & r.collection.profile.hosts for r in catalog.collections.values())
+    assert CAFE24_HOST not in container.extension_queues.supplier_hosts()
+    assert f"supplier:{key}" not in {c.key for c in container.connect.capabilities()}
+    refused("SUPPLIER_UNKNOWN", lambda: container.connect.supplier_connection(key))
+    refused("COLLECT_SUPPLIER_UNKNOWN", lambda: container.collection.submit(key, url))
+    refused("COLLECT_SUPPLIER_UNKNOWN", lambda: container.extension_capture.policy(key))
+
+
+def two_active(container: Container, config: AppConfig) -> tuple[str, str]:
+    first = cafe24(container)
+    observed = trial(config, first, (IMAGE_HOST,))
+    container.onboarding.confirm_host(
+        first, IMAGE_HOST, "image", observed_trial_id=observed, actor=OPERATOR
+    )
+    second = cafe24_second(container)
+    activate(container, config, first)
+    activate(container, config, second)
+    assert container.supplier_catalog.collectable(first)
+    assert IMAGE_HOST in container.supplier_catalog.collections[first].collection.profile.hosts
+    return first, second
+
+
+def unaffected(container: Container, key: str) -> None:
+    catalog = container.supplier_catalog
+    assert key in catalog.definitions and key in catalog.collections
+    assert key in catalog.capture_policies and key not in catalog.problems()
+    assert catalog.collectable(key) is True and catalog.site_active(key) is True
+    assert container.connect.supplier_connection(key).supplier_key == key
+
+
+@pytest.mark.parametrize("change", ["recon", "disabled", "host"])
+def test_a_failed_rebind_withdraws_the_supplier_and_keeps_the_write(
+    container: Container,
+    config: AppConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    first, second = two_active(container, config)
+    fail_binding_of(monkeypatch, first)
+    store = container.onboarding
+    if change == "recon":
+        record = store.transition(first, OnboardingState.RECON, actor=OPERATOR)
+        assert record.state is OnboardingState.RECON
+    elif change == "disabled":
+        record = store.transition(first, OnboardingState.DISABLED, actor=OPERATOR)
+        assert record.state is OnboardingState.DISABLED
+    else:
+        record = store.disable_host(first, IMAGE_HOST, "image", actor=OPERATOR)
+        assert record.state is OnboardingState.ACTIVE
+        assert IMAGE_HOST not in record.hosts_of(HostRole.IMAGE)
+    # The write is committed and durable, whatever the registry made of it.
+    assert store.current(first) == record
+    withdrawn(container, first, failed=change != "disabled")
+    unaffected(container, second)
+
+
+def test_a_failed_rebind_never_falls_back_to_the_previous_binding(
+    container: Container, config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, second = two_active(container, config)
+    fail_binding_of(monkeypatch, first)
+    # Even a widening change (a words revision, which also returns the site to RECON) leaves the
+    # supplier withdrawn when its rebuild fails, rather than on the binding it had.
+    container.onboarding.save_words(first, WORDS, expected_seq=0, actor=OPERATOR)
+    withdrawn(container, first)
+    assert "RuntimeError" in " ".join(container.supplier_catalog.problems()[first])
+    monkeypatch.undo()
+    # The next committed change rebinds it from its record.
+    container.onboarding.save_words(
+        first, {**WORDS, "price": ["도매가"]}, expected_seq=1, actor=OPERATOR
+    )
+    catalog = container.supplier_catalog
+    assert first in catalog.definitions and first not in catalog.problems()
+    assert catalog.collectable(first) is False, "the words change returned it to RECON"
+    unaffected(container, second)
+
+
+def test_an_unreadable_record_withdraws_the_supplier(
+    container: Container, config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, second = two_active(container, config)
+    catalog = container.supplier_catalog
+
+    def unreadable(_key: str) -> None:
+        raise RuntimeError("database gone")
+
+    monkeypatch.setattr(container.onboarding, "current", unreadable)
+    catalog.rebind(first)
+    monkeypatch.undo()
+    withdrawn(container, first)
+    assert "could not be read" in catalog.problems()[first][0]
+    unaffected(container, second)
+
+
+def test_a_capture_policy_failure_withdraws_the_whole_supplier(
+    container: Container, config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, second = two_active(container, config)
+    real = catalog_module.capture_policy_bytes
+
+    def policy(site: Any, *args: Any) -> bytes:
+        if site.config.supplier_key == first:
+            raise OSError("policy file unreadable")
+        return real(site, *args)
+
+    monkeypatch.setattr(catalog_module, "capture_policy_bytes", policy)
+    container.onboarding.transition(first, OnboardingState.RECON, actor=OPERATOR)
+    withdrawn(container, first)
+    unaffected(container, second)
+
+
+def test_start_up_binds_fail_closed(
+    container: Container, config: AppConfig, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, second = two_active(container, config)
+    fail_binding_of(monkeypatch, first)
+    restarted = SupplierCatalog(
+        definitions=(),
+        collections=(),
+        capture_policies={},
+        repository_active=lambda _key: None,
+        store=OnboardingStore(container.db, clock, container.audit),
+    )
+    assert first not in restarted.definitions and first not in restarted.collections
+    assert first not in restarted.capture_policies and restarted.problems()[first]
+    assert restarted.collectable(first) is False and restarted.site_active(first) is False
+    assert second in restarted.definitions and restarted.collectable(second) is True
+
+
+def test_options_stated_absent_is_read_and_proves_a_sample(
+    container: Container, config: AppConfig
+) -> None:
+    """A product without options reads ``options = ABSENT`` (ADR-0013 ruling B): no template ever
+    confirms an option axis, so ABSENT is the read status of that field. Any other core field
+    ABSENT still proves nothing (see the unread-core test)."""
+    key = recon(container)
+    statuses = dict(ALL_CORE_READ)
+    statuses["options"] = "ABSENT"
+    for n in range(3):
+        verify(config, key, trial(config, key, sample=f"{CAFE24_PRODUCT}?o={n}", statuses=statuses))
+    container.onboarding.transition(key, OnboardingState.ACTIVE, actor=OPERATOR)
+    assert container.onboarding.current(key).state is OnboardingState.ACTIVE

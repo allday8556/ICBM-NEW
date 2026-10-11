@@ -114,7 +114,7 @@ ADR-0033 G6 shows the frozen notices as image slots in the Registration Manageme
 added two integration suites; no migration.
 ADR-0036 O1 added the supplier onboarding owner `app/stages/collect/onboarding/` (its models, host
 guard, append-only store, the database-built site configuration and the running supplier registry
-that merges repository and onboarded sites and rebinds one at run time), migration `0061` and one
+that merges repository and onboarded sites and rebinds one at run time), migration `0060` and one
 integration suite.
 ADR-0036 O2 added 「+ 공급처 추가」: platform detection and the policy reads
 `app/stages/collect/onboarding/detect.py`, the add flow `service.py` and its read shapes
@@ -151,6 +151,11 @@ the mapper is provider-zero, semantic/unit-based and read-only.
 C-AUTH-1 adds the Coupang HMAC/auth and evidence-bounded error contracts, an in-memory fake
 transport, their unit/contract coverage, and the provider-zero auth contract. It adopts no endpoint,
 contains no provider transport, and grants no credentials or LIVE authority.
+C-CLAIM-1 adds one provider-zero Coupang Returns & Exchanges adapter covering eleven official
+endpoints plus unit and contract suites. It uses only the in-memory fake transport, retains provider
+response envelopes without interpreting customer data, and grants no credentials or LIVE authority.
+C-LOGISTICS-1 adds seven executable shipping/return-location contracts plus versioned courier and
+postal reference boundaries. It remains fake-only and grants no provider call or LIVE authority.
 
 | path | files | role |
 | --- | --- | --- |
@@ -168,27 +173,27 @@ contains no provider transport, and grants no credentials or LIVE authority.
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 189 | all canonical and historical documents |
+| `documents/` | 190 | all canonical and historical documents |
 | `documents/acceptance/` | 73 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 12 | platform and UI contracts |
-| `documents/decisions/` | 39 | ADRs and architect review records |
+| `documents/decisions/` | 40 | ADRs and architect review records |
 | `documents/evidence/` | 30 | external provider evidence catalog |
 | `documents/reference/` | 3 | this map and the path migration map |
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 85 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 35 |  |
+| `integrations/` | 87 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 37 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 357 | tests |
-| `tests/contracts/` | 15 | repository-rule and document-contract tests |
+| `tests/` | 361 | tests |
+| `tests/contracts/` | 17 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 149 | integration tests by runtime owner |
 | `tests/support/` | 15 | shared test support |
-| `tests/unit/` | 131 | unit tests by runtime owner |
+| `tests/unit/` | 133 | unit tests by runtime owner |
 | `ui/` | 71 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 62 | the served web client |

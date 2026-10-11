@@ -269,7 +269,7 @@ DETAIL_GUIDANCE = "0058_detail_guidance"
 DETAIL_GUIDANCE_PLACEMENT = "0059_detail_guidance_placement"
 # ADR-0036 O1: the supplier onboarding owner. TODO(lane): 0060_supplier_sales_policy precedes it
 # once it lands.
-SUPPLIER_ONBOARDING = "0061_supplier_onboarding"
+SUPPLIER_ONBOARDING = "0060_supplier_onboarding"
 SCHEMA_HEAD = SUPPLIER_ONBOARDING
 AFTER_M5 = (
     "0021_g2_review_items",
