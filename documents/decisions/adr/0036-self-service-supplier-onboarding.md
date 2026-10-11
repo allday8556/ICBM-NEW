@@ -76,7 +76,12 @@ All writes go through one owner store with an injected clock and an audit event 
 2. **Platform detection.** One read of the storefront's home page plus each template's login path decides `cafe24`, `godomall` or *unsupported*. It reads markers only, never facts. The operator confirms the detected platform. *Unsupported* stops here with "a template is needed".
 3. **Policy reads.** robots.txt and the template's terms path are read (ADR-0010 recon caps: at most 3 policy reads). They are shown, and the operator acknowledges them.
 4. **CONNECT.** The connection test runs on the template's login and probe paths, exactly as for a repository site.
-5. **State.** The site is now `RECON`: it can be collected, but registration preparation refuses it with `SUPPLIER_NOT_ACTIVE` (ADR-0030 PT-06).
+5. **State.** The site is now `RECON`. Unlike a repository site in `RECON` (ADR-0030 §7), an onboarded site in `RECON` is **not collectable**:
+   - the COLLECT submit and the extension capture both refuse it with `SUPPLIER_NOT_ACTIVE`;
+   - only the trial reads of §5 read it, and they write no canonical product truth;
+   - registration preparation refuses it as well (ADR-0030 PT-06).
+
+   Ordinary collection, which writes `ProductFactsRevision`s, starts only once the site is `ACTIVE` (§7).
 
 **Runtime binding.**
 - The supplier registry merges the repository sites with the onboarded sites when the process starts.
@@ -164,3 +169,4 @@ All writes go through one owner store with an injected clock and an audit event 
 - **OB-07** Repository sites, their identities and their review rules are unchanged.
 - **OB-08** The extension holds an onboarded origin only after the operator grants it, and never requests a host in bulk.
 - **OB-09** Onboarding works without AI.
+- **OB-10** An onboarded site writes no `ProductFactsRevision` before it is `ACTIVE`. While it is `DRAFT`, `RECON` or `DISABLED`, COLLECT and extension capture refuse it, and only trial reads run.
