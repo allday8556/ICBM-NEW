@@ -73,6 +73,7 @@ landed_cost_krw   = supplier_cost_krw
 - **Duties and taxes.**
   - The USD 150 test uses the declared value in USD: the supplier price plus local delivery, at the USD TTS from the same FX snapshot day.
   - At or under USD 150: duty-free list clearance assumed, so duties are 0.
+  - The USD 150 threshold is not a user setting. ICBM maintains it as a versioned policy constant, updated by patches (owner `6109161005`).
   - Above USD 150 and **included** (the default, owner `6109084429`): `duties_and_taxes_krw = ceil(customs_value_krw × duty_rate%) + ceil((customs_value_krw + duty) × 10%)` (부가세). `duty_rate%` is a user setting with a default (§8).
   - Above USD 150 and **excluded** by the user's choice: duties are 0 in the cost, and the listing says the buyer pays them (§6).
 - **The result** is the purchase cost the existing pricing owner (ADR-0013 §7) uses unchanged: margin, fees, minimum and rounding as today. The pricing snapshot additionally pins:
@@ -87,12 +88,13 @@ In the settings tab, under a new "해외 구매대행" card:
 
 | setting | default |
 | --- | --- |
-| `fx_margin_percent` | to be decided (§8) |
+| `fx_margin_percent` | **5** (owner `6109161005`) |
 | `overseas_shipping_default_krw` | unset |
 | `duties_included_over_usd150` | on |
-| `duty_rate_percent` | to be decided (§8) |
+| `duty_rate_percent` | 8, with a per-product override (phase 1; §8) |
 | `smartstore_overseas_shipping_address_id` | the SmartStore 주소록 entry of the overseas 출고지, unset |
-| `overseas_delivery_days` | to be decided (§8) |
+| `overseas_delivery_days` | 7–14 |
+| `importer_label` | set by the user (owner `6109161005`) |
 
 - Each setting is versioned like the existing target policy. A pricing snapshot pins the version it used.
 
@@ -115,13 +117,18 @@ In the settings tab, under a new "해외 구매대행" card:
 - The listing's Korean name comes from the AI name stage (ADR-0026 and later), with the source text as input. Option labels get the same treatment in that stage.
 - Image text translation is out of scope. It belongs to Track A's later Image Studio ADR (Issue #56), which consumes this ADR's foundation: source currency, overseas supplier, and the language of a source's text.
 
-## 8. Owner questions before ACCEPTED
+## 8. Owner answers and the open question
 
-1. Default `fx_margin_percent` (for example 3%), or no default, so the user must set it?
-2. Default `duty_rate_percent`. Duty differs by category; a single user rate is a simplification. Accept it for now, with an 8% default?
-3. The `importer` value for 구매대행 listings: the seller's business name, or "구매대행" wording? (Check common SmartStore practice.)
-4. Default `overseas_delivery_days` shown to buyers, for example 7–14.
-5. The ADR uses the USD 150 threshold for both China and Japan. Confirm that the user may change it in settings if the law changes.
+Answered (`6109161005`):
+- the FX margin default is 5%, and the user can change it;
+- the importer label is a user setting;
+- delivery days have a default the user can change;
+- the USD 150 threshold is patched by ICBM.
+
+Open: per-item duty. The proposal is phased:
+1. a default rate in settings, plus a per-product override (this ADR);
+2. a duty table by SmartStore category, maintained and patched by ICBM;
+3. optionally, an AI HS-code suggestion that the user confirms.
 
 ## Invariants
 
