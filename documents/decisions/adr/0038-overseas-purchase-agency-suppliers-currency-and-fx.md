@@ -26,7 +26,7 @@ What it authorizes, once ACCEPTED:
 
 What it does not authorize:
 - 사입 (imported stock): later, separately;
-- image translation: Image Studio, Issue #56, owner and order to be decided;
+- image translation: Image Studio, Issue #56. It is Track A's, after ADR-0036 (owner decision on #219), and has its own later ADR;
 - the 1688 and Super Delivery collectors themselves: a later ADR after reconnaissance (ADR-0030 §9: neither fits a template);
 - any LIVE write.
 
@@ -113,7 +113,7 @@ In the settings tab, under a new "해외 구매대행" card:
 
 - A collected name or option label in Chinese or Japanese is source truth, kept as stated.
 - The listing's Korean name comes from the AI name stage (ADR-0026 and later), with the source text as input. Option labels get the same treatment in that stage.
-- Image text translation is out of scope (Image Studio).
+- Image text translation is out of scope. It belongs to Track A's later Image Studio ADR (Issue #56), which consumes this ADR's foundation: source currency, overseas supplier, and the language of a source's text.
 
 ## 8. Owner questions before ACCEPTED
 
@@ -129,7 +129,7 @@ In the settings tab, under a new "해외 구매대행" card:
 - **FX-02** Every price of an overseas unit pins one FX snapshot, the margin and the settings version.
 - **FX-03** No price is made on a stale or missing rate.
 - **FX-04** Duties are included above USD 150 unless the user excluded them, and the listing's `customsTaxType` says the same.
-- **FX-05** ICBM never decides a category's eligibility for 구매대행. It projects the user's choice.
+- **FX-05** ICBM never decides a category's eligibility for 구매대행. It projects the user's choice. Under the owner's principle (#219 `6109102895`), where the risk is the seller's, ICBM implements and the user decides.
 
 ## Slices
 
