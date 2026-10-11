@@ -102,9 +102,11 @@ from app.stages.collect.extension.policy import CapturePolicySource
 from app.stages.collect.extension.queue import ExtensionQueues
 from app.stages.collect.extension.service import ExtensionCaptureService, ReportSink
 from app.stages.collect.imagedecode import HeaderImageDecoder
+from app.stages.collect.onboarding.capture import TrialCaptureStore
 from app.stages.collect.onboarding.catalog import SupplierCatalog
 from app.stages.collect.onboarding.service import OnboardingService
 from app.stages.collect.onboarding.store import OnboardingStore
+from app.stages.collect.onboarding.trials import SiteAnalysisService
 from app.stages.collect.readback import SourceTruthReadback
 from app.stages.collect.revisions import ProductFactsRevisionStore
 from app.stages.collect.runs import CollectionRunStore
@@ -361,6 +363,8 @@ class Container:
     supplier_catalog: SupplierCatalog
     # ADR-0036 O2: 「+ 공급처 추가」 — detection, the policy reads, the DRAFT and RECON.
     onboarding_service: OnboardingService
+    # ADR-0036 O3: 「사이트 분석」 — trial reads, local captures, re-analysis and observed hosts.
+    onboarding_analysis: SiteAnalysisService
     # Each configured supplier's display name, by key (ADR-0030 §11 S2: the screens' lists).
     supplier_names: Mapping[str, str] = field(default_factory=dict)
 
@@ -697,6 +701,7 @@ def build_container(
     )
     # One operator-submitted product at a time, as a durable collect.* job. The transport is
     # deferred: composing the application opens no connection, and under CI it cannot.
+    collect_gateway = collection_gateway or DeferredCollectionGateway()
     collection = ProductCollectionService(
         db=db,
         clock=clock,
@@ -705,7 +710,7 @@ def build_container(
         revisions=revisions,
         recorder=source_asset_recorder,
         sessions=collection_sessions or connect,
-        gateway=collection_gateway or DeferredCollectionGateway(),
+        gateway=collect_gateway,
         collections=supplier_catalog.collections,
         collectable=supplier_catalog.collectable,
         after_recorded=after_recorded,
@@ -714,6 +719,22 @@ def build_container(
         accounting=phase_c_reads,
     )
     registry.register(collection.job_definition())
+    # ADR-0036 O3: a trial read of a RECON onboarded site goes through the same policed gateway
+    # and CONNECT session as a collection, paced on the template's defaults and on COLLECT's own
+    # last read, and is recorded only as an onboarding trial: never a ProductFactsRevision.
+    onboarding_analysis = SiteAnalysisService(
+        store=onboarding,
+        catalog=supplier_catalog,
+        jobs=jobs,
+        gateway=collect_gateway,
+        sessions=collection_sessions or connect,
+        captures=TrialCaptureStore(config.onboarding_captures_dir),
+        clock=clock,
+        collect_remaining=lambda key, interval: runs.seconds_until_readable(
+            key, interval_s=interval
+        ),
+    )
+    registry.register(onboarding_analysis.job_definition())
 
     # ADR-0019 E1/E2: the extension capture transport. The pairing lives in the keyring only, the
     # replay cache and the capture buffer in this process only, and the capture policy is read
@@ -1421,6 +1442,7 @@ def build_container(
         onboarding=onboarding,
         supplier_catalog=supplier_catalog,
         onboarding_service=onboarding_service,
+        onboarding_analysis=onboarding_analysis,
         supplier_names=supplier_catalog.names,
     )
 

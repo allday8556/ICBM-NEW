@@ -1,8 +1,8 @@
 // 수집관리: 수집 / 공급처 관리 views. The supplier view renders canonical SupplierConnection
 // state (M1 CONNECT) in the v28/v29 supplier-card shape: login, connection test and resume are
 // live; 「+ 공급처 추가」 is the ADR-0036 O2 add flow (collect/onboarding.js), and an onboarded
-// supplier's card carries its onboarding state; site analysis and collection rules stay inert
-// until O3/O4.
+// supplier's card carries its onboarding state; 「사이트 분석」 is live on an onboarded supplier in
+// analysis (RECON, O3: collect/analysis.js); collection rules stay inert until O4.
 // The UI never decides a supplier is connected — it shows the server's protected-read verdict.
 // The 수집 view submits one product and follows its durable run (Gate 1 G1-E, below).
 
@@ -17,6 +17,7 @@ import { collectFactsBlock, collectPreviewBlock, readRevisionFacts } from '../co
 import { commonImagesSummary, openCommonImages } from '../components/common-images.js';
 import { datePill, pageHead } from '../components/page-head.js';
 import { reviewItemsBlock } from '../components/review-items.js';
+import { openSiteAnalysis } from './collect/analysis.js';
 import { loadOnboarding, onboardingChip, openAddSupplier, startRecon } from './collect/onboarding.js';
 
 const ENDPOINT = '/api/v1/screens/collect';
@@ -380,7 +381,19 @@ function supplierCard(supplier, ctx, onboarding = null) {
       h('button', { type: 'button', class: 'btn', onclick: () => openCredentialModal(supplier, ctx, onboarding) }, '로그인 정보'),
       primary,
       h('button', { type: 'button', class: 'btn', 'data-action': 'open-common-images', onclick: () => openCommonImages(supplier, refreshCommon) }, '공통 이미지'),
-      markInert(h('button', { type: 'button', class: 'btn' }, '사이트 분석')),
+      // ADR-0036 O3: site analysis reads an onboarded supplier in analysis (RECON) only.
+      onboarding?.state === 'RECON'
+        ? h(
+            'button',
+            {
+              type: 'button',
+              class: 'btn',
+              'data-action': 'site-analysis',
+              onclick: () => openSiteAnalysis(onboarding, { waitForJob, errorMessage }),
+            },
+            '사이트 분석',
+          )
+        : markInert(h('button', { type: 'button', class: 'btn' }, '사이트 분석')),
       markInert(h('button', { type: 'button', class: 'btn' }, '수집 규칙')),
     ),
   );

@@ -2,12 +2,13 @@ import json
 import logging
 import uuid
 from collections.abc import Callable, Mapping
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.capabilities.jobs.models import Job, JobAttempt, JobState
+from app.capabilities.jobs.models import TERMINAL_STATES, Job, JobAttempt, JobState
 from app.capabilities.jobs.policy import RetryPolicy
 from app.capabilities.jobs.records import JobAttemptRecord, JobRecord
 from app.capabilities.jobs.registry import JobRegistry
@@ -128,6 +129,28 @@ class JobService:
                 .limit(1)
             ).first()
             return None if job is None else JobRecord.model_validate(job)
+
+    def recent_for_targets(
+        self, job_type: str, *, target_prefix: str, since: datetime
+    ) -> list[JobRecord]:
+        """Jobs of this type whose target starts with ``target_prefix`` and that are unfinished,
+        or were queued or started at or after ``since``; newest first. An owner paces its own
+        work on these rows (ADR-0036 §5: a trial read is one job, so its job is its read)."""
+        with self._db.read() as session:
+            jobs = session.scalars(
+                select(Job)
+                .where(
+                    Job.job_type == job_type,
+                    Job.target_ref.startswith(target_prefix, autoescape=True),
+                    or_(
+                        Job.state.not_in(TERMINAL_STATES),
+                        Job.created_at >= since,
+                        Job.started_at >= since,
+                    ),
+                )
+                .order_by(Job.created_at.desc(), Job.job_id)
+            ).all()
+            return [JobRecord.model_validate(job) for job in jobs]
 
     def list_jobs(self, *, state: JobState | None = None, limit: int = 50) -> list[JobRecord]:
         query = select(Job).order_by(Job.created_at.desc()).limit(limit)

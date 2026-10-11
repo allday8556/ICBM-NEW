@@ -44,7 +44,13 @@ from integrations.suppliers.collection import (
     SupplierCollection,
     UnresolvedIdentity,
 )
-from integrations.suppliers.platforms import PlatformDetection, PlatformTemplate, SiteBinding
+from integrations.suppliers.platforms import (
+    PageRow,
+    PlatformAnalysis,
+    PlatformDetection,
+    PlatformTemplate,
+    SiteBinding,
+)
 from integrations.suppliers.platforms.godomall.collect import (
     DEFAULT_VOCABULARY,
     EXTRACTION_REVISION,
@@ -55,6 +61,15 @@ from integrations.suppliers.platforms.godomall.collect import (
     goods_number,
     parse_fields,
     resolve,
+)
+from integrations.suppliers.platforms.godomall.collect.dom import read
+from integrations.suppliers.platforms.godomall.collect.facts import (
+    CHOICE_LIST,
+    NOTICE_WORDS,
+    PRODUCT_FORM,
+    STOCK_ROW,
+    product_form,
+    rows,
 )
 from integrations.suppliers.platforms.godomall.collect.identity import (
     SourceIdentity as ParsedIdentity,
@@ -286,6 +301,60 @@ DETECTION = PlatformDetection(
 )
 
 
+# ADR-0036 §5 (slice O3): what a trial report reads besides the facts. The rows are the template's
+# own ``dt``/``dd`` pairs inside the product form; the template reads the stock row, the product
+# code, a quantity-discount row and a notice by its own words. A product page writes one product
+# form and one order list inside it: a second of either is a structure no words can read (the
+# floating cart layer's copies are outside the form, and never count).
+ROW_SLOTS = (
+    "price",
+    "purchase_price",
+    "list_price",
+    "minimum_price",
+    "shipping_fee",
+    "brand",
+    "manufacturer",
+    "origin",
+    "sales_channel_row",
+)
+CHANNEL_SLOTS = (
+    "channel_all_allowed",
+    "channel_closed_only",
+    "channel_forbid_coupang",
+    "channel_forbid_smartstore",
+)
+
+
+def page_rows(body: str) -> tuple[PageRow, ...]:
+    return tuple(PageRow(label, value) for label, value, _cell in rows(read(body)))
+
+
+def reads_label(label: str) -> bool:
+    squashed = "".join(label.split())
+    return (
+        label == STOCK_ROW
+        or label in DEFAULT_VOCABULARY.product_code
+        or ("수량" in label and "할인" in label)
+        or any(word in squashed for word in NOTICE_WORDS)
+    )
+
+
+def structure(body: str) -> tuple[str, ...]:
+    nodes = read(body)
+    forms = sum(1 for node in nodes if node.tag == "form" and node.marks_exactly(PRODUCT_FORM))
+    lists = sum(1 for node in product_form(nodes) if node.marks_exactly(f".{CHOICE_LIST}"))
+    return ("DUPLICATED_ORDER_LIST",) if forms > 1 or lists > 1 else ()
+
+
+ANALYSIS = PlatformAnalysis(
+    rows=page_rows,
+    row_slots=ROW_SLOTS,
+    channel_slots=CHANNEL_SLOTS,
+    reads_label=reads_label,
+    structure=structure,
+)
+
+
 TEMPLATE = PlatformTemplate(
     platform="godomall",
     revision=EXTRACTION_REVISION,
@@ -298,4 +367,5 @@ TEMPLATE = PlatformTemplate(
     bind=bind,
     role_table=tuple((rule.rule_id, rule.role.value) for rule in (*ROLE_RULES, OG_IMAGE_RULE)),
     detection=DETECTION,
+    analysis=ANALYSIS,
 )

@@ -243,6 +243,12 @@ class AppConfig:
         return self.data_dir / "guidance"
 
     @property
+    def onboarding_captures_dir(self) -> Path:
+        """Content-addressed sample captures of supplier onboarding's site analysis (ADR-0036 §5,
+        ADR-0017: kept locally while a trial references them)."""
+        return self.data_dir / "onboarding" / "captures"
+
+    @property
     def log_dir(self) -> Path | None:
         return self.data_dir / "logs" if self.log_to_file else None
 
