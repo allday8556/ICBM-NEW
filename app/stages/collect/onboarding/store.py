@@ -108,12 +108,14 @@ class ActivationProof:
     verification ``CORRECT`` of exactly the facts it showed and no ``WRONG`` one."""
 
     words_seq: int
+    # The template revision the proof is judged under; an ACTIVE row records it.
+    template_revision: str
     # Trials under the current words revision and template revision.
     trials: int
     # The distinct sample URL keys a trial proves, and one verification id for each.
     proven_samples: tuple[str, ...]
     evidence: tuple[str, ...]
-    # Trials under the current words that fail each condition (a trial may fail several).
+    # Those trials that fail each condition (a trial may fail several).
     core_unread: int
     unverified: int
     refuted: int
@@ -126,6 +128,7 @@ class ActivationProof:
     def details(self) -> dict[str, Any]:
         return {
             "words_seq": self.words_seq,
+            "template_revision": self.template_revision,
             "required_samples": ACTIVATION_SAMPLES,
             "proven_samples": len(self.proven_samples),
             "trials": self.trials,
@@ -321,7 +324,17 @@ class OnboardingStore:
                         details=proof.details(),
                     )
                 ids = _evidence([*ids, *(e for e in proof.evidence if e not in ids)])
-            self._append_transition(session, record, target, actor, why, ids)
+            self._append_transition(
+                session,
+                record,
+                target,
+                actor,
+                why,
+                ids,
+                template_revision=proof.template_revision
+                if target is OnboardingState.ACTIVE
+                else None,
+            )
             record = _current(session, key)
         self._changed(key)
         return record
@@ -493,8 +506,11 @@ class OnboardingStore:
             )
             .order_by(OnboardingTrial.created_at, OnboardingTrial.trial_id)
         ).all()
-        structural_open = sum(1 for t in trials if _json_list(t.structural_json))
+        # Only trials under the current words and the current template revision count, for the
+        # proof and for an open structural problem alike: once a template is fixed, an older
+        # template's trial neither proves nor blocks (ADR-0036 §7).
         current = [t for t in trials if t.template_revision == revision]
+        structural_open = sum(1 for t in current if _json_list(t.structural_json))
         verifications: dict[str, list[OnboardingVerification]] = {}
         for row in session.scalars(
             select(OnboardingVerification)
@@ -521,6 +537,7 @@ class OnboardingStore:
                 proven.setdefault(trial.sample_url_key, correct[0].verification_id)
         return ActivationProof(
             words_seq=record.words_seq,
+            template_revision=revision,
             trials=len(current),
             proven_samples=tuple(sorted(proven)),
             evidence=tuple(proven[sample] for sample in sorted(proven)),
@@ -577,6 +594,8 @@ class OnboardingStore:
         actor: str,
         reason: str,
         evidence: list[str],
+        *,
+        template_revision: str | None = None,
     ) -> None:
         session.add(
             OnboardingTransition(
@@ -589,6 +608,7 @@ class OnboardingStore:
                 reason=reason,
                 evidence_json=json.dumps(evidence),
                 created_at=self._clock.now(),
+                template_revision=template_revision,
             )
         )
         session.flush()
@@ -598,7 +618,11 @@ class OnboardingStore:
             record.supplier_key,
             actor,
             before={"state": record.state.value},
-            after={"state": target.value, "state_seq": record.state_seq + 1},
+            after={
+                "state": target.value,
+                "state_seq": record.state_seq + 1,
+                "template_revision": template_revision,
+            },
             details={"evidence_count": len(evidence)},
         )
 

@@ -168,12 +168,49 @@ def verify(
     return verification_id
 
 
-def prove(config: AppConfig, key: str, words_seq: int, samples: int = 3) -> list[str]:
+def prove(
+    config: AppConfig,
+    key: str,
+    words_seq: int,
+    samples: int = 3,
+    template_revision: str | None = None,
+) -> list[str]:
     """``samples`` distinct verified samples under ``words_seq``; their verification ids."""
     return [
-        verify(config, key, trial(config, key, sample=f"{CAFE24_PRODUCT}?n={n}", words_seq=seq))
-        for n, seq in ((n, words_seq) for n in range(samples))
+        verify(
+            config,
+            key,
+            trial(
+                config,
+                key,
+                sample=f"{CAFE24_PRODUCT}?n={n}&t={template_revision}",
+                words_seq=words_seq,
+                template_revision=template_revision,
+            ),
+        )
+        for n in range(samples)
     ]
+
+
+OLD_TEMPLATE = "cafe24-0"
+
+
+def insert_transition(
+    config: AppConfig,
+    key: str,
+    seq: int,
+    before: str | None,
+    after: str,
+    template_revision: str | None = None,
+) -> None:
+    """A raw state-log row, past the store: only the database's own rules judge it."""
+    with raw(config) as connection:
+        connection.execute(
+            "INSERT INTO onboarding_transitions (transition_id, supplier_key, seq, from_state,"
+            " to_state, actor, reason, evidence_json, created_at, template_revision)"
+            " VALUES (?, ?, ?, ?, ?, 'x', '', '[]', '2026-10-12 00:00:00', ?)",
+            (str(uuid.uuid4()), key, seq, before, after, template_revision),
+        )
 
 
 def activate(container: Container, config: AppConfig, key: str) -> None:
@@ -332,12 +369,7 @@ def test_the_database_refuses_a_state_edge_the_store_would_refuse(
     key = cafe24(container)
 
     def insert(seq: int, before: str | None, after: str) -> None:
-        with raw(config) as connection:
-            connection.execute(
-                "INSERT INTO onboarding_transitions VALUES (?, ?, ?, ?, ?, 'x', '', '[]',"
-                " '2026-10-12 00:00:00')",
-                (str(uuid.uuid4()), key, seq, before, after),
-            )
+        insert_transition(config, key, seq, before, after)
 
     with pytest.raises(sqlite3.IntegrityError, match="allowed edge"):
         insert(2, "DRAFT", "DRAFT")
@@ -462,7 +494,7 @@ def test_fewer_than_three_distinct_samples_do_not_prove_active(
     key = recon(container)
     prove(config, key, 0, samples=2)
     # A second verified trial of a sample already proven is not a third sample.
-    verify(config, key, trial(config, key, sample=f"{CAFE24_PRODUCT}?n=0"))
+    verify(config, key, trial(config, key, sample=f"{CAFE24_PRODUCT}?n=0&t=None"))
     details = not_proven(container, key)
     assert details["proven_samples"] == 2 and details["trials"] == 3
     assert details["required_samples"] == 3
@@ -531,12 +563,7 @@ def test_the_database_refuses_an_unproven_active(container: Container, config: A
     key = recon(container)
 
     def insert() -> None:
-        with raw(config) as connection:
-            connection.execute(
-                "INSERT INTO onboarding_transitions VALUES (?, ?, 3, 'RECON', 'ACTIVE', 'x', '',"
-                " '[]', '2026-10-12 00:00:00')",
-                (str(uuid.uuid4()), key),
-            )
+        insert_transition(config, key, 3, "RECON", "ACTIVE", TEMPLATES["cafe24"].revision)
 
     prove(config, key, 0, samples=2)
     with pytest.raises(sqlite3.IntegrityError, match="only when proven"):
@@ -555,6 +582,74 @@ def test_the_database_refuses_an_unproven_active(container: Container, config: A
     container.onboarding.save_words(key, WORDS, expected_seq=0, actor=OPERATOR)
     prove(config, key, 1)
     insert()
+
+
+def test_an_active_row_names_its_template_revision(container: Container, config: AppConfig) -> None:
+    key = recon(container)
+    prove(config, key, 0)
+    # Fully proven, yet a raw ACTIVE row that names no template revision is refused.
+    for missing in (None, ""):
+        with pytest.raises(sqlite3.IntegrityError):
+            insert_transition(config, key, 3, "RECON", "ACTIVE", missing)
+    container.onboarding.transition(key, "ACTIVE", actor=OPERATOR)
+    with raw(config) as connection:
+        rows = connection.execute(
+            "SELECT to_state, template_revision FROM onboarding_transitions ORDER BY seq"
+        ).fetchall()
+    assert rows == [
+        ("DRAFT", None),
+        ("RECON", None),
+        ("ACTIVE", TEMPLATES["cafe24"].revision),
+    ]
+
+
+def test_an_old_template_structural_trial_does_not_block_the_fixed_template(
+    container: Container, config: AppConfig
+) -> None:
+    key = recon(container)
+    flagged = trial(
+        config,
+        key,
+        sample=f"{CAFE24_PRODUCT}?n=old",
+        structural=["price_block"],
+        template_revision=OLD_TEMPLATE,
+    )
+    verify(config, key, flagged)
+    prove(config, key, 0)
+    proof = container.onboarding.activation(key)
+    assert proof.proven and proof.structural_open == 0
+    # The database judges the same trials the same way.
+    insert_transition(config, key, 3, "RECON", "ACTIVE", TEMPLATES["cafe24"].revision)
+    assert container.onboarding.current(key).state is OnboardingState.ACTIVE
+
+
+def test_an_old_template_structural_trial_does_not_block_in_the_store(
+    container: Container, config: AppConfig
+) -> None:
+    key = recon(container)
+    trial(config, key, sample=f"{CAFE24_PRODUCT}?n=old", structural=["x"], template_revision="z-1")
+    prove(config, key, 0)
+    assert container.onboarding.transition(key, "ACTIVE", actor=OPERATOR).state is (
+        OnboardingState.ACTIVE
+    )
+
+
+def test_old_template_samples_do_not_prove_active(container: Container, config: AppConfig) -> None:
+    key = recon(container)
+    prove(config, key, 0, template_revision=OLD_TEMPLATE)
+    details = not_proven(container, key)
+    assert (details["trials"], details["proven_samples"]) == (0, 0)
+    assert details["template_revision"] == TEMPLATES["cafe24"].revision
+    # The database refuses an ACTIVE row naming the current template on old-template samples.
+    with pytest.raises(sqlite3.IntegrityError, match="only when proven"):
+        insert_transition(config, key, 3, "RECON", "ACTIVE", TEMPLATES["cafe24"].revision)
+    # A current-template structural problem still blocks, in both.
+    prove(config, key, 0)
+    flagged = trial(config, key, sample=f"{CAFE24_PRODUCT}?n=s", structural=["script_rendered"])
+    assert flagged
+    assert not_proven(container, key)["structural_open"] == 1
+    with pytest.raises(sqlite3.IntegrityError, match="only when proven"):
+        insert_transition(config, key, 3, "RECON", "ACTIVE", TEMPLATES["cafe24"].revision)
 
 
 # ---------------------------------------------------------------- immutability and migration
