@@ -16,15 +16,34 @@ What it shows, and what it never shows:
 - the values frozen in the Snapshot that the projection does **not** send (tags, attributes),
   marked as not sent;
 - a projection the adapter refuses is shown with its own refusal code, never a guess.
+
+**Detail Guidance (ADR-0033 §6, §7; G6).** A ``detail-renderer/v2`` plan also shows its frozen
+notices as image slots, in the order the renderer draws them — the ``TOP_GUIDANCE`` notices, the
+detail images, the body, then the ``BOTTOM_GUIDANCE`` notices. Each slot names its frozen entry (its
+SHA-256, source and template), whether the Snapshot's ``guidance_assets`` hold a provider asset for
+it, and the Detail Guidance owner's **local** image route for its bytes — built here, in the read
+view only, never stored in the Snapshot and never a provider URL. A store-wide notice is labelled
+with its kind and period when the owner's newest revision of it is still the frozen one; otherwise
+its kind is unknown (``None``) and nothing is guessed. A v1 or v2 preview is unchanged: its detail
+view carries no ``guidance`` member at all.
 """
 
 import re
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any, Final
 
-from pydantic import BaseModel
+from pydantic import BaseModel, SerializerFunctionWrapHandler, model_serializer
 
-from app.stages.register.detail import DetailPlanError, plan_of
+from app.stages.register.detail import DetailPlan, DetailPlanError, PlannedGuidance, plan_of
+from app.stages.register.guidance import (
+    GUIDANCE_IMAGE_PATH,
+    PLACEMENT_SECTIONS,
+    PLACEMENTS,
+    SOURCE_PRODUCT,
+    SOURCE_STORE,
+    GuidanceRevision,
+)
 from app.stages.register.provider import WireProjector
 
 PREVIEW_VERSION: Final = "register-snapshot-preview/v1"
@@ -57,6 +76,34 @@ class PreviewImageView(BaseModel):
     provider_asset_prepared: bool
 
 
+class PreviewGuidanceSlotView(BaseModel):
+    """One frozen Detail Guidance notice as an image slot (ADR-0033 §6, §7). ``image_url`` is the
+    Detail Guidance owner's local image route, never a provider reference. ``kind`` is ``PERIOD``
+    or ``STANDING`` (a product's own notice is its standing notice), or ``None`` when the owner no
+    longer holds the frozen store-wide revision as its newest; ``starts_at`` / ``ends_at`` are a
+    period notice's own."""
+
+    placement: str  # TOP or BOTTOM
+    section: str  # TOP_GUIDANCE or BOTTOM_GUIDANCE
+    source: str  # STORE or PRODUCT
+    guidance_revision_id: str | None = None
+    preparation_revision_id: str | None = None
+    template: str
+    sha256: str
+    image_url: str
+    kind: str | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    provider_asset_prepared: bool
+
+
+class PreviewGuidanceView(BaseModel):
+    """The frozen notices of a guidance plan, per placement, each in the order it is drawn."""
+
+    top: tuple[PreviewGuidanceSlotView, ...] = ()
+    bottom: tuple[PreviewGuidanceSlotView, ...] = ()
+
+
 class PreviewDetailView(BaseModel):
     """The detail body as structure: never the HTML the renderer sends."""
 
@@ -65,6 +112,16 @@ class PreviewDetailView(BaseModel):
     renderer: str | None
     image_slots: tuple[str, ...]  # sha256 of each planned detail image, in order
     paragraphs: tuple[str, ...]
+    # ADR-0033 G6: only a guidance plan (``detail-renderer/v2``) has it, an empty one included.
+    guidance: PreviewGuidanceView | None = None
+
+    @model_serializer(mode="wrap")
+    def _without_absent_guidance(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        # A v1 or v2 preview keeps its exact shape: ``guidance`` appears only on a guidance plan.
+        data: dict[str, Any] = handler(self)
+        if data.get("guidance") is None:
+            data.pop("guidance", None)
+        return data
 
 
 class PreviewNotSentView(BaseModel):
@@ -128,7 +185,68 @@ def _paragraphs(body: str) -> tuple[str, ...]:
     return tuple(p.strip() for p in re.split(r"\n[ \t]*\n", text) if p.strip())
 
 
-def _detail(payload: Mapping[str, Any]) -> PreviewDetailView | None:
+def _prepared_guidance(payload: Mapping[str, Any]) -> frozenset[str]:
+    """The SHA-256 of each Snapshot guidance asset that holds a provider asset."""
+    assets = payload.get("guidance_assets")
+    if not isinstance(assets, list):
+        return frozenset()
+    return frozenset(
+        str(asset.get("sha256"))
+        for asset in assets
+        if isinstance(asset, Mapping) and asset.get("provider_asset_ref") is not None
+    )
+
+
+def _slot(
+    placement: str,
+    entry: PlannedGuidance,
+    known: Mapping[str, GuidanceRevision],
+    prepared: frozenset[str],
+) -> PreviewGuidanceSlotView:
+    kind: str | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    if entry.source == SOURCE_PRODUCT:
+        # A product's own notice replaces the standing one (ADR-0033 §5).
+        kind = "STANDING"
+    elif entry.identity is not None and entry.identity in known:
+        revision = known[entry.identity]
+        kind = str(revision.kind)
+        if kind == "PERIOD":
+            starts_at, ends_at = revision.starts_at, revision.ends_at
+    return PreviewGuidanceSlotView(
+        placement=placement,
+        section=PLACEMENT_SECTIONS[placement],
+        source=entry.source,
+        guidance_revision_id=entry.identity if entry.source == SOURCE_STORE else None,
+        preparation_revision_id=entry.identity if entry.source == SOURCE_PRODUCT else None,
+        template=entry.template,
+        sha256=entry.sha256,
+        image_url=GUIDANCE_IMAGE_PATH.format(sha256=entry.sha256),
+        kind=kind,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        provider_asset_prepared=entry.sha256 in prepared,
+    )
+
+
+def _guidance(
+    plan: DetailPlan, payload: Mapping[str, Any], revisions: Sequence[GuidanceRevision]
+) -> PreviewGuidanceView | None:
+    """The frozen notices of a guidance plan as slots; ``None`` for any other plan."""
+    if not plan.guides:
+        return None
+    known = {str(revision.revision_id): revision for revision in revisions}
+    prepared = _prepared_guidance(payload)
+    return PreviewGuidanceView(
+        top=tuple(_slot(PLACEMENTS[0], e, known, prepared) for e in plan.guidance_top),
+        bottom=tuple(_slot(PLACEMENTS[1], e, known, prepared) for e in plan.guidance_bottom),
+    )
+
+
+def _detail(
+    payload: Mapping[str, Any], revisions: Sequence[GuidanceRevision]
+) -> PreviewDetailView | None:
     detail = payload.get("detail")
     if not isinstance(detail, Mapping):
         return None
@@ -143,6 +261,7 @@ def _detail(payload: Mapping[str, Any]) -> PreviewDetailView | None:
             renderer=plan.renderer,
             image_slots=tuple(image.sha256 for image in plan.images),
             paragraphs=_paragraphs(plan.body),
+            guidance=_guidance(plan, payload, revisions),
         )
     body = detail.get("body")
     sections = detail.get("sections")
@@ -204,8 +323,12 @@ def preview(
     payload_hash: str,
     payload: Mapping[str, Any],
     projector: WireProjector | None,
+    *,
+    guidance_revisions: Sequence[GuidanceRevision] = (),
 ) -> SnapshotPreviewView:
-    """The preview of one frozen Snapshot payload."""
+    """The preview of one frozen Snapshot payload. ``guidance_revisions`` (the Detail Guidance
+    owner's newest revisions) only label a frozen notice slot; they never add, drop or reorder
+    one."""
     found_items = payload.get("items")
     items: list[Any] = found_items if isinstance(found_items, list) else []
     name = payload.get("name")
@@ -224,7 +347,7 @@ def preview(
         "category_id": category.get("category_id") if isinstance(category, Mapping) else None,
         "listing_identity": payload.get("listing_identity"),
         "images": _images(items),
-        "detail": _detail(payload),
+        "detail": _detail(payload, guidance_revisions),
         "not_sent": _not_sent(payload),
     }
     if projector is None:

@@ -2,7 +2,9 @@
 
 The same reader as the Cafe24 template's: a page is elements, attributes and visible text, and
 nothing a script says is text. It knows no platform; each template owns its own copy, so its
-extraction identity covers exactly what it reads.
+extraction identity covers exactly what it reads. Text is cleaned of invisible characters and a
+no-break space is a space (``godomall-2``, ADR-0035). This copy also reads words with block
+elements kept apart (:meth:`Node.words_outside`), for words kept as a reader saw them.
 
 Site knowledge is allowed to know where this storefront states a fact; it is not allowed to know
 how a document was fetched. This turns immutable bytes into elements, attributes and text, and
@@ -36,6 +38,27 @@ VOID_ELEMENTS = frozenset(
     }
 )
 _UNTEXT = frozenset({"script", "style"})
+# Elements that stand on their own line or in their own cell. Where words are kept for a reader
+# (a region layer's, ADR-0035 §2), the words of two of them never run together.
+BLOCK_ELEMENTS = frozenset(
+    {
+        "br",
+        "dd",
+        "div",
+        "dl",
+        "dt",
+        "li",
+        "ol",
+        "p",
+        "table",
+        "tbody",
+        "td",
+        "th",
+        "thead",
+        "tr",
+        "ul",
+    }
+)
 # A row or cell the storefront hides is still the page's own statement of a fact, but a hidden
 # purchase or sold-out control is not an offer to the reader. Hidden is read exactly: the
 # ``hidden`` attribute, a hiding class token, or a style that hides (spaces ignored). A style such
@@ -53,8 +76,22 @@ def _hides(values: Mapping[str, str]) -> bool:
     return any(marker in style for marker in HIDDEN_STYLES)
 
 
+# Characters a page may write that show nothing and join nothing: a byte-order mark, the
+# zero-width space and the word joiner (ADR-0035, U-PICK acceptance run 1). They are no words, so a
+# text made only of them is empty. The zero-width joiner and non-joiner are kept: they join an
+# emoji sequence or a script's letters, and removing them would change what is shown. A no-break
+# space is a space.
+INVISIBLE = "\ufeff\u200b\u2060"
+_UNSHOWN = str.maketrans({**dict.fromkeys(INVISIBLE, None), "\u00a0": " "})
+
+
+def clean(text: str) -> str:
+    """Text as a reader sees it: invisible characters removed and whitespace collapsed."""
+    return " ".join(text.translate(_UNSHOWN).split())
+
+
 def _collapse(words: Iterator[str]) -> str:
-    return " ".join("".join(words).split())
+    return clean("".join(words))
 
 
 @dataclass
@@ -75,7 +112,9 @@ class Node:
     # stands over everything after it, so it never proves where its contents end.
     closed: bool = False
 
-    def _words(self, *, painted: bool, skip: tuple[str, ...]) -> Iterator[str]:
+    def _words(
+        self, *, painted: bool, skip: tuple[str, ...], blocks: bool = False
+    ) -> Iterator[str]:
         for item in self.content:
             if isinstance(item, str):
                 yield item
@@ -84,7 +123,12 @@ class Node:
                 continue  # a subtree the rule means to leave out
             if painted and item.hidden:
                 continue  # a hidden child's words belong to the child
-            yield from item._words(painted=painted, skip=skip)
+            apart = blocks and item.tag in BLOCK_ELEMENTS
+            if apart:
+                yield " "
+            yield from item._words(painted=painted, skip=skip, blocks=blocks)
+            if apart:
+                yield " "
 
     @property
     def text(self) -> str:
@@ -114,6 +158,11 @@ class Node:
         here what it means to leave out, rather than subtracting strings afterwards.
         """
         return _collapse(self._words(painted=False, skip=markers))
+
+    def words_outside(self, *markers: str) -> str:
+        """:meth:`text_outside`, with a space wherever a block element starts or ends, so the
+        words of two paragraphs, list items or cells never run together."""
+        return _collapse(self._words(painted=False, skip=markers, blocks=True))
 
     def descendants(self) -> Iterator["Node"]:
         """Every element written inside this one, in source order."""

@@ -26,6 +26,7 @@ from app.stages.collect.collection import (
     RegisteredCollection,
     pacing_key,
 )
+from app.stages.collect.contracts import ImageReferenceView
 from app.stages.collect.facts import FactsStatus, FieldStatus, ImageIssue, ImageRole
 from app.stages.collect.models import CollectionOutcome
 from app.stages.collect.runs import CollectionRunStore, SameProductTooSoon
@@ -49,6 +50,7 @@ from automation.acceptance.m3.rehearsal.fake_shop import (
     collected_for_run,
     collection,
     page,
+    png,
     refusal,
 )
 from integrations.suppliers.collection import ImageResponse
@@ -607,6 +609,98 @@ def test_an_image_that_would_cross_the_run_total_is_never_stored(
             built.db.dispose()
 
 
+# ---------------------------------------------------------------- ADR-0037 §1: caps by role
+
+MB = 1_000_000
+
+
+def sized(size: int, width: int = 1000, height: int = 800) -> bytes:
+    """A decodable PNG header padded to exactly ``size`` bytes (the decoder reads the header)."""
+    head = png(width, height)
+    return head + b"\0" * (size - len(head))
+
+
+def collect_by_role(
+    config: AppConfig,
+    clock: FakeClock,
+    images: dict[str, object],
+    *,
+    max_run_bytes: int = 120 * MB,
+) -> tuple[FakeGateway, tuple[ImageReferenceView, ...]]:
+    """One collection under the templates' caps by role (5 MB, 30 MB), returning its images."""
+    gateway = FakeGateway(documents=[page()], images=images)
+    with acquire_data_dir(config.data_dir, app_version="test") as lease:
+        built = build_container(
+            config,
+            ownership=lease,
+            clock=clock,
+            collection_gateway=gateway,
+            collection_sessions=StubSessions(),
+            collections=(
+                registered(
+                    max_image_bytes=5 * MB,
+                    max_detail_image_bytes=30 * MB,
+                    max_run_bytes=max_run_bytes,
+                ),
+            ),
+        )
+        try:
+            submitted = built.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+            assert built.runner.run_next() is not None
+            run = built.collection.run(submitted.collection_run_id)
+            assert run.revision_id is not None
+            return gateway, built.source_truth.revision(run.revision_id).images
+        finally:
+            built.db.dispose()
+
+
+def test_a_description_image_is_capped_at_30_mb_and_a_representative_one_at_5_mb(
+    config: AppConfig, clock: FakeClock
+) -> None:
+    # IC-01: a 20 MB description image is collected; a 6 MB representative image is OVERSIZE.
+    gateway, images = collect_by_role(
+        config, clock, {PRIMARY_URL: sized(6 * MB), DETAIL_URL: sized(20 * MB)}
+    )
+    assert gateway.image_reads == [PRIMARY_URL, DETAIL_URL]
+    primary = next(i for i in images if i.role is ImageRole.REPRESENTATIVE)
+    detail = next(i for i in images if i.role is ImageRole.DETAIL)
+    assert primary.status is FieldStatus.REVIEW_REQUIRED
+    assert primary.issue is ImageIssue.OVERSIZE and primary.asset is None
+    assert detail.status is FieldStatus.CONFIRMED and detail.asset is not None
+    assert detail.asset.byte_size == 20 * MB
+
+
+def test_a_description_image_over_30_mb_is_oversize_and_never_stored(
+    config: AppConfig, clock: FakeClock
+) -> None:
+    _, images = collect_by_role(
+        config, clock, {PRIMARY_URL: sized(5 * MB), DETAIL_URL: sized(31 * MB)}
+    )
+    primary = next(i for i in images if i.role is ImageRole.REPRESENTATIVE)
+    detail = next(i for i in images if i.role is ImageRole.DETAIL)
+    assert primary.status is FieldStatus.CONFIRMED, "exactly the cap is within it"
+    assert detail.status is FieldStatus.REVIEW_REQUIRED
+    assert detail.issue is ImageIssue.OVERSIZE and detail.asset is None
+
+
+def test_a_description_image_over_what_the_run_has_left_is_budget_exhausted(
+    config: AppConfig, clock: FakeClock
+) -> None:
+    # The run has 10 MB left when the 15 MB description image arrives: it fits its role's cap,
+    # not the run total, so it is BUDGET_EXHAUSTED rather than OVERSIZE, and never stored.
+    _, images = collect_by_role(
+        config,
+        clock,
+        {PRIMARY_URL: sized(4 * MB), DETAIL_URL: sized(15 * MB)},
+        max_run_bytes=14 * MB,
+    )
+    primary = next(i for i in images if i.role is ImageRole.REPRESENTATIVE)
+    detail = next(i for i in images if i.role is ImageRole.DETAIL)
+    assert primary.status is FieldStatus.CONFIRMED
+    assert detail.status is FieldStatus.REVIEW_REQUIRED
+    assert detail.issue is ImageIssue.BUDGET_EXHAUSTED and detail.asset is None
+
+
 def test_a_product_url_with_a_query_key_is_refused_before_a_job_exists(
     collecting: Container, gateway: FakeGateway
 ) -> None:
@@ -812,6 +906,43 @@ def test_equivalent_accepted_urls_for_one_product_are_paced_as_one_product(
     clock.advance(INTERVAL + 1)
     for url in (plain, listed, renamed):
         assert runs.seconds_until_readable(keys[url], interval_s=INTERVAL) == 0, url
+
+
+def test_products_named_by_a_query_are_paced_per_product(
+    collecting: Container, clock: FakeClock
+) -> None:
+    # ADR-0010 §4: 건강산 (Godomall) names every product by goodsNo behind one path. The pacing
+    # URL part keeps the supplier's safe query keys, so a second, different product is not
+    # COLLECT_SAME_PRODUCT_TOO_SOON (observed on the 건강산 preview collection, 2026-10-10).
+    from integrations.suppliers.kmretail.collection import COLLECTION as KM
+    from integrations.suppliers.registry import SITES
+
+    ggsan = SITES["ggsan"].collection
+    base = "https://www.ggsan.com/goods/goods_view.php"
+    first = f"{base}?goodsNo=1000001010&mtn=7"
+    again = f"{base}?mtn=9&goodsNo=1000001010"
+    second = f"{base}?goodsNo=1000004918"
+    keys = {url: pacing_key(ggsan, url) for url in (first, again, second)}
+    assert keys[first].url == f"{base}?goodsNo=1000001010"
+    assert keys[again] == keys[first]
+    assert keys[second].url == f"{base}?goodsNo=1000004918"
+
+    runs = CollectionRunStore(collecting.db, clock)
+    with collecting.db.write() as session:
+        run_id = runs.open(
+            session,
+            job_id="job-query-pacing",
+            correlation_id="cid-query-pacing",
+            supplier_key="ggsan",
+            source_url=first,
+        )
+    runs.reserve_product_read(run_id, key=keys[first], interval_s=INTERVAL)
+    assert runs.seconds_until_readable(keys[again], interval_s=INTERVAL) > 0
+    assert runs.seconds_until_readable(keys[second], interval_s=INTERVAL) == 0
+
+    # A supplier without safe query keys keeps exactly the key it always had.
+    km = pacing_key(KM, "https://kmretail.co.kr/product/%EC%83%81%ED%92%88/355/?utm=x")
+    assert km.url == "https://kmretail.co.kr/product/%EC%83%81%ED%92%88/355"
 
 
 # ---------------------------------------------------------------- scope and egress

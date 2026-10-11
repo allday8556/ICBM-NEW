@@ -6,7 +6,7 @@ implementation identity over ``EXTRACTOR_INPUTS``: provenance and validation fre
 hashed set is every other module of this package; this manifest is never part of it.
 """
 
-EXTRACTOR_REVISION = "adaptive-engine-2"
+EXTRACTOR_REVISION = "adaptive-engine-3"
 EXTRACTOR_INPUTS = (
     "app/stages/collect/adaptive/engine/__init__.py",
     "app/stages/collect/adaptive/engine/canonical.py",
@@ -19,6 +19,10 @@ EXTRACTOR_INPUTS = (
     "app/stages/collect/adaptive/engine/profiles.py",
     "app/stages/collect/adaptive/engine/validation.py",
 )
+# adaptive-engine-3 (2026-10-10, owner decision Issue #219 6097082224; ADR-0013 ruling B): a page
+# that proves it has no option control now reads ``options = ABSENT`` with its control-state
+# evidence instead of CONFIRMED with zero axes, so the goldens were recorded again and, the
+# engine code having changed, EXTRACTOR_FINGERPRINT was re-pinned.
 # adaptive-engine-2 (2026-10-10, ADR-0031 §2): FIELD_REGISTRY gained the COVERAGE field
 # ``sales_channels``, so every extraction reports one field more and the goldens were recorded
 # again. Its lint revision advanced to adaptive-lint-2 for the same field, so the fingerprint was
@@ -29,4 +33,4 @@ EXTRACTOR_INPUTS = (
 # a SHA-256; the proof is mechanical: tests/unit/collect/adaptive/engine/test_identity.py
 # recomputes this digest from EXTRACTOR_INPUTS, and the merge guard requires that test green in
 # the FULL CI of the exact HEAD.
-EXTRACTOR_FINGERPRINT = "4a559460c6c95e3dff9b4b02c63eed7121dfbf653c0748f716ec4ae5135dbee3"
+EXTRACTOR_FINGERPRINT = "12b1eddc999a366cec05cc8cbd7e122c2e62553b141452e014122afc0a52fba4"

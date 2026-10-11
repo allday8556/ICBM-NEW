@@ -50,6 +50,19 @@ function instant(value) {
   );
 }
 
+// A stored instant as the `datetime-local` value of the operator's wall time (seconds only when
+// the instant has them), so an edit opens with the period exactly as saved.
+function wallTime(iso) {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  const seconds = at.getSeconds() ? `:${pad(at.getSeconds())}` : '';
+  return (
+    `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}` +
+    `T${pad(at.getHours())}:${pad(at.getMinutes())}${seconds}`
+  );
+}
+
 function messageLine() {
   return h('div', { class: 'dg-message', 'data-role': 'dg-message', role: 'status' });
 }
@@ -179,12 +192,25 @@ function standingPanel(placement, view, settings, reload) {
   );
 }
 
-function periodRow(notice, settings, placement, reload) {
+function periodRow(notice, settings, placement, reload, editHost) {
   const label = labelOf(settings, notice.template);
   const line = messageLine();
-  const end = notice.status === 'ENDED'
-    ? null
-    : h('button', { type: 'button', class: 'btn dg-small', 'data-action': 'dg-period-end' }, '조기 종료');
+  // An ENDED notice is history: it is shown, never edited or ended again.
+  const open = notice.status !== 'ENDED';
+  const end = open
+    ? h('button', { type: 'button', class: 'btn dg-small', 'data-action': 'dg-period-end' }, '조기 종료')
+    : null;
+  const edit = open
+    ? h('button', { type: 'button', class: 'btn dg-small', 'data-action': 'dg-period-edit' }, '수정')
+    : null;
+  edit?.addEventListener('click', () => {
+    edit.hidden = true;
+    const close = () => {
+      editHost.replaceChildren();
+      edit.hidden = false;
+    };
+    editHost.replaceChildren(periodForm(placement, settings, reload, close, notice));
+  });
   end?.addEventListener('click', async () => {
     if (!window.confirm('이 기간 공지를 지금 종료할까요?')) return;
     end.disabled = true;
@@ -210,7 +236,13 @@ function periodRow(notice, settings, placement, reload) {
   });
   return h(
     'div',
-    { class: 'dg-period', 'data-role': 'dg-period', 'data-guidance-id': notice.guidance_id, 'data-status': notice.status ?? '' },
+    {
+      class: 'dg-period',
+      'data-role': 'dg-period',
+      'data-guidance-id': notice.guidance_id,
+      'data-seq': String(notice.seq),
+      'data-status': notice.status ?? '',
+    },
     h('img', { src: notice.image_url, alt: `${placement.label} 기간 공지 (${label})` }),
     h(
       'div',
@@ -225,20 +257,31 @@ function periodRow(notice, settings, placement, reload) {
       h('span', { class: 'mini' }, `리비전 #${notice.seq}${notice.enabled ? '' : ' · 조기 종료됨'}`),
       line,
     ),
-    end,
+    open ? h('div', { class: 'dg-period-actions' }, edit, end) : null,
   );
 }
 
-function periodForm(placement, settings, reload, close) {
-  const editor = composer({ blocks: PERIOD_OPENING, template: null, templates: settings.templates });
-  const field = (label, role) => {
-    const el = h('input', { type: 'datetime-local', 'data-role': role, 'aria-label': `${label} (내 컴퓨터 시간)` });
-    return { el, row: h('label', {}, h('span', {}, label), el) };
+// Adds a period notice, or (with `notice`) edits one that has not ended: the same inputs opened
+// with its saved text, template and period, appended as the next revision of the same notice
+// against the sequence it was read at. Its kind and placement never change (ADR-0033 §4).
+function periodForm(placement, settings, reload, close, notice = null) {
+  const editor = composer({
+    blocks: notice ? notice.content.blocks : PERIOD_OPENING,
+    template: notice?.template ?? null,
+    templates: settings.templates,
+    saved: Boolean(notice),
+  });
+  const field = (label, role, saved) => {
+    const value = saved ? wallTime(saved) : '';
+    const el = h('input', { type: 'datetime-local', 'data-role': role, 'aria-label': `${label} (내 컴퓨터 시간)`, value });
+    // An untouched field sends the saved instant itself, not its wall time read back.
+    const at = () => (saved && el.value === value ? saved : instant(el.value));
+    return { el, at, row: h('label', {}, h('span', {}, label), el) };
   };
-  const start = field('시작', 'dg-start');
-  const end = field('끝', 'dg-end');
+  const start = field('시작', 'dg-start', notice?.starts_at);
+  const end = field('끝', 'dg-end', notice?.ends_at);
   const line = messageLine();
-  const save = h('button', { type: 'button', class: 'btn blue', 'data-role': 'dg-save' }, '기간 공지 저장');
+  const save = h('button', { type: 'button', class: 'btn blue', 'data-role': 'dg-save' }, notice ? '기간 공지 수정 저장' : '기간 공지 저장');
   const cancel = h('button', { type: 'button', class: 'btn', 'data-action': 'dg-period-cancel' }, '취소');
   cancel.addEventListener('click', close);
   let busy = false;
@@ -251,18 +294,23 @@ function periodForm(placement, settings, reload, close) {
     busy = true;
     sync();
     try {
-      await append({
+      const saved = await append({
         placement: placement.key,
         kind: 'PERIOD',
-        guidance_id: null,
-        expected_current_seq: null,
+        guidance_id: notice?.guidance_id ?? null,
+        expected_current_seq: notice?.seq ?? null,
         template: editor.template(),
         content: editor.content(),
         enabled: true,
-        starts_at: instant(start.el.value),
-        ends_at: instant(end.el.value),
+        starts_at: start.at(),
+        ends_at: end.at(),
       });
-      toast(TITLE, `${placement.label} 기간 공지를 추가했습니다.`);
+      toast(
+        TITLE,
+        notice
+          ? `${placement.label} 기간 공지를 수정했습니다 (리비전 #${saved.seq}).`
+          : `${placement.label} 기간 공지를 추가했습니다.`,
+      );
       await reload();
     } catch (error) {
       report(line, error, reload);
@@ -272,7 +320,10 @@ function periodForm(placement, settings, reload, close) {
   });
   return h(
     'div',
-    { class: 'dg-period-form', 'data-role': 'dg-period-form' },
+    notice
+      ? { class: 'dg-period-form', 'data-role': 'dg-period-edit', 'data-guidance-id': notice.guidance_id, 'data-seq': String(notice.seq) }
+      : { class: 'dg-period-form', 'data-role': 'dg-period-form' },
+    notice ? h('b', { class: 'dg-period-form-title' }, '기간 공지 수정') : null,
     h(
       'div',
       { class: 'dg-period-times' },
@@ -310,7 +361,10 @@ function periodsPanel(placement, view, settings, reload) {
       'div',
       { class: 'dg-period-list', 'data-role': 'dg-period-list', 'data-count': String(periods.length) },
       periods.length
-        ? periods.map((notice) => periodRow(notice, settings, placement, reload))
+        ? periods.flatMap((notice) => {
+            const editHost = h('div', { class: 'dg-period-edit-host' });
+            return [periodRow(notice, settings, placement, reload, editHost), editHost];
+          })
         : h('span', { class: 'mini' }, '등록된 기간 공지가 없습니다.'),
     ),
     h('div', { class: 'dg-actions start' }, add),

@@ -373,6 +373,245 @@ def test_a_period_notice_is_added_listed_as_scheduled_and_ended_early(
         assert writes.count(("POST", f"{BASE}/revisions")) == 2
 
 
+def _add_period(
+    app: TestClient,
+    starts_at: datetime,
+    ends_at: datetime,
+    *,
+    lines: list[str] | None = None,
+    template: str = "WARM",
+) -> dict[str, Any]:
+    saved = app.post(
+        f"{BASE}/revisions",
+        headers={"X-ICBM-Client": "pytest"},
+        json={
+            "actor": "pytest",
+            "placement": "BOTTOM",
+            "kind": "PERIOD",
+            "template": template,
+            "content": {
+                "blocks": [
+                    {
+                        "heading": "추석 연휴 배송 안내",
+                        "lines": lines or ["연휴 기간 주문은 연휴 후 순차 발송됩니다"],
+                    }
+                ]
+            },
+            "starts_at": starts_at.isoformat(),
+            "ends_at": ends_at.isoformat(),
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    body: dict[str, Any] = saved.json()
+    return body
+
+
+def _wall(at: datetime) -> str:
+    """``at`` as the browser's ``datetime-local`` value, in this machine's zone."""
+    local = at.astimezone()
+    return local.strftime("%Y-%m-%dT%H:%M") + (f":{local.second:02d}" if local.second else "")
+
+
+def _row_seq(page: Page, seq: int) -> None:
+    page.wait_for_function(
+        "seq => document.querySelector(\"[data-role='dg-bottom'] [data-role='dg-period']\")"
+        "?.dataset.seq === seq",
+        arg=str(seq),
+        timeout=TIMEOUT,
+    )
+
+
+def test_a_period_notice_is_edited_as_the_next_revision_of_the_same_notice(
+    browser: Browser,  # noqa: F811
+    client: TestClient,  # noqa: F811
+) -> None:
+    # A future notice whose start has seconds: an untouched 시작 is sent as that exact instant.
+    start = (datetime.now(UTC) + timedelta(days=1)).replace(second=30, microsecond=0)
+    end = start + timedelta(days=2)
+    added = _add_period(client, start, end)
+    writes: list[tuple[str, str]] = []
+    with _page(browser, client, writes) as page:
+        periods = page.locator("[data-role='dg-bottom'] [data-role='dg-periods']")
+        row = periods.locator("[data-role='dg-period']")
+        assert row.get_attribute("data-seq") == "1"
+        assert row.locator("[data-role='dg-status']").inner_text() == "예정"
+        row.locator("[data-action='dg-period-edit']").click()
+        assert row.locator("[data-action='dg-period-edit']").is_hidden()
+
+        # The same editor, opened with the notice's text, template and period in local time.
+        form = periods.locator("[data-role='dg-period-edit']")
+        assert form.get_attribute("data-guidance-id") == added["guidance_id"]
+        assert form.get_attribute("data-seq") == "1"
+        assert _values(form, "dg-heading") == ["추석 연휴 배송 안내"]
+        assert _values(form, "dg-line") == ["연휴 기간 주문은 연휴 후 순차 발송됩니다"]
+        assert form.locator("[data-template='WARM']").get_attribute("aria-checked") == "true"
+        assert form.locator("[data-role='dg-start']").input_value() == _wall(start)
+        assert form.locator("[data-role='dg-end']").input_value() == _wall(end)
+        _five_previews(form)
+        _ready(page, form)
+        # The add form is a separate thing and stays closed.
+        assert periods.locator("[data-role='dg-period-form']").count() == 0
+
+        # Saving it as it is changes nothing, and the page says so.
+        form.locator("[data-role='dg-save']").click()
+        unchanged = form.locator("[data-role='dg-message'][data-code='GUIDANCE_UNCHANGED']")
+        unchanged.wait_for(timeout=TIMEOUT)
+        assert "바뀐 것이 없습니다" in unchanged.inner_text()
+
+        # An end before the start is the server's refusal, in words.
+        form.locator("[data-role='dg-end']").fill(_wall(start - timedelta(days=1))[:16])
+        form.locator("[data-role='dg-save']").click()
+        invalid = form.locator("[data-role='dg-message'][data-code='GUIDANCE_PERIOD_INVALID']")
+        invalid.wait_for(timeout=TIMEOUT)
+        assert "기간을 확인하세요" in invalid.inner_text()
+
+        # A new line and a later end, with another template: one more revision.
+        new_end = (end + timedelta(days=1)).astimezone().replace(second=0)
+        form.locator("[data-role='dg-line']").fill("연휴 뒤 첫 영업일부터 순차 발송됩니다")
+        form.locator("[data-role='dg-end']").fill(new_end.strftime("%Y-%m-%dT%H:%M"))
+        form.locator("[data-template='CLEAN']").click()
+        _five_previews(form)
+        _ready(page, form)
+        form.locator("[data-role='dg-save']").click()
+        _row_seq(page, 2)
+
+        notices = _placement(client, "BOTTOM")["periods"]
+        assert len(notices) == 1
+        notice = notices[0]
+        assert notice["guidance_id"] == added["guidance_id"]
+        assert (notice["seq"], notice["kind"], notice["placement"]) == (2, "PERIOD", "BOTTOM")
+        assert (notice["template"], notice["enabled"], notice["status"]) == (
+            "CLEAN",
+            True,
+            "SCHEDULED",
+        )
+        assert notice["content"] == {
+            "blocks": [
+                {
+                    "heading": "추석 연휴 배송 안내",
+                    "lines": ["연휴 뒤 첫 영업일부터 순차 발송됩니다"],
+                }
+            ]
+        }
+        assert datetime.fromisoformat(notice["starts_at"]) == start
+        assert datetime.fromisoformat(notice["ends_at"]) == new_end.astimezone(UTC)
+        # The list shows the new image and period and the server's status label; the form closed.
+        row = periods.locator("[data-role='dg-period']")
+        assert row.locator("img").get_attribute("src") == notice["image_url"]
+        assert notice["image_url"] != added["image_url"]
+        assert row.locator("[data-role='dg-status']").inner_text() == "예정"
+        assert row.locator("[data-role='dg-period-range']").inner_text() == page.evaluate(
+            """([s, e]) => {
+              const options = { dateStyle: 'medium', timeStyle: 'short' };
+              const t = (iso) => new Date(iso).toLocaleString('ko-KR', options);
+              return `${t(s)} ~ ${t(e)}`;
+            }""",
+            [notice["starts_at"], notice["ends_at"]],
+        )
+        assert periods.locator("[data-role='dg-period-edit']").count() == 0
+        assert row.locator("[data-action='dg-period-edit']").is_visible()
+        # The standing notice is untouched, and only the Detail Guidance routes were written to.
+        assert _placement(client, "BOTTOM")["standing"] is None
+        assert writes.count(("POST", f"{BASE}/revisions")) == 3
+        assert {path for _, path in writes} <= {f"{BASE}/preview", f"{BASE}/revisions"}
+
+
+def test_an_ended_period_notice_is_read_only(
+    browser: Browser,  # noqa: F811
+    client: TestClient,  # noqa: F811
+) -> None:
+    now = datetime.now(UTC).replace(microsecond=0)
+    past = _add_period(client, now - timedelta(days=3), now - timedelta(days=1))
+    early = _add_period(client, now + timedelta(days=1), now + timedelta(days=2))
+    ended = client.post(
+        f"{BASE}/revisions",
+        headers={"X-ICBM-Client": "pytest"},
+        json={
+            "actor": "pytest",
+            "placement": "BOTTOM",
+            "kind": "PERIOD",
+            "guidance_id": early["guidance_id"],
+            "expected_current_seq": 1,
+            "template": early["template"],
+            "content": early["content"],
+            "enabled": False,
+            "starts_at": early["starts_at"],
+            "ends_at": early["ends_at"],
+        },
+    )
+    assert ended.status_code == 200, ended.text
+    running = _add_period(client, now - timedelta(hours=1), now + timedelta(days=1))
+    writes: list[tuple[str, str]] = []
+    with _page(browser, client, writes) as page:
+        periods = page.locator("[data-role='dg-bottom'] [data-role='dg-periods']")
+        rows = periods.locator("[data-role='dg-period']")
+        assert rows.count() == 3
+        for notice in (past, early):
+            row = periods.locator(f"[data-guidance-id='{notice['guidance_id']}']")
+            assert row.get_attribute("data-status") == "ENDED"
+            assert row.locator("[data-role='dg-status']").inner_text() == "종료"
+            assert row.locator("[data-action='dg-period-edit']").count() == 0
+            assert row.locator("[data-action='dg-period-end']").count() == 0
+        active = periods.locator(f"[data-guidance-id='{running['guidance_id']}']")
+        assert active.locator("[data-role='dg-status']").inner_text() == "진행 중"
+        assert active.locator("[data-action='dg-period-edit']").is_visible()
+        assert writes == []
+
+
+def test_a_stale_period_edit_is_refused_and_offers_a_reload(
+    browser: Browser,  # noqa: F811
+    client: TestClient,  # noqa: F811
+) -> None:
+    now = datetime.now(UTC).replace(microsecond=0)
+    added = _add_period(client, now + timedelta(days=1), now + timedelta(days=2))
+    writes: list[tuple[str, str]] = []
+    with _page(browser, client, writes) as page:
+        periods = page.locator("[data-role='dg-bottom'] [data-role='dg-periods']")
+        periods.locator("[data-action='dg-period-edit']").click()
+        form = periods.locator("[data-role='dg-period-edit']")
+        _five_previews(form)
+
+        # Another revision lands after the page read the notice.
+        moved = client.post(
+            f"{BASE}/revisions",
+            headers={"X-ICBM-Client": "pytest"},
+            json={
+                "actor": "elsewhere",
+                "placement": "BOTTOM",
+                "kind": "PERIOD",
+                "guidance_id": added["guidance_id"],
+                "expected_current_seq": 1,
+                "template": "MODERN",
+                "content": added["content"],
+                "enabled": True,
+                "starts_at": added["starts_at"],
+                "ends_at": added["ends_at"],
+            },
+        )
+        assert moved.status_code == 200, moved.text
+
+        form.locator("[data-role='dg-line']").fill("연휴 뒤 첫 영업일부터 순차 발송됩니다")
+        _ready(page, form)
+        form.locator("[data-role='dg-save']").click()
+        stale = form.locator("[data-role='dg-message'][data-code='GUIDANCE_CURRENT_MOVED']")
+        stale.wait_for(timeout=TIMEOUT)
+        assert "다시 불러온 뒤" in stale.inner_text()
+        notice = _placement(client, "BOTTOM")["periods"][0]
+        assert (notice["seq"], notice["template"]) == (2, "MODERN")
+        assert notice["content"] == added["content"]
+
+        # Reloading reads the notice as it is now; the edit form closes.
+        stale.locator("[data-action='dg-reload']").click()
+        _row_seq(page, 2)
+        assert periods.locator("[data-role='dg-period-edit']").count() == 0
+        row = periods.locator("[data-role='dg-period']")
+        assert row.locator("img").get_attribute("src") == notice["image_url"]
+        periods.locator("[data-action='dg-period-edit']").click()
+        form = periods.locator("[data-role='dg-period-edit']")
+        assert form.get_attribute("data-seq") == "2"
+        assert form.locator("[data-template='MODERN']").get_attribute("aria-checked") == "true"
+
+
 @pytest.mark.parametrize(
     "viewport",
     [
@@ -425,6 +664,9 @@ def test_the_populated_card_never_overflows_horizontally(
         row = page.locator("[data-role='dg-bottom'] [data-role='dg-period']")
         assert row.locator("[data-role='dg-status']").inner_text() == "진행 중"
         page.locator("[data-role='dg-bottom'] [data-role='dg-period-add']").click()
+        # The edit form of the running notice opens under its row, also within the card.
+        row.locator("[data-action='dg-period-edit']").click()
+        _five_previews(page.locator("[data-role='dg-bottom'] [data-role='dg-period-edit']"))
         overflow = page.evaluate(
             """() => {
               const wide = (el) => el.scrollWidth > el.clientWidth + 1;
