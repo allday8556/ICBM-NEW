@@ -36,7 +36,12 @@ def test_ggsan_is_bound_active_and_offered_to_connect_and_collect() -> None:
     # ADR-0030 PT-07: ACTIVE by the PR that cites documents/acceptance/suppliers/ggsan.md.
     assert site.config.status is SiteStatus.ACTIVE
     assert site.template.platform == "godomall"
-    assert site.extractor_revision == f"{site.template.revision}+ggsan-3"
+    assert site.template.revision == "godomall-3"
+    assert site.extractor_revision == "godomall-3+ggsan-3"
+    # ADR-0037 §1: the template's caps by role, which the site does not change.
+    limits = site.collection.profile.limits
+    assert (limits.max_image_bytes, limits.max_detail_image_bytes) == (5_000_000, 30_000_000)
+    assert limits.max_new_image_bytes_per_run == 120_000_000
     assert site.collection in COLLECTIONS
     assert site.definition in SUPPLIERS
     assert site.definition.profile.egress_hosts == {"www.ggsan.com"}

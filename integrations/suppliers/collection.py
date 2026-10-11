@@ -51,10 +51,16 @@ class FetchIssue(StrEnum):
 
 @dataclass(frozen=True)
 class CollectionLimits:
-    """Frozen after reconnaissance (ADR-0010 §4, §9). No field has a default."""
+    """Frozen after reconnaissance (ADR-0010 §4, §9). No field has a default.
+
+    The per-image bound depends on the image's canonical role (ADR-0037 §1): ``max_image_bytes``
+    bounds a ``REPRESENTATIVE`` image (the representative and the additional images), and
+    ``max_detail_image_bytes`` a ``DETAIL`` (description) image. The run total bounds both.
+    """
 
     max_image_refs: int
     max_image_bytes: int
+    max_detail_image_bytes: int
     max_image_requests_per_run: int
     max_new_image_bytes_per_run: int
     same_product_interval_s: float
@@ -63,6 +69,7 @@ class CollectionLimits:
         counts = (
             self.max_image_refs,
             self.max_image_bytes,
+            self.max_detail_image_bytes,
             self.max_image_requests_per_run,
             self.max_new_image_bytes_per_run,
         )

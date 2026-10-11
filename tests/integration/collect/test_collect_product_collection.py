@@ -26,6 +26,7 @@ from app.stages.collect.collection import (
     RegisteredCollection,
     pacing_key,
 )
+from app.stages.collect.contracts import ImageReferenceView
 from app.stages.collect.facts import FactsStatus, FieldStatus, ImageIssue, ImageRole
 from app.stages.collect.models import CollectionOutcome
 from app.stages.collect.runs import CollectionRunStore, SameProductTooSoon
@@ -49,6 +50,7 @@ from automation.acceptance.m3.rehearsal.fake_shop import (
     collected_for_run,
     collection,
     page,
+    png,
     refusal,
 )
 from integrations.suppliers.collection import ImageResponse
@@ -605,6 +607,98 @@ def test_an_image_that_would_cross_the_run_total_is_never_stored(
             assert persisted <= allowance, "the advertised run total is never exceeded"
         finally:
             built.db.dispose()
+
+
+# ---------------------------------------------------------------- ADR-0037 §1: caps by role
+
+MB = 1_000_000
+
+
+def sized(size: int, width: int = 1000, height: int = 800) -> bytes:
+    """A decodable PNG header padded to exactly ``size`` bytes (the decoder reads the header)."""
+    head = png(width, height)
+    return head + b"\0" * (size - len(head))
+
+
+def collect_by_role(
+    config: AppConfig,
+    clock: FakeClock,
+    images: dict[str, object],
+    *,
+    max_run_bytes: int = 120 * MB,
+) -> tuple[FakeGateway, tuple[ImageReferenceView, ...]]:
+    """One collection under the templates' caps by role (5 MB, 30 MB), returning its images."""
+    gateway = FakeGateway(documents=[page()], images=images)
+    with acquire_data_dir(config.data_dir, app_version="test") as lease:
+        built = build_container(
+            config,
+            ownership=lease,
+            clock=clock,
+            collection_gateway=gateway,
+            collection_sessions=StubSessions(),
+            collections=(
+                registered(
+                    max_image_bytes=5 * MB,
+                    max_detail_image_bytes=30 * MB,
+                    max_run_bytes=max_run_bytes,
+                ),
+            ),
+        )
+        try:
+            submitted = built.collection.submit(SUPPLIER_KEY, PRODUCT_URL)
+            assert built.runner.run_next() is not None
+            run = built.collection.run(submitted.collection_run_id)
+            assert run.revision_id is not None
+            return gateway, built.source_truth.revision(run.revision_id).images
+        finally:
+            built.db.dispose()
+
+
+def test_a_description_image_is_capped_at_30_mb_and_a_representative_one_at_5_mb(
+    config: AppConfig, clock: FakeClock
+) -> None:
+    # IC-01: a 20 MB description image is collected; a 6 MB representative image is OVERSIZE.
+    gateway, images = collect_by_role(
+        config, clock, {PRIMARY_URL: sized(6 * MB), DETAIL_URL: sized(20 * MB)}
+    )
+    assert gateway.image_reads == [PRIMARY_URL, DETAIL_URL]
+    primary = next(i for i in images if i.role is ImageRole.REPRESENTATIVE)
+    detail = next(i for i in images if i.role is ImageRole.DETAIL)
+    assert primary.status is FieldStatus.REVIEW_REQUIRED
+    assert primary.issue is ImageIssue.OVERSIZE and primary.asset is None
+    assert detail.status is FieldStatus.CONFIRMED and detail.asset is not None
+    assert detail.asset.byte_size == 20 * MB
+
+
+def test_a_description_image_over_30_mb_is_oversize_and_never_stored(
+    config: AppConfig, clock: FakeClock
+) -> None:
+    _, images = collect_by_role(
+        config, clock, {PRIMARY_URL: sized(5 * MB), DETAIL_URL: sized(31 * MB)}
+    )
+    primary = next(i for i in images if i.role is ImageRole.REPRESENTATIVE)
+    detail = next(i for i in images if i.role is ImageRole.DETAIL)
+    assert primary.status is FieldStatus.CONFIRMED, "exactly the cap is within it"
+    assert detail.status is FieldStatus.REVIEW_REQUIRED
+    assert detail.issue is ImageIssue.OVERSIZE and detail.asset is None
+
+
+def test_a_description_image_over_what_the_run_has_left_is_budget_exhausted(
+    config: AppConfig, clock: FakeClock
+) -> None:
+    # The run has 10 MB left when the 15 MB description image arrives: it fits its role's cap,
+    # not the run total, so it is BUDGET_EXHAUSTED rather than OVERSIZE, and never stored.
+    _, images = collect_by_role(
+        config,
+        clock,
+        {PRIMARY_URL: sized(4 * MB), DETAIL_URL: sized(15 * MB)},
+        max_run_bytes=14 * MB,
+    )
+    primary = next(i for i in images if i.role is ImageRole.REPRESENTATIVE)
+    detail = next(i for i in images if i.role is ImageRole.DETAIL)
+    assert primary.status is FieldStatus.CONFIRMED
+    assert detail.status is FieldStatus.REVIEW_REQUIRED
+    assert detail.issue is ImageIssue.BUDGET_EXHAUSTED and detail.asset is None
 
 
 def test_a_product_url_with_a_query_key_is_refused_before_a_job_exists(

@@ -882,6 +882,13 @@ class ProductCollectionService:
             # refused as it arrives and never reaches the store: the advertised run total is a
             # hard cap, not an average.
             allowance = limits.max_new_image_bytes_per_run - spent_bytes
+            # The per-image bound is the role's own (ADR-0037 §1): a description image may be
+            # larger than the representative and additional images.
+            cap = (
+                limits.max_detail_image_bytes
+                if role is ImageRole.DETAIL
+                else limits.max_image_bytes
+            )
             if allowance <= 0:
                 collected.append(unreadable(ImageIssue.BUDGET_EXHAUSTED))
                 continue
@@ -897,7 +904,7 @@ class ProductCollectionService:
                     budget=budget,
                     etag=stored.etag if stored else None,
                     last_modified=stored.last_modified if stored else None,
-                    max_bytes=min(limits.max_image_bytes, allowance),
+                    max_bytes=min(cap, allowance),
                 )
             except CollectionBudgetRefused:
                 collected.append(unreadable(ImageIssue.BUDGET_EXHAUSTED))
@@ -912,9 +919,9 @@ class ProductCollectionService:
                 continue
             except ImageFetchRefused as refused:
                 issue = ImageIssue(refused.issue.value)
-                if issue is ImageIssue.OVERSIZE and allowance < limits.max_image_bytes:
-                    # It fitted the profile's per-image bound; what it did not fit was what this
-                    # run had left.
+                if issue is ImageIssue.OVERSIZE and allowance < cap:
+                    # The bound was what this run had left, below its role's per-image bound: what
+                    # it did not fit was the run total.
                     issue = ImageIssue.BUDGET_EXHAUSTED
                 collected.append(unreadable(issue))
                 continue
