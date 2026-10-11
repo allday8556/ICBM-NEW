@@ -68,6 +68,7 @@ LIMIT_KEYS = frozenset(
     {
         "max_image_refs",
         "max_image_bytes",
+        "max_detail_image_bytes",
         "max_image_requests_per_run",
         "max_new_image_bytes_per_run",
         "same_product_interval_s",

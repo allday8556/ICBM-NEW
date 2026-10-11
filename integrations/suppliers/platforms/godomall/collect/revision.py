@@ -22,6 +22,14 @@ with ADR-0034's description minimum and free-over shipping readings.
   inside the product form ``form#frmView``, never in the floating cart layer; a region layer that
   is exactly a list of regions with one amount each is summarized in the policy text; and a
   minimum-looking description sentence without the site's phrase holds the minimum for review.
+
+``godomall-3`` (2026-10-11, ADR-0037 §1, the owner's caps by role, Issue #219 ``6103784916``):
+- an image is capped by its canonical role: 5 MB (5,000,000 bytes) for a ``REPRESENTATIVE`` image,
+  the representative and the additional images, and 30 MB (30,000,000 bytes) for a ``DETAIL``
+  (description) image; an image over its role's cap is ``OVERSIZE`` and never stored;
+- the per-product run total rises from 24 MiB to 120 MB (120,000,000 bytes); an image over what
+  the run has left is ``BUDGET_EXHAUSTED``, as before.
+No reading changes.
 """
 
-EXTRACTION_REVISION = "godomall-2"
+EXTRACTION_REVISION = "godomall-3"
