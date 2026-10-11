@@ -429,7 +429,14 @@ only POSTs to that owner's routes.
 - **기간 공지.** Each period notice shows its image, its period in local time and the server's
   status label (`예정`, `진행 중` or `종료`). `＋ 기간 공지 추가` opens the same inputs and preview
   plus `시작` and `끝` (`datetime-local`), sent as instants with the browser's offset. `조기 종료`
-  appends `enabled = false`. An existing period notice's text and period are not edited here.
+  appends `enabled = false`.
+  - `수정` on a notice that is not `종료` opens the same inputs and preview under its row, filled
+    with its saved text and template and with `시작`/`끝` in local time (an untouched field sends
+    the saved instant). `기간 공지 수정 저장` appends the next revision of the same notice
+    (`guidance_id`, `expected_current_seq` = the seq read, `enabled = true`); its kind and
+    placement never change. `GUIDANCE_CURRENT_MOVED` offers `다시 불러오기`, `GUIDANCE_UNCHANGED`
+    says nothing changed, and `GUIDANCE_PERIOD_INVALID` and text refusals show the server's reason.
+  - A `종료` notice is read-only: it shows no `수정` and no `조기 종료`.
 - **Server-owned.** Validation, the rendering, the presets, the revision numbers and each period's
   status belong to the Detail Guidance owner. The page computes none of them. A saved notice is
   resolved into every product whose choice is `기본값` (the editor's 상세페이지 step, G4). Since
