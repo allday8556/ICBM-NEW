@@ -1,6 +1,8 @@
 // 수집관리: 수집 / 공급처 관리 views. The supplier view renders canonical SupplierConnection
 // state (M1 CONNECT) in the v28/v29 supplier-card shape: login, connection test and resume are
-// live; site analysis and collection rules arrive with COLLECT (M3) and stay inert.
+// live; 「+ 공급처 추가」 is the ADR-0036 O2 add flow (collect/onboarding.js), and an onboarded
+// supplier's card carries its onboarding state; site analysis and collection rules stay inert
+// until O3/O4.
 // The UI never decides a supplier is connected — it shows the server's protected-read verdict.
 // The 수집 view submits one product and follows its durable run (Gate 1 G1-E, below).
 
@@ -15,6 +17,7 @@ import { collectFactsBlock, collectPreviewBlock, readRevisionFacts } from '../co
 import { commonImagesSummary, openCommonImages } from '../components/common-images.js';
 import { datePill, pageHead } from '../components/page-head.js';
 import { reviewItemsBlock } from '../components/review-items.js';
+import { loadOnboarding, onboardingChip, openAddSupplier, startRecon } from './collect/onboarding.js';
 
 const ENDPOINT = '/api/v1/screens/collect';
 const CONNECT = '/api/v1/connect/suppliers';
@@ -85,12 +88,16 @@ async function waitForJob(jobId) {
   return null;
 }
 
-async function runConnectionTest(supplier, ctx) {
+async function runConnectionTest(supplier, ctx, onboarding = null) {
   try {
     const queued = await sendJson('POST', `${CONNECT}/${supplier.supplier_key}/test`);
     toast('연결 테스트', '저장된 세션을 먼저 재사용하고, 필요할 때만 한 번 로그인합니다.');
     const job = await waitForJob(queued.job_id);
-    if (job?.state === 'SUCCEEDED') toast('연결 테스트', '보호 페이지 확인 완료 · 연결됨');
+    if (job?.state === 'SUCCEEDED' && onboarding?.state === 'DRAFT') {
+      // ADR-0036 §4 step 5: an onboarded draft moves to 분석 중 once its connection is proven.
+      await startRecon(supplier.supplier_key);
+      toast('연결 테스트', '보호 페이지 확인 완료 · 분석 중으로 전환했습니다.');
+    } else if (job?.state === 'SUCCEEDED') toast('연결 테스트', '보호 페이지 확인 완료 · 연결됨');
     else if (job?.state === 'RETRY_SCHEDULED') toast('연결 테스트', '일시적 오류 · 잠시 후 자동으로 한 번 더 확인합니다.');
     else if (job) toast('연결 테스트', ERROR_COPY[job.last_error_code] ?? job.last_error_code ?? '실패');
   } catch (error) {
@@ -171,7 +178,7 @@ function passwordControl(passwordStored) {
   return { row, state };
 }
 
-async function openCredentialModal(supplier, ctx) {
+async function openCredentialModal(supplier, ctx, onboarding = null) {
   const saved = await storedLogin(supplier);
   const stored = saved.password_stored;
   const username = field('ID', { value: saved.username ?? '', placeholder: '공급처 로그인 ID' });
@@ -203,7 +210,7 @@ async function openCredentialModal(supplier, ctx) {
   const test = h('button', { type: 'button', class: 'btn', disabled: !stored }, '연결 테스트');
   test.addEventListener('click', () => {
     closeModal();
-    runConnectionTest(supplier, ctx);
+    runConnectionTest(supplier, ctx, onboarding);
   });
   const budget =
     `로그인 ${supplier.real_login_attempts}회 · 세션 재사용 ${supplier.session_reuse_count}회 · ` +
@@ -229,7 +236,7 @@ async function openCredentialModal(supplier, ctx) {
   });
 }
 
-function supplierCard(supplier, ctx) {
+function supplierCard(supplier, ctx, onboarding = null) {
   const [chipLabel, tone] = CAPABILITY_CHIP[supplier.capability_status] ?? [supplier.capability_status, null];
   const failing = supplier.state !== 'READY' && supplier.last_error_code;
   const primary =
@@ -237,7 +244,7 @@ function supplierCard(supplier, ctx) {
       ? h('button', { type: 'button', class: 'btn blue', onclick: () => resume(supplier, ctx) }, '자동 로그인 재개')
       : h(
           'button',
-          { type: 'button', class: 'btn', disabled: !supplier.credentials_stored, onclick: () => runConnectionTest(supplier, ctx) },
+          { type: 'button', class: 'btn', disabled: !supplier.credentials_stored, onclick: () => runConnectionTest(supplier, ctx, onboarding) },
           '연결 테스트',
         );
   // A-NEXT2a: the supplier's common images (Issue #219's owner), counted by the owner and decided
@@ -255,7 +262,12 @@ function supplierCard(supplier, ctx) {
       'div',
       { class: 'supplier-card-head' },
       h('div', {}, h('b', {}, supplier.display_name), h('div', { class: 'supplier-domain' }, supplier.base_url)),
-      h('span', { class: tone ? `chip ${tone}` : 'chip' }, chipLabel),
+      h(
+        'div',
+        { class: 'supplier-chips' },
+        onboarding ? onboardingChip(onboarding) : null,
+        h('span', { class: tone ? `chip ${tone}` : 'chip' }, chipLabel),
+      ),
     ),
     h(
       'div',
@@ -270,7 +282,7 @@ function supplierCard(supplier, ctx) {
     h(
       'div',
       { class: 'supplier-actions' },
-      h('button', { type: 'button', class: 'btn', onclick: () => openCredentialModal(supplier, ctx) }, '로그인 정보'),
+      h('button', { type: 'button', class: 'btn', onclick: () => openCredentialModal(supplier, ctx, onboarding) }, '로그인 정보'),
       primary,
       h('button', { type: 'button', class: 'btn', 'data-action': 'open-common-images', onclick: () => openCommonImages(supplier, refreshCommon) }, '공통 이미지'),
       markInert(h('button', { type: 'button', class: 'btn' }, '사이트 분석')),
@@ -948,7 +960,31 @@ function jobsView(view, ctx) {
   return root;
 }
 
-function suppliersView(view, ctx) {
+// An onboarded supplier CONNECT no longer lists (DISABLED, or not bound): its state and nothing to
+// act on.
+function onboardedOnlyCard(record) {
+  return h(
+    'div',
+    { class: 'supplier-card', 'data-supplier': record.supplier_key },
+    h(
+      'div',
+      { class: 'supplier-card-head' },
+      h('div', {}, h('b', {}, record.display_name), h('div', { class: 'supplier-domain' }, record.origin)),
+      h('div', { class: 'supplier-chips' }, onboardingChip(record)),
+    ),
+    h(
+      'div',
+      { class: 'note' },
+      record.state === 'DISABLED'
+        ? '비활성화된 공급처입니다. 연결·수집에 쓰이지 않습니다.'
+        : '이 공급처는 지금 연결할 수 없습니다.',
+    ),
+  );
+}
+
+function suppliersView(view, ctx, onboarded = new Map()) {
+  const deps = { waitForJob, errorMessage };
+  const add = () => openAddSupplier(ctx, deps);
   const header = h(
     'div',
     { class: 'panel supplier-head' },
@@ -959,26 +995,34 @@ function suppliersView(view, ctx) {
         h('h3', { class: 'panel-title' }, '공급처 연결 관리'),
         '공급처 인증·세션·수집 프로필을 한 곳에서 확인합니다. 저장된 비밀번호는 다시 표시하지 않습니다.',
       ),
-      markInert(h('button', { type: 'button', class: 'btn blue' }, '+ 공급처 추가')),
+      h('button', { type: 'button', class: 'btn blue', 'data-action': 'add-supplier', onclick: add }, '+ 공급처 추가'),
     ),
   );
-  // A new supplier is a reviewed site configuration on a platform template (ADR-0030); the
-  // configured suppliers come from the server, so this card adds none by itself.
-  const addCard = markInert(
+  // ADR-0036 O2: a new supplier is onboarded on a platform template through the add flow; the
+  // server guards, detects and records it, and this card only opens that flow.
+  const addCard = h(
+    'button',
+    { type: 'button', class: 'supplier-card supplier-add-card', 'data-action': 'add-supplier-card', onclick: add },
     h(
-      'button',
-      { type: 'button', class: 'supplier-card supplier-add-card' },
-      h(
-        'div',
-        {},
-        h('div', { class: 'empty-icon', 'aria-hidden': 'true' }, '＋'),
-        h('b', {}, '새 공급처 추가'),
-        h('div', { class: 'mini' }, '도메인과 로그인 정보를 등록한 뒤 연결 테스트와 사이트 분석을 진행합니다.'),
-      ),
+      'div',
+      {},
+      h('div', { class: 'empty-icon', 'aria-hidden': 'true' }, '＋'),
+      h('b', {}, '새 공급처 추가'),
+      h('div', { class: 'mini' }, '도메인과 로그인 정보를 등록한 뒤 연결 테스트와 사이트 분석을 진행합니다.'),
     ),
-    '새 공급처 추가',
   );
-  return fragment(header, h('div', { class: 'supplier-grid' }, view.suppliers.map((s) => supplierCard(s, ctx)), addCard));
+  const listed = new Set(view.suppliers.map((s) => s.supplier_key));
+  const unlisted = [...onboarded.values()].filter((record) => !listed.has(record.supplier_key));
+  return fragment(
+    header,
+    h(
+      'div',
+      { class: 'supplier-grid' },
+      view.suppliers.map((s) => supplierCard(s, ctx, onboarded.get(s.supplier_key) ?? null)),
+      unlisted.map(onboardedOnlyCard),
+      addCard,
+    ),
+  );
 }
 
 export default {
@@ -989,6 +1033,7 @@ export default {
   async render(ctx) {
     const view = await getJson(ENDPOINT);
     const active = ctx.params.get('view') === 'suppliers' ? 'suppliers' : 'jobs';
+    const onboarded = active === 'suppliers' ? await loadOnboarding() : new Map();
     const tabs = h(
       'div',
       { class: 'inner-tabs', role: 'tablist', 'aria-label': '수집관리 보기' },
@@ -1012,7 +1057,7 @@ export default {
         actions: [datePill(`${dotDate(view.meta.generated_at)}　오늘`)],
       }),
       tabs,
-      active === 'suppliers' ? suppliersView(view, ctx) : jobsView(view, ctx),
+      active === 'suppliers' ? suppliersView(view, ctx, onboarded) : jobsView(view, ctx),
     );
   },
 };

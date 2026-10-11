@@ -116,6 +116,12 @@ ADR-0036 O1 added the supplier onboarding owner `app/stages/collect/onboarding/`
 guard, append-only store, the database-built site configuration and the running supplier registry
 that merges repository and onboarded sites and rebinds one at run time), migration `0061` and one
 integration suite.
+ADR-0036 O2 added 「+ 공급처 추가」: platform detection and the policy reads
+`app/stages/collect/onboarding/detect.py`, the add flow `service.py` and its read shapes
+`contracts.py`, the routes `app/interface/api/routes/onboarding.py`, the bootstrap reader in the
+existing common transport, the templates' detection markers, the modal
+`ui/web/js/pages/collect/onboarding.js`, one test support module and two integration suites; no
+migration.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -150,11 +156,11 @@ contains no provider transport, and grants no credentials or LIVE authority.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 362 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 366 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 68 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
-| `app/interface/` | 28 | operator surfaces: HTTP api, screens, cli |
+| `app/interface/` | 29 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 90 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 171 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/stages/` | 174 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -176,13 +182,13 @@ contains no provider transport, and grants no credentials or LIVE authority.
 | `integrations/` | 85 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 35 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 354 | tests |
+| `tests/` | 357 | tests |
 | `tests/contracts/` | 15 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 147 | integration tests by runtime owner |
-| `tests/support/` | 14 | shared test support |
+| `tests/integration/` | 149 | integration tests by runtime owner |
+| `tests/support/` | 15 | shared test support |
 | `tests/unit/` | 131 | unit tests by runtime owner |
-| `ui/` | 70 | operator clients: the served web client and the capture extension |
+| `ui/` | 71 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 61 | the served web client |
+| `ui/web/` | 62 | the served web client |

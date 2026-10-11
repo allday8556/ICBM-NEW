@@ -147,3 +147,51 @@ class SupplierGateway(Protocol):
         ``RateLimitedError`` for site or network trouble. Never retries a rejected login.
         """
         ...
+
+
+class PublicReadFailure(StrEnum):
+    """Why a public read has no HTTP answer. A closed vocabulary: never an exception's text."""
+
+    # The bootstrap host resolved to no public address (loopback, private, link-local, reserved).
+    ADDRESS_REFUSED = "ADDRESS_REFUSED"
+    UNRESOLVED = "UNRESOLVED"
+    EGRESS_BLOCKED = "EGRESS_BLOCKED"
+    TIMEOUT = "TIMEOUT"
+    NETWORK_ERROR = "NETWORK_ERROR"
+
+
+@dataclass(frozen=True)
+class PublicRead:
+    """One unauthenticated read of a public storefront document (ADR-0036 §4 steps 2–3).
+
+    ``content`` is held in memory only, for marker recognition and the policy summary; it is never
+    logged, persisted or put into an audit row. ``status`` is ``None`` exactly when ``failure``
+    names why the read had no HTTP answer.
+    """
+
+    path: str
+    status: int | None
+    # A 3xx answer's target, as its host and path only.
+    location_host: str | None = None
+    location_path: str | None = None
+    content: bytes = field(default=b"", repr=False)
+    charset: str | None = None
+    # The answer was longer than the read's byte cap; ``content`` is its first part.
+    truncated: bool = False
+    failure: PublicReadFailure | None = None
+
+    def text(self) -> str:
+        try:
+            return self.content.decode(self.charset or "utf-8", errors="replace")
+        except LookupError:
+            return self.content.decode("utf-8", errors="replace")
+
+
+class PublicReader(Protocol):
+    """The common transport's bootstrap reader for supplier onboarding (ADR-0036 §4, §9).
+
+    It reads exact public paths of one guarded ``https`` host, unauthenticated, inside an egress
+    grant for that host only, paced, with no redirect followed and a byte cap per read. It refuses
+    a host whose name resolves to anything but public addresses."""
+
+    def read(self, host: str, paths: tuple[str, ...]) -> tuple[PublicRead, ...]: ...

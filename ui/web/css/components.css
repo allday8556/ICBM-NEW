@@ -733,6 +733,71 @@ body.has-registration-status .content {
   margin: 6px auto 0;
 }
 
+/* ADR-0036 O2: an onboarded supplier's state chip beside its connection chip, and the add flow. */
+.supplier-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.onboarding-detect {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--space-4);
+}
+
+.onboarding-detect-result {
+  margin-top: var(--space-3);
+}
+
+.onboarding-detect-result .note,
+.onboarding-evidence {
+  overflow-wrap: anywhere;
+}
+
+.onboarding-policy-doc {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid #edf1f4;
+}
+
+.onboarding-policy-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.onboarding-robots {
+  max-height: 140px;
+  overflow: auto;
+  margin: var(--space-2) 0 0;
+  padding: 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-input);
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.onboarding-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: var(--space-4);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.onboarding-ack input {
+  margin-top: 2px;
+  flex: none;
+}
+
 @media (max-width: 1180px) {
   .supplier-grid {
     grid-template-columns: 1fr 1fr;

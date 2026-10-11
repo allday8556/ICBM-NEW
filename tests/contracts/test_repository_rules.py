@@ -2211,6 +2211,8 @@ ONBOARDING_O1_WRITES = (
     "OnboardingTransition",
     "OnboardingHost",
     "OnboardingWordRevision",
+    # ADR-0036 O2: the policy reads the operator acknowledged at add time.
+    "OnboardingPolicyRead",
 )
 
 

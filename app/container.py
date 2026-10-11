@@ -103,6 +103,7 @@ from app.stages.collect.extension.queue import ExtensionQueues
 from app.stages.collect.extension.service import ExtensionCaptureService, ReportSink
 from app.stages.collect.imagedecode import HeaderImageDecoder
 from app.stages.collect.onboarding.catalog import SupplierCatalog
+from app.stages.collect.onboarding.service import OnboardingService
 from app.stages.collect.onboarding.store import OnboardingStore
 from app.stages.collect.readback import SourceTruthReadback
 from app.stages.collect.revisions import ProductFactsRevisionStore
@@ -209,7 +210,7 @@ from integrations.marketplaces.smartstore.notice_schema import SmartStoreNoticeR
 from integrations.marketplaces.smartstore.orders import SmartStoreOrderSource
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
 from integrations.marketplaces.smartstore.tags import SmartStoreTagSource
-from integrations.suppliers.base import SupplierDefinition, SupplierGateway
+from integrations.suppliers.base import PublicReader, SupplierDefinition, SupplierGateway
 from integrations.suppliers.collection import ImageRole as SupplierImageRole
 from integrations.suppliers.collection import SupplierCollection
 from integrations.suppliers.extraction import supplier_manifest
@@ -219,7 +220,10 @@ from integrations.suppliers.kmretail.collect.images import ROLE_RULES as KM_ROLE
 from integrations.suppliers.registry import COLLECTIONS, SITE_PROBLEMS, SITES, SUPPLIERS
 from integrations.suppliers.sites import PACKAGED_HOSTS, capture_policy_bytes
 from integrations.suppliers.transport.collection import DeferredCollectionGateway
-from integrations.suppliers.transport.gateway import PolicedSupplierGateway
+from integrations.suppliers.transport.gateway import (
+    PolicedPublicReader,
+    PolicedSupplierGateway,
+)
 
 logger = logging.getLogger("icbm.container")
 
@@ -351,6 +355,8 @@ class Container:
     # the repository suppliers with the onboarded sites and rebinds one at run time.
     onboarding: OnboardingStore
     supplier_catalog: SupplierCatalog
+    # ADR-0036 O2: 「+ 공급처 추가」 — detection, the policy reads, the DRAFT and RECON.
+    onboarding_service: OnboardingService
     # Each configured supplier's display name, by key (ADR-0030 §11 S2: the screens' lists).
     supplier_names: Mapping[str, str] = field(default_factory=dict)
 
@@ -431,6 +437,7 @@ def build_container(
     secret_store: SecretStore | None = None,
     extra_jobs: Sequence[JobDefinition] = (),
     supplier_gateway: SupplierGateway | None = None,
+    onboarding_reader: PublicReader | None = None,
     collection_gateway: CollectionGateway | None = None,
     collection_sessions: SessionProvider | None = None,
     collections: Sequence[RegisteredCollection] | None = None,
@@ -512,6 +519,15 @@ def build_container(
         marketplaces=MARKETPLACE_IDENTITIES,
     )
     registry.register(connect.job_definition())
+    # ADR-0036 O2: the add flow reads the entered storefront only through the common
+    # transport's bootstrap reader; the login goes through CONNECT's credential route.
+    onboarding_service = OnboardingService(
+        store=onboarding,
+        catalog=supplier_catalog,
+        connect=connect,
+        reader=onboarding_reader or PolicedPublicReader(),
+        clock=clock,
+    )
     # Marketplace capability truth: typed evidence in, no provider access (M2 PR-B).
     marketplace_capability = MarketplaceCapabilityService(db=db, clock=clock, audit=audit)
     # SmartStore CONNECT (M2 PR-A): every provider call goes through the registry-gated caller.
@@ -1374,6 +1390,7 @@ def build_container(
         ownership=ownership,
         onboarding=onboarding,
         supplier_catalog=supplier_catalog,
+        onboarding_service=onboarding_service,
         supplier_names=supplier_catalog.names,
     )
 

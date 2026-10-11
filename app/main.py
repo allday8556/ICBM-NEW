@@ -28,6 +28,7 @@ from app.interface.api.routes import (
     detail_guidance,
     diagnostics,
     enrichment,
+    onboarding,
     operate,
     product_images,
     products,
@@ -46,7 +47,7 @@ from app.stages.collect.extension.service import ReportSink
 from app.stages.connect.marketplace.revision import EndpointMappingRevisionProvider
 from app.stages.connect.marketplace.sources import ApplicationIdentitySource
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
-from integrations.suppliers.base import SupplierGateway
+from integrations.suppliers.base import PublicReader, SupplierGateway
 
 logger = logging.getLogger("icbm.app")
 
@@ -59,6 +60,7 @@ def create_app(
     ownership: DataDirLease | None = None,
     extra_jobs: Sequence[JobDefinition] = (),
     supplier_gateway: SupplierGateway | None = None,
+    onboarding_reader: PublicReader | None = None,
     application_identity: ApplicationIdentitySource | None = None,
     mapping_revision: EndpointMappingRevisionProvider | None = None,
     smartstore_caller: SmartStoreEndpointCaller | None = None,
@@ -92,6 +94,7 @@ def create_app(
             ownership=lease,
             extra_jobs=extra_jobs,
             supplier_gateway=supplier_gateway,
+            onboarding_reader=onboarding_reader,
             application_identity=application_identity,
             mapping_revision=mapping_revision,
             smartstore_caller=smartstore_caller,
@@ -192,6 +195,7 @@ def create_app(
     app.include_router(connect.router)
     app.include_router(collect.router)
     app.include_router(collect_extension.router)
+    app.include_router(onboarding.router)
     app.include_router(synthetic_products.router)
     app.include_router(products.router)
     app.include_router(enrichment.router)

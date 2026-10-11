@@ -28,6 +28,31 @@ class PathForm:
 
 
 @dataclass(frozen=True)
+class PlatformDetection:
+    """How a storefront on this platform is recognised before it is onboarded (ADR-0036 §4 step 2).
+
+    Markers only: literal strings whose presence in a public page names the platform. A marker's
+    name is all that leaves recognition; the page itself is never kept and no fact is read from it.
+    The paths are the template's own: its login page (where CONNECT signs in), its policy
+    documents, and the product path prefix a robots rule is compared with.
+    """
+
+    # (marker name, literal) found in the storefront's home page.
+    home_markers: tuple[tuple[str, str], ...]
+    login_path: str
+    # (marker name, literal) found in the template's login page: its login form.
+    login_markers: tuple[tuple[str, str], ...]
+    robots_path: str
+    terms_path: str
+    product_path_prefix: str
+
+
+def markers_in(body: str, markers: tuple[tuple[str, str], ...]) -> tuple[str, ...]:
+    """The names of the markers whose literal ``body`` contains, in declaration order."""
+    return tuple(name for name, literal in markers if literal in body)
+
+
+@dataclass(frozen=True)
 class SiteBinding:
     definition: SupplierDefinition
     collection: SupplierCollection
@@ -51,3 +76,5 @@ class PlatformTemplate:
     # Every image-role rule name the template can assign, with its role: what the image
     # auto-selection reads for a site on this template (Issue #219).
     role_table: tuple[tuple[str, str], ...] = ()
+    # ADR-0036 §4 step 2: how a storefront on this platform is recognised before onboarding.
+    detection: PlatformDetection | None = None
