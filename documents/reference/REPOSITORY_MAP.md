@@ -141,6 +141,9 @@ the mapper is provider-zero, semantic/unit-based and read-only.
 C-AUTH-1 adds the Coupang HMAC/auth and evidence-bounded error contracts, an in-memory fake
 transport, their unit/contract coverage, and the provider-zero auth contract. It adopts no endpoint,
 contains no provider transport, and grants no credentials or LIVE authority.
+C-CLAIM-1 adds one provider-zero Coupang Returns & Exchanges adapter covering eleven official
+endpoints plus unit and contract suites. It uses only the in-memory fake transport, retains provider
+response envelopes without interpreting customer data, and grants no credentials or LIVE authority.
 
 | path | files | role |
 | --- | --- | --- |
@@ -169,16 +172,16 @@ contains no provider transport, and grants no credentials or LIVE authority.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 85 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 35 |  |
+| `integrations/` | 86 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 36 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 354 | tests |
-| `tests/contracts/` | 15 | repository-rule and document-contract tests |
+| `tests/` | 356 | tests |
+| `tests/contracts/` | 16 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 146 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 132 | unit tests by runtime owner |
+| `tests/unit/` | 133 | unit tests by runtime owner |
 | `ui/` | 70 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 61 | the served web client |
