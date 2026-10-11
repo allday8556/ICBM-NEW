@@ -346,10 +346,11 @@ class PolicedPublicReader:
             ),
         )
         with EGRESS.grant(f"onboarding:{host}", {host}):
-            refusal = self._address_refusal(host)
-            if refusal is not None:
-                self._observe(lane, "/", refusal.value, None)
-                return tuple(PublicRead(path=p, status=None, failure=refusal) for p in paths)
+            refusal, address = self._vetted_address(host)
+            if refusal is not None or address is None:
+                failure = refusal or PublicReadFailure.UNRESOLVED
+                self._observe(lane, "/", failure.value, None)
+                return tuple(PublicRead(path=p, status=None, failure=failure) for p in paths)
             with httpx.Client(
                 timeout=self._timeout_s,
                 follow_redirects=False,
@@ -366,23 +367,29 @@ class PolicedPublicReader:
                 results = []
                 for path in paths:
                     with self._pacer.slot(lane):
-                        results.append(self._one(client, lane, host, path))
+                        results.append(self._one(client, lane, host, address, path))
                 return tuple(results)
 
-    def _address_refusal(self, host: str) -> PublicReadFailure | None:
+    def _vetted_address(self, host: str) -> tuple[PublicReadFailure | None, str | None]:
+        """The one address every read connects to, after all answers proved public (OB-01).
+
+        Connecting to it, never to the name, closes DNS rebinding: a second lookup at connect time
+        cannot swap in a private address. IPv4 is preferred; the order is otherwise stable."""
         try:
             addresses = self._resolve(host)
         except EgressBlockedError:
-            return PublicReadFailure.EGRESS_BLOCKED
+            return PublicReadFailure.EGRESS_BLOCKED, None
         except OSError:
-            return PublicReadFailure.UNRESOLVED
+            return PublicReadFailure.UNRESOLVED, None
         if not addresses:
-            return PublicReadFailure.UNRESOLVED
+            return PublicReadFailure.UNRESOLVED, None
         if not all(is_public_address(a) for a in addresses):
-            return PublicReadFailure.ADDRESS_REFUSED
-        return None
+            return PublicReadFailure.ADDRESS_REFUSED, None
+        return None, sorted(addresses, key=lambda a: (":" in a, a))[0]
 
-    def _one(self, client: httpx.Client, lane: SupplierProfile, host: str, path: str) -> PublicRead:
+    def _one(
+        self, client: httpx.Client, lane: SupplierProfile, host: str, address: str, path: str
+    ) -> PublicRead:
         started, started_mono = datetime.now(UTC), time.monotonic()
         # httpx's timeout bounds each wait, not the whole read: a host that drips bytes would hold a
         # read open forever. The read as a whole ends at this deadline.
@@ -394,7 +401,14 @@ class PolicedPublicReader:
         location: str | None = None
         charset: str | None = None
         try:
-            with client.stream("GET", f"https://{host}{path}") as response:
+            netloc = f"[{address}]" if ":" in address else address
+            with client.stream(
+                "GET",
+                f"https://{netloc}{path}",
+                # The name still goes in Host and in TLS (SNI and certificate verification).
+                headers={"Host": host},
+                extensions={"sni_hostname": host},
+            ) as response:
                 status = response.status_code
                 encoding = response.headers.get("content-encoding", "identity").strip().lower()
                 if encoding not in ("", "identity"):

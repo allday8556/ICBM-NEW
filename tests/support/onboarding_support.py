@@ -89,9 +89,13 @@ class Storefront:
     requests: list[tuple[str, str, str]] = field(default_factory=list)
     resolved: list[str] = field(default_factory=list)
     grant_hosts_seen: list[frozenset[str]] = field(default_factory=list)
+    # (address connected to, Host header, TLS server name) of every request.
+    connections: list[tuple[str, str, str | None]] = field(default_factory=list)
 
     def handler(self, request: httpx.Request) -> httpx.Response:
-        host = request.url.host
+        # The reader connects to the vetted address; the site is the one the Host header names.
+        host = request.headers["host"]
+        self.connections.append((request.url.host, host, request.extensions.get("sni_hostname")))
         self.requests.append((request.method, host, request.url.path))
         grant = _active_grant.get()
         self.grant_hosts_seen.append(frozenset() if grant is None else grant.hosts)

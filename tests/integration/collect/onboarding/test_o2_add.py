@@ -234,6 +234,23 @@ def test_a_name_resolving_to_a_non_public_address_is_never_read(
     assert found.reason.value == "HOME_UNREAD"
 
 
+def test_every_read_connects_to_the_vetted_address_never_to_the_name(
+    storefront: Storefront,
+) -> None:
+    """DNS rebinding: the name is resolved once and proved public; each read then connects to
+    that address (IPv4 first), with the name only in Host and TLS, so no later lookup can swap
+    in a private address."""
+    storefront.addresses[CAFE24_HOST] = ("2606:2800:220:1::1", "93.184.216.34")
+    reads = storefront.reader().read(CAFE24_HOST, ("/", "/robots.txt"))
+    assert all(r.failure is None for r in reads)
+    assert storefront.resolved == [CAFE24_HOST]
+    assert storefront.connections == [("93.184.216.34", CAFE24_HOST, CAFE24_HOST)] * 2
+
+    storefront.addresses[GODOMALL_HOST] = ("2606:2800:220:1::1",)
+    storefront.reader().read(GODOMALL_HOST, ("/",))
+    assert storefront.connections[-1] == ("2606:2800:220:1::1", GODOMALL_HOST, GODOMALL_HOST)
+
+
 def test_a_redirecting_home_page_suggests_its_target(
     api: TestClient, storefront: Storefront
 ) -> None:
