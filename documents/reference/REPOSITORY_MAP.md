@@ -169,16 +169,16 @@ contains no provider transport, and grants no credentials or LIVE authority.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 84 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 34 |  |
+| `integrations/` | 85 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 35 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 350 | tests |
-| `tests/contracts/` | 14 | repository-rule and document-contract tests |
+| `tests/` | 352 | tests |
+| `tests/contracts/` | 15 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 145 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 130 | unit tests by runtime owner |
+| `tests/unit/` | 131 | unit tests by runtime owner |
 | `ui/` | 70 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 61 | the served web client |
