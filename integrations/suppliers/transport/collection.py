@@ -404,9 +404,11 @@ class PolicedCollectionGateway:
     ) -> ImageResponse:
         """Fetch one image, revalidating with the stored validators when there are any.
 
-        ``max_bytes`` narrows the profile's own per-image bound to what the caller still has left
-        to spend. The bound is applied to the declared size and to the body as it arrives, so a
-        response never reaches the caller — and never reaches storage — above it.
+        ``max_bytes`` is the caller's bound for this image: its role's per-image bound, narrowed to
+        what the run still has left to spend (ADR-0037 §1). It never exceeds the profile's largest
+        per-image bound; without it, the representative bound applies. The bound is applied to the
+        declared size and to the body as it arrives, so a response never reaches the caller — and
+        never reaches storage — above it.
         """
         _require_http(profile)
         host = check_target(profile, url, ReadKind.IMAGE_REQUEST)
@@ -433,7 +435,9 @@ class PolicedCollectionGateway:
             media = content_type.split(";", 1)[0].strip().lower()
             if not media.startswith("image/"):
                 raise ImageFetchRefused(FetchIssue.BAD_CONTENT_TYPE, "the response is not an image")
-            limit = min(profile.limits.max_image_bytes, max_bytes or profile.limits.max_image_bytes)
+            limits = profile.limits
+            ceiling = max(limits.max_image_bytes, limits.max_detail_image_bytes)
+            limit = min(ceiling, max_bytes) if max_bytes else limits.max_image_bytes
             declared = response.headers.get("content-length")
             if declared is not None and declared.isdigit() and int(declared) > limit:
                 raise ImageFetchRefused(FetchIssue.OVERSIZE, "declared size over the bound")

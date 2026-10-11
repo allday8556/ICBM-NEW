@@ -14,7 +14,14 @@ from app.stages.collect.adaptive.engine.engine import (
     match_template,
     replay,
 )
-from app.stages.collect.facts import FIELD_REGISTRY, SUPPLIED_FIELDS, FieldLevel, FieldStatus
+from app.stages.collect.facts import (
+    FIELD_REGISTRY,
+    SUPPLIED_FIELDS,
+    EvidenceKind,
+    FieldLevel,
+    FieldStatus,
+)
+from app.stages.products.model import BASE_PRODUCT_ABSENT_FIELDS
 from tests.support.adaptive_support import (
     SAMPLES,
     TEMPLATE_OF,
@@ -72,13 +79,16 @@ def test_every_field_equals_the_operator_expectation() -> None:
             assert fact_value(got.fields[key]) == want["value"], (name, key)
 
 
-def test_absent_is_only_a_coverage_field_whose_absence_condition_is_observed() -> None:
+def test_absent_is_only_an_observed_absence() -> None:
+    # A COVERAGE field whose absence condition is observed, or the options of a page that proves
+    # it has no option control (ADR-0013 ruling B): no other field is ever ABSENT.
     got = _of("sold_out")
     for key in ("brand", "origin", "quantity_tiers"):
         assert got.fields[key].status is FieldStatus.ABSENT
         assert FIELD_REGISTRY[key].level is FieldLevel.COVERAGE
-    for fact in got.fields.values():
+    for key, fact in got.fields.items():
         if fact.status is FieldStatus.ABSENT:
+            assert FIELD_REGISTRY[key].level is FieldLevel.COVERAGE or key == "options"
             assert all(":absent:" in e.locator for e in fact.evidence)
 
 
@@ -129,10 +139,24 @@ def test_the_m3_boundary_is_inherited_for_options_and_tiers() -> None:
         assert f"M3_BOUNDARY:{key}" in got.signals
 
 
-def test_a_page_proving_no_option_control_has_zero_axes_confirmed() -> None:
-    options = _of("on_sale").fields["options"]
-    assert options.status is FieldStatus.CONFIRMED
-    assert fact_value(options) == {"axes": [], "configurations": []}
+@pytest.mark.parametrize("name", ["on_sale", "sold_out"])
+def test_a_page_proving_no_option_control_states_no_options(name: str) -> None:
+    # Owner decision Issue #219 6097082224, ADR-0013 ruling B: the stated absence is ABSENT, as
+    # KM통상 and the platform templates read it, and the control-state proof is kept.
+    options = _of(name).fields["options"]
+    assert options.status is FieldStatus.ABSENT and options.value is None
+    assert [(e.kind, e.locator, e.status) for e in options.evidence] == [
+        (EvidenceKind.CONTROL_STATE, "plain/options:absent:no-control", FieldStatus.ABSENT)
+    ]
+
+
+@pytest.mark.parametrize("name", ["on_sale", "sold_out"])
+def test_a_page_without_options_or_tiers_proves_the_default_single_unit(name: str) -> None:
+    # ADR-0013 ruling B: M4 materializes BASE_PRODUCT only when exactly these fields are ABSENT.
+    got = _of(name)
+    assert all(got.fields[key].status is FieldStatus.ABSENT for key in BASE_PRODUCT_ABSENT_FIELDS)
+    # An option control under review proves nothing.
+    assert _of("optioned").fields["options"].status is FieldStatus.REVIEW_REQUIRED
 
 
 def test_a_conditional_shipping_policy_is_never_flattened() -> None:
