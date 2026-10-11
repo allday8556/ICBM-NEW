@@ -132,6 +132,9 @@ All writes go through one owner store with an injected clock and an audit event 
 ## 9. Safety
 
 - **Egress.** The egress grant for an onboarded supplier is exactly its confirmed, non-disabled hosts. The guard in §2 D1 refuses any other address before a grant exists.
+  - **Template hosts.** A template's own platform hosts are part of the template, not of the site. One example is Cafe24's shared login host, which its `bind` adds for CONNECT. They were reviewed in the template's PR under ADR-0030 §4 and PT-02, exactly as for repository sites on that template.
+  - They are granted only to the path the template uses them for (CONNECT). An operator never adds them, and a site can never widen them.
+  - The collection grant (storefront and image hosts) is exactly the site's confirmed hosts.
 - **Pacing and budgets.** These are the template defaults. A collection still reads exactly one product page.
 - **Audit.** Every write is audited, and audit rows never carry credentials or page text.
 - **Data from a trial.** It stays local and non-canonical.
