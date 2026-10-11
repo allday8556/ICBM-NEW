@@ -722,3 +722,4 @@ def test_a_dripping_host_is_cut_off_at_the_total_deadline(storefront: Storefront
     (drip,) = reader.read(CAFE24_HOST, ("/",))
     assert drip.status is None and drip.failure is PublicReadFailure.TIMEOUT
     assert drip.content == b""
+    assert now[0] < 20  # stopped near the deadline, not after the whole drip

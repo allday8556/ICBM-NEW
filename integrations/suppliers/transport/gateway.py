@@ -403,8 +403,10 @@ class PolicedPublicReader:
                     chunks: list[bytes] = []
                     size = 0
                     try:
-                        # Raw bytes as received: never decompressed, so the cap bounds memory.
-                        for chunk in response.iter_raw(chunk_size=65_536):
+                        # Raw bytes as received: never decompressed, so the cap bounds memory. No
+                        # chunk_size: re-chunking would hold a dripped byte until 64 KiB arrived,
+                        # and the deadline below would never be checked.
+                        for chunk in response.iter_raw():
                             if self._monotonic() > deadline:
                                 failure = PublicReadFailure.TIMEOUT
                                 break
