@@ -2119,6 +2119,11 @@ PREFLIGHT_TRUTH_WRITERS = {
     # ADR-0033 G4: the preflight resolves the Detail Guidance notices; G2's owner writes them.
     **dict.fromkeys(("DetailGuidance", "GuidanceImageArtifact", "DetailGuidanceRevision"),
                     "app/capabilities/detail_guidance/store.py"),
+    # ADR-0036 OB-10: the preflight's PT-06 gate reads an onboarded site's state, through the
+    # running registry the onboarding owner's writes rebind.
+    **dict.fromkeys(("OnboardedSupplier", "OnboardingTransition", "OnboardingHost",
+                     "OnboardingWordRevision"),
+                    "app/stages/collect/onboarding/store.py"),
 }  # fmt: skip
 
 
@@ -2186,6 +2191,70 @@ def test_the_detail_guidance_owner_is_the_one_writer_of_its_models() -> None:
                 constructed.setdefault(node.func.id, set()).add(path)
     assert constructed == {name: {DETAIL_GUIDANCE_WRITER} for name in DETAIL_GUIDANCE_MODELS}
     assert _calls(modules[DETAIL_GUIDANCE_WRITER], "append")
+
+
+# ADR-0036 §3 (O1): the onboarding owner is the one constructor of every onboarding model. O1
+# writes the identities, the state log, the hosts and the words; the policy reads, trials and
+# verifications get their writer in the same module with O2, O3 and O5, and nowhere else.
+ONBOARDING_WRITER = "app/stages/collect/onboarding/store.py"
+ONBOARDING_MODELS = (
+    "OnboardedSupplier",
+    "OnboardingTransition",
+    "OnboardingHost",
+    "OnboardingWordRevision",
+    "OnboardingPolicyRead",
+    "OnboardingTrial",
+    "OnboardingVerification",
+)
+ONBOARDING_O1_WRITES = (
+    "OnboardedSupplier",
+    "OnboardingTransition",
+    "OnboardingHost",
+    "OnboardingWordRevision",
+)
+
+
+def test_the_onboarding_owner_is_the_one_writer_of_its_models() -> None:
+    constructed: dict[str, set[str]] = {}
+    modules = _production_modules()
+    for path, tree in modules.items():
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in ONBOARDING_MODELS
+            ):
+                constructed.setdefault(node.func.id, set()).add(path)
+    assert all(paths == {ONBOARDING_WRITER} for paths in constructed.values()), constructed
+    assert set(ONBOARDING_O1_WRITES) <= set(constructed)
+    assert _calls(modules[ONBOARDING_WRITER], "append")
+
+
+def test_an_onboarded_site_is_bound_through_the_repository_binder() -> None:
+    # ADR-0036 §1, §4, OB-03, OB-07: an onboarded site is data bound by the same template binder
+    # as a repository site; the onboarding package imports no template package of its own and
+    # adds no supplier-specific code.
+    modules = _production_modules()
+    package = {
+        path: tree
+        for path, tree in modules.items()
+        if path.startswith("app/stages/collect/onboarding/")
+    }
+    assert "app/stages/collect/onboarding/catalog.py" in package
+    for path, tree in package.items():
+        imported = _imported_modules(tree)
+        assert not any(m.startswith("integrations.suppliers.platforms.") for m in imported), path
+        assert not any(m.startswith("integrations.suppliers.kmretail") for m in imported), path
+        assert not imported & RAW_CLIENTS, path
+    binders = {
+        path
+        for path, tree in modules.items()
+        if any(_callee(call) == "bind_site" for call in _calls(tree))
+    }
+    assert binders == {
+        "integrations/suppliers/sites.py",
+        "app/stages/collect/onboarding/catalog.py",
+    }
 
 
 def test_the_drill_writes_only_into_the_fresh_root_it_validated() -> None:
@@ -3879,6 +3948,14 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "detail_guidances",
         "guidance_image_artifacts",
         "detail_guidance_revisions",
+        # ADR-0036 O1: the supplier onboarding owner.
+        "onboarded_suppliers",
+        "onboarding_transitions",
+        "onboarding_trials",
+        "onboarding_hosts",
+        "onboarding_word_revisions",
+        "onboarding_policy_reads",
+        "onboarding_verifications",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

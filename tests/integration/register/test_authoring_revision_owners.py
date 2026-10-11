@@ -563,6 +563,14 @@ def test_0032_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "detail_guidances",
         "guidance_image_artifacts",
         "detail_guidance_revisions",
+        # ADR-0036 O1: the supplier onboarding owner.
+        "onboarded_suppliers",
+        "onboarding_transitions",
+        "onboarding_trials",
+        "onboarding_hosts",
+        "onboarding_word_revisions",
+        "onboarding_policy_reads",
+        "onboarding_verifications",
     }
     command.upgrade(alembic_config(url), "head")
     assert tables() == before

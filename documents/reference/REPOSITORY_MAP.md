@@ -112,6 +112,10 @@ byte source of the upload run, migration `0059`, one unit and one integration su
 ADR-0033 G6 shows the frozen notices as image slots in the Registration Management snapshot preview
 (top notices, detail images, body, bottom notices) in the existing REGISTER and UI modules, and
 added two integration suites; no migration.
+ADR-0036 O1 added the supplier onboarding owner `app/stages/collect/onboarding/` (its models, host
+guard, append-only store, the database-built site configuration and the running supplier registry
+that merges repository and onboarded sites and rebinds one at run time), migration `0060` and one
+integration suite.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -151,11 +155,11 @@ postal reference boundaries. It remains fake-only and grants no provider call or
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 357 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 364 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 68 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
 | `app/interface/` | 28 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 89 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 167 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/platform/` | 90 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 173 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -177,11 +181,11 @@ postal reference boundaries. It remains fake-only and grants no provider call or
 | `integrations/` | 87 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 37 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 358 | tests |
+| `tests/` | 360 | tests |
 | `tests/contracts/` | 17 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 146 | integration tests by runtime owner |
+| `tests/integration/` | 148 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
 | `tests/unit/` | 134 | unit tests by runtime owner |
 | `ui/` | 70 | operator clients: the served web client and the capture extension |

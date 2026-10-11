@@ -157,6 +157,10 @@ class AuditEventType(StrEnum):
     # Identity, placement, kind, sequence, template, flag, period, fingerprint and image hash only;
     # never the notice text, which lives in the revision row.
     DETAIL_GUIDANCE_REVISED = "DETAIL_GUIDANCE_REVISED"
+    # ADR-0036 O1: one supplier onboarding write — an identity created, a state changed, a words
+    # revision saved, a host confirmed or disabled. Keys, states, hosts, roles, sequence numbers
+    # and fingerprints only; never a credential, a word, an operator's reason or page text.
+    SUPPLIER_ONBOARDING_RECORDED = "SUPPLIER_ONBOARDING_RECORDED"
     # ADR-0037 §2: no upload-fit variant could be made for one oversize selected image on a
     # preparation save. Item, role, position, input identity and a bounded failure code only.
     REGISTER_UPLOAD_FIT_FAILED = "REGISTER_UPLOAD_FIT_FAILED"

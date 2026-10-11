@@ -110,6 +110,9 @@ COLLECT_PRODUCT_JOB = "collect.product"
 # What a run says when its job ended without the run reaching an answer of its own. It names the
 # lifecycle fact and the job system's own classification, and claims nothing about the source.
 UNFINISHED_RUN = "JOB_ENDED_WITHOUT_RESULT"
+# ADR-0036 OB-10: an onboarded site that is not ACTIVE is refused by COLLECT and by the extension
+# capture with the code registration preparation already uses for a site that is not ACTIVE.
+SUPPLIER_NOT_ACTIVE = "SUPPLIER_NOT_ACTIVE"
 # A collection reads one page and fetches bounded images. A transient provider failure is worth
 # another attempt; nothing else is, and the shared error taxonomy decides which classes those are.
 #
@@ -277,12 +280,16 @@ class ProductCollectionService:
         recorder: SourceAssetRecorder,
         sessions: SessionProvider,
         gateway: CollectionGateway,
-        collections: Sequence[RegisteredCollection] = (),
+        collections: Sequence[RegisteredCollection] | Mapping[str, RegisteredCollection] = (),
         after_recorded: Callable[[str], object] | None = None,
         shadow: ShadowStep | None = None,
         capture: CaptureStep | None = None,
         accounting: SendAccounting | None = None,
+        collectable: Callable[[str], bool] | None = None,
     ) -> None:
+        """``collections`` is a fixed sequence, or the running supplier registry's live view by
+        key (ADR-0036 §4). ``collectable(key)`` is false for a supplier that is registered but may
+        not be collected now (an onboarded site that is not ACTIVE, OB-10)."""
         self._db = db
         self._clock = clock
         self._jobs = jobs
@@ -291,7 +298,8 @@ class ProductCollectionService:
         self._recorder = recorder
         self._sessions = sessions
         self._gateway = gateway
-        self._collections = {registered.supplier_key: registered for registered in collections}
+        self._collections = registered_by_key(collections)
+        self._collectable = collectable
         # What follows a durably RECORDED run (M4 PR-C): the product owner's materialization,
         # handed in so COLLECT never depends on it. It is idempotent, so a replayed attempt of a
         # RECORDED run calls it again and changes nothing that already follows the run.
@@ -355,7 +363,10 @@ class ProductCollectionService:
         )
 
     def supplier_keys(self) -> list[str]:
-        return sorted(self._collections)
+        """The suppliers that can be collected now."""
+        return sorted(
+            key for key in self._collections if self._collectable is None or self._collectable(key)
+        )
 
     def submit(self, supplier_key: str, product_url: str) -> SubmittedCollection:
         """Accept exactly one product URL and return the run's durable identity.
@@ -974,11 +985,32 @@ class ProductCollectionService:
 
     def _registered(self, supplier_key: str) -> RegisteredCollection:
         try:
-            return self._collections[supplier_key]
+            registered = self._collections[supplier_key]
         except KeyError:
             raise NotFoundError(
                 "COLLECT_SUPPLIER_UNKNOWN", f"no collection definition for {supplier_key!r}"
             ) from None
+        require_collectable(self._collectable, supplier_key)
+        return registered
+
+
+def registered_by_key(
+    collections: Sequence[RegisteredCollection] | Mapping[str, RegisteredCollection],
+) -> Mapping[str, RegisteredCollection]:
+    """A live registry view is kept as it is; a fixed sequence is indexed by supplier key."""
+    if isinstance(collections, Mapping):
+        return collections
+    return {registered.supplier_key: registered for registered in collections}
+
+
+def require_collectable(collectable: Callable[[str], bool] | None, supplier_key: str) -> None:
+    """OB-10: refuse a registered supplier that may not be collected now, before anything runs."""
+    if collectable is not None and not collectable(supplier_key):
+        raise PolicyBlockedError(
+            SUPPLIER_NOT_ACTIVE,
+            "this supplier is not ACTIVE: only its trial reads run until it is approved",
+            details={"supplier_key": supplier_key},
+        )
 
 
 def _written(candidate: ImageCandidate) -> dict[str, Any]:

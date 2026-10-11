@@ -33,7 +33,7 @@ import hashlib
 import logging
 import secrets
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from urllib.parse import urlsplit
@@ -49,7 +49,12 @@ from app.platform.core.errors import (
     RateLimitedError,
 )
 from app.platform.db.database import Database
-from app.stages.collect.collection import RegisteredCollection, pacing_key
+from app.stages.collect.collection import (
+    RegisteredCollection,
+    pacing_key,
+    registered_by_key,
+    require_collectable,
+)
 from app.stages.collect.extension.gate import locator_holds_secret
 from app.stages.collect.extension.service import MINIMUM_INGEST_INTERVAL_S, extension_profile
 from app.stages.collect.models import (
@@ -189,12 +194,15 @@ class ExtensionQueues:
         db: Database,
         clock: Clock,
         runs: CollectionRunStore,
-        collections: Sequence[RegisteredCollection],
+        collections: Sequence[RegisteredCollection] | Mapping[str, RegisteredCollection],
+        collectable: Callable[[str], bool] | None = None,
     ) -> None:
         self._db = db
         self._clock = clock
         self._runs = runs
-        self._collections = {registered.supplier_key: registered for registered in collections}
+        self._collections = registered_by_key(collections)
+        # ADR-0036 OB-10: an onboarded site that is not ACTIVE is neither listed nor queued.
+        self._collectable = collectable
 
     # ------------------------------------------------------------------ the declared bounds
 
@@ -204,6 +212,7 @@ class ExtensionQueues:
         return {
             registered.collection.profile.storefront_host: key
             for key, registered in sorted(self._collections.items())
+            if self._collectable is None or self._collectable(key)
         }
 
     def discovery_policy(self, supplier_key: str) -> DiscoveryPolicy:
@@ -240,6 +249,7 @@ class ExtensionQueues:
             raise NotFoundError(
                 "COLLECT_SUPPLIER_UNKNOWN", f"no collection definition for {supplier_key!r}"
             ) from None
+        require_collectable(self._collectable, supplier_key)
         limits = registered.collection.profile.queue_limits
         if limits is None:
             raise ExtensionQueueRefused(
