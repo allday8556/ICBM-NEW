@@ -659,6 +659,26 @@ body.has-registration-status .content {
   margin-top: 3px;
 }
 
+/* ADR-0039 §4: the supplier card's sales-policy switches. */
+.supplier-sales-policy {
+  display: grid;
+  gap: 6px;
+  padding: 9px 0;
+  border-bottom: 1px solid #edf1f4;
+}
+
+.supplier-sales-policy-body {
+  display: grid;
+  gap: 6px;
+}
+
+.supplier-sales-policy .kv {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
 .supplier-status-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

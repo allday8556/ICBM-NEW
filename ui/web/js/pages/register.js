@@ -106,6 +106,14 @@ export const REASON_COPY = {
   SOURCE_CHANNEL_FORBIDDEN: '공급사가 이 마켓 판매를 금지한 상품입니다',
   SOURCE_CHANNEL_UNRESOLVED: '공급사 판매채널 문구를 확인할 수 없습니다',
   SUPPLIER_NOT_ACTIVE: '공급사 사이트가 아직 시험 단계(RECON)라 등록할 수 없습니다',
+  // ADR-0039 §2, §3: the supplier's own policy, not applied by the user's per-supplier choice.
+  // A warning that blocks nothing; the restriction is still shown.
+  SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED:
+    '공급사가 이 마켓 판매를 금지했지만, 판매채널 제한을 적용하지 않도록 설정한 공급처입니다 (사용자 책임)',
+  SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED:
+    '공급사 판매채널 문구를 확인할 수 없지만, 판매채널 제한을 적용하지 않도록 설정한 공급처입니다 (사용자 책임)',
+  'M4_PRICING.PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED':
+    '공급사 최저판매가가 있지만, 최저판매가를 적용하지 않도록 설정한 공급처입니다 (사용자 책임)',
   // B-PRICE1: the repin command's refusals.
   REGISTER_DRAFT_REVISION_MOVED: '초안이 바뀌었습니다. 화면을 새로 고친 뒤 다시 시도하세요.',
   REGISTER_REPIN_INTENT_OPEN: '이 초안의 등록 요청이 아직 진행 중이라 가격을 다시 고정할 수 없습니다.',
@@ -376,7 +384,21 @@ export function itemRow(item) {
       item.item_id,
       ...(item.option_keys ?? []).map((key) => h('span', { class: 'mini', 'data-option': key }, key)),
     ),
-    h('td', {}, won(item.sale_price_krw)),
+    h(
+      'td',
+      {},
+      won(item.sale_price_krw),
+      // ADR-0039 §3: a supplier minimum the user chose not to apply is shown beside the price.
+      item.minimum_applied === false
+        ? h(
+            'span',
+            { class: 'mini', 'data-minimum-applied': 'false' },
+            item.stated_minimum_sale_price_krw === null || item.stated_minimum_sale_price_krw === undefined
+              ? ' · 최저판매가 미적용 (사용자 설정)'
+              : ` · 최저판매가 ${won(item.stated_minimum_sale_price_krw)} 미적용 (사용자 설정)`,
+          )
+        : null,
+    ),
     h('td', {}, item.price_basis ?? '—'),
     // The current M4 price of the same Item: a pin that is no longer current is visible here,
     // and whether it is current is the server's own verdict.

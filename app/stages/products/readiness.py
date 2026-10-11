@@ -43,7 +43,12 @@ from app.stages.products.model import (
     Reason,
     precedence_status,
 )
-from app.stages.products.pricing import PriceGuard, PricingContextInput, digest
+from app.stages.products.pricing import (
+    MINIMUM_SALE_PRICE_NOT_APPLIED,
+    PriceGuard,
+    PricingContextInput,
+    digest,
+)
 from app.stages.products.pricing_service import (
     AtomicProcurement,
     Procurement,
@@ -225,6 +230,12 @@ class ProductReadinessService:
                 reasons.extend(
                     Reason(guard.value, ReadinessStatus.BLOCKED) for guard in current.guard_reasons
                 )
+        if evaluation.inputs is not None and evaluation.inputs.minimum_waived:
+            # ADR-0039 §3, SP-04: a minimum the supplier's sales policy does not apply is shown,
+            # as a warning that blocks nothing.
+            reasons.append(
+                Reason(MINIMUM_SALE_PRICE_NOT_APPLIED, ReadinessStatus.READY, "minimum_sale_price")
+            )
         ordered = _ordered(reasons)
         return Readiness(
             layer=ReadinessLayer.PRICING,
@@ -297,6 +308,11 @@ class ProductReadinessService:
                 reasons.extend(
                     Reason(guard.value, ReadinessStatus.BLOCKED) for guard in current.guard_reasons
                 )
+        if evaluation.inputs is not None and evaluation.inputs.minimum_waived:
+            # ADR-0039 §3, SP-04: the same warning as the Item path.
+            reasons.append(
+                Reason(MINIMUM_SALE_PRICE_NOT_APPLIED, ReadinessStatus.READY, "minimum_sale_price")
+            )
         ordered = _ordered(reasons)
         return Readiness(
             layer=ReadinessLayer.PRICING,

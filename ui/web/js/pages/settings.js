@@ -62,6 +62,7 @@ const SURFACE_LABEL = {
   REGISTRATION_CATEGORY_METADATA: '카테고리 메타데이터 (마켓 탭 › 상품 / 카테고리)',
   AI_PROMPT_REGISTRY: 'AI Prompt Registry (공통 › AI / Prompt)',
   DETAIL_GUIDANCE: '상세페이지 공지 (공통 › 상세페이지 공지)',
+  SUPPLIER_SALES_POLICY: '공급처 판매정책 (수집관리 › 공급처 관리)',
 };
 
 function saveScope(view) {

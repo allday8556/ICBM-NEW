@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -22,6 +23,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.platform.db.base import Base
 from app.platform.db.types import UTCDateTime
+from app.stages.products.models import MINIMUM_APPLIED_FLAG, MINIMUM_POLICY_RECORDED
 from app.stages.products.pricing import (
     PRICING_RULE_VERSION,
     GuardReason,
@@ -191,6 +193,9 @@ class AtomicSKUPricingSnapshot(Base):
             f" AND json_array_length(guard_reasons_json) = ({_LOSS}) + ({_BELOW})",
             name="guard_reasons_exact",
         ),
+        # ADR-0039 §3 (migration 0061): whether the supplier's minimum resale price was applied.
+        CheckConstraint(MINIMUM_APPLIED_FLAG, name="minimum_applied_flag"),
+        CheckConstraint(MINIMUM_POLICY_RECORDED, name="minimum_policy_recorded"),
     )
 
     pricing_snapshot_id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -249,6 +254,10 @@ class AtomicSKUPricingSnapshot(Base):
     minimum_margin_numerator: Mapped[int] = mapped_column(Integer)
     minimum_margin_denominator: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # ADR-0039 §3 (SP-03): False when the supplier's sales policy did not apply its minimum resale
+    # price; the minimum the source stated is then kept beside the price, never priced.
+    minimum_applied: Mapped[bool] = mapped_column(Boolean, server_default=text("1"))
+    stated_minimum_sale_price_krw: Mapped[int | None] = mapped_column(Integer)
 
 
 class CurrentAtomicSKUPricingSnapshotMove(Base):

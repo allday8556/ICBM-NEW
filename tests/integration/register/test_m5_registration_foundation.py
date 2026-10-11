@@ -561,6 +561,8 @@ ADAPTIVE_TABLES = (
     "onboarding_word_revisions",
     "onboarding_policy_reads",
     "onboarding_verifications",
+    # ADR-0039 §1 (0061): the supplier sales-policy revisions.
+    "supplier_sales_policy_revisions",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

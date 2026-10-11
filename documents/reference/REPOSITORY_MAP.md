@@ -163,11 +163,11 @@ financial data, and grant no provider call or LIVE authority.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 368 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 372 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 68 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
-| `app/interface/` | 29 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 90 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 176 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/interface/` | 30 | operator surfaces: HTTP api, screens, cli |
+| `app/platform/` | 91 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 178 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -189,13 +189,13 @@ financial data, and grant no provider call or LIVE authority.
 | `integrations/` | 89 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 39 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 366 | tests |
+| `tests/` | 369 | tests |
 | `tests/contracts/` | 18 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 150 | integration tests by runtime owner |
+| `tests/integration/` | 152 | integration tests by runtime owner |
 | `tests/support/` | 15 | shared test support |
-| `tests/unit/` | 136 | unit tests by runtime owner |
+| `tests/unit/` | 137 | unit tests by runtime owner |
 | `ui/` | 71 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 62 | the served web client |

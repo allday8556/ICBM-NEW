@@ -267,10 +267,12 @@ M65_DISPATCH_STAGE = "0057_m65_dispatch_stage"
 DETAIL_GUIDANCE = "0058_detail_guidance"
 # ADR-0033 G5: the Snapshot pin of the guidance assets and the guidance upload kind.
 DETAIL_GUIDANCE_PLACEMENT = "0059_detail_guidance_placement"
-# ADR-0036 O1: the supplier onboarding owner. TODO(lane): 0060_supplier_sales_policy precedes it
-# once it lands.
+# ADR-0036 O1: the supplier onboarding owner.
 SUPPLIER_ONBOARDING = "0060_supplier_onboarding"
-SCHEMA_HEAD = SUPPLIER_ONBOARDING
+# ADR-0039 §1, §3: the per-supplier sales policy and the pricing snapshot's minimum pin. Product
+# state, never registration state.
+SUPPLIER_SALES_POLICY = "0061_supplier_sales_policy"
+SCHEMA_HEAD = SUPPLIER_SALES_POLICY
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -312,6 +314,7 @@ AFTER_M5 = (
     DETAIL_GUIDANCE,
     DETAIL_GUIDANCE_PLACEMENT,
     SUPPLIER_ONBOARDING,
+    SUPPLIER_SALES_POLICY,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

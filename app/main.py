@@ -34,6 +34,7 @@ from app.interface.api.routes import (
     products,
     register,
     review,
+    sales_policy,
     screens,
     settings,
     synthetic_products,
@@ -203,6 +204,7 @@ def create_app(
     app.include_router(register.router)
     app.include_router(settings.router)
     app.include_router(detail_guidance.router)
+    app.include_router(sales_policy.router)
     app.include_router(ai.router)
     app.include_router(review.router)
 

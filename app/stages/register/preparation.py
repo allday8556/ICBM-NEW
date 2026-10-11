@@ -54,8 +54,11 @@ from app.stages.products.model import (
 from app.stages.products.pricing import PriceBasis, PriceGuard
 from app.stages.products.source_gates import (
     SOURCE_CHANNEL_FORBIDDEN,
+    SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED,
     SOURCE_CHANNEL_UNRESOLVED,
+    SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED,
     SOURCE_GATE_CODES,
+    SOURCE_GATE_WARNINGS,
     SUPPLIER_NOT_ACTIVE,
 )
 from app.stages.register import sanitize
@@ -295,6 +298,9 @@ REASON_CODES: Final = frozenset(
         SOURCE_CHANNEL_FORBIDDEN,
         SOURCE_CHANNEL_UNRESOLVED,
         SUPPLIER_NOT_ACTIVE,
+        # ADR-0039 §2: a restriction the user chose not to apply, shown as a warning.
+        SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED,
+        SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED,
         PROVIDER_DUPLICATE_FOUND,
         PROVIDER_DUPLICATE_WEAK_SIGNAL,
         DUPLICATE_EVIDENCE_MISSING,
@@ -789,6 +795,9 @@ class ResolvedUnit:
     # ADR-0033 §6 (G4): the Detail Guidance notices resolved for the request's choice at the
     # injected clock's instant; empty when none applies or no guidance source is wired.
     guidance: ResolvedGuidance = NO_GUIDANCE
+    # ADR-0039 §1 (SP-03): ``(item_id, supplier_key, revision_no, fingerprint)`` of the sales-policy
+    # revision each Item's supplier has; a supplier on the defaults names nothing.
+    sales_policies: tuple[tuple[str, str, int, str], ...] = ()
 
 
 # ---------------------------------------------------------------- the result
@@ -985,13 +994,18 @@ def _m4_reasons(unit: ResolvedUnit) -> list[Reason]:
 
 def _source_gate_reasons(unit: ResolvedUnit) -> list[Reason]:
     """ADR-0031 §4.1 and ADR-0030 §7: a source that forbids this marketplace, a restriction no rule
-    could read, or a supplier still in reconnaissance blocks the unit. No override applies."""
+    could read, or a supplier still in reconnaissance blocks the unit. No per-product override
+    applies. ADR-0039 §2: a restriction the user chose not to apply for the supplier is a
+    non-blocking warning — a READY-status reason, shown and never hidden (SP-04)."""
     gates = sorted(set(unit.source_gates))
     unknown = sorted({code for _item, code in gates} - SOURCE_GATE_CODES)
     if unknown:
         # A gate this evaluation does not know is never dropped: it would let the unit pass.
         raise ValueError(f"unknown source gate codes: {unknown}")
-    return [Reason(code, _B, item_id) for item_id, code in gates]
+    return [
+        Reason(code, ReadinessStatus.READY if code in SOURCE_GATE_WARNINGS else _B, item_id)
+        for item_id, code in gates
+    ]
 
 
 def _category_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Reason]:
@@ -1702,6 +1716,14 @@ def candidate_dependencies(request: PreflightRequest, unit: ResolvedUnit) -> dic
         },
         # Only when present, so a unit its sources do not gate keeps its earlier fingerprint.
         **({"source_gates": sorted(unit.source_gates)} if unit.source_gates else {}),
+        # ADR-0039 §1 (SP-03): the sales-policy revision of each Item's supplier, named only when
+        # one exists, so a unit whose suppliers use the defaults keeps its earlier fingerprint.
+        # A later revision changes it: the preparation is stale, as a target-policy change is.
+        **(
+            {"sales_policies": sorted([list(pin) for pin in unit.sales_policies])}
+            if unit.sales_policies
+            else {}
+        ),
         # ADR-0033 §6 (DG-05): the resolved notices of both placements, named only when at least
         # one notice is resolved, so a unit with none keeps its earlier fingerprint. A new
         # revision, a period that starts or ends, or a changed product choice changes it.
