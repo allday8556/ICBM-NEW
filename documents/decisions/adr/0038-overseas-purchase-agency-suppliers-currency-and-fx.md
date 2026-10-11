@@ -148,4 +148,4 @@ Phase 1 is in this ADR. Phase 2 follows. Phase 3 is optional.
 | O3 | SmartStore cross-border projection |
 | O4+ | the 1688 and Super Delivery collectors (their own ADR after reconnaissance) |
 
-Migrations are numbered 0061 or later.
+Migrations are numbered 0062 or later.
