@@ -266,7 +266,9 @@ class CapturePolicySource:
         self._root = root
         # ADR-0030 §4: a configured site's policy is derived from its platform template's and
         # served from those bytes; it has no file of its own.
-        self._sites = dict(sites or {})
+        # A live registry view (ADR-0036 §4) is kept as it is, so a rebound site's policy is
+        # served the moment it is bound.
+        self._sites: Mapping[str, bytes] = {} if sites is None else sites
 
     def load(self, supplier_key: str) -> BrowserCapturePolicy:
         if not _SUPPLIER_KEY.fullmatch(supplier_key):
