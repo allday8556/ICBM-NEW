@@ -150,6 +150,9 @@ endpoints plus unit and contract suites. It uses only the in-memory fake transpo
 response envelopes without interpreting customer data, and grants no credentials or LIVE authority.
 C-LOGISTICS-1 adds seven executable shipping/return-location contracts plus versioned courier and
 postal reference boundaries. It remains fake-only and grants no provider call or LIVE authority.
+C-CS-1/C-SETTLEMENT-1 add six customer inquiry/reply contracts and two KR-only settlement reads.
+Both adapters remain fake-only, retain sensitive provider envelopes without projecting customer or
+financial data, and grant no provider call or LIVE authority.
 
 | path | files | role |
 | --- | --- | --- |
@@ -178,16 +181,16 @@ postal reference boundaries. It remains fake-only and grants no provider call or
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 87 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 37 |  |
+| `integrations/` | 89 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 39 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 358 | tests |
-| `tests/contracts/` | 17 | repository-rule and document-contract tests |
+| `tests/` | 361 | tests |
+| `tests/contracts/` | 18 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 147 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 133 | unit tests by runtime owner |
+| `tests/unit/` | 135 | unit tests by runtime owner |
 | `ui/` | 70 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 61 | the served web client |
