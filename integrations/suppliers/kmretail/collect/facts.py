@@ -80,6 +80,9 @@ _AMOUNT = re.compile(r"(\d[\d,]*)\s*원?")
 # ``A원 ~ B원``, is read as its highest amount. A range inside other words is not the fee.
 _RANGE = re.compile(r"(\d[\d,]*)원?[~∼〜～](\d[\d,]*)원")
 _EVIDENCE_LIMIT = 200
+# A minimum cell states exactly one amount, optionally with 원 and 이상 (kmretail-5). A cell with
+# several amounts, a quantity or other words is a statement this parser cannot read as one minimum.
+_MINIMUM_CELL = re.compile(r"(\d{1,3}(?:,\d{3})+|\d+)원?(?:이상)?")
 
 
 def _won(text: str) -> int | None:
@@ -207,8 +210,10 @@ def _minimum_sale_price(rows: Sequence[tuple[str, str, Node]]) -> FieldFact:
         # Never derived from a sale price: an unstated minimum is no minimum (CLAUDE.md §6.1).
         return _absent("th:최저지도가 + td")
     label, value, _ = stated[0]
-    amount = _won(value)
-    if amount is None and NO_MINIMUM_WORD in value.replace(" ", ""):
+    squashed = "".join(value.split())
+    cell = _MINIMUM_CELL.fullmatch(squashed)
+    amount = int(cell.group(1).replace(",", "")) if cell else None
+    if amount is None and NO_MINIMUM_WORD in squashed and not any(ch.isdigit() for ch in squashed):
         # Stated, and what it states is that the price is free: no minimum, read from the page.
         return FieldFact(
             FieldStatus.ABSENT,

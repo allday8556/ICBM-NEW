@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Protocol
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from app.capabilities.jobs.policy import RetryPolicy
 from app.capabilities.jobs.registry import JobContext, JobDefinition, TerminalJob
@@ -882,6 +882,13 @@ class ProductCollectionService:
             # refused as it arrives and never reaches the store: the advertised run total is a
             # hard cap, not an average.
             allowance = limits.max_new_image_bytes_per_run - spent_bytes
+            # The per-image bound is the role's own (ADR-0037 §1): a description image may be
+            # larger than the representative and additional images.
+            cap = (
+                limits.max_detail_image_bytes
+                if role is ImageRole.DETAIL
+                else limits.max_image_bytes
+            )
             if allowance <= 0:
                 collected.append(unreadable(ImageIssue.BUDGET_EXHAUSTED))
                 continue
@@ -897,7 +904,7 @@ class ProductCollectionService:
                     budget=budget,
                     etag=stored.etag if stored else None,
                     last_modified=stored.last_modified if stored else None,
-                    max_bytes=min(limits.max_image_bytes, allowance),
+                    max_bytes=min(cap, allowance),
                 )
             except CollectionBudgetRefused:
                 collected.append(unreadable(ImageIssue.BUDGET_EXHAUSTED))
@@ -912,9 +919,9 @@ class ProductCollectionService:
                 continue
             except ImageFetchRefused as refused:
                 issue = ImageIssue(refused.issue.value)
-                if issue is ImageIssue.OVERSIZE and allowance < limits.max_image_bytes:
-                    # It fitted the profile's per-image bound; what it did not fit was what this
-                    # run had left.
+                if issue is ImageIssue.OVERSIZE and allowance < cap:
+                    # The bound was what this run had left, below its role's per-image bound: what
+                    # it did not fit was the run total.
                     issue = ImageIssue.BUDGET_EXHAUSTED
                 collected.append(unreadable(issue))
                 continue
@@ -1021,11 +1028,23 @@ def pacing_key(collection: SupplierCollection, product_url: str) -> PacingKey:
 
     A hint is never an identity. It can only make a collection wait; what a revision is recorded
     under still comes from the document the supplier served.
+
+    ADR-0010 §4: a supplier whose product is named by a query (Godomall's
+    ``goods_view.php?goodsNo=…``) keeps its safe query keys in the URL part, sorted, so two
+    different products behind one path never pace each other. Every other query key is dropped,
+    and a URL without a safe key has exactly the key it always had.
     """
     parts = urlsplit(product_url)
+    safe = collection.profile.safe_query_keys.get(parts.hostname or "", frozenset())
+    kept = sorted(
+        (name, value)
+        for name, value in parse_qsl(parts.query, keep_blank_values=True)
+        if name in safe
+    )
+    query = f"?{urlencode(kept)}" if kept else ""
     return PacingKey(
         supplier_key=collection.supplier_key,
-        url=f"https://{parts.hostname}{parts.path.rstrip('/')}",
+        url=f"https://{parts.hostname}{parts.path.rstrip('/')}{query}",
         source_product_id=collection.url_product_hint(product_url),
     )
 

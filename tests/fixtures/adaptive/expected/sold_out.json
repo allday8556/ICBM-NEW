@@ -3,7 +3,7 @@
   "fields": {
     "original_name": {"status": "CONFIRMED", "value": {"text": "합성마트 배즙 15포"}},
     "prices": {"status": "CONFIRMED", "value": {"prices": [{"label": "판매가", "amount_krw": 11000}]}},
-    "options": {"status": "CONFIRMED", "value": {"axes": [], "configurations": []}},
+    "options": {"status": "ABSENT", "value": null},
     "stock": {"status": "CONFIRMED", "value": {"availability": "SOLD_OUT"}},
     "shipping": {"status": "CONFIRMED", "value": {"kind": "FREE", "policy_text": "무료", "fee_krw": null, "free_over_krw": null}},
     "minimum_sale_price": {"status": "CONFIRMED", "value": {"label": "최저판매가", "amount_krw": 10500}},

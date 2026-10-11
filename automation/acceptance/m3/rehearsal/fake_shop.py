@@ -279,6 +279,7 @@ def collection_profile(
     max_image_requests: int = 10,
     max_run_bytes: int = 4 * 1024 * 1024,
     max_image_bytes: int = 1024 * 1024,
+    max_detail_image_bytes: int | None = None,
     supplier: SupplierProfile = PROFILE,
 ) -> CollectionProfile:
     return CollectionProfile(
@@ -290,6 +291,9 @@ def collection_profile(
         limits=CollectionLimits(
             max_image_refs=30,
             max_image_bytes=max_image_bytes,
+            max_detail_image_bytes=(
+                max_image_bytes if max_detail_image_bytes is None else max_detail_image_bytes
+            ),
             max_image_requests_per_run=max_image_requests,
             max_new_image_bytes_per_run=max_run_bytes,
             same_product_interval_s=60.0,
@@ -303,6 +307,7 @@ def collection(
     max_image_requests: int = 10,
     max_run_bytes: int = 4 * 1024 * 1024,
     max_image_bytes: int = 1024 * 1024,
+    max_detail_image_bytes: int | None = None,
     supplier: SupplierProfile = PROFILE,
 ) -> SupplierCollection:
     return SupplierCollection(
@@ -310,6 +315,7 @@ def collection(
             max_image_requests=max_image_requests,
             max_run_bytes=max_run_bytes,
             max_image_bytes=max_image_bytes,
+            max_detail_image_bytes=max_detail_image_bytes,
             supplier=supplier,
         ),
         roles=ImageRoleRules(identity=EXTRACTOR_REVISION, classify=_classify),

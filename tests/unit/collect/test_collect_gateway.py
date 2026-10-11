@@ -42,6 +42,7 @@ def _profile(**changes: object) -> CollectionProfile:
         limits=CollectionLimits(
             max_image_refs=20,
             max_image_bytes=512,
+            max_detail_image_bytes=512,
             max_image_requests_per_run=10,
             max_new_image_bytes_per_run=4096,
             same_product_interval_s=60.0,
@@ -246,6 +247,35 @@ def test_a_caller_s_remaining_allowance_bounds_the_body_it_receives() -> None:
     )
     with pytest.raises(ImageFetchRefused):
         _gateway(declared).read_image(_profile(), IMAGE, budget=Budget(), max_bytes=100)
+
+
+def test_a_caller_may_ask_for_a_role_bound_up_to_the_largest_per_image_bound() -> None:
+    # ADR-0037 §1: a description image's bound may exceed the representative one. The caller
+    # passes the role's bound; the gateway never goes above the profile's largest per-image bound,
+    # and without a bound it applies the representative one.
+    limits = replace(_profile().limits, max_detail_image_bytes=2048)
+    profile = _profile(limits=limits)
+
+    def body(size: int) -> Site:
+        return Site(httpx.Response(200, headers={"content-type": "image/png"}, content=b"x" * size))
+
+    image = _gateway(body(1500)).read_image(profile, IMAGE, budget=Budget(), max_bytes=2048)
+    assert len(image.content) == 1500, "over the representative bound, within the detail one"
+
+    with pytest.raises(ImageFetchRefused) as caught:
+        _gateway(body(1500)).read_image(profile, IMAGE, budget=Budget())
+    assert caught.value.issue is FetchIssue.OVERSIZE, "no bound given: the representative one"
+
+    with pytest.raises(ImageFetchRefused) as caught:
+        _gateway(body(2049)).read_image(profile, IMAGE, budget=Budget(), max_bytes=10_000)
+    assert caught.value.issue is FetchIssue.OVERSIZE, "never above the largest per-image bound"
+
+
+def test_every_per_image_bound_is_a_positive_integer() -> None:
+    with pytest.raises(ValueError):
+        replace(_profile().limits, max_detail_image_bytes=0)
+    with pytest.raises(ValueError):
+        replace(_profile().limits, max_detail_image_bytes=True)
 
 
 @pytest.mark.parametrize(

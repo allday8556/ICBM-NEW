@@ -93,6 +93,7 @@ LABEL_SLOTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "minimum_price": DEFAULT_VOCABULARY.minimum_price,
         "shipping_method": DEFAULT_VOCABULARY.shipping_method,
         "shipping_fee": DEFAULT_VOCABULARY.shipping_fee,
+        "shipping_region_fee": DEFAULT_VOCABULARY.shipping_region_fee,
         "brand": DEFAULT_VOCABULARY.brand,
         "manufacturer": DEFAULT_VOCABULARY.manufacturer,
         "origin": DEFAULT_VOCABULARY.origin,
@@ -182,6 +183,7 @@ def vocabulary(site: SiteConfig) -> Vocabulary:
         minimum_price=words("minimum_price"),
         shipping_method=words("shipping_method"),
         shipping_fee=words("shipping_fee"),
+        shipping_region_fee=words("shipping_region_fee"),
         brand=words("brand"),
         manufacturer=words("manufacturer"),
         origin=words("origin"),
@@ -256,6 +258,7 @@ def bind(site: SiteConfig, extraction_revision: str) -> SiteBinding:
             limits=CollectionLimits(
                 max_image_refs=int(limits["max_image_refs"]),
                 max_image_bytes=int(limits["max_image_bytes"]),
+                max_detail_image_bytes=int(limits["max_detail_image_bytes"]),
                 max_image_requests_per_run=int(limits["max_image_requests_per_run"]),
                 max_new_image_bytes_per_run=int(limits["max_new_image_bytes_per_run"]),
                 same_product_interval_s=float(limits["same_product_interval_s"]),

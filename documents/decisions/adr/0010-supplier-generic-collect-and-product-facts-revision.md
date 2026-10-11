@@ -301,6 +301,11 @@ Every field reports `CONFIRMED`, `ABSENT` or `REVIEW_REQUIRED`. No OCR or AI may
 - ICBM may derive a deterministic atomic configuration key from `source_product_id` and the exact ordered source selections. It is labelled as ICBM-derived and never presented as a supplier SKU ID.
 - Option-level sold-out evidence is kept wherever it is observable.
 - A product whose page proves it has no option control has options `CONFIRMED` with zero axes, not `ABSENT`.
+  *(Amendment note (2026-10-10, owner decision Issue #219 `6097082224`): a page that proves it has
+  no option control yields `options = ABSENT` with its control-state evidence, per ADR-0013
+  ruling B and M3.md §2.1 — the Product DB's proof of "no options" that KM통상 and the Cafe24
+  and Godomall templates already record — so such a revision can reach the default single-unit
+  composition. The Adaptive engine reads it so from `adaptive-engine-3`.)*
 
 ### 8. Evidence model
 
