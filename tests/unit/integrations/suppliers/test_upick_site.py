@@ -37,8 +37,12 @@ def test_upick_is_bound_active_and_offered_to_connect_and_collect() -> None:
     site = SITES["upick"]
     # ADR-0030 PT-07: ACTIVE by the PR that cites documents/acceptance/suppliers/upick.md.
     assert site.config.status is SiteStatus.ACTIVE
-    assert site.template.revision == "cafe24-3"
-    assert site.extractor_revision == f"{site.template.revision}+upick-3"
+    assert site.template.revision == "cafe24-4"
+    assert site.extractor_revision == "cafe24-4+upick-3"
+    # ADR-0037 §1: the template's caps by role, which the site does not change.
+    limits = site.collection.profile.limits
+    assert (limits.max_image_bytes, limits.max_detail_image_bytes) == (5_000_000, 30_000_000)
+    assert limits.max_new_image_bytes_per_run == 120_000_000
     assert site.collection in COLLECTIONS
     assert site.definition in SUPPLIERS
     assert site.definition.profile.egress_hosts == {"upickb2b.com", "login2.cafe24ssl.com"}

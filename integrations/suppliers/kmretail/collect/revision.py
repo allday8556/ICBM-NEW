@@ -27,6 +27,14 @@ confidently wrong minimum. Such a cell is now ``REVIEW_REQUIRED``. Found while p
 ``cafe24`` template against this parser (ADR-0035 U1). The ``cafe24-3`` module
 docstring still describes the ``kmretail-4`` reading; it is refreshed with the next ``cafe24``
 revision, so that this fix does not move the template's fingerprint.
+
+``kmretail-6`` (2026-10-11, ADR-0037 §1, the owner's caps by role, Issue #219 ``6103784916``):
+- an image is capped by its canonical role: 5 MB (5,000,000 bytes) for a ``REPRESENTATIVE`` image,
+  the representative and the additional images, and 30 MB (30,000,000 bytes) for a ``DETAIL``
+  (description) image; an image over its role's cap is ``OVERSIZE`` and never stored;
+- the per-product run total rises from 24 MiB to 120 MB (120,000,000 bytes); an image over what
+  the run has left is ``BUDGET_EXHAUSTED``, as before.
+The caps live in the profile (``kmretail/collection.py``); no reading changes.
 """
 
-EXTRACTION_REVISION = "kmretail-5"
+EXTRACTION_REVISION = "kmretail-6"

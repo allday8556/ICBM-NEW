@@ -30,7 +30,8 @@ nothing at all. These are its stated differences (ADR-0030 §10), and each is fa
     empty: a description is held for review, and a row's value cell is an empty cell, so the row
     is not stated (a minimum row of only U+FEFF is ``ABSENT``). KM통상's parser keeps them;
   - a minimum row that is exactly a per-quantity list with a one-unit amount above zero reads that
-    amount, where KM통상's parser reads the cell's first number (the quantity 1);
+    amount, where KM통상's parser (``kmretail-5``) holds such a cell for review, as it holds any
+    minimum cell that is not exactly one amount;
   - the product's name is read for restricting channel phrases, and a channel row that is not
     wholly allowed is read only when every word of it is a configured phrase or a separator.
     KM통상 reports no channel fact.
