@@ -112,6 +112,7 @@ def test_the_rule_selects_with_automatic_qa_and_the_item_is_no_longer_missing_im
         sha256=selection.outputs[0].sha256,
         derivation_id=None,
         validated_source_revision_id=selection.source_revision_id,
+        role=selection.outputs[0].role,
     )
     assert qa is not None and qa.qa_rule_version == AUTO_QA_RULE_VERSION
     assert qa.verdict is QaVerdict.PASS
@@ -260,3 +261,41 @@ def test_0040_round_trips_on_an_empty_selection_history(tmp_path: Any) -> None:
     upgrade_to_head(url)
     # The rebuilt tables, indexes and triggers are exactly what a fresh head creates.
     assert definitions() == at_head
+
+
+def test_a_v1_automatic_qa_is_stale_until_the_unchanged_rule_runs_again(
+    client: TestClient, config: AppConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0037 §3 amendment: under ``image-qa-auto/v2`` a v1 verdict reads stale (ADR-0013 §9: a
+    changed rule is a new version); the image auto-selection run again over the same plan records
+    the v2 verdict and the Item recovers without any new selection."""
+    from app.stages.products import auto_images, images
+
+    item_id = _item(client, config, _detail(1, _stored(client, config, "v1")))
+    # 1. The selection and its automatic QA as an earlier release recorded them: under v1.
+    with monkeypatch.context() as earlier:
+        earlier.setattr(auto_images, "AUTO_QA_RULE_VERSION", "image-qa-auto/v1")
+        earlier.setattr(images, "AUTO_QA_RULE_VERSION", "image-qa-auto/v1")
+        assert _selector(client).auto_select(item_id).status is AutoSelectionStatus.SELECTED
+        assert not {c for c in _codes(client, item_id) if c.startswith("IMAGE_")}
+    selection = _services(client).images.current_selection(item_id)
+    assert selection is not None
+    # 2. Under the rule in force the v1 verdicts are stale.
+    assert "IMAGE_QA_STALE" in _codes(client, item_id)
+    # 3. The rule runs again: the same plan, so no new selection — only its QA under v2.
+    again = _selector(client).auto_select(item_id)
+    assert again.status is AutoSelectionStatus.UNCHANGED
+    assert again.selection is not None
+    assert again.selection.selection_revision_id == selection.selection_revision_id
+    # 4. The Item reads v2 PASS verdicts and no image reason remains.
+    assert not {c for c in _codes(client, item_id) if c.startswith("IMAGE_")}
+    for output in selection.outputs:
+        qa = _services(client).images.qa_for_selected_asset(
+            asset_kind=output.asset_kind,
+            sha256=output.sha256,
+            derivation_id=None,
+            validated_source_revision_id=selection.source_revision_id,
+            role=output.role,
+        )
+        assert qa is not None
+        assert (qa.qa_rule_version, qa.verdict) == ("image-qa-auto/v2", QaVerdict.PASS)

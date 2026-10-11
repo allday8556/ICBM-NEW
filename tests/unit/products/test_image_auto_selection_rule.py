@@ -13,16 +13,19 @@ import pytest
 from app.container import supplier_image_roles
 from app.stages.collect.facts import ImageRole
 from app.stages.products.auto_images import (
-    AUTO_QA_MAX_BYTES,
+    AUTO_QA_DETAIL_MAX_BYTES,
+    AUTO_QA_REPRESENTATIVE_MAX_BYTES,
     MAX_ADDITIONAL_IMAGES,
     AutoSelectionBlocked,
     ImageSlot,
     PlacementNote,
     auto_qa,
+    file_qa,
     plan,
 )
 from app.stages.products.common_images import CommonImageVerdict
 from app.stages.products.image_model import (
+    AUTO_QA_RULE_VERSION,
     OutputRole,
     QaVerdict,
     SourceDecisionKind,
@@ -179,9 +182,9 @@ def _asset(**overrides: object) -> Any:
         (_asset(), QaVerdict.PASS, ()),
         (None, QaVerdict.REVIEW_REQUIRED, ("AUTO_QA_BYTES_NOT_STORED",)),
         (_asset(mime_type="image/bmp"), QaVerdict.REVIEW_REQUIRED, ("AUTO_QA_MEDIA_TYPE",)),
-        (_asset(byte_size=AUTO_QA_MAX_BYTES), QaVerdict.PASS, ()),
+        (_asset(byte_size=AUTO_QA_REPRESENTATIVE_MAX_BYTES), QaVerdict.PASS, ()),
         (
-            _asset(byte_size=AUTO_QA_MAX_BYTES + 1),
+            _asset(byte_size=AUTO_QA_REPRESENTATIVE_MAX_BYTES + 1),
             QaVerdict.REVIEW_REQUIRED,
             ("AUTO_QA_BYTE_SIZE",),
         ),
@@ -191,4 +194,36 @@ def _asset(**overrides: object) -> Any:
 def test_the_automatic_qa_reads_file_facts_only(
     asset: Any, verdict: QaVerdict, findings: tuple[str, ...]
 ) -> None:
-    assert auto_qa(asset) == (verdict, findings)
+    assert auto_qa(asset, OutputRole.REPRESENTATIVE) == (verdict, findings)
+
+
+@pytest.mark.parametrize(
+    ("role", "byte_size", "verdict"),
+    [
+        # ADR-0037 §1: the bound is the collection cap of the role the image is selected for.
+        (OutputRole.REPRESENTATIVE, 5_000_000, QaVerdict.PASS),
+        (OutputRole.REPRESENTATIVE, 5_000_001, QaVerdict.REVIEW_REQUIRED),
+        (OutputRole.ADDITIONAL, 5_000_000, QaVerdict.PASS),
+        (OutputRole.ADDITIONAL, 5_000_001, QaVerdict.REVIEW_REQUIRED),
+        # A description image between 5 and 30 MB is collected, and so it passes the file checks.
+        (OutputRole.DETAIL, 6_000_000, QaVerdict.PASS),
+        (OutputRole.DETAIL, 30_000_000, QaVerdict.PASS),
+        (OutputRole.DETAIL, 30_000_001, QaVerdict.REVIEW_REQUIRED),
+    ],
+)
+def test_the_automatic_qa_bound_is_the_roles_collection_cap(
+    role: OutputRole, byte_size: int, verdict: QaVerdict
+) -> None:
+    assert AUTO_QA_RULE_VERSION == "image-qa-auto/v2"
+    assert (AUTO_QA_REPRESENTATIVE_MAX_BYTES, AUTO_QA_DETAIL_MAX_BYTES) == (5_000_000, 30_000_000)
+    assert auto_qa(_asset(byte_size=byte_size), role)[0] is verdict
+
+
+def test_the_file_checks_take_the_bound_their_caller_states() -> None:
+    # ADR-0037 §3: an upload-fit variant is checked under its upload's bound, by the same checks.
+    assert file_qa(_asset(byte_size=9_499_999), 9_499_999) == (QaVerdict.PASS, ())
+    assert file_qa(_asset(byte_size=9_500_000), 9_499_999) == (
+        QaVerdict.REVIEW_REQUIRED,
+        ("AUTO_QA_BYTE_SIZE",),
+    )
+    assert file_qa(None, 9_499_999) == (QaVerdict.REVIEW_REQUIRED, ("AUTO_QA_BYTES_NOT_STORED",))

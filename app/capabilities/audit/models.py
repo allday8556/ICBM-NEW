@@ -161,6 +161,9 @@ class AuditEventType(StrEnum):
     # revision saved, a host confirmed or disabled. Keys, states, hosts, roles, sequence numbers
     # and fingerprints only; never a credential, a word, an operator's reason or page text.
     SUPPLIER_ONBOARDING_RECORDED = "SUPPLIER_ONBOARDING_RECORDED"
+    # ADR-0037 §2: no upload-fit variant could be made for one oversize selected image on a
+    # preparation save. Item, role, position, input identity and a bounded failure code only.
+    REGISTER_UPLOAD_FIT_FAILED = "REGISTER_UPLOAD_FIT_FAILED"
 
 
 class AuditOutcome(StrEnum):

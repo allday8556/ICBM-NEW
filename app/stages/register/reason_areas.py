@@ -131,6 +131,7 @@ REGISTER_AREAS: Final[Mapping[str, tuple[ReasonArea, ...]]] = {
     # ADR-0033 G4: a resolved top or bottom notice the composition does not place yet.
     "PUBLICATION_GUIDANCE_UNPLACED": (_A.DETAIL,),
     "PUBLICATION_ASSET_QA_NOT_PASSED": (_A.IMAGES,),
+    "IMAGE_UPLOAD_FIT_FAILED": (_A.IMAGES,),
     "PROVIDER_ASSET_IDENTITY_MISSING": (_A.IMAGES,),
     "PREPARED_ASSET_CANDIDATE_MISMATCH": (_A.IMAGES,),
     "PREPARED_ASSET_PROFILE_MISMATCH": (_A.IMAGES,),
