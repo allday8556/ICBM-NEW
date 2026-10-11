@@ -144,6 +144,8 @@ contains no provider transport, and grants no credentials or LIVE authority.
 C-CLAIM-1 adds one provider-zero Coupang Returns & Exchanges adapter covering eleven official
 endpoints plus unit and contract suites. It uses only the in-memory fake transport, retains provider
 response envelopes without interpreting customer data, and grants no credentials or LIVE authority.
+C-LOGISTICS-1 adds seven executable shipping/return-location contracts plus versioned courier and
+postal reference boundaries. It remains fake-only and grants no provider call or LIVE authority.
 
 | path | files | role |
 | --- | --- | --- |
@@ -172,16 +174,16 @@ response envelopes without interpreting customer data, and grants no credentials
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 86 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 36 |  |
+| `integrations/` | 87 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 37 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 356 | tests |
-| `tests/contracts/` | 16 | repository-rule and document-contract tests |
+| `tests/` | 358 | tests |
+| `tests/contracts/` | 17 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 146 | integration tests by runtime owner |
 | `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 133 | unit tests by runtime owner |
+| `tests/unit/` | 134 | unit tests by runtime owner |
 | `ui/` | 70 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 61 | the served web client |
