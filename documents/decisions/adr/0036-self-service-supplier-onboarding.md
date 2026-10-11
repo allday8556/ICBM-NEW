@@ -54,7 +54,7 @@ Both bind to the same templates through the same `SiteConfig` shape, so collecti
 - **D3. Chrome optional host permissions.** When a site is approved, the extension asks Chrome for that site's origin, so no reinstall is needed.
 - **D4. No AI in this version.** Candidate words are proposed by rule, and the operator confirms every word.
 
-## 3. Records (one migration, `0060`)
+## 3. Records (one migration, the next free number when O1 lands)
 
 All writes go through one owner store with an injected clock and an audit event per write. Every table refuses UPDATE and DELETE except where a pointer column is stated.
 
@@ -142,7 +142,7 @@ All writes go through one owner store with an injected clock and an audit event 
 
 | slice | scope |
 | --- | --- |
-| O1 | The owner store and migration `0060`. The registry merges repository and onboarded sites, with a runtime rebind. No UI. |
+| O1 | The owner store and its migration. The registry merges repository and onboarded sites, with a runtime rebind. No UI. |
 | O2 | 「+ 공급처 추가」: the host guard, platform detection, the policy reads, credentials and the connection test. The site becomes `RECON`. |
 | O3 | 「사이트 분석」: trial reads, local captures, the read/unread report, observed-host confirmation, and offline re-analysis. |
 | O4 | 「수집 규칙」: the words editor and its revisions. |
