@@ -32,7 +32,7 @@ from app.platform.core.errors import AppError, ErrorClass, NotFoundError
 from app.platform.db.database import Database
 from app.stages.collect.assets import ImageDecoder
 from app.stages.collect.facts import FieldStatus, ImageRole
-from app.stages.collect.models import ProductFactsImageRef
+from app.stages.collect.models import ProductFactsImageRef, SourceAsset
 from app.stages.products.image_model import (
     CURRENT_SELECTION_RULE_VERSION,
     DecisionOrigin,
@@ -331,6 +331,53 @@ class ImageUnit:
     def derivation(self, derivation_id: str) -> DerivationRecord | None:
         row = self.session.get(DerivedImageDerivation, derivation_id)
         return None if row is None else self._derivation(row)
+
+    def derivation_of(
+        self,
+        *,
+        transformation_version: str,
+        validated_source_revision_id: str,
+        source: DerivationInput,
+    ) -> DerivationRecord | None:
+        """The first recorded derivation of one recipe version over exactly one input, validated
+        against one revision (ADR-0037 §2: a content-addressed variant is reused, never re-made).
+        Several — a concurrent retry — resolve to the earliest, in a stable order."""
+        source_kind = source.kind is ImageAssetKind.SOURCE_ASSET
+        inputs = DerivedImageDerivationInput
+        row = self.session.scalars(
+            select(DerivedImageDerivation)
+            .join(inputs, inputs.derivation_id == DerivedImageDerivation.derivation_id)
+            .where(
+                DerivedImageDerivation.transformation_version == transformation_version,
+                DerivedImageDerivation.validated_source_revision_id == validated_source_revision_id,
+                DerivedImageDerivation.input_count == 1,
+                inputs.input_kind == source.kind.value,
+                (
+                    inputs.source_sha256 == source.sha256
+                    if source_kind
+                    else inputs.parent_artifact_sha256 == source.sha256
+                ),
+                (
+                    inputs.parent_derivation_id.is_(None)
+                    if source_kind
+                    else inputs.parent_derivation_id == source.parent_derivation_id
+                ),
+            )
+            .order_by(DerivedImageDerivation.recorded_at, DerivedImageDerivation.derivation_id)
+        ).first()
+        return None if row is None else self._derivation(row)
+
+    def stored_size(self, asset_kind: ImageAssetKind, sha256: str) -> int | None:
+        """The stored byte size of one exact binary, from its own row; ``None`` when not stored."""
+        if asset_kind is ImageAssetKind.SOURCE_ASSET:
+            source = self.session.get(SourceAsset, sha256)
+            return None if source is None else int(source.byte_size)
+        derived = self.session.get(DerivedImageArtifact, sha256)
+        return None if derived is None else int(derived.byte_size)
+
+    def artifact(self, sha256: str) -> StoredArtifact | None:
+        row = self.session.get(DerivedImageArtifact, sha256)
+        return None if row is None else _artifact(row)
 
     def record_derivation(
         self,

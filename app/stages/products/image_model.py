@@ -26,8 +26,9 @@ DEFAULT_QA_RULE_VERSION: Final = "image-qa/v1"
 # The automatic rule QA of an auto-selected source image (Issue #219 §4, owner decision
 # 2026-10-03): file checks only — stored bytes, an image media type, a byte size and decoded
 # dimensions — never the image's content. An operator verdict under the rule in force always
-# supersedes it.
-AUTO_QA_RULE_VERSION: Final = "image-qa-auto/v1"
+# supersedes it. v2 (ADR-0037 §1, §3): the byte bound is the collection cap of the image's role,
+# and an upload-fit variant gets the same file checks under its upload threshold.
+AUTO_QA_RULE_VERSION: Final = "image-qa-auto/v2"
 
 MAX_INPUTS: Final = 16
 MAX_OPERATIONS: Final = 16

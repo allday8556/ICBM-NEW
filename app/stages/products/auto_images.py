@@ -20,11 +20,14 @@ failed image is never a candidate, and its failure stays the revision's own:
   used and that are not a blocked, or an undecided, supplier common image;
 * the same SHA-256 is used once; an image of any other slot is left out.
 
-**Automatic QA** (``image-qa-auto/v1``, Issue #219 §4): each selected source image gets a verdict
-from its stored file facts only — its bytes are stored, its media type is an image type ICBM
-handles, its size is within the collection bound and its dimensions were decoded. A file that
-fails a check is ``REVIEW_REQUIRED`` with the check as a finding; nothing is ever ``FAIL`` on the
-rule's word. An operator's verdict under the rule in force supersedes it.
+**Automatic QA** (``image-qa-auto/v2``, Issue #219 §4, ADR-0037 §1, §3): each selected source image
+gets a verdict from its stored file facts only — its bytes are stored, its media type is an image
+type ICBM handles, its size is within the collection cap of the role it is selected for and its
+dimensions were decoded. A file that fails a check is ``REVIEW_REQUIRED`` with the check as a
+finding; nothing is ever ``FAIL`` on the rule's word. An operator's verdict under the rule in force
+supersedes it. An upload-fit variant (ADR-0037 §3) gets the same checks of its own bytes
+(:func:`file_qa`), under the byte bound of the upload it is made for; it never inherits its
+source's QA.
 """
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -68,9 +71,16 @@ AUTO_SELECTION_RULE_VERSION: Final = "image-auto-selection/v1"
 MAX_ADDITIONAL_IMAGES: Final = 9
 # The automatic QA's file checks.
 AUTO_QA_MEDIA_TYPES: Final = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
-# The byte bound follows the owner's per-image collection limit, 5 MiB for every supplier
-# (Issue #219 6086299406), so a collected image is never refused here.
-AUTO_QA_MAX_BYTES: Final = 5 * 1024 * 1024
+# The byte bound follows the owner's per-image collection cap of the role (ADR-0037 §1, Issue #219
+# 6103784916): 5 MB for the representative and additional images, 30 MB for a description image,
+# so an image collected for its role is never refused here.
+AUTO_QA_REPRESENTATIVE_MAX_BYTES: Final = 5_000_000
+AUTO_QA_DETAIL_MAX_BYTES: Final = 30_000_000
+AUTO_QA_MAX_BYTES: Final[Mapping[OutputRole, int]] = {
+    OutputRole.REPRESENTATIVE: AUTO_QA_REPRESENTATIVE_MAX_BYTES,
+    OutputRole.ADDITIONAL: AUTO_QA_REPRESENTATIVE_MAX_BYTES,
+    OutputRole.DETAIL: AUTO_QA_DETAIL_MAX_BYTES,
+}
 
 
 class ImageSlot(StrEnum):
@@ -229,18 +239,39 @@ def plan(
     )
 
 
-def auto_qa(asset: SourceAsset | None) -> tuple[QaVerdict, tuple[str, ...]]:
-    """The automatic rule QA of one source image from its stored file facts only."""
+class StoredFileFacts(Protocol):
+    """The stored facts of one file — a source asset row or a derived artifact."""
+
+    @property
+    def mime_type(self) -> str: ...
+
+    @property
+    def byte_size(self) -> int: ...
+
+    @property
+    def width(self) -> int: ...
+
+    @property
+    def height(self) -> int: ...
+
+
+def file_qa(asset: StoredFileFacts | None, max_bytes: int) -> tuple[QaVerdict, tuple[str, ...]]:
+    """The automatic rule QA of one stored file from its facts only, under one byte bound."""
     if asset is None:
         return QaVerdict.REVIEW_REQUIRED, ("AUTO_QA_BYTES_NOT_STORED",)
     findings = []
     if asset.mime_type not in AUTO_QA_MEDIA_TYPES:
         findings.append("AUTO_QA_MEDIA_TYPE")
-    if not 0 < asset.byte_size <= AUTO_QA_MAX_BYTES:
+    if not 0 < asset.byte_size <= max_bytes:
         findings.append("AUTO_QA_BYTE_SIZE")
     if not (asset.width and asset.height and asset.width > 0 and asset.height > 0):
         findings.append("AUTO_QA_DIMENSIONS")
     return (QaVerdict.REVIEW_REQUIRED, tuple(findings)) if findings else (QaVerdict.PASS, ())
+
+
+def auto_qa(asset: SourceAsset | None, role: OutputRole) -> tuple[QaVerdict, tuple[str, ...]]:
+    """The automatic rule QA of one source image selected for ``role``, under that role's cap."""
+    return file_qa(asset, AUTO_QA_MAX_BYTES[role])
 
 
 class AutoSelectionStatus(StrEnum):
@@ -334,35 +365,40 @@ class ImageAutoSelector:
                 return AutoSelection(
                     item_id, AutoSelectionStatus.BLOCKED, current, found.blocked, found.detail
                 )
-            if (
+            unchanged = (
                 current is not None
                 and current.source_revision_id == revision_id
                 and _same_plan(current, found)
-            ):
-                return AutoSelection(item_id, AutoSelectionStatus.UNCHANGED, current)
-            selection, _move = self._images.record_selection_in(
-                unit,
-                item_id,
-                source_revision_id=revision_id,
-                decisions=found.decisions,
-                outputs=found.outputs,
-                decided_by=AUTO_SELECTION_RULE_VERSION,
-                reason=None,
-                origin=DecisionOrigin.RULE,
-                correlation_id=correlation,
-                notes=found.notes,
             )
+            if not unchanged:
+                selection, _move = self._images.record_selection_in(
+                    unit,
+                    item_id,
+                    source_revision_id=revision_id,
+                    decisions=found.decisions,
+                    outputs=found.outputs,
+                    decided_by=AUTO_SELECTION_RULE_VERSION,
+                    reason=None,
+                    origin=DecisionOrigin.RULE,
+                    correlation_id=correlation,
+                    notes=found.notes,
+                )
+        if unchanged:
+            assert current is not None
+            # The same plan again: its automatic QA under the rule in force is recorded if a rule
+            # version advanced since (an equal verdict is the same result), and nothing else moves.
+            self._record_auto_qa(current, correlation)
+            return AutoSelection(item_id, AutoSelectionStatus.UNCHANGED, current)
         self._record_auto_qa(selection, correlation)
         return AutoSelection(item_id, AutoSelectionStatus.SELECTED, selection)
 
     def _record_auto_qa(self, selection: SelectionRecord, correlation: str) -> None:
         with self._store.reading() as unit:
-            assets = {
-                output.sha256: unit.session.get(SourceAsset, output.sha256)
+            facts = {
+                output.sha256: auto_qa(unit.session.get(SourceAsset, output.sha256), output.role)
                 for output in selection.outputs
                 if output.asset_kind is ImageAssetKind.SOURCE_ASSET
             }
-            facts = {sha: auto_qa(asset) for sha, asset in assets.items()}
         for sha, (verdict, findings) in sorted(facts.items()):
             self._images.record_qa(
                 asset_kind=ImageAssetKind.SOURCE_ASSET,

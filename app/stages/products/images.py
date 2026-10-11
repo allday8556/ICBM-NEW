@@ -29,7 +29,8 @@ commit together.
 source revision, one QA rule version and one input fingerprint. A verdict never transfers to
 another SHA, another derivation or another revision, and one exact input has one verdict. Readiness
 reads the verdict under the rule in force, and without one the automatic rule QA of an
-auto-selected source image (``image-qa-auto/v1``, Issue #219 §4).
+auto-selected source image (``image-qa-auto/v2``, Issue #219 §4) or of an upload-fit variant
+made for it (ADR-0037 §3).
 """
 
 import logging
@@ -48,6 +49,7 @@ from app.stages.products.image_model import (
     DEFAULT_QA_RULE_VERSION,
     CompletedDerivation,
     DecisionOrigin,
+    DerivationInput,
     ImageAssetKind,
     ImageError,
     QaVerdict,
@@ -118,6 +120,20 @@ class ImageCandidates:
     qa_rule_version: str
     images: tuple[CandidateImage, ...]
     current_selection: SelectionRecord | None
+
+
+@dataclass(frozen=True)
+class DerivedVariant:
+    """The artifact of one recorded derivation over exactly one selected binary: its derivation,
+    its exact bytes' identity and stored facts, and its own QA — never its input's (ADR-0013 §9;
+    ADR-0037 §2, §3)."""
+
+    derivation_id: str
+    sha256: str
+    byte_size: int
+    width: int
+    height: int
+    qa: QaRecord | None
 
 
 @dataclass(frozen=True)
@@ -698,6 +714,49 @@ class ProductImageService:
                 self._images(unit), asset_kind, sha256, derivation_id, validated_source_revision_id
             )
 
+    def stored_size(self, asset_kind: ImageAssetKind, sha256: str) -> int | None:
+        """The stored byte size of one exact binary, or ``None`` when it is not stored."""
+        with self._store.reading() as unit:
+            return self._images(unit).stored_size(asset_kind, sha256)
+
+    def derived_variant(
+        self,
+        *,
+        transformation_version: str,
+        asset_kind: ImageAssetKind,
+        sha256: str,
+        derivation_id: str | None,
+        validated_source_revision_id: str,
+    ) -> DerivedVariant | None:
+        """The artifact one recipe version made from exactly this selected binary under the
+        selection's validated revision, with the artifact's own QA (ADR-0037 §2: a caller's
+        content-addressed variant is reused, never re-made). Read only; nothing is made here."""
+        with self._store.reading() as unit:
+            images = self._images(unit)
+            found = images.derivation_of(
+                transformation_version=transformation_version,
+                validated_source_revision_id=validated_source_revision_id,
+                source=DerivationInput(asset_kind, sha256, derivation_id),
+            )
+            artifact = None if found is None else images.artifact(found.artifact_sha256)
+            if found is None or artifact is None:
+                return None
+            qa = self._effective_qa(
+                images,
+                ImageAssetKind.DERIVED_ARTIFACT,
+                found.artifact_sha256,
+                found.derivation_id,
+                validated_source_revision_id,
+            )
+            return DerivedVariant(
+                derivation_id=found.derivation_id,
+                sha256=found.artifact_sha256,
+                byte_size=artifact.byte_size,
+                width=artifact.width,
+                height=artifact.height,
+                qa=qa,
+            )
+
     def _effective_qa(
         self,
         images: ImageUnit,
@@ -706,12 +765,10 @@ class ProductImageService:
         derivation_id: str | None,
         revision_id: str,
     ) -> QaRecord | None:
-        """The operator's verdict under the rule in force supersedes the automatic rule QA, which
-        only ever covers a source image (Issue #219 §4)."""
-        rules = [self.qa_rule_version]
-        if asset_kind is ImageAssetKind.SOURCE_ASSET:
-            rules.append(AUTO_QA_RULE_VERSION)
-        for rule in rules:
+        """The operator's verdict under the rule in force supersedes the automatic rule QA. That
+        covers an auto-selected source image (Issue #219 §4) and an upload-fit variant, whose QA is
+        its own (ADR-0037 §3); no other artifact is ever given one."""
+        for rule in (self.qa_rule_version, AUTO_QA_RULE_VERSION):
             found = images.qa_by_input(
                 asset_kind=asset_kind,
                 sha256=sha256,

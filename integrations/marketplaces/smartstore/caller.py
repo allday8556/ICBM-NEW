@@ -122,6 +122,10 @@ _SEARCH_CODE = re.compile(r"^[0-9a-f]{30}$")
 # seller-code search may carry. Which code a source product has is the adoption owner's convention.
 _ADOPTION_CODE = re.compile(r"^[A-Za-z]{2,8}[0-9]{1,15}$")
 _IMAGE_MEDIA_TYPES = frozenset({"image/jpeg", "image/gif", "image/png", "image/bmp"})
+# ADR-0037 IC-02: an artifact of this many bytes or more is never sent; one call must total under
+# 10^7 bytes, envelope included. Equal to the upload-fit threshold (a contract test holds the two
+# in agreement), so only a fitted variant or a smaller image reaches the wire.
+IMAGE_UPLOAD_MAX_BYTES: Final = 9_500_000
 _FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
@@ -835,6 +839,7 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
             or request.media_type not in _IMAGE_MEDIA_TYPES
             or not isinstance(request.content, bytes)
             or not request.content
+            or len(request.content) >= IMAGE_UPLOAD_MAX_BYTES
         ):
             raise _Preflight("SMARTSTORE_IMAGE_UPLOAD_ARTIFACT_UNUSABLE")
         # Do not set Content-Type by hand: httpx supplies the required multipart boundary.

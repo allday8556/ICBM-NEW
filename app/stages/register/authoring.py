@@ -82,6 +82,7 @@ from app.stages.register.store import (
     RegistrationStore,
     SnapshotRecord,
 )
+from app.stages.register.upload_fit import UPLOAD_FIT_MARKETPLACES
 
 logger = logging.getLogger("icbm.register.authoring")
 
@@ -411,6 +412,15 @@ def _valid_field(field: str) -> bool:
     return kind in ("attribute", "notice") and dot == "." and bool(key.strip())
 
 
+class UploadFitSource(Protocol):
+    """ADR-0037 §2: the M4 image owner's upload-fit producer
+    (``app.stages.register.upload_variants.UploadFitVariants``)."""
+
+    def fit_selected(
+        self, item_ids: Sequence[str], *, correlation_id: str | None = None
+    ) -> tuple[Any, ...]: ...
+
+
 class RegistrationPreparationService:
     """Create, revise, read and evaluate a preparation, and freeze the unit it prepares."""
 
@@ -424,8 +434,12 @@ class RegistrationPreparationService:
         prepared_assets: PreparedAssetSource | None = None,
         enrichment: EnrichmentResultSource | None = None,
         guidance: GuidanceSource | None = None,
+        upload_fit: UploadFitSource | None = None,
     ) -> None:
         self._enrichment = enrichment
+        # ADR-0037 §2: the M4 owner that makes each oversize selected image's upload-fit variant
+        # on save. None when not wired: no variant is made, and such an image stays unpublishable.
+        self._upload_fit = upload_fit
         # ADR-0033 G4: the Detail Guidance owner that renders and records a product's own notice.
         self._guidance = guidance
         self._registrations = registrations
@@ -465,6 +479,7 @@ class RegistrationPreparationService:
                 details={"reasons": [problem.code for problem in problems]},
             )
         inputs = self._render_guidance(inputs, actor=actor, correlation_id=cid)
+        self._fit_uploads(draft.marketplace_key, chosen, correlation_id=cid)
         encoded = encode_inputs(inputs)
         try:
             with self._registrations.transaction() as unit:
@@ -500,6 +515,7 @@ class RegistrationPreparationService:
         )
         cid = self._correlation(correlation_id)
         inputs = self._render_guidance(inputs, actor=actor, correlation_id=cid)
+        self._fit_uploads(current.marketplace_key, item_ids, correlation_id=cid)
         encoded = encode_inputs(inputs)
         with self._registrations.transaction() as unit:
             return unit.revise_preparation(
@@ -539,6 +555,19 @@ class RegistrationPreparationService:
                 recorded.sha256,
             )
         return replace(inputs, guidance=GuidanceChoice(**rendered))
+
+    def _fit_uploads(
+        self, marketplace_key: str, item_ids: Sequence[str], *, correlation_id: str
+    ) -> None:
+        """ADR-0037 §2: before the revision is written — as a CUSTOM notice is rendered — the M4
+        image owner makes, or reuses, the ``smartstore-upload-fit/v1`` variant of each of the
+        unit's selected images at or over the upload-fit threshold. Variants are content-addressed
+        derived artifacts with their own lineage, so a refused write leaves at most an unused,
+        reusable one. An image nothing fits gets none, and the preflight names it
+        (``IMAGE_UPLOAD_FIT_FAILED``); the save itself is never refused for it."""
+        if self._upload_fit is None or marketplace_key not in UPLOAD_FIT_MARKETPLACES:
+            return
+        self._upload_fit.fit_selected(item_ids, correlation_id=correlation_id)
 
     def guidance(self, preparation_id: str | None) -> tuple[GuidanceChoice, ResolvedGuidance]:
         """The product's current choice and the notices it resolves to now (ADR-0033 §5, §6): a

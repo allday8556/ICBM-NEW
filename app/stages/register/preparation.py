@@ -190,6 +190,10 @@ PUBLICATION_DETAIL_IMAGES_UNPLACED: Final = "PUBLICATION_DETAIL_IMAGES_UNPLACED"
 # a composition v3 plan places one (G5): under any other profile a resolved notice stays here.
 PUBLICATION_GUIDANCE_UNPLACED: Final = "PUBLICATION_GUIDANCE_UNPLACED"
 PUBLICATION_ASSET_QA_NOT_PASSED: Final = "PUBLICATION_ASSET_QA_NOT_PASSED"
+# ADR-0037 §2 (IC-06): an image at or over SmartStore's upload-fit threshold for which no
+# ``smartstore-upload-fit/v1`` variant exists — nothing fits, or it cannot be decoded. Nothing is
+# uploaded for it, and nothing smaller is guessed.
+IMAGE_UPLOAD_FIT_FAILED: Final = "IMAGE_UPLOAD_FIT_FAILED"
 PROVIDER_ASSET_IDENTITY_MISSING: Final = "PROVIDER_ASSET_IDENTITY_MISSING"
 PREPARED_ASSET_CANDIDATE_MISMATCH: Final = "PREPARED_ASSET_CANDIDATE_MISMATCH"
 PREPARED_ASSET_PROFILE_MISMATCH: Final = "PREPARED_ASSET_PROFILE_MISMATCH"
@@ -276,6 +280,7 @@ REASON_CODES: Final = frozenset(
         PUBLICATION_DETAIL_IMAGES_UNPLACED,
         PUBLICATION_GUIDANCE_UNPLACED,
         PUBLICATION_ASSET_QA_NOT_PASSED,
+        IMAGE_UPLOAD_FIT_FAILED,
         PROVIDER_ASSET_IDENTITY_MISSING,
         PREPARED_ASSET_CANDIDATE_MISMATCH,
         PREPARED_ASSET_PROFILE_MISMATCH,
@@ -616,8 +621,39 @@ class BindingCopy:
 
 
 @dataclass(frozen=True)
+class UploadFit:
+    """ADR-0037 §2: the selected binary an upload-fit variant stands in for, and the variant's own
+    facts. The image's identity is the variant's; this records its lineage and what the operator
+    is shown (§3)."""
+
+    recipe: str
+    source_asset_kind: ImageAssetKind
+    source_sha256: str
+    source_derivation_id: str | None
+    width: int
+    height: int
+    byte_size: int
+
+    def canonical(self) -> dict[str, object]:
+        return {
+            "recipe": self.recipe,
+            "source_asset_kind": self.source_asset_kind.value,
+            "source_sha256": self.source_sha256,
+            "source_derivation_id": self.source_derivation_id,
+            "width": self.width,
+            "height": self.height,
+            "byte_size": self.byte_size,
+        }
+
+
+@dataclass(frozen=True)
 class PublicationImage:
-    """One currently selected M4 image of an Item, with its exact-binary QA."""
+    """One currently selected M4 image of an Item, with its exact-binary QA.
+
+    ADR-0037 §2: where the selected binary is too large for the marketplace's upload, the image is
+    its upload-fit variant — that exact artifact, with its own QA — and ``upload_fit`` names the
+    selected binary it stands in for. ``upload_fit_failed`` is a selected binary that needs a
+    variant and has none: it is never uploaded (``IMAGE_UPLOAD_FIT_FAILED``)."""
 
     role: OutputRole
     position: int
@@ -626,6 +662,8 @@ class PublicationImage:
     derivation_id: str | None
     qa_result_id: str | None
     qa_verdict: QaVerdict | None
+    upload_fit: UploadFit | None = None
+    upload_fit_failed: bool = False
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -640,6 +678,8 @@ class PublicationImage:
             "derivation_id": self.derivation_id,
             "qa_result_id": self.qa_result_id,
             "qa_verdict": None if self.qa_verdict is None else self.qa_verdict.value,
+            # Named only for a variant, so every other image keeps its earlier canonical form.
+            **({} if self.upload_fit is None else {"upload_fit": self.upload_fit.canonical()}),
         }
 
 
@@ -1338,10 +1378,13 @@ def _publication_reasons(
                 Reason(PUBLICATION_REPRESENTATIVE_MISSING, _R, _subject(item.item_id, "images"))
             )
         for image in images:
+            where = f"{image.role.value}:{image.position}"
+            if image.upload_fit_failed:
+                # ADR-0037 §2 (IC-02, IC-06): never sent as it is, and no variant to send instead.
+                reasons.append(Reason(IMAGE_UPLOAD_FIT_FAILED, _R, _subject(item.item_id, where)))
             if image.qa_verdict is QaVerdict.PASS:
                 continue
             status = _B if image.qa_verdict is QaVerdict.FAIL else _R
-            where = f"{image.role.value}:{image.position}"
             reasons.append(
                 Reason(PUBLICATION_ASSET_QA_NOT_PASSED, status, _subject(item.item_id, where))
             )
