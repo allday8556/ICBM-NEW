@@ -359,6 +359,13 @@ class EnrichmentApply:
 
 TAGS_FIELD: Final = "tags"
 CATEGORY_FIELD: Final = "category"
+# The one value field each whole-result field reads: a tag set is the result's ``recommended``
+# list (never ``removed``, which the filter dropped), a category its ``category_id`` (ADR-0028 §6,
+# ADR-0029 §5). Any other value field is refused before anything is read.
+PINNED_VALUE_FIELDS: Final[dict[str, str]] = {
+    TAGS_FIELD: "recommended",
+    CATEGORY_FIELD: "category_id",
+}
 # ADR-0028 §4: a tag set holds at most 10 tags.
 TAGS_MAX: Final = 10
 
@@ -586,6 +593,13 @@ class RegistrationPreparationService:
         if apply.product_group_id not in products:
             raise InputValidationError(
                 AI_APPLY_RESULT_FOREIGN, "the result is not of a product this unit prepares"
+            )
+        pinned = PINNED_VALUE_FIELDS.get(apply.field)
+        if pinned is not None and apply.value_field != pinned:
+            raise InputValidationError(
+                AI_APPLY_VALUE_INVALID,
+                f"the {apply.field} field is applied only from the result's {pinned}",
+                details={"value_field": apply.value_field, "expected": pinned},
             )
         result = self._named_result(apply, current.marketplace_key, current.marketplace_account_id)
         value = (result.value or {}).get(apply.value_field)

@@ -175,3 +175,31 @@ def test_a_result_under_another_taxonomy_than_the_targets_is_refused(
     with pytest.raises(AppError) as refused:
         _apply(unit, 1)
     assert refused.value.code == "AI_APPLY_RESULT_UNUSABLE"
+
+
+@pytest.mark.parametrize("value_field", ["whole_category_name", "taxonomy_revision"])
+def test_a_category_is_applied_only_from_its_category_id(
+    container: Container, config: AppConfig, world: dict[str, Any], value_field: str
+) -> None:
+    unit = _unit(container, config, world)
+    with pytest.raises(AppError) as refused:
+        unit["preparations"].apply_enrichment(
+            unit["preparation_id"],
+            EnrichmentApply(
+                "category",
+                unit["group"],
+                CATEGORY,
+                "category",
+                True,
+                unit["result"].sequence,
+                value_field,
+                1,
+            ),
+            actor="operator",
+        )
+    assert refused.value.code == "AI_APPLY_VALUE_INVALID"
+    assert refused.value.details == {"value_field": value_field, "expected": "category_id"}
+    assert (
+        decode_inputs(unit["preparations"].preparation(unit["preparation_id"]).current).category
+        is None
+    )
