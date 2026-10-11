@@ -952,6 +952,48 @@ export function previewBlock(unit) {
   return holder;
 }
 
+// ADR-0033 G6: the frozen notices of a guidance plan (composition v3), each as the image the
+// renderer draws, in its order: the top notices before the detail images, the bottom ones after
+// the body. The image is the Detail Guidance owner's local route the server named, never a
+// provider URL. An empty placement (and every v1/v2 preview) renders nothing.
+const GUIDANCE_PLACEMENT_LABEL = { top: '상단 공지', bottom: '하단 공지' };
+
+function guidanceSlots(slots, placement) {
+  if (!slots.length) return null;
+  const label = GUIDANCE_PLACEMENT_LABEL[placement];
+  return h(
+    'div',
+    { class: 'dg-resolved', 'data-role': `preview-guidance-${placement}` },
+    ...slots.map((slot) => {
+      const what =
+        slot.source === 'PRODUCT'
+          ? '이 상품 공지'
+          : slot.kind === 'PERIOD'
+            ? '기간 공지'
+            : slot.kind === 'STANDING'
+              ? '상시 공지'
+              : '공지';
+      const period =
+        slot.kind === 'PERIOD' && slot.starts_at && slot.ends_at
+          ? `${dotDateTime(slot.starts_at)} ~ ${dotDateTime(slot.ends_at)}`
+          : null;
+      return h(
+        'figure',
+        { 'data-role': 'preview-guidance-slot', 'data-placement': slot.placement, 'data-sha256': slot.sha256, 'data-kind': slot.kind ?? '' },
+        h('img', { src: slot.image_url, alt: `${label} · ${what}` }),
+        h(
+          'figcaption',
+          {},
+          h('span', { class: 'chip' }, label),
+          h('span', { class: slot.source === 'PRODUCT' ? 'chip info' : 'chip' }, what),
+          period ? h('span', { class: 'mini', 'data-role': 'preview-guidance-period' }, period) : null,
+          h('span', { class: 'mini' }, slot.provider_asset_prepared ? '마켓 업로드 준비됨' : '마켓 업로드 없음'),
+        ),
+      );
+    }),
+  );
+}
+
 function previewView(view) {
   const detail = view.detail;
   return h(
@@ -979,8 +1021,10 @@ function previewView(view) {
     detail
       ? h('div', { class: 'register-preview-detail', 'data-detail-builder': detail.builder },
           kv('상세 구획', detail.sections.join(' → ') || '—'),
+          guidanceSlots(detail.guidance?.top ?? [], 'top'),
           kv('상세 이미지', `${detail.image_slots.length}장`),
-          ...detail.paragraphs.map((paragraph) => h('p', { class: 'mini' }, paragraph)))
+          ...detail.paragraphs.map((paragraph) => h('p', { class: 'mini' }, paragraph)),
+          guidanceSlots(detail.guidance?.bottom ?? [], 'bottom'))
       : null,
     view.document.length
       ? table(

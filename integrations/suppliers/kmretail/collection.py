@@ -22,7 +22,9 @@ references 32 images, of which the role rules recognise 13 as product evidence, 
 image phase B fetched was 1,437,349 bytes. The E3 real run (2026-10-02, 27 products of one list
 page) then met description images over 2 MiB on 9 of them, and the user set the per-image bound to
 4 MiB on 2026-10-03 (``kmretail-2``). The owner set 5 MiB for every supplier on 2026-10-10
-(``kmretail-4``, Issue #219 6086299406); the per-run total stays 24 MiB.
+(``kmretail-4``, Issue #219 6086299406), and then caps by role on 2026-10-11 (``kmretail-6``,
+ADR-0037 §1, Issue #219 6103784916): 5 MB for the representative and additional images, 30 MB for
+a description image, and 120 MB per product run.
 
 This module performs nothing. It holds no client, opens no connection, computes no checksum and
 writes no row; the run, the fetch, the asset store, the revision and the job belong to generic
@@ -59,10 +61,14 @@ IMAGE_HOSTS = frozenset({STOREFRONT_HOST, "onewbio.diskn.com"})
 # the E3 real run met images over 2 MiB, and the user set 4 MiB (2026-10-03). The owner then set
 # 5 MiB for every supplier (Issue #219 6086299406, 2026-10-10), after a U-PICK description image of
 # about 4.4 MB; as a semantic profile change (ADR-0010 §12) it advances the revision (kmretail-4).
-MAX_IMAGE_BYTES = 5 * 1024 * 1024
+# ADR-0037 §1 (Issue #219 6103784916, 2026-10-11) caps an image by its role, in decimal MB as the
+# owner wrote them: MAX_IMAGE_BYTES bounds the representative and additional images and
+# MAX_DETAIL_IMAGE_BYTES a description image; the run total rises to 120 MB (kmretail-6).
+MAX_IMAGE_BYTES = 5_000_000
+MAX_DETAIL_IMAGE_BYTES = 30_000_000
 MAX_IMAGE_REFS = 30
 MAX_IMAGE_REQUESTS_PER_RUN = 30
-MAX_NEW_IMAGE_BYTES_PER_RUN = 24 * 1024 * 1024
+MAX_NEW_IMAGE_BYTES_PER_RUN = 120_000_000
 # ADR-0010 §4: at least 60 s between real reads of the same product.
 SAME_PRODUCT_INTERVAL_S = 60.0
 # The list queue (ADR-0019 §8.1). The user set these bounds on 2026-10-02: one queue reads at most
@@ -114,6 +120,7 @@ def build_profile(*, image_hosts: frozenset[str] = IMAGE_HOSTS) -> CollectionPro
         limits=CollectionLimits(
             max_image_refs=MAX_IMAGE_REFS,
             max_image_bytes=MAX_IMAGE_BYTES,
+            max_detail_image_bytes=MAX_DETAIL_IMAGE_BYTES,
             max_image_requests_per_run=MAX_IMAGE_REQUESTS_PER_RUN,
             max_new_image_bytes_per_run=MAX_NEW_IMAGE_BYTES_PER_RUN,
             same_product_interval_s=SAME_PRODUCT_INTERVAL_S,

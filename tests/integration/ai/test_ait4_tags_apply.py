@@ -175,3 +175,16 @@ def test_a_confirmed_set_is_locked_and_an_ai_set_may_be_replaced(unit: dict[str,
     with pytest.raises(AppError) as locked:
         _apply(unit, saved.current.revision_no)
     assert locked.value.code == "AI_APPLY_FIELD_LOCKED"
+
+
+def test_the_tags_the_filter_removed_are_never_applied(unit: dict[str, Any]) -> None:
+    with pytest.raises(AppError) as refused:
+        unit["preparations"].apply_enrichment(
+            unit["preparation_id"],
+            EnrichmentApply(
+                "tags", unit["group"], TAGS, "tags", True, unit["result"].sequence, "removed", 1
+            ),
+            actor="operator",
+        )
+    assert refused.value.code == "AI_APPLY_VALUE_INVALID"
+    assert refused.value.details == {"value_field": "removed", "expected": "recommended"}

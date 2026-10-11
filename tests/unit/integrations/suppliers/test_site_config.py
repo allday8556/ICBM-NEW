@@ -88,12 +88,16 @@ def test_a_minimal_site_parses() -> None:
         ({"status": "LIVE"}, "example"),
         ({"status": "ACTIVE"}, "example"),
         ({"label_overrides": {"price": ["도.*가"]}}, "example"),
+        ({"label_overrides": {"price": ["(.+)가"]}}, "example"),
         ({"label_overrides": {"price": ["<b>가</b>"]}}, "example"),
         ({"label_overrides": {"price": []}}, "example"),
         ({"region_overrides": {"detail": {"by": "css", "token": "x"}}}, "example"),
         ({"region_overrides": {"detail": {"by": "id", "token": "a b"}}}, "example"),
         ({"limits": {"max_image_bytes": 1.5}}, "example"),
         ({"limits": {"max_image_bytes": 0}}, "example"),
+        ({"limits": {"max_detail_image_bytes": 1.5}}, "example"),
+        ({"limits": {"max_detail_image_bytes": 0}}, "example"),
+        ({"limits": {"max_detail_image_bytes": True}}, "example"),
         ({"limits": {"same_product_interval_s": float("inf")}}, "example"),
         ({"limits": {"min_queue_interval_s": float("nan")}}, "example"),
         ({"limits": {"unknown": 1}}, "example"),
@@ -182,6 +186,45 @@ def test_a_raised_limit_needs_the_owner_s_decision(tmp_path: Path) -> None:
     assert only.collection.profile.limits.max_image_refs == 40
 
 
+@pytest.mark.parametrize("platform", ["cafe24", "godomall"])
+def test_a_template_caps_images_by_role(platform: str) -> None:
+    # ADR-0037 §1, in decimal MB as the owner wrote them.
+    defaults = TEMPLATES[platform].default_limits
+    assert defaults["max_image_bytes"] == 5_000_000
+    assert defaults["max_detail_image_bytes"] == 30_000_000
+    assert defaults["max_new_image_bytes_per_run"] == 120_000_000
+    assert defaults["max_image_requests_per_run"] == 30
+
+
+def test_a_site_may_lower_the_description_image_cap(tmp_path: Path) -> None:
+    _write(tmp_path, "example", encoded(limits={"max_detail_image_bytes": 10_000_000}))
+    (only,), problems = bind_sites(tmp_path)
+    assert problems == ()
+    limits = only.collection.profile.limits
+    assert (limits.max_image_bytes, limits.max_detail_image_bytes) == (5_000_000, 10_000_000)
+    assert limits.max_new_image_bytes_per_run == 120_000_000
+
+
+def test_a_site_raising_the_description_image_cap_needs_the_owner_s_decision(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path, "example", encoded(limits={"max_detail_image_bytes": 40_000_000}))
+    bound, problems = bind_sites(tmp_path)
+    assert len(bound) == 0
+    assert len(problems) == 1 and "max_detail_image_bytes" in problems[0]
+
+    _write(
+        tmp_path,
+        "example",
+        encoded(
+            limits={"max_detail_image_bytes": 40_000_000}, limit_decision="Issue #219 6103784916"
+        ),
+    )
+    (only,), problems = bind_sites(tmp_path)
+    assert problems == ()
+    assert only.collection.profile.limits.max_detail_image_bytes == 40_000_000
+
+
 def test_any_change_to_the_site_file_changes_its_identity(tmp_path: Path) -> None:
     _write(tmp_path, "example", encoded())
     (first,), _ = bind_sites(tmp_path)
@@ -215,3 +258,10 @@ def test_this_build_s_sites_all_bind() -> None:
 def test_a_seller_code_convention_takes_the_adr_0024_form() -> None:
     parsed = parse_site(encoded(seller_code_convention="UP{source_product_id}"), "example")
     assert parsed.seller_code_convention == "UP{source_product_id}"
+
+
+def test_a_site_word_may_hold_round_brackets_a_page_prints() -> None:
+    # ADR-0035 §4: 건강산 writes its one-unit minimum as "(1개)12,900원 이상". A site word is
+    # matched literally, so the brackets are page text, not pattern syntax.
+    parsed = parse_site(encoded(label_overrides={"minimum_price_phrase": ["(1개)"]}), "example")
+    assert parsed.label_overrides["minimum_price_phrase"] == ("(1개)",)
