@@ -516,6 +516,14 @@ def _start_and_close_after_one(
     return reopened, open_queue.queue_id
 
 
+def _until(condition: Any, timeout_s: float = 30.0) -> None:
+    """Poll a server-side condition the UI has already signalled, failing after ``timeout_s``."""
+    deadline = time.monotonic() + timeout_s
+    while not condition():
+        assert time.monotonic() < deadline, "the server state never followed the panel"
+        time.sleep(0.2)
+
+
 def test_a_closed_panel_finds_its_open_queue_again_and_resumes_it(
     chromium: BrowserContext, config: AppConfig
 ) -> None:
@@ -524,7 +532,10 @@ def test_a_closed_panel_finds_its_open_queue_again_and_resumes_it(
         # Resumed, never declared again: the same queue reads its second product and finishes.
         panel.locator("[data-action='queue-pause']").dispatch_event("click")
         expect(panel.locator(_role("queue-count"))).to_have_text("2 / 2", timeout=60_000)
-        assert app.extension_queues.read(queue_id).state.value == "FINISHED"
+        # The panel shows "2 / 2" once the second read is recorded; the queue's FINISHED state is
+        # written by the server just after it. Wait for it rather than racing it (a busy, parallel
+        # CI runner showed OPEN here).
+        _until(lambda: app.extension_queues.read(queue_id).state.value == "FINISHED")
         assert table_counts(config)["extension_queues"] == 1
         runs = [run for run in app.collection.recent_runs() if run.provenance is not None]
         assert sorted(run.source_url for run in runs) == [_product("9001"), _product("9002")]
@@ -540,7 +551,7 @@ def test_a_closed_panel_finds_its_open_queue_again_and_cancels_it(
         expect(panel.locator(_role("queue-status"))).to_contain_text(
             "취소했습니다", timeout=TIMEOUT_MS
         )
-        assert app.extension_queues.read(queue_id).state.value == "CANCELLED"
+        _until(lambda: app.extension_queues.read(queue_id).state.value == "CANCELLED")
         # The unread product stays unread.
         runs = [run for run in app.collection.recent_runs() if run.provenance is not None]
         assert [run.source_url for run in runs] == [_product("9001")]
@@ -561,7 +572,7 @@ def test_a_dead_product_is_given_back_at_once_and_the_queue_goes_on(
         panel.locator("[data-action='queue-start']").dispatch_event("click")
         expect(panel.locator(_role("queue-status"))).to_contain_text("마쳤습니다", timeout=90_000)
         elapsed = time.monotonic() - started
-        assert app.extension_queues.discovery_policy(SUPPLIER).open_queue is None
+        _until(lambda: app.extension_queues.discovery_policy(SUPPLIER).open_queue is None)
         runs = sorted(
             (run for run in app.collection.recent_runs() if run.provenance is not None),
             key=lambda run: run.requested_at,
