@@ -697,8 +697,9 @@ class OnboardingStore:
             try:
                 listener(key)
             except Exception:
-                # The write is durable; a registry that failed to rebind still holds the previous
-                # definition, and the next change or a restart binds it again.
+                # The write is durable and is not undone. The registry withdraws the supplier
+                # before it rebuilds it and never raises (fail closed); this only guards a
+                # listener that breaks that rule.
                 logger.exception("collect.onboarding_rebind_failed", extra={"supplier": key})
 
 
