@@ -123,3 +123,94 @@ class OnboardingView(BaseModel):
     connection: ConnectionView | None
     recon: ReconReadiness
     problems: list[str]
+
+
+# ---------------------------------------------------------------- 「사이트 분석」 (ADR-0036 §5, O3)
+
+
+class TrialSubmitted(BaseModel):
+    """A trial read accepted as one durable job; its result is a trial row when the job ends."""
+
+    job_id: str
+    sample_url_key: str
+
+
+class TrialFieldView(BaseModel):
+    field: str
+    core: bool
+    # CONFIRMED (읽음), ABSENT (없음) or REVIEW_REQUIRED (못 읽음).
+    status: str
+    # Why a field that is not read was held, as the template's own bounded evidence.
+    note: str | None
+
+
+class UnreadRowView(BaseModel):
+    kind: str
+    label: str
+    value: str
+    # The slot a rule proposes (D4: never AI), or none.
+    candidate: str | None
+    rule: str | None
+
+
+class ObservedHostView(BaseModel):
+    host: str
+    role: str
+    count: int
+    # The newest trial that observed it under the current words: what a confirmation names.
+    trial_id: str
+    confirmed: bool
+    # Whether a confirmation could pass: an image or login host that the host guard accepts.
+    confirmable: bool
+    refusal: str | None
+
+
+class TrialView(BaseModel):
+    trial_id: str
+    sample_url: str
+    created_at: datetime
+    words_seq: int
+    template_revision: str
+    facts_fingerprint: str
+    fields: list[TrialFieldView]
+    # The values the operator verifies (name, prices, options, stock, product number, images);
+    # ``None`` when the stored capture no longer reproduces what the trial showed.
+    summary: dict[str, object] | None
+    unread_rows: list[UnreadRowView]
+    structural: list[str]
+    # Every core field read and no structural problem: what O5 may ask the operator to verify.
+    verifiable: bool
+
+
+class StaleSampleView(BaseModel):
+    """A sample whose newest trial ran under older words or another template revision."""
+
+    sample_url: str
+    words_seq: int
+    template_revision: str
+
+
+class AnalysisView(BaseModel):
+    supplier_key: str
+    state: str
+    template: str
+    template_revision: str
+    words_seq: int
+    sample_limit: int
+    # Samples this site has used, failed reads included: each is read once (§5 step 2).
+    samples_taken: int
+    samples: list[TrialView]
+    stale: list[StaleSampleView]
+    observed_hosts: list[ObservedHostView]
+    # ``ActivationProof.details()``: the ACTIVE gate's own counts (§7) and the template revision
+    # they are judged under.
+    activation: dict[str, int | str]
+    # Samples whose newest trial under the current words is verifiable: "샘플 n/3 확인 가능".
+    verifiable_samples: int
+
+
+class ReanalysisView(BaseModel):
+    analysed: int
+    current: int
+    missing: int
+    analysis: AnalysisView

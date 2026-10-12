@@ -9,7 +9,8 @@ and connects through the fake CONNECT gateway. Proven here:
   terms reads with their warning; 「저장」 waits for the acknowledgement;
 - 「저장」 creates the draft and saves the login through CONNECT's credential route, sending the
   password exactly once and clearing it; 「연결 테스트」 passes and the card shows 분석 중;
-- 사이트 분석 and 수집 규칙 stay inert; the password is never shown;
+- 사이트 분석 turns live once the card is 분석 중 (O3) and 수집 규칙 stays inert; the password is
+  never shown;
 - an unsupported site shows "템플릿이 필요합니다" with no choice and no 저장; an ambiguous
   one offers exactly its two matched templates;
 - neither the screen nor the open modal scrolls horizontally at 1920×1080 or at 390×844.
@@ -178,8 +179,11 @@ def test_a_supplier_is_added_saved_tested_and_shown_in_analysis(
         card = page.locator(f"[data-supplier='{KEY}']")
         card.locator("[data-onboarding-state='RECON']").wait_for(timeout=15_000)
         assert card.locator("[data-onboarding-state='RECON']").inner_text() == "분석 중"
-        for label in ("사이트 분석", "수집 규칙"):
-            assert card.get_by_role("button", name=label).get_attribute("data-inert")
+        # ADR-0036 O3: 사이트 분석 is live on a RECON card; 수집 규칙 stays inert until O4.
+        analysis = card.get_by_role("button", name="사이트 분석")
+        assert analysis.get_attribute("data-action") == "site-analysis"
+        assert analysis.get_attribute("data-inert") is None
+        assert card.get_by_role("button", name="수집 규칙").get_attribute("data-inert")
         assert PASSWORD not in page.content()
         _no_horizontal_scroll(page)
 

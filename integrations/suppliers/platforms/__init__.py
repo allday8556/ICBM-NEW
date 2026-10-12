@@ -53,6 +53,43 @@ def markers_in(body: str, markers: tuple[tuple[str, str], ...]) -> tuple[str, ..
 
 
 @dataclass(frozen=True)
+class PageRow:
+    """One label/value row of a product page's information list, as the template scans it."""
+
+    label: str
+    value: str
+
+
+@dataclass(frozen=True)
+class PlatformAnalysis:
+    """What a trial report reads from a page besides the facts (ADR-0036 §5, slice O3).
+
+    Site knowledge only, like the rest of a template: pure functions over a captured document. It
+    reads rows and structure; it never reads a fact, and nothing here decides a field.
+
+    - ``rows`` are the information rows exactly as the template's own row scanner pairs them, so
+      a row that no slot's words name is a row the template saw and did not read.
+    - ``row_slots`` are the label slots whose words name a row; ``channel_slots`` the slots whose
+      phrases read a sales-channel row. Every other slot names a phrase, a mark or a control.
+    - ``reads_label`` says whether the template reads a row by its own fixed words, outside any
+      slot (a stock row, a notice, a quantity tier): such a row is read, never unread.
+    - ``structure`` names the problems in the page's structure that words cannot fix, by the
+      template's own rules (ADR-0035): a duplicated order list, for one.
+    - ``capture_regions`` are the regions of one site's product page whose text and content the
+      template reads (its own, and the site's relocated ones), as ``marks`` tokens. A sample
+      capture keeps text only inside them (ADR-0036 §5 step 3), so they name every region the
+      template's facts, identity, images and rows read.
+    """
+
+    rows: Callable[[str], tuple[PageRow, ...]]
+    row_slots: tuple[str, ...]
+    channel_slots: tuple[str, ...]
+    reads_label: Callable[[str], bool]
+    structure: Callable[[str], tuple[str, ...]]
+    capture_regions: Callable[[SiteConfig], tuple[str, ...]]
+
+
+@dataclass(frozen=True)
 class SiteBinding:
     definition: SupplierDefinition
     collection: SupplierCollection
@@ -78,3 +115,5 @@ class PlatformTemplate:
     role_table: tuple[tuple[str, str], ...] = ()
     # ADR-0036 §4 step 2: how a storefront on this platform is recognised before onboarding.
     detection: PlatformDetection | None = None
+    # ADR-0036 §5: how a trial report reads a page's rows and structure (slice O3).
+    analysis: PlatformAnalysis | None = None
