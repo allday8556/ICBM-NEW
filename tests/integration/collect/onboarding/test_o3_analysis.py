@@ -164,7 +164,16 @@ def test_a_cafe24_trial_reads_one_page_once_and_writes_no_canonical_truth(
     assert sample.summary["prices"] == [{"label": "판매가", "amount_krw": 12000}]
     assert sample.summary["stock"] == "ON_SALE"
     assert sample.summary["product_id"] == "101"
-    assert sample.summary["images"] == {"count": 1, "urls": [f"https://{IMAGE_HOST}/p/101.jpg"]}
+    images = sample.summary["images"]
+    assert images["count"] == 1 and images["urls"] == [f"https://{IMAGE_HOST}/p/101.jpg"]
+    # Every product image with its role, rank and rule: what a verification confirms.
+    assert [(i["rank"], i["role"], i["rule"]) for i in images["items"]] == [
+        (1, "PRIMARY", "cafe24.primary.og_image"),
+        (2, "PRIMARY", "cafe24.primary.key_image"),
+    ]
+    assert {i["url"] for i in images["items"]} == {f"https://{IMAGE_HOST}/p/101.jpg"}
+    # Options read as ABSENT carry no normalized value; a read value is shown in full.
+    assert sample.summary["options"]["value"] is None
     assert sample.structural == [] and sample.verifiable
     hosts = {(h.host, h.role) for h in view.observed_hosts}
     assert (IMAGE_HOST, "image") in hosts
@@ -799,3 +808,45 @@ def test_collect_counts_a_trial_read_from_its_end_and_an_unfinished_one_as_now(
     other_key = pacing_key(entry.bound.collection, other)
     clock.advance(600)
     assert runs.seconds_until_readable(other_key, interval_s=60) == 60
+
+
+def test_a_capture_that_reads_differently_from_its_page_never_proves_the_site(
+    app: Container, clock: FakeClock, shop: TrialShop
+) -> None:
+    """A price row in a review block lies outside the regions a capture keeps: the whole page
+    holds the price for review, the capture alone would read it. The trial is flagged
+    CAPTURE_DIVERGES, a structural problem, so it never looks more readable than a collection of
+    the page; and a re-analysis under new words keeps the flag."""
+    key = recon_site(app, CAFE24_ORIGIN, "cafe24")
+    url = cafe24_url(931)
+    review = (
+        '<div class="xans-element- xans-product xans-product-review">'
+        "<table><tr><th>판매가</th><td>9,900원</td></tr></table></div>"
+    )
+    shop.serve(url, cafe24_page(931, body_extra=review))
+    run_trial(app, key, url)
+    (sample,) = app.onboarding_analysis.view(key).samples
+    assert "CAPTURE_DIVERGES" in sample.structural and not sample.verifiable
+    # Under new words the capture is re-analysed offline, and it stays diverged.
+    app.onboarding.save_words(key, {"brand": ["상표"]}, expected_seq=0, actor=OPERATOR)
+    result = app.onboarding_analysis.reanalyse(key, actor=OPERATOR)
+    assert result.analysed == 1
+    (again,) = result.analysis.samples
+    assert "CAPTURE_DIVERGES" in again.structural and not again.verifiable
+    assert app.onboarding.activation(key).structural_open == 1
+
+
+def test_a_trial_read_redacts_the_members_login_id(
+    app: Container, shop: TrialShop, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = recon_site(app, CAFE24_ORIGIN, "cafe24")
+    url = cafe24_url(941)
+    rows = (
+        row("상품명", "트라이얼 상품 941") + row("판매가", "12,000원") + row("회원", "tester01 님")
+    )
+    shop.serve(url, cafe24_page(941, rows=rows))
+    monkeypatch.setattr(app.onboarding_analysis, "_login_id", lambda supplier: "tester01")
+    run_trial(app, key, url)
+    (trial,) = app.onboarding.trials(key)
+    captures = TrialCaptureStore(app.config.onboarding_captures_dir)
+    assert "tester01" not in captures.read(trial.capture_sha256)

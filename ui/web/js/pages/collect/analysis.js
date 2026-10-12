@@ -74,6 +74,7 @@ const STRUCTURAL_COPY = {
   PRICE_BLOCK_UNREADABLE: '가격 칸이 금액 하나로 읽히지 않습니다.',
   IDENTITY_UNRESOLVED: '페이지가 상품 번호를 일관되게 밝히지 않습니다.',
   DUPLICATED_ORDER_LIST: '상품 영역이나 주문 목록이 중복되어 있습니다.',
+  CAPTURE_DIVERGES: '저장본이 페이지와 다르게 읽힙니다(상품 영역 밖의 내용을 템플릿이 읽음). 이 샘플로는 승인할 수 없습니다.',
 };
 
 const ROLE_LABEL = { image: '이미지', login: '로그인', asset: '자산(수집에 쓰이지 않음)' };
@@ -98,6 +99,8 @@ function message(error, fallback) {
   return ERROR_COPY[code] ?? fallback?.(error) ?? error?.error?.message ?? String(error?.message ?? error);
 }
 
+const IMAGE_ROLE = { PRIMARY: '대표', THUMBNAIL: '추가', DETAIL: '상세', PRODUCT_AUX: '보조' };
+
 function won(amount) {
   return `${Number(amount).toLocaleString('ko-KR')}원`;
 }
@@ -109,13 +112,26 @@ function valueText(field, summary, note) {
       return summary.name ?? note ?? '-';
     case 'prices':
       return summary.prices?.length ? summary.prices.map((p) => `${p.label} ${won(p.amount_krw)}`).join(' · ') : note ?? '-';
-    case 'options':
+    case 'options': {
       if (summary.options?.status === 'ABSENT') return '옵션 없음';
+      const value = summary.options?.value;
+      if (value?.axes?.length) {
+        const axes = value.axes.map((a) => `${a.name}: ${a.values.join('/')}`).join(' · ');
+        return `${axes} (조합 ${value.configurations?.length ?? 0}개)`;
+      }
       return summary.options?.observed?.length ? summary.options.observed.join(' · ') : note ?? '-';
+    }
     case 'stock':
       return summary.stock === 'ON_SALE' ? '판매 중' : summary.stock === 'SOLD_OUT' ? '품절' : note ?? '-';
-    case 'images':
-      return `${summary.images?.count ?? 0}장`;
+    case 'images': {
+      const items = summary.images?.items ?? [];
+      const roles = {};
+      for (const item of items) roles[item.role] = (roles[item.role] ?? 0) + 1;
+      const detail = Object.entries(roles)
+        .map(([role, count]) => `${IMAGE_ROLE[role] ?? role} ${count}`)
+        .join(' · ');
+      return detail ? `${summary.images?.count ?? 0}장 (${detail})` : `${summary.images?.count ?? 0}장`;
+    }
     default:
       return note ?? '-';
   }

@@ -43,7 +43,8 @@ Inside what is kept, member-identifying material is then removed by rule:
   ``product``, ``prd``, ``goods``, ``item``, ``option``, ``detail``) is the product's and stays;
 - the ``value`` of every ``input`` (it is not in the allowlist);
 - e-mail addresses, Korean mobile numbers, bearer and JWT tokens, secret-named query values
-  (``token=``, ``session=``, ``sid=``, …) and every value of the session's own cookies.
+  (``token=``, ``session=``, ``sid=``, …), every value of the session's own cookies and the
+  member's own login ID.
 
 What stays is the product's own regions: its information rows, its image references and its
 identity declarations. The trial report is computed on the capture itself, so a re-analysis of
@@ -260,10 +261,34 @@ class _Sanitizer(HTMLParser):
         self.out: list[str] = []
         # The tag of the private region being skipped and how deep its own tag is nested in it.
         self._skip: tuple[str, int] | None = None
-        # The tag of the product region being kept and how deep its own tag is nested in it.
-        self._region: tuple[str, int] | None = None
+        # The open elements, outermost first, as a parser nests them: an end tag closes the
+        # nearest open element of its name and every element left open inside it.
+        self._open: list[str] = []
+        # Where the product region being read sits in ``_open``, and what it has written so far in
+        # both renderings: with its content, and as structure only.
+        self._region_at: int | None = None
+        self._region_writes: list[tuple[str, str]] = []
         self._raw: str | None = None
         self._title = False
+
+    @property
+    def _inside(self) -> bool:
+        return self._region_at is not None
+
+    def _write(self, kept: str, structure: str | None = None) -> None:
+        if self._region_at is None:
+            self.out.append(kept)
+        else:
+            self._region_writes.append((kept, kept if structure is None else structure))
+
+    def _settle(self, *, closed: bool) -> None:
+        """End the region. Its content stays only when its own end tag closed it; a region an
+        ancestor's end or the end of the document closed was never closed by the page, so what
+        it seemed to hold is withdrawn and only its structure stays (as the templates withdraw a
+        scope the page never closed)."""
+        self.out.extend(kept if closed else structure for kept, structure in self._region_writes)
+        self._region_writes = []
+        self._region_at = None
 
     def _attrs(self, tag: str, attrs: list[tuple[str, str | None]], inside: bool) -> str:
         kept: list[str] = []
@@ -326,15 +351,18 @@ class _Sanitizer(HTMLParser):
                 candidates.append(f"{located} {descriptor}".strip())
         return ", ".join(candidates)
 
-    def _enter(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in _VOID:
+    def _tag(self, tag: str, attrs: list[tuple[str, str | None]], close: str = "") -> None:
+        marks = any(_marks(attrs, token) for token in self._regions)
+        if self._region_at is None and marks and tag not in _VOID and not close:
+            self._region_at = len(self._open)
+        if self._region_at is None and not (marks and (tag in _VOID or close)):
+            self.out.append(f"<{tag}{self._attrs(tag, attrs, False)}{close}>")
             return
-        if self._region is not None:
-            region, depth = self._region
-            if tag == region:
-                self._region = (region, depth + 1)
-        elif any(_marks(attrs, token) for token in self._regions):
-            self._region = (tag, 1)
+        kept = f"<{tag}{self._attrs(tag, attrs, True)}{close}>"
+        if self._region_at is None:  # a void element that is itself a region: its own attributes
+            self.out.append(kept)
+            return
+        self._write(kept, f"<{tag}{self._attrs(tag, attrs, False)}{close}>")
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if self._skip is not None:
@@ -346,8 +374,9 @@ class _Sanitizer(HTMLParser):
             if tag not in _VOID:
                 self._skip = (tag, 1)
             return
-        self._enter(tag, attrs)
-        self.out.append(f"<{tag}{self._attrs(tag, attrs, self._region is not None)}>")
+        self._tag(tag, attrs)
+        if tag not in _VOID:
+            self._open.append(tag)
         if tag in _RAW_TEXT:
             self._raw = tag
         if tag == "title":
@@ -356,8 +385,7 @@ class _Sanitizer(HTMLParser):
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if self._skip is not None or _private(attrs):
             return
-        inside = self._region is not None or any(_marks(attrs, t) for t in self._regions)
-        self.out.append(f"<{tag}{self._attrs(tag, attrs, inside)}/>")
+        self._tag(tag, attrs, "/")
 
     def handle_endtag(self, tag: str) -> None:
         if self._skip is not None:
@@ -369,22 +397,33 @@ class _Sanitizer(HTMLParser):
             self._raw = None
         if tag == "title":
             self._title = False
-        if self._region is not None:
-            region, depth = self._region
-            if tag == region:
-                self._region = None if depth == 1 else (region, depth - 1)
-        self.out.append(f"</{tag}>")
+        at = next((i for i in range(len(self._open) - 1, -1, -1) if self._open[i] == tag), None)
+        if at is None:  # a stray end tag closes nothing
+            self._write(f"</{tag}>")
+            return
+        del self._open[at:]
+        if self._region_at is not None and at < self._region_at:
+            self._settle(closed=False)
+        self._write(f"</{tag}>")
+        if self._region_at is not None and at == self._region_at:
+            self._settle(closed=True)
 
     def handle_data(self, data: str) -> None:
         if self._skip is not None or self._raw is not None:
             return
-        if self._region is None and not self._title:
-            return
-        self.out.append(html.escape(_redact(data, self._secrets), quote=False))
+        if self._title:
+            self._write(html.escape(_redact(data, self._secrets), quote=False))
+        elif self._region_at is not None:
+            self._write(html.escape(_redact(data, self._secrets), quote=False), "")
 
     def handle_decl(self, decl: str) -> None:
         if self._skip is None and decl.lower().startswith("doctype"):
-            self.out.append(f"<!{decl}>")
+            self._write(f"<!{decl}>")
+
+    def close(self) -> None:
+        super().close()
+        if self._region_at is not None:
+            self._settle(closed=False)
 
 
 def sanitize(
@@ -394,6 +433,7 @@ def sanitize(
     base_url: str,
     safe_query_keys: Mapping[str, frozenset[str]],
     secrets: Iterable[str] = (),
+    member: Iterable[str] = (),
 ) -> str:
     """The page reduced to what the template reads, member material removed (module docstring).
 
@@ -401,7 +441,15 @@ def sanitize(
     content attributes are kept only inside them. ``base_url`` is the sample's URL and
     ``safe_query_keys`` the site profile's safe query keys per host: every kept locator is
     resolved against the one and keeps only the other's keys (ADR-0010)."""
-    values = tuple(sorted({s for s in secrets if isinstance(s, str) and len(s) >= 6}, key=len))
+    # The session's cookie values (6+ characters) and the member's own login ID (4+): every
+    # occurrence in kept text or attributes is replaced, longest first.
+    values = tuple(
+        sorted(
+            {s for s in secrets if isinstance(s, str) and len(s) >= 6}
+            | {m for m in member if isinstance(m, str) and len(m) >= 4},
+            key=len,
+        )
+    )
     parser = _Sanitizer(
         tuple(reversed(values)),
         tuple(t for t in regions if t.strip("#.")),

@@ -515,12 +515,13 @@ def build_container(
     jobs.set_worker_notifier(worker.notify)
 
     secrets = secret_store or build_secret_store(config.secret_backend)
+    supplier_credentials = SupplierCredentialStore(secrets)
     connect = ConnectService(
         db=db,
         clock=clock,
         audit=audit,
         jobs=jobs,
-        credentials=SupplierCredentialStore(secrets),
+        credentials=supplier_credentials,
         sessions=SupplierSessionStore(config.runtime_dir / SESSIONS_DIR_NAME, secrets),
         gateway=supplier_gateway or PolicedSupplierGateway(browser_channel=config.browser_channel),
         suppliers=supplier_catalog.definitions,
@@ -738,6 +739,8 @@ def build_container(
         collect_remaining=lambda key, interval: runs.seconds_until_readable(
             key, interval_s=interval, collection_runs_only=True
         ),
+        # ADR-0036 §5 step 3: the member's login ID is redacted from a capture, in memory only.
+        login_id=supplier_credentials.username,
     )
     registry.register(onboarding_analysis.job_definition())
 

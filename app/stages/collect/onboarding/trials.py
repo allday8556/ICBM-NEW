@@ -32,7 +32,7 @@ import hashlib
 import logging
 import threading
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
@@ -54,7 +54,7 @@ from app.platform.core.errors import (
 )
 from app.stages.collect.collection import CollectionGateway, SessionProvider, pacing_key
 from app.stages.collect.facts import FIELD_REGISTRY, FieldLevel, FieldStatus
-from app.stages.collect.onboarding.analysis import TrialReport, analyse
+from app.stages.collect.onboarding.analysis import CAPTURE_DIVERGES, TrialReport, analyse
 from app.stages.collect.onboarding.capture import (
     CaptureIntegrityError,
     TrialCaptureStore,
@@ -241,6 +241,7 @@ class SiteAnalysisService:
         clock: Clock,
         collect_remaining: Callable[[PacingKey, float], float] | None = None,
         templates: Mapping[str, PlatformTemplate] = TEMPLATES,
+        login_id: Callable[[str], str | None] | None = None,
     ) -> None:
         """``collect_remaining`` is COLLECT's own same-product interval check (a read-only call of
         the run store)."""
@@ -253,6 +254,9 @@ class SiteAnalysisService:
         self._clock = clock
         self._collect_remaining = collect_remaining
         self._templates = templates
+        # The supplier's saved login ID, read in memory only so a capture never keeps it: a page
+        # greets its member by it wherever its markup puts the greeting.
+        self._login_id = login_id
         # A check and the job it admits are one step: two submits of a sample cannot both pass.
         self._admit = threading.Lock()
 
@@ -336,10 +340,14 @@ class SiteAnalysisService:
             base_url=url,
             safe_query_keys=site.collection.profile.safe_query_keys,
             secrets=_cookie_values(session),
+            member=self._member(key),
         )
         sha256 = self._captures.put(body)
         actor = str(context.payload.get("actor") or f"job:{context.job_id}")[:64]
-        trial = self._record(site, pacing.url, sha256, body, actor=actor)
+        # The whole page, read in memory once and never kept: a capture that does not read
+        # exactly as the page did must never look more readable than a collection of the page.
+        page = self._report(site, pacing.url, document.body)
+        trial = self._record(site, pacing.url, sha256, body, actor=actor, against=page)
         logger.info(
             "collect.onboarding_trial_recorded",
             extra={"supplier": key, "trial_id": trial.trial_id, "job_id": context.job_id},
@@ -361,7 +369,15 @@ class SiteAnalysisService:
             except CaptureIntegrityError:
                 missing += 1
                 continue
-            self._record(site, trial.sample_url_key, trial.capture_sha256, body, actor=actor)
+            self._record(
+                site,
+                trial.sample_url_key,
+                trial.capture_sha256,
+                body,
+                actor=actor,
+                # A capture that diverged from its page stays diverged under any words.
+                diverged=CAPTURE_DIVERGES in trial.structural,
+            )
             analysed += 1
         return ReanalysisView(
             analysed=analysed, current=current, missing=missing, analysis=self.view(key)
@@ -478,6 +494,13 @@ class SiteAnalysisService:
             )
         return url
 
+    def _member(self, key: str) -> tuple[str, ...]:
+        try:
+            login = self._login_id(key) if self._login_id is not None else None
+        except Exception:  # an unreadable store redacts nothing more; the allowlist still holds
+            login = None
+        return (login,) if login else ()
+
     def _ledger(self, key: str) -> list[JobRecord]:
         """Every trial job this site ever had: each one is (or was) one read of a sample."""
         return self._jobs.recent_for_targets(
@@ -544,9 +567,26 @@ class SiteAnalysisService:
                 raise TrialTooSoon(remaining, "sample")
 
     def _record(
-        self, site: _Site, sample_key: str, sha256: str, body: str, *, actor: str
+        self,
+        site: _Site,
+        sample_key: str,
+        sha256: str,
+        body: str,
+        *,
+        actor: str,
+        against: TrialReport | None = None,
+        diverged: bool = False,
     ) -> StoredTrial:
+        """Record the capture's report. ``against`` is the whole page's report, read in memory at
+        the trial's own read: when the capture's statuses, values or structure differ from it, the
+        trial is flagged ``CAPTURE_DIVERGES``, a structural problem, so it never proves the site."""
         report = self._report(site, sample_key, body)
+        if against is not None and (
+            against.fingerprint != report.fingerprint or against.structural != report.structural
+        ):
+            diverged = True
+        if diverged and CAPTURE_DIVERGES not in report.structural:
+            report = replace(report, structural=(*report.structural, CAPTURE_DIVERGES))
         return self._store.record_trial(
             site.record.supplier_key,
             TrialInput(

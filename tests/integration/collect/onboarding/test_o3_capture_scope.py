@@ -199,3 +199,45 @@ def test_a_capture_keeps_no_member_text_and_no_url_path_outside_the_product_regi
     assert 'class="top"' in kept  # the structure stays, its text does not
     # A style keeps only what can hide an element, squashed as the templates read it.
     assert 'style="display:none!important"' in kept
+
+
+def _kept(page: str, *, member: tuple[str, ...] = ()) -> str:
+    return sanitize(
+        page,
+        regions=("xans-product-detail",),
+        base_url="https://shop.example.com/product/a/1/",
+        safe_query_keys={},
+        member=member,
+    )
+
+
+def test_a_region_the_page_never_closes_keeps_nothing_it_seemed_to_hold() -> None:
+    """A region is kept only when its own end tag closes it. One an ancestor's end or the end of
+    the document closes was never closed by the page, so the member text it would swallow is
+    withdrawn with the rest; only the structure stays."""
+    unclosed = (
+        "<html><body><div class='wrap'><div class='xans-product-detail'><p>판매가 12,000원</p>"
+        f"<div class='top'>{MEMBER_NAME}님 VIP</div></div-not-closing></body></html>"
+    )
+    kept = _kept(unclosed)
+    assert MEMBER_NAME not in kept and "판매가" not in kept
+    assert 'class="xans-product-detail"' in kept and 'class="top"' in kept
+    at_eof = f"<div class='xans-product-detail'><p>판매가 12,000원</p><p>{MEMBER_NAME}님</p>"
+    kept = _kept(at_eof)
+    assert MEMBER_NAME not in kept and "판매가" not in kept
+    # Properly closed, inside misnested markup: the region keeps its own text and only that.
+    closed = (
+        "<div class='wrap'><span><div class='xans-product-detail'><p>판매가 12,000원</p></div>"
+        f"</span></div><div class='top'>{MEMBER_NAME}님</div>"
+    )
+    kept = _kept(closed)
+    assert "판매가 12,000원" in kept and MEMBER_NAME not in kept
+
+
+def test_the_members_login_id_is_redacted_wherever_it_is_written() -> None:
+    page = (
+        "<div class='xans-product-detail'><p>판매가 12,000원</p>"
+        "<p>tester01 님의 회원가 10,000원</p><img src='https://img.example.com/tester01.jpg'></div>"
+    )
+    kept = _kept(page, member=("tester01",))
+    assert "tester01" not in kept and "판매가 12,000원" in kept

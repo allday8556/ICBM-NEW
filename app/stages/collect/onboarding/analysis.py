@@ -84,6 +84,11 @@ PRODUCT_BLOCK_NOT_FOUND: Final = "PRODUCT_BLOCK_NOT_FOUND"
 PRICE_BLOCK_NOT_FOUND: Final = "PRICE_BLOCK_NOT_FOUND"
 PRICE_BLOCK_UNREADABLE: Final = "PRICE_BLOCK_UNREADABLE"
 IDENTITY_UNRESOLVED: Final = "IDENTITY_UNRESOLVED"
+# The stored capture does not read as the page the supplier served: something the template read
+# lay outside what a capture keeps (a price row in a review block, a region the page never
+# closed). What the capture shows is not what a collection of the page would read, so the sample
+# cannot prove the site; a template change (its capture regions) is needed.
+CAPTURE_DIVERGES: Final = "CAPTURE_DIVERGES"
 
 _URL_MATERIAL = re.compile(r"(?i)(?:[a-z][a-z0-9+.-]*:)?//\S*")
 _HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
@@ -362,7 +367,18 @@ def _images(candidates: Sequence[ImageCandidate]) -> tuple[str, dict[str, Any]]:
         if product
         else FieldStatus.ABSENT
     )
-    return status.value, {"count": len(identities), "urls": urls[:IMAGE_URL_LIMIT]}
+    # Every product image as the template decided it — role, its rank among the product images in
+    # source order, the reference without its query — so a verification (O5) confirms the images
+    # field itself, not a count. The rank, not the document index: a capture keeps no layout image.
+    items = [
+        {"role": c.role.value, "rank": rank, "url": _image_url(c.url), "rule": c.rule}
+        for rank, c in enumerate(sorted(product, key=lambda c: c.order), start=1)
+    ]
+    return status.value, {
+        "count": len(identities),
+        "urls": urls[:IMAGE_URL_LIMIT],
+        "items": items,
+    }
 
 
 def _value(fact: FieldFact | None) -> dict[str, Any] | None:
@@ -409,6 +425,8 @@ def analyse(
         "prices": (_value(fields.get("prices")) or {}).get("prices", []),
         "options": {
             "status": None if options is None else options.status.value,
+            # The normalized axes and configurations, when read: what a verification confirms.
+            "value": _value(options),
             "observed": []
             if options is None
             else [_bounded(e.observed, VALUE_LIMIT) for e in options.evidence if e.observed][:3],
