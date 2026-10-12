@@ -134,8 +134,9 @@ class CollectionRunRecord:
     provenance: RunProvenance | None = None
 
 
-# Another owner's real reads of a product, read inside the caller's unit: the latest, or None.
-OtherReads = Callable[[Session, PacingKey], datetime | None]
+# Another owner's real reads of a product, read inside the caller's unit at ``now``: the latest
+# moment a read of it may have happened, or None.
+OtherReads = Callable[[Session, PacingKey, datetime], datetime | None]
 
 
 class CollectionRunStore:
@@ -314,7 +315,11 @@ class CollectionRunStore:
         return self._latest(session, key)
 
     def _latest(self, session: Session, key: PacingKey) -> datetime | None:
-        reads = [_last_read(session, key), *(source(session, key) for source in self._other_reads)]
+        now = self._clock.now()
+        reads = [
+            _last_read(session, key),
+            *(source(session, key, now) for source in self._other_reads),
+        ]
         return max((_utc(read) for read in reads if read is not None), default=None)
 
     def note_identity(self, run_id: str, *, source_product_id: str) -> None:

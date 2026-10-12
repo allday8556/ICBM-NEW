@@ -136,7 +136,9 @@ def test_a_capture_keeps_no_member_text_and_no_url_path_outside_the_product_regi
         '<a href="https://auth.shop-login.com/member/login.php?r=%2Fsecret">로그인</a>'
         '<form action="https://pay.example.com/charge/7D3C2B1A9E8F/" data-user="u-77">'
         '<input name="t" value="v-secret"></form>'
-        '<div class="xans-product-detail"><p>판매가 12,000원</p>'
+        '<div class="xans-product-detail" style="display: none !important;'
+        ' background: url(https://track.example.com/s.png?token=STYLESECRET)">'
+        '<p style="color:red">판매가 12,000원</p>'
         '<img src="https://img.shop-cdn.com/p/103.jpg" data-owner="u-77">'
         '<img src="https://img.shop-cdn.com/p/104.jpg?v=a1b2c3d4&amp;goodsNo=104#frag"'
         ' srcset="https://img.shop-cdn.com/p/105.jpg?exp=1700000000 2x,'
@@ -170,6 +172,9 @@ def test_a_capture_keeps_no_member_text_and_no_url_path_outside_the_product_regi
         "base64",
         "PATHSECRET",
         "w=500",
+        "STYLESECRET",
+        "track.example.com",
+        "color",
     ):
         assert gone not in kept, gone
     # ADR-0010: a locator keeps scheme, host, path and only the profile's safe query keys.
@@ -182,3 +187,5 @@ def test_a_capture_keeps_no_member_text_and_no_url_path_outside_the_product_regi
     assert 'href="//auth.shop-login.com/login"' in kept
     assert 'src="//assets.shop-cdn.com/"' in kept and 'href="//assets.shop-cdn.com/"' in kept
     assert 'class="top"' in kept  # the structure stays, its text does not
+    # A style keeps only what can hide an element, squashed as the templates read it.
+    assert 'style="display:none!important"' in kept

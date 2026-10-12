@@ -28,6 +28,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
+from app.capabilities.jobs.models import Job
 from app.config import AppConfig, database_path
 from app.container import Container
 from app.main import create_app
@@ -741,3 +742,38 @@ def test_a_trial_read_paces_collects_next_read_of_that_product(
         lambda: app.onboarding_analysis.submit(key, other, actor=OPERATOR),
     )
     assert error.details["scope"] == "sample"
+
+
+def test_collect_counts_a_trial_read_from_its_end_and_an_unfinished_one_as_now(
+    app: Container, clock: FakeClock, shop: TrialShop
+) -> None:
+    """A delay between a trial job's start and its request (the session, the gateway) never
+    shortens COLLECT's interval: a finished trial counts from when it finished, after its read,
+    and a started one that has not finished counts as reading now."""
+    key = recon_site(app, CAFE24_ORIGIN, "cafe24")
+    url = cafe24_url(911)
+    shop.serve(url, cafe24_page(911))
+    # 30 s pass between the job's start and the supplier's answer.
+    shop.on_request = lambda: clock.advance(30)
+    run_trial(app, key, url)
+    shop.on_request = None
+    entry = app.supplier_catalog.onboarded(key)
+    assert entry is not None and entry.bound is not None
+    pacing = pacing_key(entry.bound.collection, url)
+    runs = CollectionRunStore(app.db, clock, other_reads=(last_trial_read,))
+    # 40 s after the job started is 10 s after the read: still the read's interval.
+    clock.advance(10)
+    assert 49 <= runs.seconds_until_readable(pacing, interval_s=60) <= 50
+    clock.advance(51)
+    assert runs.seconds_until_readable(pacing, interval_s=60) == 0
+
+    # A trial job that started and has not finished is a read in flight.
+    other = cafe24_url(912)
+    submitted = app.onboarding_analysis.submit(key, other, actor=OPERATOR)
+    with app.db.write() as session:
+        job = session.get(Job, submitted.job_id)
+        assert job is not None
+        job.state, job.started_at = "RUNNING", clock.now()
+    other_key = pacing_key(entry.bound.collection, other)
+    clock.advance(600)
+    assert runs.seconds_until_readable(other_key, interval_s=60) == 60

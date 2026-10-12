@@ -8,7 +8,7 @@ fixtures moved onto the test host, or synthetic pages written here; no supplier 
 """
 
 import html as html_text
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -131,6 +131,8 @@ class TrialShop:
     pages: dict[tuple[str, str], Page] = field(default_factory=dict)
     requests: list[tuple[str, str, str]] = field(default_factory=list)
     cookies: list[str] = field(default_factory=list)
+    # Called as each request arrives, before it is answered: a test's way to let time pass there.
+    on_request: Callable[[], None] | None = None
 
     def serve(self, url: str, body: str, status: int = 200) -> None:
         parsed = httpx.URL(url)
@@ -141,6 +143,8 @@ class TrialShop:
         target = request.url.path + (f"?{request.url.query.decode()}" if request.url.query else "")
         self.requests.append((request.method, request.url.host, target))
         self.cookies.append(request.headers.get("cookie", ""))
+        if self.on_request is not None:
+            self.on_request()
         page = self.pages.get((request.url.host, target))
         if page is None:
             return httpx.Response(404, text="not found")

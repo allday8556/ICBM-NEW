@@ -17,7 +17,9 @@ template reads:
   whatever its markup, so member text in a generic element never reaches the capture.
 - **The tag structure stays whole**, so nesting reads exactly as the template's parser saw it (an
   unclosed description block included). Outside the regions an element keeps only ``id``,
-  ``class`` and ``style``: what a ``within``/``marks`` rule and a hidden-element check read.
+  ``class`` and ``style``: what a ``within``/``marks`` rule and a hidden-element check read. A
+  ``style`` keeps only its ``display``/``visibility`` keywords, everywhere: every other
+  declaration, a CSS ``url(…)`` among them, is dropped.
 - **Attributes are an allowlist everywhere**: those, the image sources a template reads (``src``,
   ``srcset``, ``data-src``, ``data-original``, ``ec-data-src``) inside the regions, the
   form-state flags (``disabled``, ``selected``, ``checked``), ``name``, a ``meta`` element's
@@ -87,11 +89,15 @@ _VOID: Final = frozenset(
     }
 )
 _RAW_TEXT: Final = frozenset({"script", "style", "textarea"})
-# What a template reads of an element anywhere: its marks and whether it is painted.
+# What a template reads of an element anywhere: its marks, and whether its style hides it.
 _STRUCTURE: Final = frozenset({"id", "class", "style"})
-# What it reads inside a product region besides: image sources, form-state flags and names.
+# Of a style, only what can hide an element: a ``display``/``visibility`` keyword (the templates'
+# HIDDEN_STYLES). Every other declaration, a ``url(…)`` among them, is dropped.
+_STYLE_KEPT: Final = frozenset({"display", "visibility"})
+_STYLE_KEYWORD = re.compile(r"^[a-z-]+(!important)?$")
 # The kept attributes that locate a resource: each keeps only what ADR-0010 lets a locator keep.
 _LOCATORS: Final = frozenset({"src", "srcset", "data-src", "data-original", "ec-data-src"})
+# What a template reads inside a product region besides: image sources, form-state flags, names.
 _INSIDE: Final = frozenset(
     {
         "src",
@@ -160,6 +166,17 @@ def _marks(attrs: list[tuple[str, str | None]], token: str) -> bool:
     return bare == element_id or any(c == bare or c.startswith(bare) for c in classes)
 
 
+def _style(value: str) -> str:
+    """A style reduced to its ``display``/``visibility`` keywords, squashed as the templates read
+    it; empty when it states neither."""
+    kept = []
+    for declaration in value.split(";"):
+        name, _, keyword = "".join(declaration.lower().split()).partition(":")
+        if name in _STYLE_KEPT and _STYLE_KEYWORD.fullmatch(keyword):
+            kept.append(f"{name}:{keyword}")
+    return ";".join(kept)
+
+
 def _host_only(reference: str, *, login: bool = False) -> str | None:
     """An absolute reference reduced to its host (``//host/``), with the fixed path ``/login`` when
     it targets a login page: what the report's host observation reads, and no path segment, query
@@ -180,6 +197,9 @@ def _attribute(
     tag: str, name: str, value: str | None, attrs: list[tuple[str, str | None]], inside: bool
 ) -> tuple[bool, str | None]:
     """Whether the attribute is kept, and the value kept (see the module docstring)."""
+    if name == "style":
+        kept = _style(value or "")
+        return bool(kept), kept
     if name in _STRUCTURE:
         return True, value
     if tag == "meta":

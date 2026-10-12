@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.capabilities.jobs.models import TERMINAL_STATE_NAMES, Job
@@ -187,18 +187,29 @@ def target_ref(supplier_key: str, sample_key: str) -> str:
     return f"{supplier_key}:{_digest(sample_key)}"
 
 
-def last_trial_read(session: Session, key: PacingKey) -> datetime | None:
-    """When a trial last read this product: its job's start, which precedes the read (OB-06).
+def last_trial_read(session: Session, key: PacingKey, now: datetime) -> datetime | None:
+    """The latest moment a trial may have read this product (OB-06), never earlier than its read.
 
-    COLLECT's same-product interval counts it (``CollectionRunStore`` ``other_reads``), so an
-    ordinary collection does not read a product a trial has just read. A trial job that never
-    reached its read counts as well: the interval errs on the side of waiting."""
-    return session.scalar(
-        select(func.max(Job.started_at)).where(
+    A finished trial job counts from when it finished, which is after its request was sent and
+    answered; a started job that has not finished counts as reading ``now``, so a delay between the
+    job's start and its request (the session, the gateway) can never shorten the interval. COLLECT's
+    same-product interval counts it (``CollectionRunStore`` ``other_reads``): an ordinary collection
+    does not read a product a trial has just read. A job that never reached its read counts as
+    well; the interval errs on the side of waiting."""
+    moments: list[datetime] = []
+    for state, started, finished in session.execute(
+        select(Job.state, Job.started_at, Job.finished_at).where(
             Job.job_type == ONBOARDING_TRIAL_JOB,
             Job.target_ref == target_ref(key.supplier_key, key.url),
             Job.started_at.is_not(None),
         )
+    ):
+        if state not in TERMINAL_STATE_NAMES:
+            moments.append(now)
+        else:
+            moments.append(finished or started)
+    return max(
+        (m if m.tzinfo is not None else m.replace(tzinfo=UTC) for m in moments), default=None
     )
 
 
