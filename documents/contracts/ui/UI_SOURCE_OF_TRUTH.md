@@ -475,6 +475,36 @@ to, in v29's existing language: the 공급처 관리 supplier card and a modal l
   are used. This is the one write the 수집관리 screen adds besides the collection submit, and it is
   the Product DB owner's write, not COLLECT's.
 
+## Collection Management — 공급처 관리 › 「+ 공급처 추가」 (ADR-0036 O2)
+
+v29's `+ 공급처 추가` and its `새 공급처 추가` card open v29's `supplierCredentialModal` (titled
+`새 공급처 추가`: 공급처명, 도메인, ID, Password, 연결 테스트, 저장) with the add flow's steps:
+
+- **플랫폼 확인.** `POST /api/v1/onboarding/detect` with the domain. The server guards the origin
+  (an exact public `https` host, never a repository supplier's or an onboarded one's), reads the
+  home page and each template's login page once, and reads robots.txt and the detected template's
+  terms page. The modal shows the detected platform (`Cafe24` / `고도몰` / `지원하지 않는 플랫폼`),
+  the marker names that decided it, the robots.txt lines and both documents' status with a link
+  to open them, and every warning (`주의`). A warning never blocks: the seller reads it and decides.
+  An unsupported site stops with `템플릿이 필요합니다` and 저장 stays disabled: no template is ever
+  forced onto a site that does not carry its markers. Only when both templates' markers matched
+  (`AMBIGUOUS`) does a `플랫폼` select offer exactly those templates; a choice reads only that
+  template's policy documents. A home page that redirects offers `…로 다시 확인`.
+- **저장.** Enabled only after the acknowledgement checkbox. It creates the draft
+  (`POST /api/v1/onboarding/suppliers`: name, origin, the confirmed template, the detection id and
+  the acknowledgement) and then saves the login through CONNECT's existing
+  `PUT /api/v1/connect/suppliers/{key}/credentials`. The password is read from its field once,
+  sent once to that route only and cleared; it is never shown, kept or logged.
+- **연결 테스트.** CONNECT's existing test; when it passes, `POST …/onboarding/suppliers/{key}/recon`
+  moves the supplier to `RECON` and the modal closes. A card's own 연결 테스트 does the same for a
+  draft supplier whose modal was closed early.
+- **The card.** An onboarded supplier's card carries its onboarding chip beside the connection chip:
+  `초안` (DRAFT), `분석 중` (RECON), `사용 중` (ACTIVE), `비활성` (DISABLED). A disabled supplier,
+  which CONNECT no longer lists, keeps a card with its chip and no action. `사이트 분석` and
+  `수집 규칙` stay inert until O3 and O4.
+- **Server-owned.** Detection, the warnings, the conditions for `RECON` and every state belong to the
+  onboarding owner. The page decides none of them and keeps nothing in browser storage.
+
 ## Collection intake (A-UX2, owner decisions 2026-10-04 D1 and D2)
 
 - Collection Management's URL box follows v29's `상품 URL을 입력하세요. 여러 개는 줄바꿈`: one URL per

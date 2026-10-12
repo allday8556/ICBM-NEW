@@ -40,7 +40,7 @@ from integrations.suppliers.collection import (
     SupplierCollection,
     UnresolvedIdentity,
 )
-from integrations.suppliers.platforms import PlatformTemplate, SiteBinding
+from integrations.suppliers.platforms import PlatformDetection, PlatformTemplate, SiteBinding
 from integrations.suppliers.platforms.cafe24.collect import (
     DEFAULT_VOCABULARY,
     EXTRACTION_REVISION,
@@ -278,6 +278,27 @@ def bind(site: SiteConfig, extraction_revision: str) -> SiteBinding:
     return SiteBinding(definition=definition, collection=collection)
 
 
+# ADR-0036 §4 step 2: how a Cafe24 storefront is recognised before it is onboarded. The asset host
+# and the ``xans-`` modules are on every Cafe24 page (U-PICK, KM통상); the login form is the one
+# CONNECT fills. Markers only: nothing is read from the page.
+DETECTION = PlatformDetection(
+    home_markers=(
+        ("cafe24_asset_host", "echosting.cafe24.com"),
+        ("cafe24_module", "xans-element-"),
+        ("cafe24_layout_module", "xans-layout"),
+        ("cafe24_front_action", "/exec/front/"),
+    ),
+    login_path=LOGIN_PATH,
+    login_markers=(
+        ("cafe24_login_form", 'action="/exec/front/Member/login/"'),
+        ("cafe24_login_module", "xans-member-login"),
+    ),
+    robots_path=ROBOTS_PATH,
+    terms_path=TERMS_PATH,
+    product_path_prefix="/product/",
+)
+
+
 TEMPLATE = PlatformTemplate(
     platform="cafe24",
     revision=EXTRACTION_REVISION,
@@ -289,4 +310,5 @@ TEMPLATE = PlatformTemplate(
     capture_revision=CAPTURE_REVISION,
     bind=bind,
     role_table=tuple((rule.rule_id, rule.role.value) for rule in (*ROLE_RULES, OG_IMAGE_RULE)),
+    detection=DETECTION,
 )

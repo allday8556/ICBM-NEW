@@ -44,7 +44,7 @@ from integrations.suppliers.collection import (
     SupplierCollection,
     UnresolvedIdentity,
 )
-from integrations.suppliers.platforms import PlatformTemplate, SiteBinding
+from integrations.suppliers.platforms import PlatformDetection, PlatformTemplate, SiteBinding
 from integrations.suppliers.platforms.godomall.collect import (
     DEFAULT_VOCABULARY,
     EXTRACTION_REVISION,
@@ -268,6 +268,24 @@ def bind(site: SiteConfig, extraction_revision: str) -> SiteBinding:
     return SiteBinding(definition=definition, collection=collection)
 
 
+# ADR-0036 §4 step 2: how a Godomall storefront is recognised before it is onboarded. The skin path
+# and the NHN Commerce storage host are on every Godomall page (건강산); the login form is the one
+# CONNECT fills. Markers only: nothing is read from the page.
+DETECTION = PlatformDetection(
+    home_markers=(
+        ("godomall_skin", "/data/skin/front/"),
+        ("godomall_storage_host", "godomall-storage"),
+        ("godomall_cdn_host", "cdn-nhncommerce.com"),
+        ("godomall_name", "godomall"),
+    ),
+    login_path=LOGIN_PATH,
+    login_markers=(("godomall_login_form", _LOGIN_FORM_MARKER),),
+    robots_path=ROBOTS_PATH,
+    terms_path=TERMS_PATH,
+    product_path_prefix="/goods/goods_view.php",
+)
+
+
 TEMPLATE = PlatformTemplate(
     platform="godomall",
     revision=EXTRACTION_REVISION,
@@ -279,4 +297,5 @@ TEMPLATE = PlatformTemplate(
     capture_revision=CAPTURE_REVISION,
     bind=bind,
     role_table=tuple((rule.rule_id, rule.role.value) for rule in (*ROLE_RULES, OG_IMAGE_RULE)),
+    detection=DETECTION,
 )

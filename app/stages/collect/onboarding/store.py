@@ -6,7 +6,9 @@ if anything tries. An audit event names keys, states, hosts, roles, sequence num
 fingerprints only: never a credential, a word, a reason the operator typed or page text (§9).
 
 - ``create`` writes the identity, the first state ``DRAFT`` and the bootstrap storefront host,
-  the origin's own host, which passes the host guard first (OB-01).
+  the origin's own host, which passes the host guard first (OB-01). Since O2 it also writes, in
+  the same unit, the policy reads the operator was shown and acknowledged (§4 step 3), and audits
+  the detected and the confirmed platform (step 2) by name only.
 - ``transition`` appends one allowed edge of the state log (§3, §7). ``RECON → ACTIVE`` is
   appended only when the trials and verifications prove it (§7 D2, OB-04, ``activation``); the
   database refuses an unproven ``ACTIVE`` as well. Trials and verifications have no writer before
@@ -26,6 +28,7 @@ import re
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Final
 
 from sqlalchemy import func, select
@@ -41,6 +44,7 @@ from app.stages.collect.onboarding.hosts import onboarding_host, onboarding_orig
 from app.stages.collect.onboarding.models import (
     OnboardedSupplier,
     OnboardingHost,
+    OnboardingPolicyRead,
     OnboardingTransition,
     OnboardingTrial,
     OnboardingVerification,
@@ -81,6 +85,7 @@ ONBOARDING_ROLE_UNKNOWN: Final = "ONBOARDING_ROLE_UNKNOWN"
 ONBOARDING_REASON_INVALID: Final = "ONBOARDING_REASON_INVALID"
 ONBOARDING_EVIDENCE_INVALID: Final = "ONBOARDING_EVIDENCE_INVALID"
 ONBOARDING_ACTIVATION_NOT_PROVEN: Final = "ONBOARDING_ACTIVATION_NOT_PROVEN"
+ONBOARDING_POLICY_READS_INVALID: Final = "ONBOARDING_POLICY_READS_INVALID"
 
 # ADR-0036 §2 D2: three distinct samples prove a words revision.
 ACTIVATION_SAMPLES: Final = 3
@@ -146,6 +151,53 @@ class ActivationProof:
             "refuted": self.refuted,
             "structural_open": self.structural_open,
         }
+
+
+@dataclass(frozen=True)
+class PolicyReadInput:
+    """One policy document read shown to the operator at add time (§4 step 3): which document,
+    its path, the HTTP status and the SHA-256 of what was read. Never the text itself."""
+
+    document: str
+    path: str
+    http_status: int
+    content_sha256: str | None
+    read_at: datetime
+
+
+@dataclass(frozen=True)
+class StoredPolicyRead:
+    read_id: str
+    document: str
+    path: str
+    http_status: int
+    content_sha256: str | None
+    read_at: datetime
+    acknowledged_by: str
+    acknowledged_at: datetime
+
+
+# ADR-0010 Q1 reconnaissance caps: at most 3 public policy reads per site.
+POLICY_READ_CAP: Final = 3
+_POLICY_DOCUMENTS: Final = frozenset({"ROBOTS", "TERMS"})
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _policy_reads(values: Iterable[PolicyReadInput]) -> list[PolicyReadInput]:
+    reads = list(values)
+    if len(reads) > POLICY_READ_CAP or not all(
+        r.document in _POLICY_DOCUMENTS
+        and isinstance(r.path, str)
+        and r.path.startswith("/")
+        and 100 <= r.http_status <= 599
+        and (r.content_sha256 is None or _HEX64.fullmatch(r.content_sha256))
+        for r in reads
+    ):
+        raise InputValidationError(
+            ONBOARDING_POLICY_READS_INVALID,
+            f"at most {POLICY_READ_CAP} policy reads, each a robots or terms document",
+        )
+    return reads
 
 
 class OnboardingConflictError(AppError):
@@ -219,8 +271,24 @@ class OnboardingStore:
 
     # ------------------------------------------------------------------ writes
 
-    def create(self, *, name: str, origin: str, template: str, actor: str) -> OnboardingRecord:
-        """A new ``DRAFT`` supplier with its bootstrap storefront host (§4 step 1, OB-01)."""
+    def create(
+        self,
+        *,
+        name: str,
+        origin: str,
+        template: str,
+        actor: str,
+        policy_reads: Iterable[PolicyReadInput] = (),
+        detected: str | None = None,
+        markers: Iterable[str] = (),
+    ) -> OnboardingRecord:
+        """A new ``DRAFT`` supplier with its bootstrap storefront host (§4 step 1, OB-01).
+
+        ``policy_reads`` are the reads the operator was shown, written acknowledged by ``actor``
+        (step 3). ``detected`` and ``markers`` are what platform detection found (step 2): the
+        audit names them beside the template the operator confirmed."""
+        reads = _policy_reads(policy_reads)
+        marker_names = [m for m in markers if isinstance(m, str) and _EVIDENCE_ID.fullmatch(m)]
         try:
             display_name = plain_word(name, "display_name")
         except SiteConfigError:
@@ -282,6 +350,20 @@ class OnboardingStore:
                     confirmed_at=now,
                 )
             )
+            for read in reads:
+                session.add(
+                    OnboardingPolicyRead(
+                        read_id=str(uuid.uuid4()),
+                        supplier_key=key,
+                        document=read.document,
+                        path=read.path,
+                        http_status=read.http_status,
+                        content_sha256=read.content_sha256,
+                        read_at=read.read_at,
+                        acknowledged_by=actor,
+                        acknowledged_at=now,
+                    )
+                )
             session.flush()
             self._event(
                 session,
@@ -292,6 +374,15 @@ class OnboardingStore:
                     "template": chosen.platform,
                     "storefront_host": host,
                     "state": OnboardingState.DRAFT.value,
+                },
+                details={
+                    "detected": detected,
+                    "confirmed": chosen.platform,
+                    "markers": marker_names[:_EVIDENCE_LIMIT],
+                    "policy_reads": [
+                        {"document": r.document, "path": r.path, "http_status": r.http_status}
+                        for r in reads
+                    ],
                 },
             )
             record = _current(session, key)
@@ -494,6 +585,40 @@ class OnboardingStore:
     def current(self, key: str) -> OnboardingRecord:
         with self._db.read() as session:
             return _current(session, key)
+
+    def policy_reads(self, key: str) -> tuple[StoredPolicyRead, ...]:
+        """The policy reads the operator acknowledged for ``key`` (§4 step 3), oldest first."""
+        with self._db.read() as session:
+            _current(session, key)
+            rows = session.scalars(
+                select(OnboardingPolicyRead)
+                .where(OnboardingPolicyRead.supplier_key == key)
+                .order_by(OnboardingPolicyRead.read_at, OnboardingPolicyRead.document)
+            ).all()
+            return tuple(
+                StoredPolicyRead(
+                    read_id=row.read_id,
+                    document=row.document,
+                    path=row.path,
+                    http_status=row.http_status,
+                    content_sha256=row.content_sha256,
+                    read_at=row.read_at,
+                    acknowledged_by=row.acknowledged_by,
+                    acknowledged_at=row.acknowledged_at,
+                )
+                for row in rows
+            )
+
+    def supplier_of_origin(self, origin: str) -> str | None:
+        """The onboarded supplier key that holds ``origin`` (normalised), in any state."""
+        with self._db.read() as session:
+            return session.scalars(
+                select(OnboardedSupplier.supplier_key).where(OnboardedSupplier.origin == origin)
+            ).first()
+
+    def reserved_host(self, host: str) -> bool:
+        """Whether ``host`` is a repository supplier's storefront (ADR-0036 §1)."""
+        return host in self._reserved_hosts
 
     def all_current(self) -> tuple[OnboardingRecord, ...]:
         """Every onboarded supplier as it stands now, by key."""

@@ -8,17 +8,25 @@ Core CONNECT receives only this object; supplier definitions receive nothing but
   every request is routed through the same host allowlist (browser login);
 * is attributed with one ``supplier.request`` log line built from the safe-payload allowlist.
 
+``PolicedPublicReader`` is the onboarding bootstrap reader (ADR-0036 §4 steps 2–3): unauthenticated
+reads of exact public paths on the one host an operator entered, under the same rules.
+
 The browser runs headless in an off-the-record context: no persistent profile, no tracing, no HAR,
 no video, no screenshots. Only cookies for the supplier's own hosts leave it, as the session
 payload that core CONNECT encrypts at rest.
 """
 
+import ipaddress
 import logging
+import socket
 import time
+from collections.abc import Callable, Iterable
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
+import httpcore
 import httpx
 
 from app.platform.core.egress import EGRESS, EgressBlockedError
@@ -33,7 +41,10 @@ from app.platform.core.safe_payload import safe_payload
 from integrations.suppliers.base import (
     Credentials,
     ProbeResponse,
+    PublicRead,
+    PublicReadFailure,
     RequestKind,
+    RequestPolicy,
     SupplierDefinition,
     SupplierProfile,
     SupplierTransport,
@@ -263,3 +274,311 @@ class PolicedSupplierGateway:
                 browser_blocked_requests=blocked,
                 target=spec.path,
             )
+
+
+# ---------------------------------------------------------------- onboarding bootstrap reads
+
+# ADR-0036 §4 steps 2–3: the storefront's home page, each template's login page and the policy
+# documents. Markers and a short policy summary are read from them in memory; a page is never kept.
+PUBLIC_READ_MAX_BYTES = 1_000_000
+PUBLIC_READ_TIMEOUT_S = 10.0
+PUBLIC_READ_INTERVAL_S = 1.0
+_PUBLIC_LANE = "onboarding"
+
+
+def _resolve_addresses(host: str) -> tuple[str, ...]:
+    """Every address ``host`` resolves to (called inside the host's own egress grant)."""
+    infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    return tuple(sorted({str(info[4][0]).split("%", 1)[0] for info in infos}))
+
+
+# The monotonic instant the current public read must end by; None outside a read.
+_READ_DEADLINE: ContextVar[float | None] = ContextVar("icbm_public_read_deadline", default=None)
+
+
+class _DeadlineStream(httpcore.NetworkStream):
+    """A socket whose every wait is cut to the time left before the read's total deadline:
+    connecting, TLS, request, headers and body alike, so dripping any of them cannot outlast it."""
+
+    def __init__(self, inner: httpcore.NetworkStream, clock: Callable[[], float]) -> None:
+        self._inner = inner
+        self._clock = clock
+
+    def _left(self, timeout: float | None, expired: type[Exception]) -> float | None:
+        return _time_left(timeout, self._clock, expired)
+
+    def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        return self._inner.read(max_bytes, self._left(timeout, httpcore.ReadTimeout))
+
+    def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        self._inner.write(buffer, self._left(timeout, httpcore.WriteTimeout))
+
+    def close(self) -> None:
+        self._inner.close()
+
+    def start_tls(
+        self,
+        ssl_context: Any,
+        server_hostname: str | None = None,
+        timeout: float | None = None,
+    ) -> httpcore.NetworkStream:
+        left = self._left(timeout, httpcore.ConnectTimeout)
+        return _DeadlineStream(
+            self._inner.start_tls(ssl_context, server_hostname, left), self._clock
+        )
+
+    def get_extra_info(self, info: str) -> Any:
+        return self._inner.get_extra_info(info)
+
+
+def _time_left(
+    timeout: float | None, clock: Callable[[], float], expired: type[Exception]
+) -> float | None:
+    deadline = _READ_DEADLINE.get()
+    if deadline is None:
+        return timeout
+    left = deadline - clock()
+    if left <= 0:
+        raise expired("the public read passed its total deadline")
+    return left if timeout is None else min(timeout, left)
+
+
+class _DeadlineBackend(httpcore.NetworkBackend):
+    def __init__(self, clock: Callable[[], float]) -> None:
+        self._inner = httpcore.SyncBackend()
+        self._clock = clock
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[Any] | None = None,
+    ) -> httpcore.NetworkStream:
+        left = _time_left(timeout, self._clock, httpcore.ConnectTimeout)
+        stream = self._inner.connect_tcp(host, port, left, local_address, socket_options)
+        return _DeadlineStream(stream, self._clock)
+
+    def connect_unix_socket(
+        self, path: str, timeout: float | None = None, socket_options: Iterable[Any] | None = None
+    ) -> httpcore.NetworkStream:
+        raise httpcore.ConnectError("a public read never uses a unix socket")
+
+    def sleep(self, seconds: float) -> None:
+        self._inner.sleep(seconds)
+
+
+class _DeadlineTransport(httpx.HTTPTransport):
+    """The network transport of public reads: httpx's own, over a deadline-bounded backend."""
+
+    def __init__(self, clock: Callable[[], float]) -> None:
+        super().__init__(trust_env=False)
+        self._pool = httpcore.ConnectionPool(
+            ssl_context=httpx.create_ssl_context(trust_env=False),
+            network_backend=_DeadlineBackend(clock),
+        )
+
+
+def is_public_address(address: str) -> bool:
+    """A globally routable unicast address: never loopback, private, link-local, shared,
+    reserved, multicast or unspecified, including in an IPv4-mapped IPv6 form."""
+    try:
+        ip = ipaddress.ip_address(address.split("%", 1)[0])
+    except ValueError:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip.is_global and not ip.is_multicast
+
+
+class PolicedPublicReader:
+    """Unauthenticated reads of exact public paths on one onboarding bootstrap host.
+
+    Every call opens one egress grant for that host only (ADR-0036 §9), resolves the name inside
+    it and refuses every read when any answer is not a public address (OB-01), then reads each path
+    once, paced, without following a redirect and up to a byte cap. Each read is attributed by one
+    ``supplier.public_read`` log line from the safe-payload allowlist; no body reaches a log.
+    """
+
+    def __init__(
+        self,
+        *,
+        pacer: RequestPacer | None = None,
+        # Tests substitute an httpx.MockTransport and a resolver; production uses the network.
+        http_transport: httpx.BaseTransport | None = None,
+        resolve: Callable[[str], tuple[str, ...]] | None = None,
+        max_bytes: int = PUBLIC_READ_MAX_BYTES,
+        timeout_s: float = PUBLIC_READ_TIMEOUT_S,
+        interval_s: float = PUBLIC_READ_INTERVAL_S,
+        # The clock of the total per-read deadline; tests substitute a fake one.
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._pacer = pacer or RequestPacer()
+        self._monotonic = monotonic
+        self._http_transport = http_transport
+        self._resolve = resolve or _resolve_addresses
+        self._max_bytes = max_bytes
+        self._timeout_s = timeout_s
+        self._interval_s = interval_s
+
+    def read(self, host: str, paths: tuple[str, ...]) -> tuple[PublicRead, ...]:
+        if any(not p.startswith("/") or "?" in p or "#" in p for p in paths):
+            raise ValueError("a public read is an exact absolute path without a query")
+        lane = SupplierProfile(
+            supplier_key=_PUBLIC_LANE,
+            display_name=_PUBLIC_LANE,
+            base_url=f"https://{host}",
+            auth_required=False,
+            egress_hosts=frozenset({host}),
+            request_policy=RequestPolicy(
+                minimum_request_interval_s=self._interval_s, request_timeout_s=self._timeout_s
+            ),
+        )
+        with EGRESS.grant(f"onboarding:{host}", {host}):
+            refusal, address = self._vetted_address(host)
+            if refusal is not None or address is None:
+                failure = refusal or PublicReadFailure.UNRESOLVED
+                self._observe(lane, "/", failure.value, None)
+                return tuple(PublicRead(path=p, status=None, failure=failure) for p in paths)
+            with httpx.Client(
+                timeout=self._timeout_s,
+                follow_redirects=False,
+                trust_env=False,
+                # The network transport bounds every socket wait by the read's total deadline.
+                transport=self._http_transport or _DeadlineTransport(self._monotonic),
+                headers={
+                    "User-Agent": DEFAULT_USER_AGENT,
+                    "Accept-Language": "ko-KR,ko;q=0.9",
+                    # Only uncompressed bodies: the byte cap counts the bytes received (raw), and a
+                    # content-encoded answer is refused unread rather than decompressed.
+                    "Accept-Encoding": "identity",
+                },
+            ) as client:
+                results = []
+                for path in paths:
+                    with self._pacer.slot(lane):
+                        results.append(self._one(client, lane, host, address, path))
+                return tuple(results)
+
+    def _vetted_address(self, host: str) -> tuple[PublicReadFailure | None, str | None]:
+        """The one address every read connects to, after all answers proved public (OB-01).
+
+        Connecting to it, never to the name, closes DNS rebinding: a second lookup at connect time
+        cannot swap in a private address. IPv4 is preferred; the order is otherwise stable."""
+        try:
+            addresses = self._resolve(host)
+        except EgressBlockedError:
+            return PublicReadFailure.EGRESS_BLOCKED, None
+        except OSError:
+            return PublicReadFailure.UNRESOLVED, None
+        if not addresses:
+            return PublicReadFailure.UNRESOLVED, None
+        if not all(is_public_address(a) for a in addresses):
+            return PublicReadFailure.ADDRESS_REFUSED, None
+        return None, sorted(addresses, key=lambda a: (":" in a, a))[0]
+
+    def _one(
+        self, client: httpx.Client, lane: SupplierProfile, host: str, address: str, path: str
+    ) -> PublicRead:
+        started, started_mono = datetime.now(UTC), time.monotonic()
+        # httpx's timeout bounds each wait, not the whole read: a host that drips bytes would hold a
+        # read open forever. The read as a whole ends at this deadline: the network transport cuts
+        # every socket wait to it (connect, TLS, headers, body), and the body loop checks it too.
+        deadline = self._monotonic() + self._timeout_s
+        token = _READ_DEADLINE.set(deadline)
+        failure: PublicReadFailure | None = None
+        status: int | None = None
+        content = b""
+        truncated = False
+        location: str | None = None
+        charset: str | None = None
+        try:
+            netloc = f"[{address}]" if ":" in address else address
+            with client.stream(
+                "GET",
+                f"https://{netloc}{path}",
+                # The name still goes in Host and in TLS (SNI and certificate verification).
+                headers={"Host": host},
+                extensions={"sni_hostname": host},
+            ) as response:
+                status = response.status_code
+                encoding = response.headers.get("content-encoding", "identity").strip().lower()
+                if encoding not in ("", "identity"):
+                    failure = PublicReadFailure.ENCODED_REFUSED
+                else:
+                    chunks: list[bytes] = []
+                    size = 0
+                    try:
+                        # Raw bytes as received: never decompressed, so the cap bounds memory. No
+                        # chunk_size: re-chunking would hold a dripped byte until 64 KiB arrived,
+                        # and the deadline below would never be checked.
+                        for chunk in response.iter_raw():
+                            if self._monotonic() > deadline:
+                                failure = PublicReadFailure.TIMEOUT
+                                break
+                            chunks.append(chunk)
+                            size += len(chunk)
+                            if size > self._max_bytes:
+                                truncated = True
+                                break
+                    except httpx.StreamConsumed:
+                        # A transport that hands over an already-read body (identity-encoded,
+                        # as checked above): the same cap applies to it.
+                        chunks, size = [response.content], len(response.content)
+                        truncated = size > self._max_bytes
+                    content = b"".join(chunks)[: self._max_bytes]
+                location = response.headers.get("location") if status in _REDIRECTS else None
+                charset = response.charset_encoding
+        except EgressBlockedError:
+            failure = PublicReadFailure.EGRESS_BLOCKED
+        except httpx.TimeoutException:
+            failure = PublicReadFailure.TIMEOUT
+        except httpx.TransportError as exc:
+            blocked = isinstance(exc.__cause__ or exc.__context__, EgressBlockedError)
+            failure = (
+                PublicReadFailure.EGRESS_BLOCKED if blocked else PublicReadFailure.NETWORK_ERROR
+            )
+        finally:
+            _READ_DEADLINE.reset(token)
+        result = failure.value if failure is not None else f"HTTP_{status}"
+        self._observe(lane, path, result, status, started=started, started_mono=started_mono)
+        if failure is not None or status is None:
+            return PublicRead(path=path, status=None, failure=failure)
+        target = urlsplit(location) if location else None
+        return PublicRead(
+            path=path,
+            status=status,
+            location_host=target.hostname if target is not None else None,
+            location_path=(target.path or "/") if target is not None else None,
+            content=content,
+            charset=charset,
+            truncated=truncated,
+        )
+
+    @staticmethod
+    def _observe(
+        lane: SupplierProfile,
+        path: str,
+        result_class: str,
+        status: int | None,
+        *,
+        started: datetime | None = None,
+        started_mono: float | None = None,
+    ) -> None:
+        now = datetime.now(UTC)
+        began = started_mono if started_mono is not None else time.monotonic()
+        logger.info(
+            "supplier.public_read",
+            extra=safe_payload(
+                supplier_key=lane.supplier_key,
+                transport=SupplierTransport.HTTP,
+                started_at=started or now,
+                finished_at=now,
+                latency_ms=round((time.monotonic() - began) * 1000, 1),
+                retry_count=0,
+                result_class=result_class,
+                http_status=status,
+                target=path,
+            ),
+        )
