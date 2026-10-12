@@ -125,7 +125,7 @@ ADR-0036 O3 added 「사이트 분석」: the trial reads, offline re-analysis a
 confirmation `app/stages/collect/onboarding/trials.py`, the trial report `analysis.py`, the local
 sanitized sample captures `capture.py`, the store's trial writer, the templates' analysis hooks
 (row scanner and structure rules), the panel `ui/web/js/pages/collect/analysis.js`, one test support
-module and two integration suites; no new migration (migration `0060`'s ACTIVE gate reads a stated
+module and three integration suites; no new migration (migration `0060`'s ACTIVE gate reads a stated
 "no options" as read).
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
@@ -195,11 +195,11 @@ financial data, and grant no provider call or LIVE authority.
 | `integrations/` | 89 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 39 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 372 | tests |
+| `tests/` | 373 | tests |
 | `tests/contracts/` | 18 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 154 | integration tests by runtime owner |
+| `tests/integration/` | 155 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
 | `tests/unit/` | 137 | unit tests by runtime owner |
 | `ui/` | 72 | operator clients: the served web client and the capture extension |
