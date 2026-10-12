@@ -389,7 +389,7 @@ class SiteAnalysisService:
     def _bound(self, record: OnboardingRecord) -> _Site | None:
         entry = self._catalog.onboarded(record.supplier_key)
         template = self._templates.get(record.template)
-        if entry is None or entry.bound is None or template is None:
+        if entry is None or entry.record is None or entry.bound is None or template is None:
             return None
         if template.analysis is None:
             raise PolicyBlockedError(

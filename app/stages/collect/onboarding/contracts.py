@@ -200,8 +200,9 @@ class AnalysisView(BaseModel):
     samples: list[TrialView]
     stale: list[StaleSampleView]
     observed_hosts: list[ObservedHostView]
-    # ``ActivationProof.details()``: the ACTIVE gate's own counts (§7).
-    activation: dict[str, int]
+    # ``ActivationProof.details()``: the ACTIVE gate's own counts (§7) and the template revision
+    # they are judged under.
+    activation: dict[str, int | str]
     # Samples whose newest trial under the current words is verifiable: "샘플 n/3 확인 가능".
     verifiable_samples: int
 

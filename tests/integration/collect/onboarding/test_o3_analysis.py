@@ -546,6 +546,7 @@ def test_three_read_samples_are_ready_and_wait_only_for_verification(
     assert view.verifiable_samples == 3
     assert view.activation == {
         "words_seq": 0,
+        "template_revision": view.template_revision,
         "required_samples": 3,
         "proven_samples": 0,
         "trials": 3,
