@@ -164,6 +164,9 @@ postal reference boundaries. It remains fake-only and grants no provider call or
 C-CS-1/C-SETTLEMENT-1 add six customer inquiry/reply contracts and two KR-only settlement reads.
 C-PROMO-1 adds three common contract/budget reads plus fail-closed specifications for eighteen
 contract-bound cashback and coupon endpoints. All execution remains fake-only.
+C-RG-1 adds seven exact Rocket Growth endpoint specifications plus a stable operator-safe blocked
+state. Every endpoint remains account-gated until program enrollment and the precise seller/account
+contract are proven; no request can be built, signed or sent.
 Both adapters remain fake-only, retain sensitive provider envelopes without projecting customer or
 financial data, and grant no provider call or LIVE authority.
 
@@ -194,16 +197,16 @@ financial data, and grant no provider call or LIVE authority.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 90 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 40 |  |
+| `integrations/` | 91 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 41 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 375 | tests |
-| `tests/contracts/` | 19 | repository-rule and document-contract tests |
+| `tests/` | 377 | tests |
+| `tests/contracts/` | 20 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 155 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
-| `tests/unit/` | 138 | unit tests by runtime owner |
+| `tests/unit/` | 139 | unit tests by runtime owner |
 | `ui/` | 72 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 63 | the served web client |
