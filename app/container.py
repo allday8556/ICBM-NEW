@@ -106,7 +106,7 @@ from app.stages.collect.onboarding.capture import TrialCaptureStore
 from app.stages.collect.onboarding.catalog import SupplierCatalog
 from app.stages.collect.onboarding.service import OnboardingService
 from app.stages.collect.onboarding.store import OnboardingStore
-from app.stages.collect.onboarding.trials import SiteAnalysisService
+from app.stages.collect.onboarding.trials import SiteAnalysisService, last_trial_read
 from app.stages.collect.readback import SourceTruthReadback
 from app.stages.collect.revisions import ProductFactsRevisionStore
 from app.stages.collect.runs import CollectionRunStore
@@ -657,7 +657,12 @@ def build_container(
         db, clock, supplier_gate=adaptive_gate, validation=adaptive_validation
     )
     runs = CollectionRunStore(
-        db, clock, shadow_freezer=shadow_switch.freeze, capture_freezer=capture_store.freeze
+        db,
+        clock,
+        shadow_freezer=shadow_switch.freeze,
+        capture_freezer=capture_store.freeze,
+        # ADR-0036 §5: an onboarding trial's read paces COLLECT's next read of that product.
+        other_reads=(last_trial_read,),
     )
 
     def _auto_select(materialized: Materialization) -> None:
@@ -731,7 +736,7 @@ def build_container(
         captures=TrialCaptureStore(config.onboarding_captures_dir),
         clock=clock,
         collect_remaining=lambda key, interval: runs.seconds_until_readable(
-            key, interval_s=interval
+            key, interval_s=interval, collection_runs_only=True
         ),
     )
     registry.register(onboarding_analysis.job_definition())

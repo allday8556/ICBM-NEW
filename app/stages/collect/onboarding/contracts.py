@@ -197,6 +197,8 @@ class AnalysisView(BaseModel):
     template_revision: str
     words_seq: int
     sample_limit: int
+    # Samples this site has used, failed reads included: each is read once (§5 step 2).
+    samples_taken: int
     samples: list[TrialView]
     stale: list[StaleSampleView]
     observed_hosts: list[ObservedHostView]

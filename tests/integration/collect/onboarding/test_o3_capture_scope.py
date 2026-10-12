@@ -46,7 +46,7 @@ def app(config: AppConfig, clock: FakeClock) -> Iterator[Container]:
 
 @dataclass(frozen=True)
 class _Reader:
-    regions: tuple[str, ...]
+    capture: Callable[[str], str]
     read: Callable[[str], TrialReport]
 
 
@@ -73,7 +73,15 @@ def _reader(app: Container, origin: str, template: str, url: str) -> _Reader:
             words=words,
         )
 
-    return _Reader(analysis.capture_regions(bound.config), read)
+    def capture(body: str) -> str:
+        return sanitize(
+            body,
+            regions=analysis.capture_regions(bound.config),
+            base_url=url,
+            safe_query_keys=bound.collection.profile.safe_query_keys,
+        )
+
+    return _Reader(capture, read)
 
 
 PAGES = [
@@ -97,7 +105,7 @@ def test_the_template_reads_the_capture_exactly_as_the_whole_page(
     reader = _reader(app, origin, template, url)
     body = page()
     whole = reader.read(body)
-    kept = reader.read(sanitize(body, regions=reader.regions))
+    kept = reader.read(reader.capture(body))
     assert dict(kept.statuses) == dict(whole.statuses)
     assert kept.fingerprint == whole.fingerprint
     assert dict(kept.summary) == dict(whole.summary)
@@ -129,10 +137,20 @@ def test_a_capture_keeps_no_member_text_and_no_url_path_outside_the_product_regi
         '<form action="https://pay.example.com/charge/7D3C2B1A9E8F/" data-user="u-77">'
         '<input name="t" value="v-secret"></form>'
         '<div class="xans-product-detail"><p>판매가 12,000원</p>'
-        '<img src="https://img.shop-cdn.com/p/103.jpg" data-owner="u-77"></div>'
+        '<img src="https://img.shop-cdn.com/p/103.jpg" data-owner="u-77">'
+        '<img src="https://img.shop-cdn.com/p/104.jpg?v=a1b2c3d4&amp;goodsNo=104#frag"'
+        ' srcset="https://img.shop-cdn.com/p/105.jpg?exp=1700000000 2x,'
+        ' data:image/gif;base64,R0 1x">'
+        '<img src="/web/p/106.jpg;jsessionid=PATHSECRET?w=500"></div>'
         "</body></html>"
     )
-    kept = sanitize(page, regions=("xans-product-detail",), secrets=[SESSION_VALUE])
+    kept = sanitize(
+        page,
+        regions=("xans-product-detail",),
+        base_url="https://shop.example.com/product/a/103/",
+        safe_query_keys={"img.shop-cdn.com": frozenset({"goodsNo"})},
+        secrets=[SESSION_VALUE],
+    )
     for gone in (
         MEMBER_NAME,
         MEMBER_EMAIL,
@@ -146,8 +164,18 @@ def test_a_capture_keeps_no_member_text_and_no_url_path_outside_the_product_regi
         "site.css",
         "주문",
         "로그인",
+        "a1b2c3d4",
+        "frag",
+        "1700000000",
+        "base64",
+        "PATHSECRET",
+        "w=500",
     ):
         assert gone not in kept, gone
+    # ADR-0010: a locator keeps scheme, host, path and only the profile's safe query keys.
+    assert 'src="https://img.shop-cdn.com/p/104.jpg?goodsNo=104"' in kept
+    assert 'srcset="https://img.shop-cdn.com/p/105.jpg 2x"' in kept
+    assert 'src="https://shop.example.com/web/p/106.jpg"' in kept
     # What the template and the host report read stays.
     assert "판매가 12,000원" in kept and 'src="https://img.shop-cdn.com/p/103.jpg"' in kept
     assert '<meta property="og:title" content="상품 103">' in kept and "<title>상품 103" in kept

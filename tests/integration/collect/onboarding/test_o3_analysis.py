@@ -32,6 +32,7 @@ from app.config import AppConfig, database_path
 from app.container import Container
 from app.main import create_app
 from app.platform.core.errors import AppError
+from app.stages.collect.collection import pacing_key
 from app.stages.collect.onboarding.analysis import (
     IDENTITY_UNRESOLVED,
     PRICE_BLOCK_UNREADABLE,
@@ -48,7 +49,9 @@ from app.stages.collect.onboarding.trials import (
     ONBOARDING_TRIAL_PENDING,
     ONBOARDING_TRIAL_TOO_SOON,
     TrialBudget,
+    last_trial_read,
 )
+from app.stages.collect.runs import CollectionRunStore, SameProductTooSoon
 from integrations.suppliers.collection import ReadKind
 from tests.conftest import LOCAL
 from tests.support.jobs_support import FakeClock
@@ -237,9 +240,17 @@ def test_the_session_cookie_values_are_redacted_from_a_capture() -> None:
         f"<html><body><div class='xans-product-detail'><p>sid={SESSION_VALUE}</p>"
         "<img src='https://img.example.com/p.jpg?token=abc123'></div></body></html>"
     )
-    cleaned = sanitize(page, regions=("xans-product-detail",), secrets=[SESSION_VALUE])
+    cleaned = sanitize(
+        page,
+        regions=("xans-product-detail",),
+        base_url="https://shop.example.com/product/a/1/",
+        safe_query_keys={},
+        secrets=[SESSION_VALUE],
+    )
     assert SESSION_VALUE not in cleaned
-    assert "abc123" not in cleaned and "token=REDACTED" in cleaned
+    # A query value no profile declares safe is never kept, a token's least of all.
+    assert "abc123" not in cleaned and "token" not in cleaned
+    assert 'src="https://img.example.com/p.jpg"' in cleaned
 
 
 def test_unread_rows_carry_the_slot_a_rule_proposes(app: Container, shop: TrialShop) -> None:
@@ -460,6 +471,8 @@ def test_a_failed_read_uses_its_sample_and_counts_toward_the_five(
         lambda: app.onboarding_analysis.submit(key, cafe24_url(455), actor=OPERATOR),
     )
     assert len(shop.requests) == 5
+    # The panel counts the failed read among the samples used, and offers no sixth.
+    assert app.onboarding_analysis.view(key).samples_taken == 5
 
 
 def test_a_trial_budget_allows_one_product_read_and_nothing_else() -> None:
@@ -646,6 +659,7 @@ def test_the_api_queues_a_trial_and_reports_it(api: TestClient, shop: TrialShop)
     assert report.status_code == 200
     body = report.json()
     assert body["verifiable_samples"] == 1 and body["sample_limit"] == 5
+    assert body["samples_taken"] == 1
     sample = body["samples"][0]
     assert sample["summary"]["name"] == "트라이얼 상품 801"
     trial_id = sample["trial_id"]
@@ -676,3 +690,54 @@ def test_the_api_queues_a_trial_and_reports_it(api: TestClient, shop: TrialShop)
     reanalysed = api.post(f"{base}/reanalyse", headers=HEADERS)
     assert reanalysed.status_code == 200 and reanalysed.json()["current"] == 1
     assert SESSION_VALUE not in report.text and MEMBER_NAME not in report.text
+
+
+def test_a_trial_read_paces_collects_next_read_of_that_product(
+    app: Container, clock: FakeClock, shop: TrialShop
+) -> None:
+    """The same-product interval is one owner's (OB-06): a trial's read is counted by COLLECT's
+    reservation, so an ordinary collection waits the interval after a trial read the product."""
+    key = recon_site(app, CAFE24_ORIGIN, "cafe24")
+    url = cafe24_url(901)
+    shop.serve(url, cafe24_page(901))
+    run_trial(app, key, url)
+    entry = app.supplier_catalog.onboarded(key)
+    assert entry is not None and entry.bound is not None
+    pacing = pacing_key(entry.bound.collection, url)
+    # The run store as the container wires it.
+    runs = CollectionRunStore(app.db, clock, other_reads=(last_trial_read,))
+    with app.db.write() as session:
+        run_id = runs.open(
+            session,
+            job_id="job-after-trial",
+            correlation_id="cid-after-trial",
+            supplier_key=key,
+            source_url=url,
+        )
+    with pytest.raises(SameProductTooSoon):
+        runs.reserve_product_read(run_id, key=pacing, interval_s=60)
+    assert runs.seconds_until_readable(pacing, interval_s=60) > 0
+    # The trial's own check asks about collection runs alone, so it never counts itself.
+    assert runs.seconds_until_readable(pacing, interval_s=60, collection_runs_only=True) == 0
+    clock.advance(61)
+    runs.reserve_product_read(run_id, key=pacing, interval_s=60)
+    # And a collection read paces the next trial read of the product the other way round.
+    other = cafe24_url(902)
+    with app.db.write() as session:
+        collected = runs.open(
+            session,
+            job_id="job-before-trial",
+            correlation_id="cid-before-trial",
+            supplier_key=key,
+            source_url=other,
+        )
+    runs.reserve_product_read(
+        collected, key=pacing_key(entry.bound.collection, other), interval_s=60
+    )
+    clock.advance(11)
+    shop.serve(other, cafe24_page(902))
+    error = refused(
+        ONBOARDING_TRIAL_TOO_SOON,
+        lambda: app.onboarding_analysis.submit(key, other, actor=OPERATOR),
+    )
+    assert error.details["scope"] == "sample"

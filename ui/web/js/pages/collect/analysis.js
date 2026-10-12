@@ -267,9 +267,9 @@ export async function openSiteAnalysis(record, { waitForJob, errorMessage }) {
     status.textContent = text ?? '';
   };
   const refreshButtons = () => {
-    const full = (view?.samples.length ?? 0) + (view?.stale.length ?? 0) >= (view?.sample_limit ?? 5);
-    add.disabled = busy;
-    add.title = full ? '샘플 5개가 모두 찼습니다. 이미 있는 샘플만 다시 읽을 수 있습니다.' : '';
+    const full = (view?.samples_taken ?? 0) >= (view?.sample_limit ?? 5);
+    add.disabled = busy || full;
+    add.title = full ? '샘플 5개를 모두 썼습니다(실패한 읽기 포함). 수집 규칙이 바뀌면 다시 분석으로 저장본을 다시 봅니다.' : '';
     reanalyse.disabled = busy || !view?.stale.length;
   };
 
@@ -301,7 +301,7 @@ export async function openSiteAnalysis(record, { waitForJob, errorMessage }) {
       h(
         'span',
         { class: 'mini' },
-        ` · 현재 수집 규칙 w${view.words_seq} · 템플릿 ${view.template_revision} · 샘플 ${view.samples.length + view.stale.length}/${view.sample_limit}` +
+        ` · 현재 수집 규칙 w${view.words_seq} · 템플릿 ${view.template_revision} · 샘플 ${view.samples_taken}/${view.sample_limit}` +
           ' · 사실 확인과 사용 시작은 다음 단계에서 열립니다.',
       ),
     );

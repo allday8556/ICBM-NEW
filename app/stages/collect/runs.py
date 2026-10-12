@@ -17,9 +17,9 @@ content, no URL of a provider's making and no credential ever reaches this row.
 
 import logging
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session
@@ -134,6 +134,10 @@ class CollectionRunRecord:
     provenance: RunProvenance | None = None
 
 
+# Another owner's real reads of a product, read inside the caller's unit: the latest, or None.
+OtherReads = Callable[[Session, PacingKey], datetime | None]
+
+
 class CollectionRunStore:
     def __init__(
         self,
@@ -142,9 +146,13 @@ class CollectionRunStore:
         *,
         shadow_freezer: ShadowFreezer | None = None,
         capture_freezer: CaptureFreezer | None = None,
+        other_reads: Sequence[OtherReads] = (),
     ) -> None:
         self._db = db
         self._clock = clock
+        # Real reads of a supplier's product that are not collection runs (ADR-0036 §5: a trial
+        # read of onboarding). The same-product interval counts them too, in the same unit.
+        self._other_reads = tuple(other_reads)
         # Who answers a run's shadow decision at its first reservation (ADR-0017 §10.1). Without
         # one every run freezes an explicit DISABLED, so no run is ever shadow-eligible by default.
         self._shadow_freezer = shadow_freezer
@@ -219,7 +227,7 @@ class CollectionRunStore:
             if row is None:
                 raise NotFoundError("COLLECT_RUN_UNKNOWN", "no collection run has that identifier")
             now = self._clock.now()
-            remaining = _remaining(_last_read(session, key), now, interval_s)
+            remaining = _remaining(self._latest(session, key), now, interval_s)
             if remaining > 0:
                 raise SameProductTooSoon(remaining)
             first_reservation = row.product_read_at is None
@@ -289,15 +297,25 @@ class CollectionRunStore:
             logger.exception("collect.shadow_freeze_failed", extra={"supplier": supplier_key})
             return DISABLED
 
-    def seconds_until_readable(self, key: PacingKey, *, interval_s: float) -> float:
-        """How long this product must still be left alone. Read-only; reserves nothing."""
+    def seconds_until_readable(
+        self, key: PacingKey, *, interval_s: float, collection_runs_only: bool = False
+    ) -> float:
+        """How long this product must still be left alone. Read-only; reserves nothing.
+
+        ``collection_runs_only`` asks about collection runs' reads alone: an owner of other reads
+        (the onboarding trial) paces on its own ledger and must not count its own read."""
         with self._db.read() as session:
-            return _remaining(_last_read(session, key), self._clock.now(), interval_s)
+            last = _last_read(session, key) if collection_runs_only else self._latest(session, key)
+            return _remaining(last, self._clock.now(), interval_s)
 
     def last_product_read(self, session: Session, key: PacingKey) -> datetime | None:
         """The most recent real server read of this product, inside the caller's own unit. The list
         queue counts it before it issues a read of the same product (ADR-0019 §8.1)."""
-        return _last_read(session, key)
+        return self._latest(session, key)
+
+    def _latest(self, session: Session, key: PacingKey) -> datetime | None:
+        reads = [_last_read(session, key), *(source(session, key) for source in self._other_reads)]
+        return max((_utc(read) for read in reads if read is not None), default=None)
 
     def note_identity(self, run_id: str, *, source_product_id: str) -> None:
         """Record what the document identified, so later reads are paced on the product itself.
@@ -521,6 +539,10 @@ def _last_read(session: Session, key: "PacingKey") -> datetime | None:
             CollectionRun.product_read_at.is_not(None),
         )
     )
+
+
+def _utc(moment: datetime) -> datetime:
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
 
 
 def _remaining(last: datetime | None, now: datetime, interval_s: float) -> float:

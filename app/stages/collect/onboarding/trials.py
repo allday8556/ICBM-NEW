@@ -36,7 +36,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
-from app.capabilities.jobs.models import TERMINAL_STATE_NAMES
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.capabilities.jobs.models import TERMINAL_STATE_NAMES, Job
 from app.capabilities.jobs.policy import RetryPolicy
 from app.capabilities.jobs.records import JobRecord
 from app.capabilities.jobs.registry import JobContext, JobDefinition
@@ -184,6 +187,21 @@ def target_ref(supplier_key: str, sample_key: str) -> str:
     return f"{supplier_key}:{_digest(sample_key)}"
 
 
+def last_trial_read(session: Session, key: PacingKey) -> datetime | None:
+    """When a trial last read this product: its job's start, which precedes the read (OB-06).
+
+    COLLECT's same-product interval counts it (``CollectionRunStore`` ``other_reads``), so an
+    ordinary collection does not read a product a trial has just read. A trial job that never
+    reached its read counts as well: the interval errs on the side of waiting."""
+    return session.scalar(
+        select(func.max(Job.started_at)).where(
+            Job.job_type == ONBOARDING_TRIAL_JOB,
+            Job.target_ref == target_ref(key.supplier_key, key.url),
+            Job.started_at.is_not(None),
+        )
+    )
+
+
 class SiteAnalysisService:
     def __init__(
         self,
@@ -289,6 +307,8 @@ class SiteAnalysisService:
         body = sanitize(
             document.body,
             regions=site.analysis.capture_regions(site.bound.config),
+            base_url=url,
+            safe_query_keys=site.collection.profile.safe_query_keys,
             secrets=_cookie_values(session),
         )
         sha256 = self._captures.put(body)
@@ -372,6 +392,7 @@ class SiteAnalysisService:
             template_revision=template.revision,
             words_seq=record.words_seq,
             sample_limit=SAMPLE_LIMIT,
+            samples_taken=len(self._taken(key, self._ledger(key))),
             samples=samples,
             stale=stale,
             observed_hosts=self._hosts(
@@ -437,10 +458,14 @@ class SiteAnalysisService:
             ONBOARDING_TRIAL_JOB, target_prefix=f"{key}:", since=_EVER
         )
 
-    def _refuse_reread(self, key: str, target: str, jobs: list[JobRecord]) -> None:
-        taken = {job.target_ref for job in jobs} | {
+    def _taken(self, key: str, jobs: list[JobRecord]) -> set[str | None]:
+        """The samples this site has used: every trial job's target and every trial's sample."""
+        return {job.target_ref for job in jobs} | {
             target_ref(key, trial.sample_url_key) for trial in self._store.trials(key)
         }
+
+    def _refuse_reread(self, key: str, target: str, jobs: list[JobRecord]) -> None:
+        taken = self._taken(key, jobs)
         if target in taken:
             raise OnboardingConflictError(
                 ONBOARDING_SAMPLE_ALREADY_READ,

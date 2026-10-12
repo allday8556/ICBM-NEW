@@ -19,11 +19,16 @@ template reads:
   unclosed description block included). Outside the regions an element keeps only ``id``,
   ``class`` and ``style``: what a ``within``/``marks`` rule and a hidden-element check read.
 - **Attributes are an allowlist everywhere**: those, the image sources a template reads (``src``,
-  ``srcset``, ``data-src``, ``data-original``, ``ec-data-src``), the form-state flags
-  (``disabled``, ``selected``, ``checked``), ``name``, a ``meta`` element's
-  ``property``/``content``/``charset``, and a ``link``'s ``href`` only when it is the canonical
-  link. No other URL is kept: no link ``href``, form ``action`` or ``data-*`` value, so no
-  secret-bearing path segment survives in one. Image sources are inside the product regions.
+  ``srcset``, ``data-src``, ``data-original``, ``ec-data-src``) inside the regions, the
+  form-state flags (``disabled``, ``selected``, ``checked``), ``name``, a ``meta`` element's
+  ``property``/``content``/``charset``, and a ``link``'s ``href`` when it is the canonical link.
+- **Every kept locator follows ADR-0010's secret-bearing URL rule**: an image source, a
+  ``srcset`` candidate, a ``meta`` URL and the canonical link keep only scheme, host, path and
+  the query keys the site profile declares safe for that host; fragments, credentials, ports,
+  path parameters and every other query value are dropped (no profile declares a tokenized path
+  segment). Every other reference — script, stylesheet and frame sources, login form actions and
+  links — keeps only its host (``//host/``, or ``//host/login`` for a login target); a link
+  ``href``, form ``action`` or ``data-*`` value is never kept.
 
 Inside what is kept, member-identifying material is then removed by rule:
 
@@ -50,11 +55,11 @@ import html
 import os
 import re
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Final
-from urllib.parse import urlsplit
+from urllib.parse import unquote_plus, urljoin, urlsplit
 
 from app.platform.core.errors import AppError, ErrorClass
 from app.stages.collect.onboarding.analysis import LOGIN_PATH
@@ -85,6 +90,8 @@ _RAW_TEXT: Final = frozenset({"script", "style", "textarea"})
 # What a template reads of an element anywhere: its marks and whether it is painted.
 _STRUCTURE: Final = frozenset({"id", "class", "style"})
 # What it reads inside a product region besides: image sources, form-state flags and names.
+# The kept attributes that locate a resource: each keeps only what ADR-0010 lets a locator keep.
+_LOCATORS: Final = frozenset({"src", "srcset", "data-src", "data-original", "ec-data-src"})
 _INSIDE: Final = frozenset(
     {
         "src",
@@ -195,11 +202,31 @@ def _attribute(
     return inside and name in _INSIDE, value
 
 
+def _locates(tag: str, name: str, value: str, attrs: list[tuple[str, str | None]]) -> bool:
+    """Whether a kept attribute value is a resource locator the URL rule applies to."""
+    if tag in ("script", "iframe", "a", "form"):
+        return False  # already reduced to its host
+    if tag == "link":
+        rel = next((v or "" for n, v in attrs if n.lower() == "rel"), "").lower().split()
+        return name == "href" and "canonical" in rel
+    if tag == "meta":
+        return name == "content" and value.strip().lower().startswith(("http:", "https:", "/"))
+    return name in _LOCATORS
+
+
 class _Sanitizer(HTMLParser):
-    def __init__(self, secrets: tuple[str, ...], regions: tuple[str, ...]) -> None:
+    def __init__(
+        self,
+        secrets: tuple[str, ...],
+        regions: tuple[str, ...],
+        base_url: str,
+        safe_query_keys: Mapping[str, frozenset[str]],
+    ) -> None:
         super().__init__(convert_charrefs=True)
         self._secrets = secrets
         self._regions = regions
+        self._base = base_url
+        self._safe = safe_query_keys
         self.out: list[str] = []
         # The tag of the private region being skipped and how deep its own tag is nested in it.
         self._skip: tuple[str, int] | None = None
@@ -211,15 +238,63 @@ class _Sanitizer(HTMLParser):
     def _attrs(self, tag: str, attrs: list[tuple[str, str | None]], inside: bool) -> str:
         kept: list[str] = []
         for name, value in attrs:
-            keep, value = _attribute(tag, name.lower(), value, attrs, inside)
+            lowered = name.lower()
+            keep, value = _attribute(tag, lowered, value, attrs, inside)
             if not keep:
                 continue
+            if value is not None and _locates(tag, lowered, value, attrs):
+                value = self._srcset(value) if lowered == "srcset" else self._locator(value)
+                if not value:
+                    continue
             if value is None:
                 kept.append(f" {name}")
                 continue
             clean = _redact(value, self._secrets)
             kept.append(f' {name}="{html.escape(clean, quote=True)}"')
         return "".join(kept)
+
+    def _locator(self, reference: str) -> str | None:
+        """ADR-0010's secret-bearing URL rule on a kept locator: resolved against the sample, then
+        only scheme, host, path and the query keys the site's profile declares safe for that host.
+        A fragment, credentials, a port, path parameters and every other query value are dropped;
+        what is not an http(s) locator (a ``data:`` placeholder) is dropped whole."""
+        try:
+            parts = urlsplit(urljoin(self._base, reference.strip()))
+            host = (parts.hostname or "").lower()
+        except ValueError:
+            return None
+        if parts.scheme not in ("http", "https") or not host or not reference.strip():
+            return None
+        path = parts.path.split(";", 1)[0] or "/"
+        safe = self._safe.get(host, frozenset())
+        kept = [
+            pair
+            for pair in parts.query.split("&")
+            if pair and unquote_plus(pair.split("=", 1)[0]) in safe
+        ]
+        return f"{parts.scheme}://{host}{path}" + (f"?{'&'.join(kept)}" if kept else "")
+
+    def _srcset(self, value: str) -> str:
+        """Each ``srcset`` candidate's locator under the same rule. A candidate's URL runs to the
+        next whitespace (HTML's own parsing), so a comma inside a ``data:`` URL splits nothing."""
+        candidates, at = [], 0
+        while at < len(value):
+            while at < len(value) and (value[at].isspace() or value[at] == ","):
+                at += 1
+            start = at
+            while at < len(value) and not value[at].isspace():
+                at += 1
+            url, descriptor = value[start:at], ""
+            if url.endswith(","):
+                url = url.rstrip(",")
+            else:
+                start = at
+                while at < len(value) and value[at] != ",":
+                    at += 1
+                descriptor = value[start:at].strip()
+            if url and (located := self._locator(url)) is not None:
+                candidates.append(f"{located} {descriptor}".strip())
+        return ", ".join(candidates)
 
     def _enter(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in _VOID:
@@ -282,13 +357,27 @@ class _Sanitizer(HTMLParser):
             self.out.append(f"<!{decl}>")
 
 
-def sanitize(body: str, *, regions: Iterable[str], secrets: Iterable[str] = ()) -> str:
+def sanitize(
+    body: str,
+    *,
+    regions: Iterable[str],
+    base_url: str,
+    safe_query_keys: Mapping[str, frozenset[str]],
+    secrets: Iterable[str] = (),
+) -> str:
     """The page reduced to what the template reads, member material removed (module docstring).
 
     ``regions`` are the template's product regions for the site (``capture_regions``): text and
-    content attributes are kept only inside them."""
+    content attributes are kept only inside them. ``base_url`` is the sample's URL and
+    ``safe_query_keys`` the site profile's safe query keys per host: every kept locator is
+    resolved against the one and keeps only the other's keys (ADR-0010)."""
     values = tuple(sorted({s for s in secrets if isinstance(s, str) and len(s) >= 6}, key=len))
-    parser = _Sanitizer(tuple(reversed(values)), tuple(t for t in regions if t.strip("#.")))
+    parser = _Sanitizer(
+        tuple(reversed(values)),
+        tuple(t for t in regions if t.strip("#.")),
+        base_url,
+        safe_query_keys,
+    )
     parser.feed(body)
     parser.close()
     return "".join(parser.out)
