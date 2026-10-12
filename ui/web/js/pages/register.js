@@ -106,6 +106,14 @@ export const REASON_COPY = {
   SOURCE_CHANNEL_FORBIDDEN: '공급사가 이 마켓 판매를 금지한 상품입니다',
   SOURCE_CHANNEL_UNRESOLVED: '공급사 판매채널 문구를 확인할 수 없습니다',
   SUPPLIER_NOT_ACTIVE: '공급사 사이트가 아직 시험 단계(RECON)라 등록할 수 없습니다',
+  // ADR-0039 §2, §3: the supplier's own policy, not applied by the user's per-supplier choice.
+  // A warning that blocks nothing; the restriction is still shown.
+  SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED:
+    '공급사가 이 마켓 판매를 금지했지만, 판매채널 제한을 적용하지 않도록 설정한 공급처입니다 (사용자 책임)',
+  SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED:
+    '공급사 판매채널 문구를 확인할 수 없지만, 판매채널 제한을 적용하지 않도록 설정한 공급처입니다 (사용자 책임)',
+  'M4_PRICING.PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED':
+    '공급사 최저판매가가 있지만, 최저판매가를 적용하지 않도록 설정한 공급처입니다 (사용자 책임)',
   // B-PRICE1: the repin command's refusals.
   REGISTER_DRAFT_REVISION_MOVED: '초안이 바뀌었습니다. 화면을 새로 고친 뒤 다시 시도하세요.',
   REGISTER_REPIN_INTENT_OPEN: '이 초안의 등록 요청이 아직 진행 중이라 가격을 다시 고정할 수 없습니다.',
@@ -155,6 +163,8 @@ export const REASON_COPY = {
   // ADR-0033 §8: a resolved top or bottom notice the unit's composition does not place. Since G5
   // the SmartStore composition (v3) places both; an older composition revision does not.
   PUBLICATION_GUIDANCE_UNPLACED: '이 상품의 상세페이지 구성은 상·하단 공지를 넣지 못합니다. 등록 정책을 다시 저장한 뒤 준비 내용을 저장하면 공지가 들어갑니다. 이 상품에서 그 공지를 끄면 이 사유는 사라집니다.',
+  // ADR-0037 §2: an image over SmartStore's upload limit with no upload-fit variant.
+  IMAGE_UPLOAD_FIT_FAILED: '9.5MB 넘는 이미지의 업로드용 압축본이 없습니다. 아직 없다면 준비 내용을 저장하면 다시 만듭니다. 저장 후에도 남으면 줄일 수 없는 이미지이니 다른 이미지를 고르세요.',
   GUIDANCE_TEXT_INVALID: '쓸 수 없는 공지 문구입니다. 상세페이지 단계의 직접 작성 문구를 확인하세요.',
   GUIDANCE_TEXT_TOO_WIDE: '공지 문구 중 템플릿 글상자보다 넓은 줄이 있습니다.',
   GUIDANCE_TEMPLATE_UNKNOWN: '알 수 없는 공지 템플릿입니다.',
@@ -374,7 +384,21 @@ export function itemRow(item) {
       item.item_id,
       ...(item.option_keys ?? []).map((key) => h('span', { class: 'mini', 'data-option': key }, key)),
     ),
-    h('td', {}, won(item.sale_price_krw)),
+    h(
+      'td',
+      {},
+      won(item.sale_price_krw),
+      // ADR-0039 §3: a supplier minimum the user chose not to apply is shown beside the price.
+      item.minimum_applied === false
+        ? h(
+            'span',
+            { class: 'mini', 'data-minimum-applied': 'false' },
+            item.stated_minimum_sale_price_krw === null || item.stated_minimum_sale_price_krw === undefined
+              ? ' · 최저판매가 미적용 (사용자 설정)'
+              : ` · 최저판매가 ${won(item.stated_minimum_sale_price_krw)} 미적용 (사용자 설정)`,
+          )
+        : null,
+    ),
     h('td', {}, item.price_basis ?? '—'),
     // The current M4 price of the same Item: a pin that is no longer current is visible here,
     // and whether it is current is the server's own verdict.
@@ -395,9 +419,20 @@ export function itemRow(item) {
           'span',
           { class: 'mini', 'data-asset': asset.sha256, 'data-qa': asset.qa_verdict ?? 'NONE' },
           `${asset.role} ${asset.sha256.slice(0, 8)} ${asset.qa_verdict ?? 'QA 없음'}`,
+          asset.upload_fit ? uploadFitLabel(asset.upload_fit) : null,
         ),
       ),
     ),
+  );
+}
+
+// ADR-0037 §3: the image is uploaded as its upload-fit variant; the server says which one.
+function uploadFitLabel(fit) {
+  const mb = (fit.byte_size / 1_000_000).toFixed(1);
+  return h(
+    'span',
+    { class: 'chip', 'data-upload-fit': fit.source_sha256 },
+    `업로드용 압축본 · ${fit.width}×${fit.height} · ${mb}MB`,
   );
 }
 

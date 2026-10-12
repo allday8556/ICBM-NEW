@@ -158,6 +158,9 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     # G5 only a composition revision older than the SmartStore v3 profile).
     "PUBLICATION_GUIDANCE_UNPLACED": (_X, None),
     "PUBLICATION_ASSET_QA_NOT_PASSED": (_X, None),
+    # ADR-0037 §2: no upload-fit variant could be made for an oversize image; the operator chooses
+    # another image (or saves the preparation again after the selection changed).
+    "IMAGE_UPLOAD_FIT_FAILED": (_F, _IMAGES),
     "PROVIDER_ASSET_IDENTITY_MISSING": (_X, None),
     "PREPARED_ASSET_CANDIDATE_MISMATCH": (_X, None),
     "PREPARED_ASSET_PROFILE_MISMATCH": (_X, None),
@@ -174,6 +177,10 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     "SOURCE_CHANNEL_FORBIDDEN": (_N, None),
     "SOURCE_CHANNEL_UNRESOLVED": (_N, None),
     "SUPPLIER_NOT_ACTIVE": (_N, None),
+    # ADR-0039 §2: the user chose, per supplier, not to apply its channel policy. A warning that
+    # blocks nothing: there is nothing to fix here (the choice itself lives on the supplier card).
+    "SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED": (_N, None),
+    "SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED": (_N, None),
     "PROVIDER_DUPLICATE_FOUND": (_X, None),
     "PROVIDER_DUPLICATE_WEAK_SIGNAL": (_X, None),
     # No provider duplicate lookup is adopted yet.
@@ -191,6 +198,8 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
 # re-pin; a sold-out source is a supplier fact; the rest have no operator screen.
 M4_ACTIONS: Final[Mapping[str, Entry]] = {
     "SOURCE_STOCK_SOLD_OUT": (_N, None),
+    # ADR-0039 §3: the supplier's minimum is not applied by the user's choice; a warning.
+    "PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED": (_N, None),
     # The re-pin has M4 price the Item under the policy's context (B-PRICE1).
     "PRICING_SNAPSHOT_MISSING": (_F, _ACT),
     "PRICING_SNAPSHOT_SUPERSEDED": (_F, _ACT),

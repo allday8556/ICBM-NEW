@@ -54,8 +54,11 @@ from app.stages.products.model import (
 from app.stages.products.pricing import PriceBasis, PriceGuard
 from app.stages.products.source_gates import (
     SOURCE_CHANNEL_FORBIDDEN,
+    SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED,
     SOURCE_CHANNEL_UNRESOLVED,
+    SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED,
     SOURCE_GATE_CODES,
+    SOURCE_GATE_WARNINGS,
     SUPPLIER_NOT_ACTIVE,
 )
 from app.stages.register import sanitize
@@ -190,6 +193,11 @@ PUBLICATION_DETAIL_IMAGES_UNPLACED: Final = "PUBLICATION_DETAIL_IMAGES_UNPLACED"
 # a composition v3 plan places one (G5): under any other profile a resolved notice stays here.
 PUBLICATION_GUIDANCE_UNPLACED: Final = "PUBLICATION_GUIDANCE_UNPLACED"
 PUBLICATION_ASSET_QA_NOT_PASSED: Final = "PUBLICATION_ASSET_QA_NOT_PASSED"
+# ADR-0037 §2 (IC-06): an image at or over SmartStore's upload-fit threshold for which no
+# ``smartstore-upload-fit/v1`` variant exists — none could be made (nothing fits, it cannot be
+# decoded), or none was made yet (the selection changed after the last save; a save makes it).
+# Nothing is uploaded for it, and nothing smaller is guessed.
+IMAGE_UPLOAD_FIT_FAILED: Final = "IMAGE_UPLOAD_FIT_FAILED"
 PROVIDER_ASSET_IDENTITY_MISSING: Final = "PROVIDER_ASSET_IDENTITY_MISSING"
 PREPARED_ASSET_CANDIDATE_MISMATCH: Final = "PREPARED_ASSET_CANDIDATE_MISMATCH"
 PREPARED_ASSET_PROFILE_MISMATCH: Final = "PREPARED_ASSET_PROFILE_MISMATCH"
@@ -276,6 +284,7 @@ REASON_CODES: Final = frozenset(
         PUBLICATION_DETAIL_IMAGES_UNPLACED,
         PUBLICATION_GUIDANCE_UNPLACED,
         PUBLICATION_ASSET_QA_NOT_PASSED,
+        IMAGE_UPLOAD_FIT_FAILED,
         PROVIDER_ASSET_IDENTITY_MISSING,
         PREPARED_ASSET_CANDIDATE_MISMATCH,
         PREPARED_ASSET_PROFILE_MISMATCH,
@@ -289,6 +298,9 @@ REASON_CODES: Final = frozenset(
         SOURCE_CHANNEL_FORBIDDEN,
         SOURCE_CHANNEL_UNRESOLVED,
         SUPPLIER_NOT_ACTIVE,
+        # ADR-0039 §2: a restriction the user chose not to apply, shown as a warning.
+        SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED,
+        SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED,
         PROVIDER_DUPLICATE_FOUND,
         PROVIDER_DUPLICATE_WEAK_SIGNAL,
         DUPLICATE_EVIDENCE_MISSING,
@@ -616,8 +628,40 @@ class BindingCopy:
 
 
 @dataclass(frozen=True)
+class UploadFit:
+    """ADR-0037 §2: the selected binary an upload-fit variant stands in for, and the variant's own
+    facts. The image's identity is the variant's; this records its lineage and what the operator
+    is shown (§3)."""
+
+    recipe: str
+    source_asset_kind: ImageAssetKind
+    source_sha256: str
+    source_derivation_id: str | None
+    width: int
+    height: int
+    byte_size: int
+
+    def canonical(self) -> dict[str, object]:
+        return {
+            "recipe": self.recipe,
+            "source_asset_kind": self.source_asset_kind.value,
+            "source_sha256": self.source_sha256,
+            "source_derivation_id": self.source_derivation_id,
+            "width": self.width,
+            "height": self.height,
+            "byte_size": self.byte_size,
+        }
+
+
+@dataclass(frozen=True)
 class PublicationImage:
-    """One currently selected M4 image of an Item, with its exact-binary QA."""
+    """One currently selected M4 image of an Item, with its exact-binary QA.
+
+    ADR-0037 §2: where the selected binary is too large for the marketplace's upload, the image is
+    its upload-fit variant — that exact artifact, with its own QA — and ``upload_fit`` names the
+    selected binary it stands in for. ``upload_fit_failed`` is a selected binary that needs a
+    variant and has none — none could be made, or none was made yet: it is never uploaded
+    (``IMAGE_UPLOAD_FIT_FAILED``)."""
 
     role: OutputRole
     position: int
@@ -626,6 +670,8 @@ class PublicationImage:
     derivation_id: str | None
     qa_result_id: str | None
     qa_verdict: QaVerdict | None
+    upload_fit: UploadFit | None = None
+    upload_fit_failed: bool = False
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -640,6 +686,8 @@ class PublicationImage:
             "derivation_id": self.derivation_id,
             "qa_result_id": self.qa_result_id,
             "qa_verdict": None if self.qa_verdict is None else self.qa_verdict.value,
+            # Named only for a variant, so every other image keeps its earlier canonical form.
+            **({} if self.upload_fit is None else {"upload_fit": self.upload_fit.canonical()}),
         }
 
 
@@ -747,6 +795,9 @@ class ResolvedUnit:
     # ADR-0033 §6 (G4): the Detail Guidance notices resolved for the request's choice at the
     # injected clock's instant; empty when none applies or no guidance source is wired.
     guidance: ResolvedGuidance = NO_GUIDANCE
+    # ADR-0039 §1 (SP-03): ``(item_id, supplier_key, revision_no, fingerprint)`` of the sales-policy
+    # revision each Item's supplier has; a supplier on the defaults names nothing.
+    sales_policies: tuple[tuple[str, str, int, str], ...] = ()
 
 
 # ---------------------------------------------------------------- the result
@@ -943,13 +994,18 @@ def _m4_reasons(unit: ResolvedUnit) -> list[Reason]:
 
 def _source_gate_reasons(unit: ResolvedUnit) -> list[Reason]:
     """ADR-0031 §4.1 and ADR-0030 §7: a source that forbids this marketplace, a restriction no rule
-    could read, or a supplier still in reconnaissance blocks the unit. No override applies."""
+    could read, or a supplier still in reconnaissance blocks the unit. No per-product override
+    applies. ADR-0039 §2: a restriction the user chose not to apply for the supplier is a
+    non-blocking warning — a READY-status reason, shown and never hidden (SP-04)."""
     gates = sorted(set(unit.source_gates))
     unknown = sorted({code for _item, code in gates} - SOURCE_GATE_CODES)
     if unknown:
         # A gate this evaluation does not know is never dropped: it would let the unit pass.
         raise ValueError(f"unknown source gate codes: {unknown}")
-    return [Reason(code, _B, item_id) for item_id, code in gates]
+    return [
+        Reason(code, ReadinessStatus.READY if code in SOURCE_GATE_WARNINGS else _B, item_id)
+        for item_id, code in gates
+    ]
 
 
 def _category_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Reason]:
@@ -1338,10 +1394,13 @@ def _publication_reasons(
                 Reason(PUBLICATION_REPRESENTATIVE_MISSING, _R, _subject(item.item_id, "images"))
             )
         for image in images:
+            where = f"{image.role.value}:{image.position}"
+            if image.upload_fit_failed:
+                # ADR-0037 §2 (IC-02, IC-06): never sent as it is, and no variant to send instead.
+                reasons.append(Reason(IMAGE_UPLOAD_FIT_FAILED, _R, _subject(item.item_id, where)))
             if image.qa_verdict is QaVerdict.PASS:
                 continue
             status = _B if image.qa_verdict is QaVerdict.FAIL else _R
-            where = f"{image.role.value}:{image.position}"
             reasons.append(
                 Reason(PUBLICATION_ASSET_QA_NOT_PASSED, status, _subject(item.item_id, where))
             )
@@ -1657,6 +1716,14 @@ def candidate_dependencies(request: PreflightRequest, unit: ResolvedUnit) -> dic
         },
         # Only when present, so a unit its sources do not gate keeps its earlier fingerprint.
         **({"source_gates": sorted(unit.source_gates)} if unit.source_gates else {}),
+        # ADR-0039 §1 (SP-03): the sales-policy revision of each Item's supplier, named only when
+        # one exists, so a unit whose suppliers use the defaults keeps its earlier fingerprint.
+        # A later revision changes it: the preparation is stale, as a target-policy change is.
+        **(
+            {"sales_policies": sorted([list(pin) for pin in unit.sales_policies])}
+            if unit.sales_policies
+            else {}
+        ),
         # ADR-0033 §6 (DG-05): the resolved notices of both placements, named only when at least
         # one notice is resolved, so a unit with none keeps its earlier fingerprint. A new
         # revision, a period that starts or ends, or a changed product choice changes it.

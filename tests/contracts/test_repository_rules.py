@@ -2211,6 +2211,10 @@ ONBOARDING_O1_WRITES = (
     "OnboardingTransition",
     "OnboardingHost",
     "OnboardingWordRevision",
+    # ADR-0036 O2: the policy reads the operator acknowledged at add time.
+    "OnboardingPolicyRead",
+    # ADR-0036 O3: the trial reads of 「사이트 분석」.
+    "OnboardingTrial",
 )
 
 
@@ -2255,6 +2259,52 @@ def test_an_onboarded_site_is_bound_through_the_repository_binder() -> None:
         "integrations/suppliers/sites.py",
         "app/stages/collect/onboarding/catalog.py",
     }
+
+
+def test_a_trial_read_never_writes_canonical_truth() -> None:
+    # ADR-0036 §5, OB-02: a trial reads one product page through the policed collection gateway
+    # under a budget of one product read, and records only an onboarding trial. No onboarding
+    # module appends a revision, records a collection document, opens a collection run, stores a
+    # source asset or requests an image.
+    from app.stages.collect.onboarding.trials import TrialBudget
+    from integrations.suppliers.collection import ReadKind
+
+    modules = _production_modules()
+    package = {
+        path: tree
+        for path, tree in modules.items()
+        if path.startswith("app/stages/collect/onboarding/")
+    }
+    assert "app/stages/collect/onboarding/trials.py" in package
+    forbidden_calls = {
+        "_record_document",
+        "record_captured_document",
+        "read_image",
+        "reserve_product_read",
+        "ProductFactsRevisionStore",
+        "SourceAssetStore",
+        "SourceAssetRecorder",
+        "RunBudget",
+    }
+    for path, tree in package.items():
+        called = {_callee(call) for call in _calls(tree)}
+        assert not called & forbidden_calls, (path, called & forbidden_calls)
+        imported = _imported_modules(tree)
+        assert "app.stages.collect.revisions" not in imported, path
+        assert "app.stages.collect.assets" not in imported, path
+    reads = [
+        call
+        for call in _calls(package["app/stages/collect/onboarding/trials.py"])
+        if _callee(call) == "read_document"
+    ]
+    assert len(reads) == 1
+    budget = TrialBudget()
+    for kind in (ReadKind.IMAGE_REQUEST, ReadKind.POLICY_READ):
+        with pytest.raises(Exception):  # noqa: B017 - any refusal; nothing is sent
+            budget.reserve(kind, "subject")
+    budget.reserve(ReadKind.PRODUCT_READ, "subject")
+    with pytest.raises(Exception):  # noqa: B017
+        budget.reserve(ReadKind.PRODUCT_READ, "subject")
 
 
 def test_the_drill_writes_only_into_the_fresh_root_it_validated() -> None:
@@ -3956,6 +4006,8 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "onboarding_word_revisions",
         "onboarding_policy_reads",
         "onboarding_verifications",
+        # ADR-0039 §1: each supplier's sales policy, its append-only revisions.
+        "supplier_sales_policy_revisions",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

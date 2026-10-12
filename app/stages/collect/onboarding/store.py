@@ -6,11 +6,16 @@ if anything tries. An audit event names keys, states, hosts, roles, sequence num
 fingerprints only: never a credential, a word, a reason the operator typed or page text (§9).
 
 - ``create`` writes the identity, the first state ``DRAFT`` and the bootstrap storefront host,
-  the origin's own host, which passes the host guard first (OB-01).
+  the origin's own host, which passes the host guard first (OB-01). Since O2 it also writes, in
+  the same unit, the policy reads the operator was shown and acknowledged (§4 step 3), and audits
+  the detected and the confirmed platform (step 2) by name only.
 - ``transition`` appends one allowed edge of the state log (§3, §7). ``RECON → ACTIVE`` is
   appended only when the trials and verifications prove it (§7 D2, OB-04, ``activation``); the
-  database refuses an unproven ``ACTIVE`` as well. Trials and verifications have no writer before
-  O3 and O5, so in O1 no site can become ``ACTIVE``.
+  database refuses an unproven ``ACTIVE`` as well. Verifications have no writer before O5, so no
+  site can become ``ACTIVE`` yet.
+- ``record_trial`` (O3) appends one trial read of 「사이트 분석」 under the current words revision
+  of a ``RECON`` site: never a ``ProductFactsRevision`` (OB-02). Its audit event names the trial,
+  its capture's SHA-256, its facts fingerprint and counts, never the page or the sample's values.
 - ``save_words`` appends a words revision checked by the site-word rules and the template's own
   slots (OB-03). A words change to an ``ACTIVE`` site appends ``RECON`` in the same unit (OB-04).
 - ``confirm_host`` and ``disable_host`` append host rows. A confirmed host other than the
@@ -26,6 +31,7 @@ import re
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Final
 
 from sqlalchemy import func, select
@@ -41,6 +47,7 @@ from app.stages.collect.onboarding.hosts import onboarding_host, onboarding_orig
 from app.stages.collect.onboarding.models import (
     OnboardedSupplier,
     OnboardingHost,
+    OnboardingPolicyRead,
     OnboardingTransition,
     OnboardingTrial,
     OnboardingVerification,
@@ -81,6 +88,9 @@ ONBOARDING_ROLE_UNKNOWN: Final = "ONBOARDING_ROLE_UNKNOWN"
 ONBOARDING_REASON_INVALID: Final = "ONBOARDING_REASON_INVALID"
 ONBOARDING_EVIDENCE_INVALID: Final = "ONBOARDING_EVIDENCE_INVALID"
 ONBOARDING_ACTIVATION_NOT_PROVEN: Final = "ONBOARDING_ACTIVATION_NOT_PROVEN"
+ONBOARDING_POLICY_READS_INVALID: Final = "ONBOARDING_POLICY_READS_INVALID"
+ONBOARDING_NOT_RECON: Final = "ONBOARDING_NOT_RECON"
+ONBOARDING_TRIAL_INVALID: Final = "ONBOARDING_TRIAL_INVALID"
 
 # ADR-0036 §2 D2: three distinct samples prove a words revision.
 ACTIVATION_SAMPLES: Final = 3
@@ -146,6 +156,130 @@ class ActivationProof:
             "refuted": self.refuted,
             "structural_open": self.structural_open,
         }
+
+
+@dataclass(frozen=True)
+class PolicyReadInput:
+    """One policy document read shown to the operator at add time (§4 step 3): which document,
+    its path, the HTTP status and the SHA-256 of what was read. Never the text itself."""
+
+    document: str
+    path: str
+    http_status: int
+    content_sha256: str | None
+    read_at: datetime
+
+
+@dataclass(frozen=True)
+class StoredPolicyRead:
+    read_id: str
+    document: str
+    path: str
+    http_status: int
+    content_sha256: str | None
+    read_at: datetime
+    acknowledged_by: str
+    acknowledged_at: datetime
+
+
+@dataclass(frozen=True)
+class TrialInput:
+    """One trial read's record (ADR-0036 §3 ``onboarding_trials``, §5): names, statuses, codes,
+    hosts and hashes. The sample capture itself stays a local file named by its SHA-256."""
+
+    sample_url_key: str
+    template_revision: str
+    words_seq: int
+    capture_sha256: str
+    facts_fingerprint: str
+    field_statuses: Mapping[str, str]
+    unread_rows: tuple[Mapping[str, Any], ...]
+    observed_hosts: tuple[Mapping[str, Any], ...]
+    structural: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class StoredTrial:
+    trial_id: str
+    sample_url_key: str
+    template_revision: str
+    words_seq: int
+    capture_sha256: str
+    facts_fingerprint: str
+    field_statuses: Mapping[str, str]
+    unread_rows: tuple[Mapping[str, Any], ...]
+    observed_hosts: tuple[Mapping[str, Any], ...]
+    structural: tuple[str, ...]
+    created_by: str
+    created_at: datetime
+
+
+_SAMPLE_LIMIT: Final = 512
+_STRUCTURAL_CODE = re.compile(r"^[A-Z][A-Z_]{1,47}$")
+_TRIAL_ROWS_LIMIT: Final = 64
+_TRIAL_HOSTS_LIMIT: Final = 64
+_TRIAL_HOST_ROLES: Final = frozenset({"image", "login", "asset"})
+_STATUS_VALUES: Final = frozenset(status.value for status in FieldStatus)
+
+
+def _trial(value: TrialInput) -> TrialInput:
+    """``ONBOARDING_TRIAL_INVALID`` unless every part of the record has its closed shape."""
+    statuses = dict(value.field_statuses)
+    ok = (
+        isinstance(value.sample_url_key, str)
+        and value.sample_url_key.startswith("https://")
+        and len(value.sample_url_key) <= _SAMPLE_LIMIT
+        and not any(ch.isspace() for ch in value.sample_url_key)
+        and isinstance(value.template_revision, str)
+        and 0 < len(value.template_revision) <= 64
+        and isinstance(value.words_seq, int)
+        and value.words_seq >= 0
+        and bool(_HEX64.fullmatch(value.capture_sha256))
+        and bool(_HEX64.fullmatch(value.facts_fingerprint))
+        and set(statuses) <= set(FIELD_REGISTRY)
+        and set(CORE_FIELDS) <= set(statuses)
+        and all(v in _STATUS_VALUES for v in statuses.values())
+        and len(value.unread_rows) <= _TRIAL_ROWS_LIMIT
+        and len(value.observed_hosts) <= _TRIAL_HOSTS_LIMIT
+        and all(
+            isinstance(h, Mapping)
+            and isinstance(h.get("host"), str)
+            and h.get("role") in _TRIAL_HOST_ROLES
+            for h in value.observed_hosts
+        )
+        and all(
+            isinstance(c, str) and _STRUCTURAL_CODE.fullmatch(c) is not None
+            for c in value.structural
+        )
+    )
+    if not ok:
+        raise InputValidationError(
+            ONBOARDING_TRIAL_INVALID, "a trial record is names, statuses, codes and hashes"
+        )
+    return value
+
+
+# ADR-0010 Q1 reconnaissance caps: at most 3 public policy reads per site.
+POLICY_READ_CAP: Final = 3
+_POLICY_DOCUMENTS: Final = frozenset({"ROBOTS", "TERMS"})
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _policy_reads(values: Iterable[PolicyReadInput]) -> list[PolicyReadInput]:
+    reads = list(values)
+    if len(reads) > POLICY_READ_CAP or not all(
+        r.document in _POLICY_DOCUMENTS
+        and isinstance(r.path, str)
+        and r.path.startswith("/")
+        and 100 <= r.http_status <= 599
+        and (r.content_sha256 is None or _HEX64.fullmatch(r.content_sha256))
+        for r in reads
+    ):
+        raise InputValidationError(
+            ONBOARDING_POLICY_READS_INVALID,
+            f"at most {POLICY_READ_CAP} policy reads, each a robots or terms document",
+        )
+    return reads
 
 
 class OnboardingConflictError(AppError):
@@ -219,8 +353,24 @@ class OnboardingStore:
 
     # ------------------------------------------------------------------ writes
 
-    def create(self, *, name: str, origin: str, template: str, actor: str) -> OnboardingRecord:
-        """A new ``DRAFT`` supplier with its bootstrap storefront host (§4 step 1, OB-01)."""
+    def create(
+        self,
+        *,
+        name: str,
+        origin: str,
+        template: str,
+        actor: str,
+        policy_reads: Iterable[PolicyReadInput] = (),
+        detected: str | None = None,
+        markers: Iterable[str] = (),
+    ) -> OnboardingRecord:
+        """A new ``DRAFT`` supplier with its bootstrap storefront host (§4 step 1, OB-01).
+
+        ``policy_reads`` are the reads the operator was shown, written acknowledged by ``actor``
+        (step 3). ``detected`` and ``markers`` are what platform detection found (step 2): the
+        audit names them beside the template the operator confirmed."""
+        reads = _policy_reads(policy_reads)
+        marker_names = [m for m in markers if isinstance(m, str) and _EVIDENCE_ID.fullmatch(m)]
         try:
             display_name = plain_word(name, "display_name")
         except SiteConfigError:
@@ -282,6 +432,20 @@ class OnboardingStore:
                     confirmed_at=now,
                 )
             )
+            for read in reads:
+                session.add(
+                    OnboardingPolicyRead(
+                        read_id=str(uuid.uuid4()),
+                        supplier_key=key,
+                        document=read.document,
+                        path=read.path,
+                        http_status=read.http_status,
+                        content_sha256=read.content_sha256,
+                        read_at=read.read_at,
+                        acknowledged_by=actor,
+                        acknowledged_at=now,
+                    )
+                )
             session.flush()
             self._event(
                 session,
@@ -292,6 +456,15 @@ class OnboardingStore:
                     "template": chosen.platform,
                     "storefront_host": host,
                     "state": OnboardingState.DRAFT.value,
+                },
+                details={
+                    "detected": detected,
+                    "confirmed": chosen.platform,
+                    "markers": marker_names[:_EVIDENCE_LIMIT],
+                    "policy_reads": [
+                        {"document": r.document, "path": r.path, "http_status": r.http_status}
+                        for r in reads
+                    ],
                 },
             )
             record = _current(session, key)
@@ -484,7 +657,78 @@ class OnboardingStore:
         self._changed(key)
         return record
 
+    def record_trial(self, key: str, trial: TrialInput, *, actor: str) -> StoredTrial:
+        """Append one trial read of a ``RECON`` site under its current words revision (§5).
+
+        It is the trial's only record: never a ``ProductFactsRevision`` (OB-02). A site in any
+        other state is refused, and so is a trial under words that are no longer current."""
+        checked = _trial(trial)
+        with self._db.write() as session:
+            record = _current(session, key)
+            if record.state is not OnboardingState.RECON:
+                raise OnboardingConflictError(
+                    ONBOARDING_NOT_RECON,
+                    "site analysis reads a supplier that is in analysis (RECON) only",
+                    details={"state": record.state.value},
+                )
+            if checked.words_seq != record.words_seq:
+                raise OnboardingConflictError(
+                    ONBOARDING_WORDS_MOVED,
+                    "the words changed while the sample was analysed; analyse it again",
+                    details={"current_seq": record.words_seq},
+                )
+            row = OnboardingTrial(
+                trial_id=str(uuid.uuid4()),
+                supplier_key=key,
+                sample_url_key=checked.sample_url_key,
+                template_revision=checked.template_revision,
+                words_seq=checked.words_seq,
+                capture_sha256=checked.capture_sha256,
+                facts_fingerprint=checked.facts_fingerprint,
+                field_status_json=_canonical(dict(checked.field_statuses)),
+                unread_rows_json=_canonical([dict(r) for r in checked.unread_rows]),
+                observed_hosts_json=_canonical([dict(h) for h in checked.observed_hosts]),
+                structural_json=_canonical(list(checked.structural)),
+                created_by=actor,
+                created_at=self._clock.now(),
+            )
+            session.add(row)
+            session.flush()
+            self._event(
+                session,
+                "ONBOARDING_TRIAL_RECORDED",
+                key,
+                actor,
+                after={
+                    "trial_id": row.trial_id,
+                    "words_seq": row.words_seq,
+                    "template_revision": row.template_revision,
+                    "capture_sha256": row.capture_sha256,
+                    "facts_fingerprint": row.facts_fingerprint,
+                },
+                details={
+                    "unread_rows": len(checked.unread_rows),
+                    "observed_hosts": len(checked.observed_hosts),
+                    "structural": list(checked.structural),
+                },
+            )
+            return _stored_trial(row)
+
     # ------------------------------------------------------------------ reads
+
+    def trials(self, key: str) -> tuple[StoredTrial, ...]:
+        """Every trial of ``key``, oldest first (a re-analysis at the same instant after its
+        words revision)."""
+        with self._db.read() as session:
+            _current(session, key)
+            rows = session.scalars(
+                select(OnboardingTrial)
+                .where(OnboardingTrial.supplier_key == key)
+                .order_by(
+                    OnboardingTrial.created_at, OnboardingTrial.words_seq, OnboardingTrial.trial_id
+                )
+            ).all()
+            return tuple(_stored_trial(row) for row in rows)
 
     def activation(self, key: str) -> ActivationProof:
         """What the trials under the current words revision prove now (§7)."""
@@ -494,6 +738,40 @@ class OnboardingStore:
     def current(self, key: str) -> OnboardingRecord:
         with self._db.read() as session:
             return _current(session, key)
+
+    def policy_reads(self, key: str) -> tuple[StoredPolicyRead, ...]:
+        """The policy reads the operator acknowledged for ``key`` (§4 step 3), oldest first."""
+        with self._db.read() as session:
+            _current(session, key)
+            rows = session.scalars(
+                select(OnboardingPolicyRead)
+                .where(OnboardingPolicyRead.supplier_key == key)
+                .order_by(OnboardingPolicyRead.read_at, OnboardingPolicyRead.document)
+            ).all()
+            return tuple(
+                StoredPolicyRead(
+                    read_id=row.read_id,
+                    document=row.document,
+                    path=row.path,
+                    http_status=row.http_status,
+                    content_sha256=row.content_sha256,
+                    read_at=row.read_at,
+                    acknowledged_by=row.acknowledged_by,
+                    acknowledged_at=row.acknowledged_at,
+                )
+                for row in rows
+            )
+
+    def supplier_of_origin(self, origin: str) -> str | None:
+        """The onboarded supplier key that holds ``origin`` (normalised), in any state."""
+        with self._db.read() as session:
+            return session.scalars(
+                select(OnboardedSupplier.supplier_key).where(OnboardedSupplier.origin == origin)
+            ).first()
+
+    def reserved_host(self, host: str) -> bool:
+        """Whether ``host`` is a repository supplier's storefront (ADR-0036 §1)."""
+        return host in self._reserved_hosts
 
     def all_current(self) -> tuple[OnboardingRecord, ...]:
         """Every onboarded supplier as it stands now, by key."""
@@ -736,6 +1014,28 @@ def _json_object(text: str) -> dict[str, Any]:
     except ValueError:
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _canonical(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _stored_trial(row: OnboardingTrial) -> StoredTrial:
+    statuses = _json_object(row.field_status_json)
+    return StoredTrial(
+        trial_id=row.trial_id,
+        sample_url_key=row.sample_url_key,
+        template_revision=row.template_revision,
+        words_seq=row.words_seq,
+        capture_sha256=row.capture_sha256,
+        facts_fingerprint=row.facts_fingerprint,
+        field_statuses={k: str(v) for k, v in statuses.items()},
+        unread_rows=tuple(r for r in _json_list(row.unread_rows_json) if isinstance(r, dict)),
+        observed_hosts=tuple(h for h in _json_list(row.observed_hosts_json) if isinstance(h, dict)),
+        structural=tuple(str(c) for c in _json_list(row.structural_json)),
+        created_by=row.created_by,
+        created_at=row.created_at,
+    )
 
 
 def _observed(session: Session, key: str, trial_id: str, host: str) -> bool:

@@ -40,7 +40,13 @@ from integrations.suppliers.collection import (
     SupplierCollection,
     UnresolvedIdentity,
 )
-from integrations.suppliers.platforms import PlatformTemplate, SiteBinding
+from integrations.suppliers.platforms import (
+    PageRow,
+    PlatformAnalysis,
+    PlatformDetection,
+    PlatformTemplate,
+    SiteBinding,
+)
 from integrations.suppliers.platforms.cafe24.collect import (
     DEFAULT_VOCABULARY,
     EXTRACTION_REVISION,
@@ -50,6 +56,14 @@ from integrations.suppliers.platforms.cafe24.collect import (
     classify_images,
     parse_fields,
     resolve,
+)
+from integrations.suppliers.platforms.cafe24.collect.dom import read
+from integrations.suppliers.platforms.cafe24.collect.facts import (
+    ACTION_AREA,
+    FEE_TOOLTIP,
+    NOTICE_WORDS,
+    TIER_LABELS,
+    _rows,
 )
 from integrations.suppliers.platforms.cafe24.collect.identity import (
     SourceIdentity as ParsedIdentity,
@@ -278,6 +292,110 @@ def bind(site: SiteConfig, extraction_revision: str) -> SiteBinding:
     return SiteBinding(definition=definition, collection=collection)
 
 
+# ADR-0036 §4 step 2: how a Cafe24 storefront is recognised before it is onboarded. The asset host
+# and the ``xans-`` modules are on every Cafe24 page (U-PICK, KM통상); the login form is the one
+# CONNECT fills. Markers only: nothing is read from the page.
+DETECTION = PlatformDetection(
+    home_markers=(
+        ("cafe24_asset_host", "echosting.cafe24.com"),
+        ("cafe24_module", "xans-element-"),
+        ("cafe24_layout_module", "xans-layout"),
+        ("cafe24_front_action", "/exec/front/"),
+    ),
+    login_path=LOGIN_PATH,
+    login_markers=(
+        ("cafe24_login_form", 'action="/exec/front/Member/login/"'),
+        ("cafe24_login_module", "xans-member-login"),
+    ),
+    robots_path=ROBOTS_PATH,
+    terms_path=TERMS_PATH,
+    product_path_prefix="/product/",
+)
+
+
+# ADR-0036 §5 (slice O3): what a trial report reads besides the facts. The rows are the template's
+# own ``th``/``td`` pairs; the template reads a quantity-tier or a notice row by its own words.
+# A product page writes one product detail module and one order list (``#totalProducts``): a
+# second of either is a page whose structure no words can read.
+ROW_SLOTS = (
+    "name",
+    "price",
+    "purchase_price",
+    "list_price",
+    "minimum_price",
+    "shipping_method",
+    "shipping_fee",
+    "shipping_region_fee",
+    "brand",
+    "manufacturer",
+    "origin",
+    "sales_channel_row",
+)
+CHANNEL_SLOTS = (
+    "channel_all_allowed",
+    "channel_closed_only",
+    "channel_forbid_coupang",
+    "channel_forbid_smartstore",
+)
+_PRODUCT_MODULE = "xans-product-detail"
+_ORDER_LIST = "#totalProducts"
+
+
+def page_rows(body: str) -> tuple[PageRow, ...]:
+    return tuple(PageRow(label, value) for label, value, _cell in _rows(read(body)))
+
+
+def reads_label(label: str) -> bool:
+    squashed = "".join(label.split())
+    return any(word in label for word in TIER_LABELS) or any(
+        word in squashed for word in NOTICE_WORDS
+    )
+
+
+def structure(body: str) -> tuple[str, ...]:
+    nodes = read(body)
+    modules = sum(1 for node in nodes if node.marks_exactly(_PRODUCT_MODULE))
+    orders = sum(1 for node in nodes if node.marks_exactly(_ORDER_LIST))
+    return ("DUPLICATED_ORDER_LIST",) if modules > 1 or orders > 1 else ()
+
+
+# The product page's own regions: the detail module (name, prices, rows), the action area (order
+# controls, sold-out marks, photo slide), the image module and its additional images, the order
+# list and the shipping-fee tooltip, then the site's option, description, tab-strip and key-image
+# regions.
+_CAPTURE_REGIONS = (
+    _PRODUCT_MODULE,
+    ACTION_AREA,
+    "xans-product-image",
+    "xans-product-addimage",
+    "xans-photoslide",
+    "infoArea",
+    _ORDER_LIST,
+    FEE_TOOLTIP,
+)
+
+
+def capture_regions(site: SiteConfig) -> tuple[str, ...]:
+    words = vocabulary(site)
+    return (
+        *_CAPTURE_REGIONS,
+        words.option_container,
+        words.detail_container,
+        words.detail_menu,
+        words.key_image,
+    )
+
+
+ANALYSIS = PlatformAnalysis(
+    rows=page_rows,
+    row_slots=ROW_SLOTS,
+    channel_slots=CHANNEL_SLOTS,
+    reads_label=reads_label,
+    structure=structure,
+    capture_regions=capture_regions,
+)
+
+
 TEMPLATE = PlatformTemplate(
     platform="cafe24",
     revision=EXTRACTION_REVISION,
@@ -289,4 +407,6 @@ TEMPLATE = PlatformTemplate(
     capture_revision=CAPTURE_REVISION,
     bind=bind,
     role_table=tuple((rule.rule_id, rule.role.value) for rule in (*ROLE_RULES, OG_IMAGE_RULE)),
+    detection=DETECTION,
+    analysis=ANALYSIS,
 )

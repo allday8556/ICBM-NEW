@@ -32,6 +32,7 @@ from collections.abc import Iterable
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Float,
     ForeignKey,
@@ -429,6 +430,16 @@ _BELOW = (
 )
 
 
+# ADR-0039 §3, frozen by migration 0061: an applied snapshot names no separate stated minimum, and
+# one that did not apply the minimum priced without it.
+MINIMUM_APPLIED_FLAG = "minimum_applied IN (0, 1)"
+MINIMUM_POLICY_RECORDED = (
+    "(minimum_applied = 1 AND stated_minimum_sale_price_krw IS NULL)"
+    " OR (minimum_applied = 0 AND minimum_sale_price_krw IS NULL"
+    " AND (stated_minimum_sale_price_krw IS NULL OR stated_minimum_sale_price_krw > 0))"
+)
+
+
 class PricingSnapshot(Base):
     __tablename__ = "pricing_snapshots"
     __table_args__ = (
@@ -501,6 +512,9 @@ class PricingSnapshot(Base):
             f" AND json_array_length(guard_reasons_json) = ({_LOSS}) + ({_BELOW})",
             name="guard_reasons_exact",
         ),
+        # ADR-0039 §3 (migration 0061): whether the supplier's minimum resale price was applied.
+        CheckConstraint(MINIMUM_APPLIED_FLAG, name="minimum_applied_flag"),
+        CheckConstraint(MINIMUM_POLICY_RECORDED, name="minimum_policy_recorded"),
     )
 
     pricing_snapshot_id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -551,6 +565,10 @@ class PricingSnapshot(Base):
     price_guard: Mapped[str] = mapped_column(String(20))
     guard_reasons_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # ADR-0039 §3 (SP-03): False when the supplier's sales policy did not apply its minimum resale
+    # price; the minimum the source stated is then kept beside the price, never priced.
+    minimum_applied: Mapped[bool] = mapped_column(Boolean, server_default=text("1"))
+    stated_minimum_sale_price_krw: Mapped[int | None] = mapped_column(Integer)
 
 
 class CurrentPricingSnapshotMove(Base):

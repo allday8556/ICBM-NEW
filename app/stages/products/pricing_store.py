@@ -64,6 +64,10 @@ class PricingSnapshotRecord:
     price_guard: PriceGuard
     guard_reasons: tuple[GuardReason, ...]
     created_at: datetime
+    # ADR-0039 §3 (SP-03): whether the supplier's minimum was applied, and the minimum the source
+    # stated when it was not.
+    minimum_applied: bool = True
+    stated_minimum_sale_price_krw: int | None = None
 
 
 @dataclass(frozen=True)
@@ -151,6 +155,8 @@ class PricingUnit:
             price_guard=calculation.price_guard.value,
             guard_reasons_json=json.dumps([reason.value for reason in calculation.guard_reasons]),
             created_at=self._clock.now(),
+            minimum_applied=inputs.minimum_applied,
+            stated_minimum_sale_price_krw=inputs.stated_minimum_sale_price_krw,
         )
         self.session.add(row)
         self.session.flush()
@@ -215,6 +221,8 @@ def _snapshot(row: PricingSnapshot) -> PricingSnapshotRecord:
         price_guard=PriceGuard(row.price_guard),
         guard_reasons=tuple(GuardReason(r) for r in json.loads(row.guard_reasons_json)),
         created_at=row.created_at,
+        minimum_applied=bool(row.minimum_applied),
+        stated_minimum_sale_price_krw=row.stated_minimum_sale_price_krw,
     )
 
 

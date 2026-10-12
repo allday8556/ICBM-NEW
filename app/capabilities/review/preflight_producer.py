@@ -28,6 +28,8 @@ evaluation by reference. It copies no rule and stores no verdict, because none e
   - ``M4_PRICING.<procurement>`` is the same current-procurement condition that M4 base readiness
     derives and ``products.readiness`` already indexes.
 - STALE, BLOCKED and DUPLICATE reasons are the owner's own verdicts, not review work.
+- READY-status warnings (``WARNINGS``) are not review work either: a supplier sales policy the user
+  chose not to apply (ADR-0039 §2, §3) is shown on the unit and blocks nothing.
 - A REVIEW_REQUIRED code that is neither indexed nor excluded above **fails the derivation**
   (``REVIEW_CONDITION_UNMAPPED``), so a new preflight reason can never be silently left out of a
   count.
@@ -60,6 +62,7 @@ from app.platform.core.errors import AppError, ErrorClass
 from app.platform.db.database import DatabaseWriteReentryError
 from app.stages.products.model import ReadinessStatus
 from app.stages.products.pricing import (
+    MINIMUM_SALE_PRICE_NOT_APPLIED,
     MINIMUM_SALE_PRICE_NOT_OFFER_BOUND,
     MINIMUM_SALE_PRICE_NOT_POSITIVE,
     MINIMUM_SALE_PRICE_UNRESOLVED,
@@ -80,6 +83,10 @@ from app.stages.products.pricing_service import (
     MEMBERSHIP_REVISION_NOT_CURRENT,
 )
 from app.stages.products.readiness import GROUP_CANDIDATE_PENDING, ProductReadinessService
+from app.stages.products.source_gates import (
+    SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED,
+    SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED,
+)
 from app.stages.register import preparation as p
 from app.stages.register.authoring import RegistrationPreparationService
 from app.stages.register.preflight import RegistrationPreflightService
@@ -124,6 +131,7 @@ REVIEWED: Final = frozenset(
         p.PUBLICATION_ASSET_COUNT_EXCEEDED,
         p.PUBLICATION_REPRESENTATIVE_MISSING,
         p.PUBLICATION_ASSET_QA_NOT_PASSED,
+        p.IMAGE_UPLOAD_FIT_FAILED,
         p.PROVIDER_DUPLICATE_FOUND,
         p.PROVIDER_DUPLICATE_WEAK_SIGNAL,
         p.DUPLICATE_EVIDENCE_MISSING,
@@ -166,6 +174,15 @@ M4_PROCUREMENT: Final = frozenset(
         GROUP_CANDIDATE_PENDING,
     }
 )
+# ADR-0039 §2, §3: the warnings a candidate states with READY status. Never indexed: they are the
+# user's own per-supplier choice, not review work, and a READY reason never reaches ``indexed``.
+WARNINGS: Final = frozenset(
+    {
+        SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED,
+        SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED,
+        f"{p.M4_PRICING_PREFIX}{MINIMUM_SALE_PRICE_NOT_APPLIED}",
+    }
+)
 # A refusal the owner may give instead of an evaluation: a typed cause, never a crash.
 _REFUSAL_CLASSES: Final = frozenset(
     {
@@ -181,6 +198,8 @@ _REFUSAL_CLASSES: Final = frozenset(
 def indexed(code: str) -> bool:
     """Whether a REVIEW_REQUIRED candidate reason is indexed here (True), is a projection another
     producer already indexes (False), or has no reviewed mapping (it raises)."""
+    if code in WARNINGS:
+        return False
     if code.startswith(p.M4_BASE_PREFIX):
         return code == f"{p.M4_BASE_PREFIX}{ReadinessStatus.REVIEW_REQUIRED.value}"
     if code.startswith(p.M4_PRICING_PREFIX):
