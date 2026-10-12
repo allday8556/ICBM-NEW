@@ -129,6 +129,10 @@ def test_a_capture_keeps_no_member_text_and_no_url_path_outside_the_product_regi
     page = (
         "<html><head><title>상품 103</title>"
         '<meta property="og:title" content="상품 103">'
+        '<meta property="product:productId" content="103">'
+        '<meta name="csrf-token" content="CSRFMETA77">'
+        '<meta name="naver-site-verification" content="VERIFYMETA88">'
+        '<meta charset="utf-8">'
         '<link rel="stylesheet" href="https://assets.shop-cdn.com/s/abc/site.css">'
         '<script src="https://assets.shop-cdn.com/k/9f8e7d6c5b4a/front.js"></script></head><body>'
         f'<div class="top"><span>{MEMBER_NAME}님</span> <em>{MEMBER_EMAIL}</em></div>'
@@ -175,6 +179,9 @@ def test_a_capture_keeps_no_member_text_and_no_url_path_outside_the_product_regi
         "STYLESECRET",
         "track.example.com",
         "color",
+        "CSRFMETA77",
+        "csrf-token",
+        "VERIFYMETA88",
     ):
         assert gone not in kept, gone
     # ADR-0010: a locator keeps scheme, host, path and only the profile's safe query keys.
@@ -184,6 +191,9 @@ def test_a_capture_keeps_no_member_text_and_no_url_path_outside_the_product_regi
     # What the template and the host report read stays.
     assert "판매가 12,000원" in kept and 'src="https://img.shop-cdn.com/p/103.jpg"' in kept
     assert '<meta property="og:title" content="상품 103">' in kept and "<title>상품 103" in kept
+    # Only public Open Graph and product metadata keep a value; any other meta keeps nothing.
+    assert '<meta property="product:productId" content="103">' in kept
+    assert '<meta charset="utf-8">' in kept
     assert 'href="//auth.shop-login.com/login"' in kept
     assert 'src="//assets.shop-cdn.com/"' in kept and 'href="//assets.shop-cdn.com/"' in kept
     assert 'class="top"' in kept  # the structure stays, its text does not

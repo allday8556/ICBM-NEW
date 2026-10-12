@@ -744,6 +744,28 @@ def test_a_trial_read_paces_collects_next_read_of_that_product(
     assert error.details["scope"] == "sample"
 
 
+def test_the_next_trial_waits_from_the_end_of_the_last_read(
+    app: Container, clock: FakeClock, shop: TrialShop
+) -> None:
+    """The 10 s between trial reads count from when the last read ended, not from when its job
+    started: 30 s spent before the supplier answered do not count toward the next read's wait."""
+    key = recon_site(app, CAFE24_ORIGIN, "cafe24")
+    first, second = cafe24_url(921), cafe24_url(922)
+    shop.serve(first, cafe24_page(921))
+    shop.serve(second, cafe24_page(922))
+    shop.on_request = lambda: clock.advance(30)
+    run_trial(app, key, first)
+    shop.on_request = None
+    clock.advance(5)  # 35 s after the job started, 5 s after its read
+    error = refused(
+        ONBOARDING_TRIAL_TOO_SOON,
+        lambda: app.onboarding_analysis.submit(key, second, actor=OPERATOR),
+    )
+    assert error.details["scope"] == "site" and 4 <= error.details["seconds_remaining"] <= 5
+    clock.advance(5)
+    run_trial(app, key, second)
+
+
 def test_collect_counts_a_trial_read_from_its_end_and_an_unfinished_one_as_now(
     app: Container, clock: FakeClock, shop: TrialShop
 ) -> None:

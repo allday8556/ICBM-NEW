@@ -22,8 +22,10 @@ template reads:
   declaration, a CSS ``url(…)`` among them, is dropped.
 - **Attributes are an allowlist everywhere**: those, the image sources a template reads (``src``,
   ``srcset``, ``data-src``, ``data-original``, ``ec-data-src``) inside the regions, the
-  form-state flags (``disabled``, ``selected``, ``checked``), ``name``, a ``meta`` element's
-  ``property``/``content``/``charset``, and a ``link``'s ``href`` when it is the canonical link.
+  form-state flags (``disabled``, ``selected``, ``checked``), ``name``, the ``charset`` and the
+  ``property``/``name``/``content`` of a ``meta`` element declaring public Open Graph or product
+  metadata (``og:…``, ``product:…``) — any other meta, a CSRF token among them, keeps nothing
+  else — and a ``link``'s ``href`` when it is the canonical link.
 - **Every kept locator follows ADR-0010's secret-bearing URL rule**: an image source, a
   ``srcset`` candidate, a ``meta`` URL and the canonical link keep only scheme, host, path and
   the query keys the site profile declares safe for that host; fragments, credentials, ports,
@@ -111,8 +113,11 @@ _INSIDE: Final = frozenset(
         "name",
     }
 )
-# A meta element's declaration (og:title, og:url, og:image, the charset).
-_META: Final = frozenset({"property", "name", "content", "charset", "http-equiv"})
+# The meta declarations a template reads: the product page's own public Open Graph and product
+# metadata (og:title, og:url, og:image, product:productId, product:price:amount, …). Any other
+# meta element — a CSRF token, a site verification, an app id — keeps nothing but its charset.
+_META_KEYS: Final = ("og:", "product:")
+_META: Final = frozenset({"property", "name", "content"})
 _PRIVATE: Final = re.compile(
     r"(?i)(member|mypage|myshop|login|logon|account|userinfo|user-info|customer)"
 )
@@ -203,7 +208,12 @@ def _attribute(
     if name in _STRUCTURE:
         return True, value
     if tag == "meta":
-        return name in _META, value
+        if name == "charset":
+            return True, value
+        # The template's own lookup: ``property``, else ``name``.
+        found = {n.lower(): v or "" for n, v in attrs}
+        key = (found.get("property") or found.get("name") or "").lower()
+        return name in _META and key.startswith(_META_KEYS), value
     if tag == "link":
         rel = next((v or "" for n, v in attrs if n.lower() == "rel"), "").lower().split()
         if name == "rel":

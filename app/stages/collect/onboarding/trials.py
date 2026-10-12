@@ -187,6 +187,21 @@ def target_ref(supplier_key: str, sample_key: str) -> str:
     return f"{supplier_key}:{_digest(sample_key)}"
 
 
+def _read_moment(job: JobRecord, now: datetime, *, started_only: bool) -> datetime | None:
+    """The latest moment a trial job may have read, never earlier than its read: a finished job
+    when it finished, a started unfinished one now. A queued job is counted from its creation at
+    submit (``started_only`` False) and not at all by a job checking before its own read."""
+    if job.state in TERMINAL_STATE_NAMES:
+        moment = job.finished_at or job.started_at
+    elif job.started_at is not None:
+        moment = now
+    else:
+        moment = None if started_only else job.created_at
+    if moment is not None and moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment
+
+
 def last_trial_read(session: Session, key: PacingKey, now: datetime) -> datetime | None:
     """The latest moment a trial may have read this product (OB-06), never earlier than its read.
 
@@ -515,7 +530,7 @@ class SiteAnalysisService:
         same, between = self._intervals(site)
         target = target_ref(site.record.supplier_key, pacing.url)
         for job in recent:
-            moment = job.started_at if started_only else (job.started_at or job.created_at)
+            moment = _read_moment(job, now, started_only=started_only)
             if moment is None:
                 continue
             elapsed = (now - moment).total_seconds()

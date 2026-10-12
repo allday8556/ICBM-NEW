@@ -134,8 +134,9 @@ class JobService:
         self, job_type: str, *, target_prefix: str, since: datetime
     ) -> list[JobRecord]:
         """Jobs of this type whose target starts with ``target_prefix`` and that are unfinished,
-        or were queued or started at or after ``since``; newest first. An owner paces its own
-        work on these rows (ADR-0036 §5: a trial read is one job, so its job is its read)."""
+        or were queued, started or finished at or after ``since``; newest first. An owner paces
+        its own work on these rows (ADR-0036 §5: a trial read is one job, so its job is its
+        read)."""
         with self._db.read() as session:
             jobs = session.scalars(
                 select(Job)
@@ -146,6 +147,7 @@ class JobService:
                         Job.state.not_in(TERMINAL_STATES),
                         Job.created_at >= since,
                         Job.started_at >= since,
+                        Job.finished_at >= since,
                     ),
                 )
                 .order_by(Job.created_at.desc(), Job.job_id)
