@@ -80,9 +80,10 @@ const ROLE_LABEL = { image: '이미지', login: '로그인', asset: '자산(수�
 
 const ERROR_COPY = {
   ONBOARDING_SAMPLE_REFUSED: '이 공급처 쇼핑몰의 상품 페이지 주소만 샘플로 읽습니다.',
-  ONBOARDING_SAMPLES_FULL: '샘플은 최대 5개까지입니다.',
+  ONBOARDING_SAMPLES_FULL: '샘플은 실패한 읽기를 포함해 최대 5개까지입니다.',
+  ONBOARDING_SAMPLE_ALREADY_READ: '이미 읽은 샘플입니다. 샘플은 한 번만 읽고, 수집 규칙이 바뀌면 다시 분석으로 저장본을 다시 봅니다.',
   ONBOARDING_TRIAL_PENDING: '이 샘플은 이미 읽기 대기 중입니다.',
-  ONBOARDING_TRIAL_TOO_SOON: '너무 이른 읽기입니다. 같은 샘플은 60초, 다른 샘플은 10초 뒤에 읽습니다.',
+  ONBOARDING_TRIAL_TOO_SOON: '너무 이른 읽기입니다. 읽기 사이에는 10초를 둡니다.',
   ONBOARDING_NOT_RECON: '분석 중(RECON)인 공급처만 사이트 분석을 합니다.',
   ONBOARDING_SAMPLE_UNREAD: '상품 페이지 대신 다른 응답(로그인 이동 등)을 받았습니다. 연결 테스트 후 다시 읽으세요.',
   ONBOARDING_SITE_UNBOUND: '이 공급처는 지금 연결할 수 없습니다.',

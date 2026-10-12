@@ -58,7 +58,13 @@ from integrations.suppliers.platforms.cafe24.collect import (
     resolve,
 )
 from integrations.suppliers.platforms.cafe24.collect.dom import read
-from integrations.suppliers.platforms.cafe24.collect.facts import NOTICE_WORDS, TIER_LABELS, _rows
+from integrations.suppliers.platforms.cafe24.collect.facts import (
+    ACTION_AREA,
+    FEE_TOOLTIP,
+    NOTICE_WORDS,
+    TIER_LABELS,
+    _rows,
+)
 from integrations.suppliers.platforms.cafe24.collect.identity import (
     SourceIdentity as ParsedIdentity,
 )
@@ -353,12 +359,40 @@ def structure(body: str) -> tuple[str, ...]:
     return ("DUPLICATED_ORDER_LIST",) if modules > 1 or orders > 1 else ()
 
 
+# The product page's own regions: the detail module (name, prices, rows), the action area (order
+# controls, sold-out marks, photo slide), the image module and its additional images, the order
+# list and the shipping-fee tooltip, then the site's option, description, tab-strip and key-image
+# regions.
+_CAPTURE_REGIONS = (
+    _PRODUCT_MODULE,
+    ACTION_AREA,
+    "xans-product-image",
+    "xans-product-addimage",
+    "xans-photoslide",
+    "infoArea",
+    _ORDER_LIST,
+    FEE_TOOLTIP,
+)
+
+
+def capture_regions(site: SiteConfig) -> tuple[str, ...]:
+    words = vocabulary(site)
+    return (
+        *_CAPTURE_REGIONS,
+        words.option_container,
+        words.detail_container,
+        words.detail_menu,
+        words.key_image,
+    )
+
+
 ANALYSIS = PlatformAnalysis(
     rows=page_rows,
     row_slots=ROW_SLOTS,
     channel_slots=CHANNEL_SLOTS,
     reads_label=reads_label,
     structure=structure,
+    capture_regions=capture_regions,
 )
 
 

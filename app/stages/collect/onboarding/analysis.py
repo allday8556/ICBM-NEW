@@ -93,7 +93,8 @@ _ONE_AMOUNT = re.compile(
     re.IGNORECASE,
 )
 _SEPARATORS = re.compile(r"[/,·\n]")
-_LOGIN_PATH = re.compile(r"(?i)login|logon|signin")
+# A reference to a login page, by its path (the report's login hosts; a capture keeps only these).
+LOGIN_PATH = re.compile(r"(?i)login|logon|signin")
 _ROLE_ORDER: Final = {"image": 0, "login": 1, "asset": 2}
 
 
@@ -222,7 +223,7 @@ def _observed(
         host, path = found
         if kind == "asset":
             note(host, "asset")
-        elif _LOGIN_PATH.search(path):
+        elif LOGIN_PATH.search(path):
             note(host, "login")
     hosts = sorted(
         (ObservedHost(host, role, count) for (host, role), count in counts.items()),

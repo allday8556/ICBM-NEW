@@ -37,11 +37,12 @@ from app.stages.collect.onboarding.analysis import (
     PRICE_BLOCK_UNREADABLE,
     SCRIPT_RENDERED,
 )
-from app.stages.collect.onboarding.capture import sanitize
+from app.stages.collect.onboarding.capture import TrialCaptureStore, sanitize
 from app.stages.collect.onboarding.site import HostRole, OnboardingState
 from app.stages.collect.onboarding.store import ONBOARDING_NOT_RECON
 from app.stages.collect.onboarding.trials import (
     ONBOARDING_HOST_ROLE_UNOBSERVED,
+    ONBOARDING_SAMPLE_ALREADY_READ,
     ONBOARDING_SAMPLE_REFUSED,
     ONBOARDING_SAMPLES_FULL,
     ONBOARDING_TRIAL_PENDING,
@@ -172,23 +173,26 @@ def test_the_facts_fingerprint_is_stable_and_names_what_was_shown(
 ) -> None:
     key = recon_site(app, CAFE24_ORIGIN, "cafe24")
     url = cafe24_url(102)
-    shop.serve(url, cafe24_page(102))
+    shop.serve(url, cafe24_page(102, body_extra='<div class="top">최근 본 상품 3개</div>'))
     run_trial(app, key, url)
-    clock.advance(61)
-    run_trial(app, key, url)
-    trials = app.onboarding.trials(key)
-    assert len(trials) == 2
-    assert trials[0].facts_fingerprint == trials[1].facts_fingerprint
-    # The member's own page furniture differs between reads; the capture drops it, so the same
-    # product reads to the same capture.
-    assert trials[0].capture_sha256 == trials[1].capture_sha256
+    (trial,) = app.onboarding.trials(key)
+    # The capture keeps no text outside the product regions: the page furniture's is gone.
+    captures = TrialCaptureStore(app.config.onboarding_captures_dir)
+    assert "최근 본 상품" not in captures.read(trial.capture_sha256)
+    # The stored capture reproduces exactly the fingerprint the trial recorded, so the view shows
+    # the values it names: what the operator verifies is what was read.
+    (sample,) = app.onboarding_analysis.view(key).samples
+    assert sample.facts_fingerprint == trial.facts_fingerprint
+    assert sample.summary is not None and sample.summary["name"] == "트라이얼 상품 102"
     # A different price is a different fingerprint.
-    clock.advance(61)
+    clock.advance(11)
+    other = cafe24_url(103)
     shop.serve(
-        url, cafe24_page(102, rows=row("상품명", "트라이얼 상품 102") + row("판매가", "13,000원"))
+        other, cafe24_page(103, rows=row("상품명", "트라이얼 상품 103") + row("판매가", "13,000원"))
     )
-    run_trial(app, key, url)
-    assert app.onboarding.trials(key)[-1].facts_fingerprint != trials[0].facts_fingerprint
+    run_trial(app, key, other)
+    changed = app.onboarding.trials(key)[-1]
+    assert changed.facts_fingerprint != trial.facts_fingerprint
 
 
 def test_the_capture_is_local_sanitized_and_content_addressed(
@@ -229,8 +233,11 @@ def test_the_capture_is_local_sanitized_and_content_addressed(
 
 
 def test_the_session_cookie_values_are_redacted_from_a_capture() -> None:
-    page = f"<html><body><p>sid={SESSION_VALUE}</p><a href='/x?token=abc123'>x</a></body></html>"
-    cleaned = sanitize(page, secrets=[SESSION_VALUE])
+    page = (
+        f"<html><body><div class='xans-product-detail'><p>sid={SESSION_VALUE}</p>"
+        "<img src='https://img.example.com/p.jpg?token=abc123'></div></body></html>"
+    )
+    cleaned = sanitize(page, regions=("xans-product-detail",), secrets=[SESSION_VALUE])
     assert SESSION_VALUE not in cleaned
     assert "abc123" not in cleaned and "token=REDACTED" in cleaned
 
@@ -393,18 +400,17 @@ def test_the_same_sample_waits_60_s_and_the_site_10_s(
     )
     assert error.details["scope"] == "site"
     clock.advance(11)
-    error = refused(
-        ONBOARDING_TRIAL_TOO_SOON,
+    run_trial(app, key, second)
+    # A sample is read once: after its pacing it is still refused, and only its capture is
+    # analysed again.
+    clock.advance(120)
+    refused(
+        ONBOARDING_SAMPLE_ALREADY_READ,
         lambda: app.onboarding_analysis.submit(key, first, actor=OPERATOR),
     )
-    assert error.details["scope"] == "sample" and 48 <= error.details["seconds_remaining"] <= 49
-    run_trial(app, key, second)
-    clock.advance(50)
-    run_trial(app, key, first)
     assert [path for _, _, path in shop.requests] == [
         "/product/sample/301/",
         "/product/sample/302/",
-        "/product/sample/301/",
     ]
 
 
@@ -418,9 +424,42 @@ def test_at_most_five_samples_are_taken(app: Container, clock: FakeClock, shop: 
         ONBOARDING_SAMPLES_FULL,
         lambda: app.onboarding_analysis.submit(key, cafe24_url(406), actor=OPERATOR),
     )
-    clock.advance(60)
-    # A sample already taken may be read again.
-    run_trial(app, key, cafe24_url(401))
+    clock.advance(600)
+    # A sample already taken is never read again.
+    refused(
+        ONBOARDING_SAMPLE_ALREADY_READ,
+        lambda: app.onboarding_analysis.submit(key, cafe24_url(401), actor=OPERATOR),
+    )
+    assert len(shop.requests) == 5
+
+
+def test_a_failed_read_uses_its_sample_and_counts_toward_the_five(
+    app: Container, clock: FakeClock, shop: TrialShop
+) -> None:
+    """A read that did not answer the product page still read the supplier: the sample is not
+    read again, and it takes one of the five."""
+    key = recon_site(app, CAFE24_ORIGIN, "cafe24")
+    failed = cafe24_url(450)
+    shop.serve(failed, "", status=302)
+    submitted = app.onboarding_analysis.submit(key, failed, actor=OPERATOR)
+    app.runner.run_next()
+    assert app.jobs.get(submitted.job_id).state == "DEAD"
+    assert app.onboarding.trials(key) == ()
+    clock.advance(600)
+    shop.serve(failed, cafe24_page(450))
+    refused(
+        ONBOARDING_SAMPLE_ALREADY_READ,
+        lambda: app.onboarding_analysis.submit(key, failed, actor=OPERATOR),
+    )
+    for number in range(451, 455):
+        shop.serve(cafe24_url(number), cafe24_page(number))
+        run_trial(app, key, cafe24_url(number))
+        clock.advance(11)
+    refused(
+        ONBOARDING_SAMPLES_FULL,
+        lambda: app.onboarding_analysis.submit(key, cafe24_url(455), actor=OPERATOR),
+    )
+    assert len(shop.requests) == 5
 
 
 def test_a_trial_budget_allows_one_product_read_and_nothing_else() -> None:
@@ -610,8 +649,9 @@ def test_the_api_queues_a_trial_and_reports_it(api: TestClient, shop: TrialShop)
     sample = body["samples"][0]
     assert sample["summary"]["name"] == "트라이얼 상품 801"
     trial_id = sample["trial_id"]
-    too_soon = api.post(f"{base}/trials", json={"sample_url": url}, headers=HEADERS)
-    assert too_soon.status_code == 429
+    again = api.post(f"{base}/trials", json={"sample_url": url}, headers=HEADERS)
+    assert again.status_code == 409
+    assert again.json()["error"]["code"] == ONBOARDING_SAMPLE_ALREADY_READ
     off_host = api.post(
         f"{base}/trials",
         json={"sample_url": "https://elsewhere.co.kr/product/a/1/"},

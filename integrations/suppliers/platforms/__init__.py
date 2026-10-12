@@ -75,6 +75,10 @@ class PlatformAnalysis:
       slot (a stock row, a notice, a quantity tier): such a row is read, never unread.
     - ``structure`` names the problems in the page's structure that words cannot fix, by the
       template's own rules (ADR-0035): a duplicated order list, for one.
+    - ``capture_regions`` are the regions of one site's product page whose text and content the
+      template reads (its own, and the site's relocated ones), as ``marks`` tokens. A sample
+      capture keeps text only inside them (ADR-0036 §5 step 3), so they name every region the
+      template's facts, identity, images and rows read.
     """
 
     rows: Callable[[str], tuple[PageRow, ...]]
@@ -82,6 +86,7 @@ class PlatformAnalysis:
     channel_slots: tuple[str, ...]
     reads_label: Callable[[str], bool]
     structure: Callable[[str], tuple[str, ...]]
+    capture_regions: Callable[[SiteConfig], tuple[str, ...]]
 
 
 @dataclass(frozen=True)

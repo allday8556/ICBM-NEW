@@ -30,11 +30,13 @@ guard. A confirmed image host joins the collection's egress at once (the registr
 
 import hashlib
 import logging
+import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
+from app.capabilities.jobs.models import TERMINAL_STATE_NAMES
 from app.capabilities.jobs.policy import RetryPolicy
 from app.capabilities.jobs.records import JobRecord
 from app.capabilities.jobs.registry import JobContext, JobDefinition
@@ -93,8 +95,11 @@ logger = logging.getLogger("icbm.collect.onboarding")
 ONBOARDING_TRIAL_JOB: Final = "onboarding.trial"
 # A trial read is never retried: another attempt would be another real read of the sample.
 TRIAL_POLICY: Final = RetryPolicy(max_attempts=1, base_delay_s=60.0, max_delay_s=60.0)
-# ADR-0036 §5 step 1: up to 5 sample product URLs per site.
+# ADR-0036 §5 steps 1–2: up to 5 sample product URLs per site, each read once. Every trial job
+# ever queued counts, whatever it ended in: a read that failed was still a read of the supplier.
 SAMPLE_LIMIT: Final = 5
+# Job rows are never deleted, so the ledger of a site's trial reads is all its trial jobs.
+_EVER: Final = datetime(1970, 1, 1, tzinfo=UTC)
 # The template defaults the trial reads are paced on (OB-06), when a template names none.
 SAME_SAMPLE_INTERVAL_S: Final = 60.0
 TRIAL_INTERVAL_S: Final = 10.0
@@ -102,6 +107,7 @@ TRIAL_INTERVAL_S: Final = 10.0
 ONBOARDING_SITE_UNBOUND: Final = "ONBOARDING_SITE_UNBOUND"
 ONBOARDING_SAMPLE_REFUSED: Final = "ONBOARDING_SAMPLE_REFUSED"
 ONBOARDING_SAMPLES_FULL: Final = "ONBOARDING_SAMPLES_FULL"
+ONBOARDING_SAMPLE_ALREADY_READ: Final = "ONBOARDING_SAMPLE_ALREADY_READ"
 ONBOARDING_TRIAL_PENDING: Final = "ONBOARDING_TRIAL_PENDING"
 ONBOARDING_TRIAL_TOO_SOON: Final = "ONBOARDING_TRIAL_TOO_SOON"
 ONBOARDING_TRIAL_BUDGET: Final = "ONBOARDING_TRIAL_BUDGET"
@@ -203,6 +209,8 @@ class SiteAnalysisService:
         self._clock = clock
         self._collect_remaining = collect_remaining
         self._templates = templates
+        # A check and the job it admits are one step: two submits of a sample cannot both pass.
+        self._admit = threading.Lock()
 
     def job_definition(self) -> JobDefinition:
         return JobDefinition(
@@ -217,35 +225,31 @@ class SiteAnalysisService:
     # ------------------------------------------------------------------ trial reads
 
     def submit(self, key: str, sample_url: str, *, actor: str) -> TrialSubmitted:
-        """Accept one sample URL as one trial job (202), or refuse it before anything is read."""
+        """Accept one sample URL as one trial job (202), or refuse it before anything is read.
+
+        Each sample is read once, ever: a sample a trial job was ever queued for is refused, and a
+        site takes at most ``SAMPLE_LIMIT`` samples, failed reads included. A words change is
+        re-analysed from the stored captures, never by reading a sample again."""
         site = self._site(key)
         url = self._sample(site, sample_url)
         pacing = pacing_key(site.collection, url)
-        known = {_digest(t.sample_url_key) for t in self._store.trials(key)}
-        now = self._clock.now()
-        recent = self._recent(site, now)
         target = target_ref(key, pacing.url)
-        pending = {
-            (job.target_ref or "").split(":", 1)[-1]
-            for job in recent
-            if job.state not in ("SUCCEEDED", "DEAD")
-        }
-        if target.split(":", 1)[1] in pending:
-            raise OnboardingConflictError(
-                ONBOARDING_TRIAL_PENDING, "that sample is already waiting to be read"
+        with self._admit:
+            jobs = self._ledger(key)
+            if any(
+                job.target_ref == target and job.state not in TERMINAL_STATE_NAMES for job in jobs
+            ):
+                raise OnboardingConflictError(
+                    ONBOARDING_TRIAL_PENDING, "that sample is already waiting to be read"
+                )
+            self._refuse_reread(key, target, jobs)
+            now = self._clock.now()
+            self._paced(site, pacing, now, self._recent(site, now), started_only=False)
+            job = self._jobs.enqueue(
+                ONBOARDING_TRIAL_JOB,
+                payload={"supplier_key": key, "sample_url": url, "actor": actor},
+                target_ref=target,
             )
-        if _digest(pacing.url) not in known | pending and len(known | pending) >= SAMPLE_LIMIT:
-            raise InputValidationError(
-                ONBOARDING_SAMPLES_FULL,
-                f"site analysis takes at most {SAMPLE_LIMIT} sample products",
-                details={"sample_limit": SAMPLE_LIMIT},
-            )
-        self._paced(site, pacing, now, recent, started_only=False)
-        job = self._jobs.enqueue(
-            ONBOARDING_TRIAL_JOB,
-            payload={"supplier_key": key, "sample_url": url, "actor": actor},
-            target_ref=target,
-        )
         logger.info(
             "collect.onboarding_trial_submitted",
             extra={"supplier": key, "job_id": job.job_id},
@@ -258,6 +262,10 @@ class SiteAnalysisService:
         site = self._site(key)
         url = self._sample(site, url)
         pacing = pacing_key(site.collection, url)
+        # The same ledger again, without this job: a job queued around the submit check is
+        # refused here, before its read.
+        earlier = [j for j in self._ledger(key) if j.job_id != context.job_id]
+        self._refuse_reread(key, target_ref(key, pacing.url), earlier)
         now = self._clock.now()
         recent = [j for j in self._recent(site, now) if j.job_id != context.job_id]
         self._paced(site, pacing, now, recent, started_only=True)
@@ -278,7 +286,11 @@ class SiteAnalysisService:
                 f"the sample answered HTTP {document.status}, not the product page",
                 details={"http_status": document.status},
             )
-        body = sanitize(document.body, secrets=_cookie_values(session))
+        body = sanitize(
+            document.body,
+            regions=site.analysis.capture_regions(site.bound.config),
+            secrets=_cookie_values(session),
+        )
         sha256 = self._captures.put(body)
         actor = str(context.payload.get("actor") or f"job:{context.job_id}")[:64]
         trial = self._record(site, pacing.url, sha256, body, actor=actor)
@@ -418,6 +430,28 @@ class SiteAnalysisService:
                 details={"reason": "STOREFRONT_DISABLED"},
             )
         return url
+
+    def _ledger(self, key: str) -> list[JobRecord]:
+        """Every trial job this site ever had: each one is (or was) one read of a sample."""
+        return self._jobs.recent_for_targets(
+            ONBOARDING_TRIAL_JOB, target_prefix=f"{key}:", since=_EVER
+        )
+
+    def _refuse_reread(self, key: str, target: str, jobs: list[JobRecord]) -> None:
+        taken = {job.target_ref for job in jobs} | {
+            target_ref(key, trial.sample_url_key) for trial in self._store.trials(key)
+        }
+        if target in taken:
+            raise OnboardingConflictError(
+                ONBOARDING_SAMPLE_ALREADY_READ,
+                "each sample is read once; 다시 분석 reads its stored capture again",
+            )
+        if len(taken) >= SAMPLE_LIMIT:
+            raise InputValidationError(
+                ONBOARDING_SAMPLES_FULL,
+                f"site analysis reads at most {SAMPLE_LIMIT} samples, failed reads included",
+                details={"sample_limit": SAMPLE_LIMIT},
+            )
 
     def _recent(self, site: _Site, now: datetime) -> list[JobRecord]:
         since = now - timedelta(seconds=max(self._intervals(site)))

@@ -514,9 +514,11 @@ existing modal language:
 - **Samples.** A URL box and `샘플 읽기` (`POST /api/v1/onboarding/suppliers/{key}/trials`, 202 with a
   job id the page follows like a connection test). Up to 5 samples; a sample is a product page of the
   supplier's own storefront in its template's path form, and anything else is refused before any
-  read. Each sample is read once, paced on the template's defaults (60 s for the same sample, 10 s
-  between reads); a refusal says why (`너무 이른 읽기`, `샘플은 최대 5개`, …). Images are never
-  downloaded.
+  read. Each sample is read once, ever, and a read that failed still uses its sample and counts
+  toward the 5; reads are paced on the template's defaults (10 s between reads, and COLLECT's own
+  last read of the product). A refusal says why (`이미 읽은 샘플`, `너무 이른 읽기`, `샘플은 최대
+  5개`, …). A words change is re-analysed from the stored captures (`다시 분석`), never by reading a
+  sample again. Images are never downloaded.
 - **Each sample's report** (`GET …/trials`, the newest trial of each sample under the current
   words): its URL, the product number, `확인 가능` / `확인 불가`, and a table `필드 | 상태 | 값 요약`
   with `읽음` (CONFIRMED), `없음` (ABSENT) and `못 읽음` (REVIEW_REQUIRED) per field (the five core
