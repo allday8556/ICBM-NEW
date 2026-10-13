@@ -1,4 +1,4 @@
-"""C-AUTH-1 stays provider-zero; C-LIVE-R1 is the sole bounded network exception."""
+"""C-AUTH-1 stays provider-zero; reviewed live owners are closed bounded exceptions."""
 
 import ast
 from pathlib import Path
@@ -27,7 +27,7 @@ def test_contract_cites_the_official_auth_sources_and_safety_boundary() -> None:
     assert "One exact KR `GET`" in text
 
 
-def test_c_auth_1_contains_no_network_client_and_the_canary_is_the_only_exception() -> None:
+def test_c_auth_1_contains_no_network_client_outside_reviewed_live_owners() -> None:
     imports_by_file: dict[str, set[str]] = {}
     sources: dict[str, str] = {}
     for path in PACKAGE.glob("*.py"):
@@ -43,14 +43,24 @@ def test_c_auth_1_contains_no_network_client_and_the_canary_is_the_only_exceptio
         if network:
             imports_by_file[path.name] = network
 
-    assert imports_by_file == {"canary.py": {"httpx"}}
-    assert [name for name, source in sources.items() if "EGRESS.grant" in source] == ["canary.py"]
+    assert imports_by_file == {
+        "canary.py": {"httpx"},
+        "live_mutations.py": {"httpx"},
+    }
+    assert sorted(name for name, source in sources.items() if "EGRESS.grant" in source) == [
+        "canary.py",
+        "live_mutations.py",
+    ]
     canary = sources["canary.py"]
     assert 'client.stream("GET", path' in canary
     assert "Method.GET" in canary
     assert all(f"Method.{method}" not in canary for method in ("POST", "PUT", "PATCH", "DELETE"))
     assert canary.count("client.stream(") == 1
     assert "tenacity" not in canary
+    mutations = sources["live_mutations.py"]
+    assert "TEST_PRODUCT_BINDINGS" in mutations
+    assert "COUPANG_MUTATION_RECOVERY_REQUIRED" in mutations
+    assert "tenacity" not in mutations
 
 
 def test_cli_accepts_secrets_only_through_no_echo_prompts() -> None:
@@ -62,3 +72,4 @@ def test_cli_accepts_secrets_only_through_no_echo_prompts() -> None:
     assert 'add_argument("--secret-key"' not in source
     assert '("coupang", "save-credentials"): _coupang_credentials' in source
     assert '("coupang", "read-canary"): _coupang_read_canary' in source
+    assert '("coupang", "mutate-test-products"): _coupang_mutate_test_products' in source

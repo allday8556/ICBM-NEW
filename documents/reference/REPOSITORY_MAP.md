@@ -203,16 +203,16 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 93 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 43 |  |
+| `integrations/` | 94 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 44 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 383 | tests |
+| `tests/` | 384 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 157 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
-| `tests/unit/` | 142 | unit tests by runtime owner |
+| `tests/unit/` | 143 | unit tests by runtime owner |
 | `ui/` | 73 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 64 | the served web client |

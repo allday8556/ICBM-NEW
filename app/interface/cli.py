@@ -23,8 +23,10 @@ FAILED proof of the state as it is; nothing here decides a verdict, and a proof 
 itself — the stack still refuses under ``M0_DRY_RUN_ONLY``.
 
 ``icbm coupang save-credentials`` is the no-echo local input path into the OS credential store.
-``icbm coupang read-canary`` composes the one C-LIVE-R1 identity-bound KR read; neither command
-accepts Access Key or Secret Key as an argument, so secret material does not enter a process list.
+``icbm coupang read-canary`` composes the one C-LIVE-R1 identity-bound KR read and
+``icbm coupang mutate-test-products`` composes the C-LIVE-MUT-1 exact test 1..11 workflow.
+None of these commands accepts Access Key or Secret Key as an argument, so secret material does
+not enter a process list.
 
 **The residual-risk acceptance** (ADR-0018 §6.1, G3-30) is given by the user and the architect in
 GitHub. ``record-residual-risk-acceptance`` is the only path that records its durable proof: it
@@ -100,7 +102,11 @@ LIVE_OPERATOR_COMMANDS: tuple[str, ...] = (
     "record-residual-risk-acceptance",
     "upload-assets",
 )
-COUPANG_OPERATOR_COMMANDS: tuple[str, ...] = ("save-credentials", "read-canary")
+COUPANG_OPERATOR_COMMANDS: tuple[str, ...] = (
+    "save-credentials",
+    "read-canary",
+    "mutate-test-products",
+)
 for _name in LIVE_OPERATOR_COMMANDS:
     _IN_USE_HINTS[("live", _name)] = (
         "Stop the ICBM server using this data directory, then retry the command."
@@ -160,6 +166,25 @@ def build_parser() -> argparse.ArgumentParser:
     canary.add_argument("--scope-id", required=True, help="the bounded owner-approval reference")
     canary.add_argument("--approved-at", required=True, help="approval time with explicit offset")
     canary.add_argument("--expires-at", required=True, help="expiry time with explicit offset")
+    mutations = coupang_commands.add_parser(
+        "mutate-test-products",
+        help="run the approved C-LIVE-MUT-1 test 1..11 create/update/read/delete workflow",
+    )
+    mutations.add_argument(
+        "--bundle", required=True, type=Path, help="closed test 1..11 payload bundle JSON"
+    )
+    mutations.add_argument("--source-ip", required=True, help="the outbound IP registered in Wing")
+    mutations.add_argument(
+        "--clock-skew-seconds", required=True, type=float, help="observed absolute clock offset"
+    )
+    mutations.add_argument("--scope-id", required=True, help="must be C-LIVE-MUT-1")
+    mutations.add_argument(
+        "--payload-digest", required=True, help="reviewed lowercase SHA-256 payload digest"
+    )
+    mutations.add_argument(
+        "--approved-at", required=True, help="approval time with explicit offset"
+    )
+    mutations.add_argument("--expires-at", required=True, help="expiry time with explicit offset")
     return parser
 
 
@@ -504,6 +529,81 @@ def _coupang_read_canary(config: AppConfig, lease: DataDirLease, args: argparse.
     return 0
 
 
+def _coupang_mutate_test_products(
+    config: AppConfig, lease: DataDirLease, args: argparse.Namespace
+) -> int:
+    """Run C-LIVE-MUT-1 from one reviewed closed bundle; secrets stay in the OS store."""
+    from app.platform.core.errors import AppError
+    from app.platform.core.ownership import require_ownership
+    from app.platform.core.secrets import build_secret_store
+    from app.stages.connect.coupang.credentials import CoupangCredentialStore
+    from integrations.marketplaces.coupang.auth import (
+        AuthContext,
+        IpAllowlistDeclaration,
+        Market,
+        SystemUtcClock,
+    )
+    from integrations.marketplaces.coupang.canary import ClockPreflight
+    from integrations.marketplaces.coupang.live_mutations import (
+        CoupangTestProductMutationRun,
+        LiveMutationTransportRefused,
+        MutationJournal,
+        TestProductBundle,
+        TestProductMutationApproval,
+    )
+
+    require_ownership(lease, config.data_dir)
+    secrets = build_secret_store(config.secret_backend)
+    status = secrets.status()
+    if not status.available or status.backend == "memory":
+        print("COUPANG_OS_SECRET_STORE_UNAVAILABLE", file=sys.stderr)
+        return 1
+    try:
+        credentials = CoupangCredentialStore(secrets).load()
+    except OSError:
+        credentials = None
+    if credentials is None:
+        print("COUPANG_CREDENTIALS_NOT_CONFIGURED", file=sys.stderr)
+        return 1
+    try:
+        raw = json.loads(args.bundle.read_text("utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("bundle must be an object")
+        bundle = TestProductBundle.from_mapping(raw)
+        if bundle.payload_digest != args.payload_digest:
+            raise ValueError("payload digest does not match the reviewed bundle")
+        clock = SystemUtcClock()
+        now = clock.now()
+        declaration = IpAllowlistDeclaration.create(
+            args.source_ip,
+            credential_generation=credentials.credential_generation,
+            recorded_at=now,
+        )
+        approval = TestProductMutationApproval.create(
+            scope_id=args.scope_id,
+            vendor_id=credentials.vendor_id,
+            credential_generation=credentials.credential_generation,
+            source_ip=args.source_ip,
+            payload_digest=bundle.payload_digest,
+            approved_at=_instant(args.approved_at, "--approved-at"),
+            expires_at=_instant(args.expires_at, "--expires-at"),
+        )
+        result = CoupangTestProductMutationRun(
+            context=AuthContext(credentials, Market.KR, declaration),
+            approval=approval,
+            bundle=bundle,
+            clock=clock,
+            clock_preflight=ClockPreflight.create(args.clock_skew_seconds, checked_at=now),
+            journal=MutationJournal(config.runtime_dir / "coupang-live-mutations.json"),
+        ).run()
+    except (AppError, LiveMutationTransportRefused, OSError, ValueError) as exc:
+        code = exc.code if isinstance(exc, AppError) else "COUPANG_MUTATION_LOCAL_REFUSAL"
+        print(code, file=sys.stderr)
+        return 1
+    print(json.dumps(asdict(result), ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 class _OperatorInputError(ValueError):
     """An operator input that is not even well-formed: refused before any owner is asked."""
 
@@ -767,6 +867,7 @@ OWNING_COMMANDS: dict[Command, Callable[[AppConfig, DataDirLease, argparse.Names
     ("extension", "revoke"): _extension_pairing,
     ("coupang", "save-credentials"): _coupang_credentials,
     ("coupang", "read-canary"): _coupang_read_canary,
+    ("coupang", "mutate-test-products"): _coupang_mutate_test_products,
 }
 # The only commands allowed to run without the data-directory lock (ADR-0006).
 READ_ONLY_COMMANDS: dict[Command, Callable[[AppConfig], int]] = {
