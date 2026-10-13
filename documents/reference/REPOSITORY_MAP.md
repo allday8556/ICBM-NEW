@@ -167,7 +167,10 @@ contract-bound cashback and coupon endpoints. All execution remains fake-only.
 C-RG-1 adds seven exact Rocket Growth endpoint specifications plus a stable operator-safe blocked
 state. Every endpoint remains account-gated until program enrollment and the precise seller/account
 contract are proven; no request can be built, signed or sent.
-Both adapters remain fake-only, retain sensitive provider envelopes without projecting customer or
+C-CGF-1 adds the exact KR/TW CGF Lite order-label specification and a stable operator-safe blocked
+state. It remains account-gated until CGF Lite enrollment and the precise seller/account contract
+are proven; no request can be built, signed or sent.
+These adapters remain fake-only, retain sensitive provider envelopes without projecting customer or
 financial data, and grant no provider call or LIVE authority.
 
 | path | files | role |
