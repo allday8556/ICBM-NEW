@@ -22,6 +22,10 @@ exact ASSET grant or Intent into a fresh restore root the operator names, and
 FAILED proof of the state as it is; nothing here decides a verdict, and a proof proves only
 itself — the stack still refuses under ``M0_DRY_RUN_ONLY``.
 
+``icbm coupang save-credentials`` is the no-echo local input path into the OS credential store.
+``icbm coupang read-canary`` composes the one C-LIVE-R1 identity-bound KR read; neither command
+accepts Access Key or Secret Key as an argument, so secret material does not enter a process list.
+
 **The residual-risk acceptance** (ADR-0018 §6.1, G3-30) is given by the user and the architect in
 GitHub. ``record-residual-risk-acceptance`` is the only path that records its durable proof: it
 calls ``ResidualRiskAcceptanceService.record`` with the account, the current risk contract and
@@ -96,9 +100,14 @@ LIVE_OPERATOR_COMMANDS: tuple[str, ...] = (
     "record-residual-risk-acceptance",
     "upload-assets",
 )
+COUPANG_OPERATOR_COMMANDS: tuple[str, ...] = ("save-credentials", "read-canary")
 for _name in LIVE_OPERATOR_COMMANDS:
     _IN_USE_HINTS[("live", _name)] = (
         "Stop the ICBM server using this data directory, then retry the command."
+    )
+for _name in COUPANG_OPERATOR_COMMANDS:
+    _IN_USE_HINTS[("coupang", _name)] = (
+        "Stop the ICBM server using this data directory, then retry the Coupang command."
     )
 
 
@@ -136,6 +145,21 @@ def build_parser() -> argparse.ArgumentParser:
         "rotate", help="issue a new pairing generation; the prior code stops working"
     )
     extension_commands.add_parser("revoke", help="remove the pairing")
+    coupang = commands.add_parser("coupang", help="bounded Coupang credential and canary actions")
+    coupang_commands = coupang.add_subparsers(dest="coupang_command", required=True)
+    coupang_commands.add_parser(
+        "save-credentials", help="prompt without echo and save one credential bundle"
+    )
+    canary = coupang_commands.add_parser(
+        "read-canary", help="run the approved one-shot KR read-only canary"
+    )
+    canary.add_argument("--source-ip", required=True, help="the outbound IP registered in Wing")
+    canary.add_argument(
+        "--clock-skew-seconds", required=True, type=float, help="observed absolute clock offset"
+    )
+    canary.add_argument("--scope-id", required=True, help="the bounded owner-approval reference")
+    canary.add_argument("--approved-at", required=True, help="approval time with explicit offset")
+    canary.add_argument("--expires-at", required=True, help="expiry time with explicit offset")
     return parser
 
 
@@ -288,6 +312,8 @@ def _command_of(args: argparse.Namespace) -> Command:
         return ("live", args.live_command)
     if args.command == "extension":
         return ("extension", args.extension_command)
+    if args.command == "coupang":
+        return ("coupang", args.coupang_command)
     return (args.command,)
 
 
@@ -385,6 +411,96 @@ def _extension_pairing(config: AppConfig, lease: DataDirLease, args: argparse.Na
     )
     print("pairing code — paste it into the extension once, and keep it nowhere else:")
     print(issued.code)
+    return 0
+
+
+def _coupang_credentials(config: AppConfig, lease: DataDirLease, args: argparse.Namespace) -> int:
+    """Prompt locally with no echo and atomically replace the OS-held credential bundle."""
+    from getpass import getpass
+
+    from app.platform.core.secrets import build_secret_store
+    from app.stages.connect.coupang.credentials import CoupangCredentialStore
+    from integrations.marketplaces.coupang.auth import Credentials
+
+    secrets = build_secret_store(config.secret_backend)
+    status = secrets.status()
+    if not status.available or status.backend == "memory":
+        print("COUPANG_OS_SECRET_STORE_UNAVAILABLE", file=sys.stderr)
+        return 1
+    try:
+        vendor_id = input("Coupang Vendor ID: ")
+        generation = int(input("Credential generation (positive integer): "))
+        access_key = getpass("Coupang Access Key (hidden): ")
+        secret_key = getpass("Coupang Secret Key (hidden): ")
+        credentials = Credentials(access_key, secret_key, vendor_id, generation)
+        CoupangCredentialStore(secrets).save(credentials)
+    except (EOFError, KeyboardInterrupt, OSError, ValueError):
+        print("COUPANG_CREDENTIAL_INPUT_REFUSED", file=sys.stderr)
+        return 1
+    print(f"Coupang credentials stored in the OS credential manager (generation {generation})")
+    return 0
+
+
+def _coupang_read_canary(config: AppConfig, lease: DataDirLease, args: argparse.Namespace) -> int:
+    """Run C-LIVE-R1 once; every caller-selectable value is a preflight binding, not a target."""
+    from app.platform.core.errors import AppError
+    from app.platform.core.secrets import build_secret_store
+    from app.stages.connect.coupang.credentials import CoupangCredentialStore
+    from integrations.marketplaces.coupang.auth import (
+        AuthContext,
+        IpAllowlistDeclaration,
+        Market,
+        SystemUtcClock,
+    )
+    from integrations.marketplaces.coupang.canary import (
+        ClockPreflight,
+        CoupangReadCanary,
+        LiveTransportRefused,
+        ReadOnlyCanaryApproval,
+    )
+
+    secrets = build_secret_store(config.secret_backend)
+    status = secrets.status()
+    if not status.available or status.backend == "memory":
+        print("COUPANG_OS_SECRET_STORE_UNAVAILABLE", file=sys.stderr)
+        return 1
+    try:
+        credentials = CoupangCredentialStore(secrets).load()
+    except OSError:
+        credentials = None
+    if credentials is None:
+        print("COUPANG_CREDENTIALS_NOT_CONFIGURED", file=sys.stderr)
+        return 1
+    clock = SystemUtcClock()
+    now = clock.now()
+    try:
+        declaration = IpAllowlistDeclaration.create(
+            args.source_ip,
+            credential_generation=credentials.credential_generation,
+            recorded_at=now,
+        )
+        approval = ReadOnlyCanaryApproval.create(
+            scope_id=args.scope_id,
+            vendor_id=credentials.vendor_id,
+            credential_generation=credentials.credential_generation,
+            source_ip=args.source_ip,
+            approved_at=_instant(args.approved_at, "--approved-at"),
+            expires_at=_instant(args.expires_at, "--expires-at"),
+        )
+        result = CoupangReadCanary(
+            context=AuthContext(credentials, Market.KR, declaration),
+            approval=approval,
+            clock=clock,
+            clock_preflight=ClockPreflight.create(
+                args.clock_skew_seconds,
+                checked_at=now,
+            ),
+        ).run()
+    except (AppError, LiveTransportRefused, ValueError) as exc:
+        code = exc.code if isinstance(exc, AppError) else "COUPANG_CANARY_LOCAL_REFUSAL"
+        print(code, file=sys.stderr)
+        return 1
+    print(json.dumps(asdict(result), ensure_ascii=False, sort_keys=True))
     return 0
 
 
@@ -649,6 +765,8 @@ OWNING_COMMANDS: dict[Command, Callable[[AppConfig, DataDirLease, argparse.Names
     ("extension", "pair"): _extension_pairing,
     ("extension", "rotate"): _extension_pairing,
     ("extension", "revoke"): _extension_pairing,
+    ("coupang", "save-credentials"): _coupang_credentials,
+    ("coupang", "read-canary"): _coupang_read_canary,
 }
 # The only commands allowed to run without the data-directory lock (ADR-0006).
 READ_ONLY_COMMANDS: dict[Command, Callable[[AppConfig], int]] = {

@@ -170,18 +170,21 @@ contract are proven; no request can be built, signed or sent.
 C-CGF-1 adds the exact KR/TW CGF Lite order-label specification and a stable operator-safe blocked
 state. It remains account-gated until CGF Lite enrollment and the precise seller/account contract
 are proven; no request can be built, signed or sent.
-These adapters remain fake-only, retain sensitive provider envelopes without projecting customer or
-financial data, and grant no provider call or LIVE authority.
+C-LIVE-R1 adds the Coupang OS-secret-store credential owner and one one-shot KR read canary for
+the category auto-matching agreement endpoint, plus their two unit suites. It adds no generic
+provider caller and no mutation surface.
+All other Coupang adapters remain fake-only, retain sensitive provider envelopes without projecting
+customer or financial data, and grant no provider call or LIVE authority.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 375 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 377 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 68 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
 | `app/interface/` | 30 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 91 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 181 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/stages/` | 183 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -200,16 +203,16 @@ financial data, and grant no provider call or LIVE authority.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 92 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 42 |  |
+| `integrations/` | 93 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 43 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 379 | tests |
+| `tests/` | 381 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 155 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
-| `tests/unit/` | 140 | unit tests by runtime owner |
+| `tests/unit/` | 142 | unit tests by runtime owner |
 | `ui/` | 72 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 63 | the served web client |
