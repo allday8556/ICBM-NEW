@@ -180,11 +180,11 @@ customer or financial data, and grant no provider call or LIVE authority.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 377 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 378 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 68 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
 | `app/interface/` | 30 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 91 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 183 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/stages/` | 184 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -206,13 +206,13 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `integrations/` | 93 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 43 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 381 | tests |
+| `tests/` | 383 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 155 | integration tests by runtime owner |
+| `tests/integration/` | 157 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
 | `tests/unit/` | 142 | unit tests by runtime owner |
-| `ui/` | 72 | operator clients: the served web client and the capture extension |
+| `ui/` | 73 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 63 | the served web client |
+| `ui/web/` | 64 | the served web client |

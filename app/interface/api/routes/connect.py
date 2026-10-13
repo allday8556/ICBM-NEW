@@ -7,13 +7,15 @@ the configured operator as the audited actor."""
 
 from typing import Any
 
-from fastapi import APIRouter
-from pydantic import BaseModel, ConfigDict, SecretStr
+from fastapi import APIRouter, Request
+from pydantic import BaseModel, ConfigDict, SecretStr, ValidationError
 
 from app.capabilities.jobs.records import JobRecord
 from app.interface.api.deps import ContainerDep
 from app.platform.core.correlation import get_correlation_id, new_correlation_id
+from app.platform.core.errors import InputValidationError
 from app.stages.connect.contracts import StoredLoginView, SupplierConnectionSummary
+from app.stages.connect.coupang.service import CoupangCredentialStatus
 from app.stages.connect.marketplace.attestation import ApiGroup
 from app.stages.connect.marketplace.attestation_contracts import PermissionAttestationView
 from app.stages.connect.marketplace.capability import ContractFreshness, Resolution, WorkflowScope
@@ -21,6 +23,63 @@ from app.stages.connect.marketplace.contracts import MarketplaceCapabilityView
 from app.stages.connect.smartstore.service import ConnectResult
 
 router = APIRouter(tags=["connect"])
+
+
+COUPANG = "/api/v1/connect/marketplaces/coupang"
+
+
+class CoupangCredentialsRequest(BaseModel):
+    """A whole replacement bundle; validation must never echo secret-bearing input."""
+
+    model_config = ConfigDict(hide_input_in_errors=True, extra="forbid")
+
+    vendor_id: str
+    access_key: SecretStr
+    secret_key: SecretStr
+
+
+class CoupangCredentialsView(BaseModel):
+    configured: bool
+    credential_generation: int | None
+
+
+def _coupang_view(status: CoupangCredentialStatus) -> CoupangCredentialsView:
+    return CoupangCredentialsView(
+        configured=status.configured,
+        credential_generation=status.credential_generation,
+    )
+
+
+@router.get(f"{COUPANG}/credentials")
+def coupang_credentials(container: ContainerDep) -> CoupangCredentialsView:
+    """Return only whether the OS-held bundle exists and its generation."""
+    return _coupang_view(container.coupang_credentials.status())
+
+
+@router.put(f"{COUPANG}/credentials")
+async def save_coupang_credentials(
+    request: Request, container: ContainerDep
+) -> CoupangCredentialsView:
+    """Atomically replace the OS-held bundle; no credential value is returned or persisted.
+
+    FastAPI must not validate this secret-bearing body: its normal structured 422 response may
+    include the rejected input. Parse and collapse every JSON/schema failure to one safe error.
+    """
+    try:
+        payload = await request.json()
+        body = CoupangCredentialsRequest.model_validate(payload)
+    except (ValidationError, ValueError, TypeError) as exc:
+        raise InputValidationError(
+            "COUPANG_CREDENTIAL_REQUEST_INVALID", "the credential bundle is invalid"
+        ) from exc
+    return _coupang_view(
+        container.coupang_credentials.save_credentials(
+            body.vendor_id,
+            body.access_key.get_secret_value(),
+            body.secret_key.get_secret_value(),
+            actor=container.config.operator_actor,
+        )
+    )
 
 
 class CredentialsRequest(BaseModel):

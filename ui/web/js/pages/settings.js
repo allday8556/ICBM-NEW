@@ -1,7 +1,7 @@
 // 설정: renders the v29 settings structure from the settings contract. The general common and
 // platform settings have no save contract (`editable: false`), so every such field shows as
-// unset, every toggle as off, and their save/test actions are inert. The live parts are 등록 권한
-// 확인 (M2 PR-C, its own permission-attestation contract), the SmartStore capability projection
+// unset, every toggle as off, and their generic save/test actions are inert. The live parts are
+// Coupang's OS-held credential bundle, 등록 권한 확인 (M2 PR-C, its own permission-attestation contract), the SmartStore capability projection
 // (M2 PR-D, CAPABILITY_MAPPING §14.11), read from the capability read API, the SmartStore
 // operator actions (M2 PR-E, instructions §8A), after each of which that truth is re-read, and
 // the registration target policy (Gate 1 G1-A, ADR-0015 §2), the operator-reviewed category
@@ -23,6 +23,7 @@ import { capabilityProjection } from './settings/capability-projection.js';
 import { permissionAttestationPanel } from './settings/permission-attestation.js';
 import { API_STATUS_LABEL, CONNECTION_LABEL, PLATFORM_TABS, SUBTABS } from './settings/settings-schema.js';
 import { accountPanel, contractReviewPanel, credentialsPanel, workflowActions } from './settings/smartstore-operator.js';
+import { coupangCredentialsPanel } from './settings/coupang-operator.js';
 import { categoryMetadataPanel } from './settings/category-metadata.js';
 import { targetPolicyPanel } from './settings/target-policy.js';
 import { detailGuidancePanel } from './settings/detail-guidance.js';
@@ -190,6 +191,7 @@ function renderItem(item, state) {
   if (item.workflowActions) return state.truth(item.workflowActions).actions;
   if (item.permissionAttestation) return state.truth(item.permissionAttestation).attestation;
   if (item.smartstoreCredentials) return credentialsPanel(() => state.truth('smartstore').refresh());
+  if (item.coupangCredentials) return coupangCredentialsPanel();
   if (item.smartstoreAccount) return accountPanel(() => state.truth('smartstore').refresh());
   if (item.contractReview) {
     return contractReviewPanel(item.contractReview, () => state.truth(item.contractReview).refresh());
