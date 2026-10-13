@@ -2703,6 +2703,8 @@ RAW_CLIENT_OWNERS = {
     "integrations/marketplaces/smartstore/caller.py": "the registry-gated SmartStore caller",
     # C-LIVE-R1: one non-generic, one-shot KR read canary; every other Coupang path is fake-only.
     "integrations/marketplaces/coupang/canary.py": "the bounded Coupang read canary",
+    # C-LIVE-MUT-1: exact test 1..11 create/update/read/delete, no generic caller or retry.
+    "integrations/marketplaces/coupang/live_mutations.py": "the bounded test-product owner",
     # Opens nothing: socket.gaierror is the evidence that separates a DNS failure (ERRORS §15.1).
     "integrations/marketplaces/smartstore/transmission.py": "DNS-phase evidence type (socket)",
     "app/platform/core/egress.py": "resolves the granted hosts' addresses for the guard (socket)",
@@ -2815,8 +2817,7 @@ def test_raw_network_and_browser_clients_live_only_in_the_common_transport() -> 
 
 
 def test_only_reviewed_transports_open_egress_grants() -> None:
-    # Supplier transport, COLLECT, the SmartStore registry caller and C-LIVE-R1's one-shot
-    # Coupang read are the reviewed grant owners. No other code can open a grant.
+    # Supplier transport, COLLECT, SmartStore and the two bounded Coupang owners are reviewed.
     openers = {path for path, tree in _production_modules().items() if _calls(tree, "grant")}
     assert openers == {
         "integrations/suppliers/transport/gateway.py",
@@ -2824,6 +2825,7 @@ def test_only_reviewed_transports_open_egress_grants() -> None:
         "integrations/suppliers/transport/collection.py",
         "integrations/marketplaces/smartstore/caller.py",
         "integrations/marketplaces/coupang/canary.py",
+        "integrations/marketplaces/coupang/live_mutations.py",
     }
 
 

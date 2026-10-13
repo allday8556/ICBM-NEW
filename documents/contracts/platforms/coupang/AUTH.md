@@ -102,3 +102,26 @@ The operator enters Access Key and Secret Key only through the no-echo
 `icbm coupang save-credentials` prompts. They are not command-line options. The bounded call is
 exposed as `icbm coupang read-canary`; its arguments bind approval, declared source IP and clock
 preflight only and cannot select another provider target.
+
+## C-LIVE-MUT-1 bounded extension
+
+| Field | Value |
+| --- | --- |
+| Products | Exact user-bound synthetic `test 1` through `test 11` only |
+| Runtime surface | Fixed create -> partial update -> read-back -> delete paths on KR |
+| Approval request | `requested=false`; sale approval is never requested |
+| Retry | None; an in-flight journal barrier requires manual recovery after ambiguity |
+| Delete authority | Only the `sellerProductId` returned by this run's successful create |
+
+The owner accepts one closed payload bundle whose SHA-256 digest is bound into a current approval,
+along with vendor id, credential generation and the declared Wing source IP. It rejects missing,
+reordered or additional products, `test 12+`, changed synthetic identities, multiple items and any
+request for sale approval. A durable journal records only state, digest and returned identities;
+it is committed before each provider call so a crash or timeout can never cause a blind retry.
+
+Each successful create is updated through the fixed partial-update path, read back and verified as
+the same saved synthetic SKU, then deleted through that exact returned identity. Existing Coupang
+products are never caller-selectable. The live client uses the same clock, redirect, proxy, response
+cap, secret-store and explicit-egress constraints as C-LIVE-R1. CI and tests can supply only an
+in-memory transport. The operator command requires the exclusive data-directory lease and takes a
+reviewed bundle path and digest, never Access Key or Secret Key command-line arguments.
