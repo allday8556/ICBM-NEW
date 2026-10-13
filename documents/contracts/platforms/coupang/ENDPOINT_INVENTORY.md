@@ -6,11 +6,11 @@
 | --- | --- |
 | Provider | Coupang Open API |
 | Inventory status | `DETAIL_PAGE_VERIFIED_CLASSIFICATION` |
-| Runtime adoption | `NONE` — this inventory grants no network or LIVE authority |
+| Runtime adoption | `C-LIVE-R1` — endpoint `#25` only; this inventory grants no additional authority |
 | Primary source | `P0-INDEX` + `P0-DETAIL` — official Coupang Developer Center index and endpoint pages |
 | Retrieved at | `2026-10-10` |
 | Indexed endpoints | `102` |
-| Current Coupang transport | `NOT_IMPLEMENTED` |
+| Current Coupang transport | `ONE_SHOT_READ_CANARY` |
 
 This document is a complete first-pass inventory of the endpoints exposed by the official
 Coupang Developer Center API index on the retrieval date. It is a planning and gap-analysis
@@ -251,16 +251,19 @@ for the Rocket Growth contract.
 | 101 | `GET` | `/v2/providers/rg_open_api/apis/api/v1/vendors/{vendorId}/rg/inventory/summaries` | [Rocket Growth inventory](https://developers.coupang.com/en/api/rocket-growth/rg-inventory-api) | `KR` | `READ` | `ACCOUNT_GATED` |
 | 102 | `GET` | `/v2/providers/rg_open_api/apis/api/v1/vendors/{vendorId}/rg/orders` | [Rocket Growth orders](https://developers.coupang.com/en/api/rocket-growth/rg-order-apilist-query) | `KR` | `READ` | `ACCOUNT_GATED` |
 
-## Current implementation gap
+## Current implementation boundary
 
-ICBM currently has no Coupang-specific transport, signer, connection owner, endpoint registry, or
-provider caller. C-P3 supplies only provider-zero reviewed metadata adoption and semantic mapping.
+ICBM has a Coupang signer, an OS-secret-store credential owner and one C-LIVE-R1 provider caller
+for endpoint `#25`. That caller is a non-generic, one-shot KR `GET` with identity-bound approval,
+declared-IP and clock preflight, bounded response retention and provider-only egress. Every other
+endpoint remains provider-zero; no generic transport or mutation caller is adopted. C-P3 supplies
+provider-zero reviewed metadata adoption and semantic mapping.
 The mature SmartStore implementation is reusable only at common ownership boundaries; none of its
 bearer-token, endpoint, identity, error, or payload semantics may be copied as Coupang semantics.
 
 | Reusable common owner | Coupang-specific gap |
 | --- | --- |
-| CONNECT credential lifecycle and capability projection | HMAC-SHA256 signing, AccessKey/SecretKey handling, vendor identity, IP allowlist, clock/skew contract |
+| CONNECT credential lifecycle and capability projection | broader connection projection beyond the C-LIVE-R1 OS-secret bundle and preflight |
 | REGISTER reviewed category metadata owner | Coupang category tree, category metadata, notices, attributes, options, unit/value semantics, adoption revision |
 | Registration intent, audit, grants, brakes, retention | sellerProduct/product/vendorItem identity, safe response retention, exact read-back and reconciliation |
 | PRODUCTS canonical product and AtomicSKU | Coupang sellerProduct/item request projection without canonical mutation or Cartesian synthesis |

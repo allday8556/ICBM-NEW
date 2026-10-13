@@ -1,4 +1,4 @@
-"""The Coupang endpoint inventory stays complete, classified, and provider-zero."""
+"""The inventory stays complete; only endpoint 25 has one bounded runtime canary."""
 
 import re
 from collections import Counter
@@ -71,11 +71,13 @@ def test_every_endpoint_links_its_official_detail_and_closes_semantics() -> None
     assert next(row for row in rows if row["number"] == "33")["effect"] == "DOCUMENT_READ"
 
 
-def test_inventory_is_not_an_adoption_or_live_authority() -> None:
+def test_inventory_records_the_one_bounded_adoption_without_granting_more_authority() -> None:
     text = INVENTORY.read_text(encoding="utf-8")
 
-    assert "Runtime adoption | `NONE`" in text
+    assert "Runtime adoption | `C-LIVE-R1` — endpoint `#25` only" in text
+    assert "Current Coupang transport | `ONE_SHOT_READ_CANARY`" in text
     assert "`IMPLEMENT != callable`" in text
     assert "`inventory classification != LIVE authority`" in text
+    assert re.search(r"Every other\s+endpoint remains provider-zero", text)
     assert "https://developers.coupang.com/en/api" in text
     assert "TBD" not in text

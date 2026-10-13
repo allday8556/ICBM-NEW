@@ -2701,6 +2701,8 @@ RAW_CLIENT_OWNERS = {
     "integrations/suppliers/transport/collection.py": "the common collection gateway",
     # ENDPOINT_MATRIX §13: the one registry-gated SmartStore endpoint caller (M2 PR-A).
     "integrations/marketplaces/smartstore/caller.py": "the registry-gated SmartStore caller",
+    # C-LIVE-R1: one non-generic, one-shot KR read canary; every other Coupang path is fake-only.
+    "integrations/marketplaces/coupang/canary.py": "the bounded Coupang read canary",
     # Opens nothing: socket.gaierror is the evidence that separates a DNS failure (ERRORS §15.1).
     "integrations/marketplaces/smartstore/transmission.py": "DNS-phase evidence type (socket)",
     "app/platform/core/egress.py": "resolves the granted hosts' addresses for the guard (socket)",
@@ -2812,15 +2814,16 @@ def test_raw_network_and_browser_clients_live_only_in_the_common_transport() -> 
     assert importers == set(RAW_CLIENT_OWNERS)
 
 
-def test_only_the_common_transport_opens_egress_grants() -> None:
-    # The supplier transport for supplier profile hosts (M1) and the SmartStore caller for the
-    # SmartStore provider host (M2 PR-A). No other code can open a grant.
+def test_only_reviewed_transports_open_egress_grants() -> None:
+    # Supplier transport, COLLECT, the SmartStore registry caller and C-LIVE-R1's one-shot
+    # Coupang read are the reviewed grant owners. No other code can open a grant.
     openers = {path for path, tree in _production_modules().items() if _calls(tree, "grant")}
     assert openers == {
         "integrations/suppliers/transport/gateway.py",
         # ADR-0010 §3: the COLLECT gateway, for exactly its collection profile's hosts.
         "integrations/suppliers/transport/collection.py",
         "integrations/marketplaces/smartstore/caller.py",
+        "integrations/marketplaces/coupang/canary.py",
     }
 
 
