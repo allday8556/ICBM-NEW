@@ -420,6 +420,13 @@ class CoupangTestProductMutationRun:
             raise CoupangLiveMutationError(
                 ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_APPROVAL_BINDING_MISMATCH"
             )
+        if any(
+            plan.create_document.value().get("vendorId") != credentials.vendor_id
+            for plan in self._bundle.plans
+        ):
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_VENDOR_BODY_MISMATCH"
+            )
         if not (approval.approved_at <= now <= approval.expires_at):
             raise CoupangLiveMutationError(
                 ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_APPROVAL_NOT_CURRENT"
@@ -504,7 +511,12 @@ class CoupangTestProductMutationRun:
 
     @staticmethod
     def _verify_readback(
-        response: Mapping[str, object], *, seller_product_id: int, source_product_id: str
+        response: Mapping[str, object],
+        *,
+        seller_product_id: int,
+        source_product_id: str,
+        seller_product_name: str,
+        update_message: str,
     ) -> None:
         data = response.get("data")
         if not isinstance(data, dict) or data.get("sellerProductId") != seller_product_id:
@@ -515,6 +527,14 @@ class CoupangTestProductMutationRun:
             raise CoupangLiveMutationError(
                 ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_DELETE_NOT_SAVED"
             )
+        if data.get("sellerProductName") != seller_product_name:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_READBACK_NAME_MISMATCH"
+            )
+        if data.get("extraInfoMessage") != update_message:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_READBACK_UPDATE_MISMATCH"
+            )
         items = data.get("items")
         if not isinstance(items, list) or not any(
             isinstance(item, dict) and item.get("externalVendorSku") == source_product_id
@@ -523,6 +543,18 @@ class CoupangTestProductMutationRun:
             raise CoupangLiveMutationError(
                 ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_READBACK_SCOPE_MISMATCH"
             )
+
+    @staticmethod
+    def _assert_unique_identity(
+        records: Mapping[str, object], *, synthetic_id: str, seller_product_id: int
+    ) -> None:
+        for other_id, other in records.items():
+            if other_id == synthetic_id or not isinstance(other, dict):
+                continue
+            if other.get("seller_product_id") == seller_product_id:
+                raise CoupangLiveMutationError(
+                    ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_DUPLICATE_CREATE_IDENTITY"
+                )
 
     def _initial_journal(self) -> dict[str, object]:
         return {
@@ -609,6 +641,11 @@ class CoupangTestProductMutationRun:
                 raise CoupangLiveMutationError(
                     ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_JOURNAL_IDENTITY_MISSING"
                 )
+            self._assert_unique_identity(
+                records,
+                synthetic_id=synthetic_id,
+                seller_product_id=seller_product_id,
+            )
             if phase == "created":
                 update = FrozenDocument.from_mapping(
                     {
@@ -637,6 +674,8 @@ class CoupangTestProductMutationRun:
                     readback,
                     seller_product_id=seller_product_id,
                     source_product_id=plan.binding.source_product_id,
+                    seller_product_name=str(plan.create_document.value()["sellerProductName"]),
+                    update_message=plan.update_message,
                 )
                 self._transition(
                     state, synthetic_id, "verified", seller_product_id=seller_product_id

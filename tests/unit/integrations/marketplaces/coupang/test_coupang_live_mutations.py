@@ -156,14 +156,18 @@ def _owner(tmp_path: Path, transport: httpx.BaseTransport) -> CoupangTestProduct
 
 def test_exact_eleven_create_update_readback_delete_once_each(tmp_path: Path) -> None:
     requests: list[httpx.Request] = []
-    created: dict[int, str] = {}
+    created: dict[int, tuple[str, str, str]] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if request.method == "POST":
             document = json.loads(request.content)
             identity = 1000 + len(created) + 1
-            created[identity] = document["items"][0]["externalVendorSku"]
+            created[identity] = (
+                document["items"][0]["externalVendorSku"],
+                document["sellerProductName"],
+                f"ICBM TEST {identity - 1000} UPDATED",
+            )
             return httpx.Response(200, json={"code": "SUCCESS", "message": "", "data": identity})
         identity_index = -2 if request.url.path.endswith("/partial") else -1
         identity = int(request.url.path.rsplit("/", 2)[identity_index])
@@ -174,6 +178,7 @@ def test_exact_eleven_create_update_readback_delete_once_each(tmp_path: Path) ->
             }
             return httpx.Response(200, json={"code": "SUCCESS", "message": "", "data": None})
         if request.method == "GET":
+            source_product_id, seller_product_name, update_message = created[identity]
             return httpx.Response(
                 200,
                 json={
@@ -181,8 +186,10 @@ def test_exact_eleven_create_update_readback_delete_once_each(tmp_path: Path) ->
                     "message": "",
                     "data": {
                         "sellerProductId": identity,
+                        "sellerProductName": seller_product_name,
+                        "extraInfoMessage": update_message,
                         "status": "SAVED",
-                        "items": [{"externalVendorSku": created[identity]}],
+                        "items": [{"externalVendorSku": source_product_id}],
                     },
                 },
             )
@@ -217,6 +224,44 @@ def test_bundle_rejects_scope_expansion_and_approval_requests() -> None:
         ProductBundle.from_mapping(approval)
 
 
+def test_preflight_rejects_body_vendor_mismatch(tmp_path: Path) -> None:
+    mapping = _bundle_mapping()
+    rows = mapping["products"]
+    assert isinstance(rows, list) and isinstance(rows[0], dict)
+    create = rows[0]["create"]
+    assert isinstance(create, dict)
+    create["vendorId"] = "DIFFERENT"
+    bundle = ProductBundle.from_mapping(mapping)
+    credentials = Credentials("access", "secret", "A0001", 1)
+    context = AuthContext(
+        credentials,
+        Market.KR,
+        IpAllowlistDeclaration.create(SOURCE_IP, credential_generation=1, recorded_at=NOW),
+    )
+    approval = MutationApproval.create(
+        scope_id=SCOPE_ID,
+        vendor_id="A0001",
+        credential_generation=1,
+        source_ip=SOURCE_IP,
+        payload_digest=bundle.payload_digest,
+        approved_at=NOW - timedelta(minutes=1),
+        expires_at=NOW + timedelta(hours=1),
+    )
+    owner = CoupangTestProductMutationRun(
+        context=context,
+        approval=approval,
+        bundle=bundle,
+        clock=Clock(NOW),
+        clock_preflight=ClockPreflight.create(0, checked_at=NOW),
+        journal=MutationJournal(tmp_path / "journal.json"),
+        transport=httpx.MockTransport(lambda _: httpx.Response(500)),
+        environ={},
+    )
+    with pytest.raises(CoupangLiveMutationError) as refused:
+        owner.run()
+    assert refused.value.code == "COUPANG_MUTATION_VENDOR_BODY_MISMATCH"
+
+
 def test_ambiguous_dispatch_persists_barrier_and_never_blindly_retries(
     tmp_path: Path,
 ) -> None:
@@ -236,6 +281,36 @@ def test_ambiguous_dispatch_persists_barrier_and_never_blindly_retries(
         _owner(tmp_path, httpx.MockTransport(timeout)).run()
     assert resumed.value.code == "COUPANG_MUTATION_RECOVERY_REQUIRED"
     assert calls == 1
+
+
+def test_duplicate_create_identity_holds_before_second_product_mutation(tmp_path: Path) -> None:
+    calls: list[str] = []
+    first_source = TEST_PRODUCT_BINDINGS[0].source_product_id
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.method)
+        if request.method == "POST":
+            return httpx.Response(200, json={"code": "SUCCESS", "data": 1001})
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "code": "SUCCESS",
+                    "data": {
+                        "sellerProductId": 1001,
+                        "sellerProductName": "ICBM TEST 1",
+                        "extraInfoMessage": "ICBM TEST 1 UPDATED",
+                        "status": "SAVED",
+                        "items": [{"externalVendorSku": first_source}],
+                    },
+                },
+            )
+        return httpx.Response(200, json={"code": "SUCCESS", "data": None})
+
+    with pytest.raises(CoupangLiveMutationError) as refused:
+        _owner(tmp_path, httpx.MockTransport(handler)).run()
+    assert refused.value.code == "COUPANG_MUTATION_DUPLICATE_CREATE_IDENTITY"
+    assert calls == ["POST", "PUT", "GET", "DELETE", "POST"]
 
 
 def test_real_transport_never_exists_under_tests(tmp_path: Path) -> None:
