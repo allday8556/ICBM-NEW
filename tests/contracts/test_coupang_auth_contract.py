@@ -47,7 +47,7 @@ def test_c_auth_1_contains_no_network_client_outside_reviewed_live_owners() -> N
         "canary.py": {"httpx"},
         "live_mutations.py": {"httpx"},
     }
-    assert [name for name, source in sources.items() if "EGRESS.grant" in source] == [
+    assert sorted(name for name, source in sources.items() if "EGRESS.grant" in source) == [
         "canary.py",
         "live_mutations.py",
     ]
