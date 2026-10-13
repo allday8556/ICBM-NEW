@@ -1,6 +1,6 @@
-// Structure of the settings screen, reproduced from the approved v29 prototype.
-// This is presentation structure only: every value comes from the settings contract
-// (`policy_values`), which is empty in M0, so every field renders as unset.
+// Structure of the settings screen, reproduced from the approved v29 prototype. Generic fields
+// come from the settings contract (`policy_values`); explicitly owned operator panels such as
+// SmartStore and Coupang credentials use their own narrow API contracts.
 
 export const CONNECTION_LABEL = { NOT_CONNECTED: '미연동' };
 export const API_STATUS_LABEL = { NOT_CONNECTED: '미연결' };
@@ -456,13 +456,8 @@ export const SUBTABS = {
             {
               title: '쿠팡 Open API 인증',
               help:
-                'Wing에서 발급받은 API 인증정보를 입력합니다. · Secret Key는 실제 빌드에서 암호화 저장하며 로그/AI 요청에 포함하지 않습니다.',
-              items: [
-                field('Vendor ID', 'coupang.vendor_id', { placeholder: 'A00******' }),
-                field('Access Key', 'coupang.access_key', { placeholder: 'Access Key' }),
-                field('Secret Key', 'coupang.secret_key', { placeholder: 'Secret Key', secret: true }),
-                API_ACTIONS,
-              ],
+                'Wing에서 발급받은 API 인증정보를 한 번 입력합니다. · Access Key와 Secret Key는 Windows 보안 저장소에만 저장되며 다시 표시하거나 로그/AI 요청에 포함하지 않습니다.',
+              items: [{ coupangCredentials: true }],
             },
             apiStatusCard('coupang', ['상품 조회', '상품 등록/수정', '주문 조회']),
           ],

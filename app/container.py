@@ -114,6 +114,7 @@ from app.stages.collect.service import CollectService
 from app.stages.collect.sourceassets import SourceAssetRecorder
 from app.stages.collect.synthetic import SyntheticTestProductService
 from app.stages.connect.accounts import AccountBinding, MarketplaceAccountStore
+from app.stages.connect.coupang.service import CoupangCredentialService
 from app.stages.connect.credentials import SupplierCredentialStore
 from app.stages.connect.marketplace.attestation import ApiGroup
 from app.stages.connect.marketplace.attestation_service import PermissionAttestationService
@@ -345,6 +346,7 @@ class Container:
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
+    coupang_credentials: CoupangCredentialService
     # Owner decision 2026-10-07: automatic token renewal through CONNECT's own pass.
     smartstore_keeper: SmartStoreSessionKeeper
     review_items: ReviewItemStore
@@ -557,6 +559,7 @@ def build_container(
             else None
         ),
     )
+    coupang_credentials = CoupangCredentialService(secrets, audit)
     # SMARTSTORE-A0-PERMISSION (M2 PR-C). The application identity comes from the committed
     # SmartStore credential bundle and the endpoint-mapping revision from the endpoint registry
     # (§5.1, §5.2); test fixtures may stand in for either.
@@ -1436,6 +1439,7 @@ def build_container(
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,
+        coupang_credentials=coupang_credentials,
         smartstore_keeper=SmartStoreSessionKeeper(smartstore, enabled=config.smartstore_auto_renew),
         review_items=review_items,
         review_reconciler=review_reconciler,
