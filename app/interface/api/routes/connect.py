@@ -7,12 +7,13 @@ the configured operator as the audited actor."""
 
 from typing import Any
 
-from fastapi import APIRouter
-from pydantic import BaseModel, ConfigDict, SecretStr
+from fastapi import APIRouter, Request
+from pydantic import BaseModel, ConfigDict, SecretStr, ValidationError
 
 from app.capabilities.jobs.records import JobRecord
 from app.interface.api.deps import ContainerDep
 from app.platform.core.correlation import get_correlation_id, new_correlation_id
+from app.platform.core.errors import InputValidationError
 from app.stages.connect.contracts import StoredLoginView, SupplierConnectionSummary
 from app.stages.connect.coupang.service import CoupangCredentialStatus
 from app.stages.connect.marketplace.attestation import ApiGroup
@@ -56,10 +57,21 @@ def coupang_credentials(container: ContainerDep) -> CoupangCredentialsView:
 
 
 @router.put(f"{COUPANG}/credentials")
-def save_coupang_credentials(
-    body: CoupangCredentialsRequest, container: ContainerDep
+async def save_coupang_credentials(
+    request: Request, container: ContainerDep
 ) -> CoupangCredentialsView:
-    """Atomically replace the OS-held bundle; no credential value is returned or persisted."""
+    """Atomically replace the OS-held bundle; no credential value is returned or persisted.
+
+    FastAPI must not validate this secret-bearing body: its normal structured 422 response may
+    include the rejected input. Parse and collapse every JSON/schema failure to one safe error.
+    """
+    try:
+        payload = await request.json()
+        body = CoupangCredentialsRequest.model_validate(payload)
+    except (ValidationError, ValueError, TypeError) as exc:
+        raise InputValidationError(
+            "COUPANG_CREDENTIAL_REQUEST_INVALID", "the credential bundle is invalid"
+        ) from exc
     return _coupang_view(
         container.coupang_credentials.save_credentials(
             body.vendor_id,

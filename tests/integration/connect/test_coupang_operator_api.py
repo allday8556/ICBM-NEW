@@ -99,3 +99,25 @@ def test_invalid_bundle_is_refused_without_replacing_the_committed_generation(
     assert refused.status_code == 422
     assert refused.json()["error"]["code"] == "COUPANG_CREDENTIALS_INVALID"
     assert client.get(ENDPOINT).json() == {"configured": True, "credential_generation": 1}
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"vendor_id": VENDOR_ID, "access_key": {"value": SECRET_KEY}, "secret_key": SECRET_KEY},
+        {
+            "vendor_id": VENDOR_ID,
+            "access_key": ACCESS_KEY,
+            "secret_key": SECRET_KEY,
+            "unexpected": SECRET_KEY,
+        },
+        [VENDOR_ID, ACCESS_KEY, SECRET_KEY],
+    ],
+)
+def test_schema_errors_never_echo_the_secret_bearing_input(
+    client: TestClient, invalid: object
+) -> None:
+    refused = client.put(ENDPOINT, json=invalid, headers=CLIENT)
+    assert refused.status_code == 422
+    assert refused.json()["error"]["code"] == "COUPANG_CREDENTIAL_REQUEST_INVALID"
+    assert ACCESS_KEY not in refused.text and SECRET_KEY not in refused.text
