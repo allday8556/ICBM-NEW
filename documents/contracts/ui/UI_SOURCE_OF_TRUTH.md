@@ -547,7 +547,8 @@ v29's `수집 규칙` button on a supplier card is live only on an onboarded sup
 - **Slots.** One table `슬롯 | 템플릿 기본 단어 | 이 공급처 단어` (`GET
   /api/v1/onboarding/suppliers/{key}/words`): every slot of the supplier's template, named in
   Korean with its kind (`행 이름`, `문구`, `표시`), the template's own words as read-only chips, and
-  one field for the supplier's words, comma or line separated. Only words pass: the server refuses
+  one box for the supplier's words, one per line (a comma belongs to the word: ADR-0035's phrases
+  hold commas). Only words pass: the server refuses
   pattern characters (`< > { } [ ] \ | * + ? ^ $`), more than 12 words in a slot, a word longer
   than 40 characters and a slot the template does not have, and says why.
 - **미리보기.** `POST …/words/preview` re-analyses each sample's stored capture under the current and

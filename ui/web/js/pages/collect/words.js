@@ -2,7 +2,7 @@
 //
 // Live on an onboarded supplier's card while it is 분석 중 (RECON) or 사용 중 (ACTIVE). Each
 // template slot shows the template's own words (read-only) beside this supplier's words, which the
-// operator edits as plain words, comma or line separated. 「미리보기」 re-analyses the stored sample
+// operator edits as plain words, one per line: a word may itself hold a comma (ADR-0035's phrases). 「미리보기」 re-analyses the stored sample
 // captures under the current and the proposed words — nothing is read from the supplier, nothing is
 // saved — and shows, per sample, the unread rows the new words read and the field statuses they
 // change. 「저장」 appends a words revision (the store's word rules decide what passes); a 사용 중
@@ -30,9 +30,11 @@ function wordsMessage(error, fallback) {
   return WORDS_ERROR[error?.error?.code] ?? message(error, fallback);
 }
 
+// One word per line. A comma is part of a word (a phrase such as 「쿠팡, 스마트스토어 판매 가능」),
+// never a separator.
 function parseWords(text) {
   const words = [];
-  for (const part of text.split(/[,\n]/)) {
+  for (const part of text.split('\n')) {
     const word = part.trim();
     if (word && !words.includes(word)) words.push(word);
   }
@@ -124,14 +126,14 @@ export async function openCollectionWords(record, { errorMessage, onSaved }) {
           'tbody',
           {},
           view.slots.map((slot) => {
-            const input = h('input', {
-              type: 'text',
+            const input = h('textarea', {
+              rows: Math.max(1, slot.site.length),
               autocomplete: 'off',
               'data-role': 'slot-words',
               'aria-label': `${SLOT_LABEL[slot.slot] ?? slot.slot} 단어`,
-              placeholder: '쉼표로 구분',
-              value: slot.site.join(', '),
+              placeholder: '한 줄에 한 단어',
             });
+            input.value = slot.site.join('\n');
             inputs.set(slot.slot, input);
             return h(
               'tr',

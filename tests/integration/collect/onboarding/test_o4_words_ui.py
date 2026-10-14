@@ -160,6 +160,10 @@ def test_words_are_previewed_saved_and_reanalysed_without_a_supplier_read(
         _no_horizontal_scroll(page)
 
         modal.locator("[data-slot='purchase_price'] [data-role='slot-words']").fill("회원가")
+        # A word may hold a comma (ADR-0035's phrases): one word per line, never split at a comma.
+        modal.locator("[data-slot='channel_all_allowed'] [data-role='slot-words']").fill(
+            "쿠팡, 스마트스토어 판매 가능"
+        )
         modal.locator("[data-action='preview-words']").click()
         sample = modal.locator("[data-preview-sample]")
         sample.wait_for(timeout=15_000)
@@ -195,8 +199,13 @@ def test_words_are_previewed_saved_and_reanalysed_without_a_supplier_read(
         ("PUT", f"{base}/words"),
         ("POST", f"{base}/reanalyse"),
     ]
-    assert json.loads(writes[0][2]) == {"words": {"purchase_price": ["회원가"]}}
-    assert json.loads(writes[1][2]) == {"words": {"purchase_price": ["회원가"]}, "expected_seq": 0}
+    words = {"purchase_price": ["회원가"], "channel_all_allowed": ["쿠팡, 스마트스토어 판매 가능"]}
+    assert json.loads(writes[0][2]) == {"words": words}
+    assert json.loads(writes[1][2]) == {"words": words, "expected_seq": 0}
+    saved = container.onboarding_words.view(key)
+    assert {s.slot: s.site for s in saved.slots}["channel_all_allowed"] == [
+        "쿠팡, 스마트스토어 판매 가능"
+    ]
     assert container.onboarding.current(key).words_seq == 1
 
 

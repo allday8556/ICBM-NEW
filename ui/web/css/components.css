@@ -902,10 +902,11 @@ body.has-registration-status .content {
   margin: 0 4px 4px 0;
 }
 
-.words-table input {
+.words-table textarea {
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
+  resize: vertical;
 }
 
 .analysis-sample [data-role='newly-read'],
