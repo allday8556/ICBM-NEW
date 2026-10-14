@@ -103,6 +103,8 @@ const ERROR_COPY = {
   ONBOARDING_TRIAL_NOT_VERIFIABLE: '핵심 필드를 모두 읽고 템플릿 수정이 필요 없는 샘플만 맞다고 확인할 수 있습니다.',
   ONBOARDING_TRIAL_NOT_CURRENT: '지금 수집 규칙의 결과가 아닙니다. 「다시 분석」 후 확인하세요.',
   ONBOARDING_VERIFICATION_STALE: '확인한 값이 지금 결과와 다릅니다. 창을 닫았다 다시 여세요.',
+  ONBOARDING_SAMPLE_RETIRED: '이미 분석에서 제외한 샘플입니다.',
+  ONBOARDING_RETIREMENT_REASON_INVALID: '제외 사유를 1~200자로 적어 주세요.',
   ONBOARDING_ACTIVATION_NOT_PROVEN: '아직 사용 시작 조건(서로 다른 샘플 3개 값 확인, 템플릿 수정 필요 없음)을 채우지 못했습니다.',
 };
 
@@ -201,8 +203,29 @@ function unreadTable(sample) {
   );
 }
 
+// ADR-0036 §7 as amended (6160586049, O5b): a sample may be retired from the analysis with the
+// operator's reason; it then neither proves nor blocks and stays shown, with its warning.
+function retirementLine(sample, retire) {
+  if (sample.retired_reason) {
+    return h(
+      'div',
+      { class: 'note', 'data-role': 'retired' },
+      h('span', { class: 'chip', 'data-retired': 'true' }, '제외됨'),
+      ` 분석에서 제외했습니다(사유: ${sample.retired_reason}). 승인에 쓰이지도, 막지도 않습니다.`,
+    );
+  }
+  if (sample.verdict === 'CORRECT') return null;
+  return h(
+    'div',
+    { class: 'analysis-add' },
+    h('button', { type: 'button', class: 'btn', 'data-action': 'retire-sample', onclick: () => retire(sample) }, '분석에서 제외'),
+    h('span', { class: 'mini' }, '이 샘플만 읽기 어려운 상품이면 사유를 남기고 제외할 수 있습니다.'),
+  );
+}
+
 // ADR-0036 §7 (O5): the operator's verdict on exactly the facts this sample showed.
 function verdictLine(sample, verify) {
+  if (sample.retired_reason) return null;
   if (sample.verdict === 'CORRECT') return h('div', { 'data-role': 'verdict' }, h('span', { class: 'chip good', 'data-verdict': 'CORRECT' }, '값 확인함'));
   if (sample.verdict === 'WRONG') {
     return h(
@@ -222,11 +245,11 @@ function verdictLine(sample, verify) {
   );
 }
 
-function sampleBlock(sample, verify) {
+function sampleBlock(sample, verify, retire) {
   const images = sample.summary?.images?.urls ?? [];
   return h(
     'div',
-    { class: 'analysis-sample', 'data-sample': sample.sample_url },
+    { class: sample.retired_reason ? 'analysis-sample retired' : 'analysis-sample', 'data-sample': sample.sample_url },
     h(
       'div',
       { class: 'analysis-sample-head' },
@@ -255,6 +278,7 @@ function sampleBlock(sample, verify) {
     fieldTable(sample),
     images.length ? h('div', { class: 'mini analysis-images', 'data-role': 'image-urls' }, images.join('\n')) : null,
     verdictLine(sample, verify),
+    retirementLine(sample, retire),
     unreadTable(sample),
   );
 }
@@ -364,7 +388,7 @@ export async function openSiteAnalysis(record, { waitForJob, errorMessage, onCha
       view.state === 'RECON' ? start : h('span', { class: 'chip good', 'data-role': 'active' }, '사용 중'),
     );
     samples.replaceChildren(
-      ...view.samples.map((sample) => sampleBlock(sample, verify)),
+      ...view.samples.map((sample) => sampleBlock(sample, verify, retire)),
       ...view.stale.map((s) =>
         h(
           'div',
@@ -405,6 +429,26 @@ export async function openSiteAnalysis(record, { waitForJob, errorMessage, onCha
   }
 
   start.addEventListener('click', () => activate());
+
+  async function retire(sample) {
+    const reason = window.prompt(
+      `${sample.sample_url}\n이 샘플을 분석에서 제외할까요? 사유를 적어 주세요(되돌릴 수 없고, 화면에는 계속 남습니다).`,
+    );
+    if (reason === null) return;
+    if (!reason.trim()) return say('제외 사유를 적어 주세요.');
+    busy = true;
+    refreshButtons();
+    try {
+      view = await sendJson('POST', `${base}/samples/retire`, { sample_url: sample.sample_url, reason: reason.trim() });
+      render();
+      say('샘플을 분석에서 제외했습니다. 남은 샘플로 승인을 판단합니다.');
+    } catch (error) {
+      say(message(error, errorMessage));
+    } finally {
+      busy = false;
+      refreshButtons();
+    }
+  }
 
   async function activate() {
     if (!window.confirm(`${record.display_name}의 수집을 시작할까요?\n확인한 샘플과 지금 수집 규칙으로 일반 수집에 쓰입니다.`)) return;

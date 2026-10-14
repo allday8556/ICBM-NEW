@@ -131,6 +131,10 @@ ADR-0036 O4 added 「수집 규칙」: the words editor service `app/stages/coll
 (view, save through the store's words revisions, and an offline preview over the stored captures),
 the store's `check_words` and the catalog's `bind_words`, the editor `ui/web/js/pages/collect/words.js`
 and two integration suites; no new migration.
+ADR-0036 O5b (amendment `6160586049`) added retiring a sample: migration
+`0062_onboarding_sample_retirements` (the append-only retirement record and the ACTIVE gate that
+leaves a retired sample out), the store's `retire_sample` and `retirements`, the analysis service's
+`retire`, its route, `분석에서 제외` in the analysis panel and two integration suites.
 ADR-0036 O5a added the approval steps of §7: the store's `record_verification` and `verifications`,
 the analysis service's `verify` and `activate`, their routes, `값이 맞음`/`값이 틀림` and `사용 시작`
 in `ui/web/js/pages/collect/analysis.js`, `비활성화` on an onboarded card (`collect/onboarding.js`)
@@ -188,10 +192,10 @@ customer or financial data, and grant no provider call or LIVE authority.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 379 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 380 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 68 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
 | `app/interface/` | 30 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 91 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/platform/` | 92 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 185 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
@@ -214,11 +218,11 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `integrations/` | 94 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 44 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 388 | tests |
+| `tests/` | 390 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 161 | integration tests by runtime owner |
+| `tests/integration/` | 163 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
 | `tests/unit/` | 143 | unit tests by runtime owner |
 | `ui/` | 74 | operator clients: the served web client and the capture extension |

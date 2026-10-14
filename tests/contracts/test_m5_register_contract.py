@@ -272,7 +272,10 @@ SUPPLIER_ONBOARDING = "0060_supplier_onboarding"
 # ADR-0039 §1, §3: the per-supplier sales policy and the pricing snapshot's minimum pin. Product
 # state, never registration state.
 SUPPLIER_SALES_POLICY = "0061_supplier_sales_policy"
-SCHEMA_HEAD = SUPPLIER_SALES_POLICY
+# ADR-0036 O5b (amendment 6160586049): retiring an onboarding sample, and the ACTIVE gate
+# that leaves a retired sample out.
+ONBOARDING_RETIREMENTS = "0062_onboarding_sample_retirements"
+SCHEMA_HEAD = ONBOARDING_RETIREMENTS
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -315,6 +318,7 @@ AFTER_M5 = (
     DETAIL_GUIDANCE_PLACEMENT,
     SUPPLIER_ONBOARDING,
     SUPPLIER_SALES_POLICY,
+    ONBOARDING_RETIREMENTS,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

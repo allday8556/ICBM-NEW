@@ -48,6 +48,7 @@ from app.stages.collect.onboarding.models import (
     OnboardedSupplier,
     OnboardingHost,
     OnboardingPolicyRead,
+    OnboardingSampleRetirement,
     OnboardingTransition,
     OnboardingTrial,
     OnboardingVerification,
@@ -95,6 +96,9 @@ ONBOARDING_TRIAL_UNKNOWN: Final = "ONBOARDING_TRIAL_UNKNOWN"
 ONBOARDING_TRIAL_NOT_CURRENT: Final = "ONBOARDING_TRIAL_NOT_CURRENT"
 ONBOARDING_VERIFICATION_INVALID: Final = "ONBOARDING_VERIFICATION_INVALID"
 ONBOARDING_VERIFICATION_STALE: Final = "ONBOARDING_VERIFICATION_STALE"
+ONBOARDING_SAMPLE_RETIRED: Final = "ONBOARDING_SAMPLE_RETIRED"
+ONBOARDING_SAMPLE_UNKNOWN: Final = "ONBOARDING_SAMPLE_UNKNOWN"
+ONBOARDING_RETIREMENT_REASON_INVALID: Final = "ONBOARDING_RETIREMENT_REASON_INVALID"
 
 # ADR-0036 §2 D2: three distinct samples prove a words revision.
 ACTIVATION_SAMPLES: Final = 3
@@ -228,6 +232,16 @@ class StoredVerification:
     verdict: str
     verified_by: str
     verified_at: datetime
+
+
+@dataclass(frozen=True)
+class StoredRetirement:
+    """A sample retired from the analysis, with the operator's reason (§7, ``6160586049``)."""
+
+    sample_url_key: str
+    reason: str
+    retired_by: str
+    retired_at: datetime
 
 
 _SAMPLE_LIMIT: Final = 512
@@ -775,7 +789,76 @@ class OnboardingStore:
             )
             return _stored_verification(row)
 
+    def retire_sample(
+        self, key: str, sample_url_key: str, reason: str, *, actor: str
+    ) -> StoredRetirement:
+        """Retire one sample of a ``RECON`` site from the analysis (§7, amendment ``6160586049``):
+        it then neither proves the site nor keeps a structural problem open. The reason is the
+        operator's; a sample no trial of this supplier read, or one already retired, is refused.
+        The retirement is audited and never undone."""
+        stated = reason.strip() if isinstance(reason, str) else ""
+        if not 1 <= len(stated) <= _REASON_LIMIT or any(ord(ch) < 32 for ch in stated):
+            raise InputValidationError(
+                ONBOARDING_RETIREMENT_REASON_INVALID,
+                f"a retirement states its reason in 1 to {_REASON_LIMIT} characters",
+            )
+        with self._db.write() as session:
+            record = _current(session, key)
+            if record.state is not OnboardingState.RECON:
+                raise OnboardingConflictError(
+                    ONBOARDING_NOT_RECON,
+                    "a sample is retired while the supplier is in analysis (RECON)",
+                    details={"state": record.state.value},
+                )
+            read = session.scalar(
+                select(OnboardingTrial.trial_id).where(
+                    OnboardingTrial.supplier_key == key,
+                    OnboardingTrial.sample_url_key == sample_url_key,
+                )
+            )
+            if read is None:
+                raise NotFoundError(
+                    ONBOARDING_SAMPLE_UNKNOWN, "no trial of this supplier read that sample"
+                )
+            if session.scalar(
+                select(OnboardingSampleRetirement.retirement_id).where(
+                    OnboardingSampleRetirement.supplier_key == key,
+                    OnboardingSampleRetirement.sample_url_key == sample_url_key,
+                )
+            ):
+                raise OnboardingConflictError(
+                    ONBOARDING_SAMPLE_RETIRED, "that sample is already retired"
+                )
+            row = OnboardingSampleRetirement(
+                retirement_id=str(uuid.uuid4()),
+                supplier_key=key,
+                sample_url_key=sample_url_key,
+                reason=stated,
+                retired_by=actor,
+                retired_at=self._clock.now(),
+            )
+            session.add(row)
+            session.flush()
+            self._event(
+                session,
+                "ONBOARDING_SAMPLE_RETIRED",
+                key,
+                actor,
+                after={"retirement_id": row.retirement_id, "sample_url_key": sample_url_key},
+                details={"reason": stated},
+            )
+            return _stored_retirement(row)
+
     # ------------------------------------------------------------------ reads
+
+    def retirements(self, key: str) -> tuple[StoredRetirement, ...]:
+        with self._db.read() as session:
+            rows = session.scalars(
+                select(OnboardingSampleRetirement)
+                .where(OnboardingSampleRetirement.supplier_key == key)
+                .order_by(OnboardingSampleRetirement.retired_at)
+            ).all()
+            return tuple(_stored_retirement(row) for row in rows)
 
     def verifications(self, key: str) -> tuple[StoredVerification, ...]:
         with self._db.read() as session:
@@ -867,8 +950,18 @@ class OnboardingStore:
         ).all()
         # Only trials under the current words and the current template revision count, for the
         # proof and for an open structural problem alike: once a template is fixed, an older
-        # template's trial neither proves nor blocks (ADR-0036 §7).
-        current = [t for t in trials if t.template_revision == revision]
+        # template's trial neither proves nor blocks (ADR-0036 §7). Nor does a retired sample's
+        # (amendment 6160586049; migration 0062's trigger agrees).
+        retired = set(
+            session.scalars(
+                select(OnboardingSampleRetirement.sample_url_key).where(
+                    OnboardingSampleRetirement.supplier_key == record.supplier_key
+                )
+            )
+        )
+        current = [
+            t for t in trials if t.template_revision == revision and t.sample_url_key not in retired
+        ]
         structural_open = sum(1 for t in current if _json_list(t.structural_json))
         verifications: dict[str, list[OnboardingVerification]] = {}
         for row in session.scalars(
@@ -1224,4 +1317,13 @@ def _stored_verification(row: OnboardingVerification) -> StoredVerification:
         verdict=row.verdict,
         verified_by=row.verified_by,
         verified_at=row.verified_at,
+    )
+
+
+def _stored_retirement(row: OnboardingSampleRetirement) -> StoredRetirement:
+    return StoredRetirement(
+        sample_url_key=row.sample_url_key,
+        reason=row.reason,
+        retired_by=row.retired_by,
+        retired_at=row.retired_at,
     )

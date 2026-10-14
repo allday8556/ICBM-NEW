@@ -183,6 +183,9 @@ class TrialView(BaseModel):
     # The operator's verdict on exactly these facts (``CORRECT`` or ``WRONG``; a ``WRONG`` stands
     # over any ``CORRECT``), or ``None`` before one (§7, slice O5).
     verdict: str | None = None
+    # The operator's reason when the sample was retired from the analysis (amendment
+    # 6160586049): a retired sample neither proves nor blocks, and is shown with its warning.
+    retired_reason: str | None = None
 
 
 class StaleSampleView(BaseModel):
