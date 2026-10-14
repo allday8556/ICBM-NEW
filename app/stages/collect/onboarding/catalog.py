@@ -31,7 +31,8 @@ the same rule to every onboarded site.
 **Collectability** (OB-10). Only an ``ACTIVE`` onboarded site is collectable; ``collectable`` says
 so for COLLECT submit, the extension capture and the list queue. A repository site keeps its own
 rule: a ``RECON`` repository site still collects (ADR-0030 §7, OB-07). ``site_active`` answers the
-registration preparation's PT-06 gate for both kinds.
+registration preparation's PT-06 gate for both kinds. ``active_origins`` lists the same ``ACTIVE``
+sites as the exact origins the extension may ask Chrome for (ADR-0036 §8, OB-08).
 """
 
 import logging
@@ -118,6 +119,16 @@ class OnboardedEntry:
         return (
             self.offered and self.record is not None and self.record.state is OnboardingState.ACTIVE
         )
+
+
+@dataclass(frozen=True)
+class OnboardedOrigin:
+    """An ``ACTIVE`` onboarded site the extension may ask Chrome for (ADR-0036 §8, OB-08): its
+    exact storefront origin, never a pattern, with its key and the name the operator sees."""
+
+    supplier_key: str
+    display_name: str
+    origin: str
 
 
 @dataclass(frozen=True)
@@ -213,6 +224,23 @@ class SupplierCatalog:
             return None, (f"no template {record.template!r}",)
         site = onboarded_site(record, template, words=words, require_storefront=False)
         return bind_site(site, template, self._platforms)
+
+    def active_origins(self) -> tuple[OnboardedOrigin, ...]:
+        """Every onboarded site that is ``ACTIVE`` and offered, by key: the only origins the
+        extension may ask Chrome for, one at a time on the operator's click (ADR-0036 §8). A
+        repository supplier is never listed; its host is in the manifest already."""
+        listed = []
+        for key, entry in sorted(self._view.onboarded.items()):
+            if not entry.active or entry.bound is None or entry.registered is None:
+                continue
+            listed.append(
+                OnboardedOrigin(
+                    supplier_key=key,
+                    display_name=entry.bound.definition.profile.display_name,
+                    origin=f"https://{entry.registered.collection.profile.storefront_host}",
+                )
+            )
+        return tuple(listed)
 
     def problems(self) -> Mapping[str, tuple[str, ...]]:
         return {key: e.problems for key, e in self._view.onboarded.items() if e.problems}

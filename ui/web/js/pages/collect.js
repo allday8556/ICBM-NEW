@@ -19,7 +19,7 @@ import { datePill, pageHead } from '../components/page-head.js';
 import { reviewItemsBlock } from '../components/review-items.js';
 import { openSiteAnalysis } from './collect/analysis.js';
 import { openCollectionWords } from './collect/words.js';
-import { loadOnboarding, onboardingChip, openAddSupplier, startRecon } from './collect/onboarding.js';
+import { disableOnboarded, loadOnboarding, onboardingChip, openAddSupplier, startRecon } from './collect/onboarding.js';
 
 const ENDPOINT = '/api/v1/screens/collect';
 const CONNECT = '/api/v1/connect/suppliers';
@@ -390,7 +390,12 @@ function supplierCard(supplier, ctx, onboarding = null) {
               type: 'button',
               class: 'btn',
               'data-action': 'site-analysis',
-              onclick: () => openSiteAnalysis(onboarding, { waitForJob, errorMessage }),
+              onclick: () =>
+                openSiteAnalysis(onboarding, {
+                  waitForJob,
+                  errorMessage,
+                  onChanged: () => ctx.navigate('collect', { view: 'suppliers' }),
+                }),
             },
             '사이트 분석',
           )
@@ -414,6 +419,28 @@ function supplierCard(supplier, ctx, onboarding = null) {
             '수집 규칙',
           )
         : markInert(h('button', { type: 'button', class: 'btn' }, '수집 규칙')),
+      // ADR-0036 §7 (O5): an onboarded supplier in any state but DISABLED can be disabled.
+      onboarding && onboarding.state !== 'DISABLED'
+        ? h(
+            'button',
+            {
+              type: 'button',
+              class: 'btn',
+              'data-action': 'disable-supplier',
+              onclick: async () => {
+                try {
+                  if (await disableOnboarded(onboarding)) {
+                    toast('공급처 관리', `${onboarding.display_name} 비활성화`);
+                    ctx.navigate('collect', { view: 'suppliers' });
+                  }
+                } catch (error) {
+                  toast('공급처 관리', errorMessage(error));
+                }
+              },
+            },
+            '비활성화',
+          )
+        : null,
     ),
   );
 }

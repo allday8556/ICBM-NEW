@@ -173,6 +173,15 @@ product-scope cut → browser sanitize → loopback → server final scan → Do
     outside the scope;
   - security material placed inside the scope must still refuse.
 
+> **Amendment note (ADR-0040 §3; owner decision 2026-10-14, Issue #219 `6158718055`).** For the
+> `ali1688` supplier only, a capture carries one more member besides the product-scope DOM.
+> - **The browser builds it.** It takes the single JSON argument of exactly one declared inline script, parses it as data and never executes it.
+> - **Projection.** It sends only the reviewed allowlist of ADR-0040 §4: the scope cut happens in the browser (§6), and no script text is sent.
+> - **What never leaves the browser** (AC-07): the member's receive address, and any other account or member payload. Neither is on the allowlist.
+> - **The server re-checks** the member against the same allowlist, refuses anything outside it, and runs the security gate over its strings.
+> - **Unchanged:** the DOM capture keeps `script` excluded, and every other supplier is as before.
+> - **Evidence kind.** ADR-0040 also authorizes `EMBEDDED_DATA` (AC-18).
+
 ### 6.1 Broad product capture, security-only gate (the user's decision, 2026-10-01)
 
 The first real KM통상 E1 acceptances (`documents/acceptance/adaptive/EXTENSION-E1.md` §5.1) were

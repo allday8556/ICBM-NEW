@@ -69,7 +69,12 @@ def test_the_manifest_is_exactly_the_reviewed_one() -> None:
     assert {"kmretail.co.kr", "www.superdelivery.com"} == PACKAGED_HOSTS
     # No cookie, request, download, history or tab-content reach.
     assert manifest["permissions"] == ["scripting", "sidePanel", "storage"]
-    assert "optional_permissions" not in manifest and "optional_host_permissions" not in manifest
+    # ADR-0036 §8 and §10 (owner decision D3, the amendment of this E1 pin): one optional host
+    # pattern, from which the operator grants one ACTIVE onboarded origin at a time. It is never
+    # requested whole (``test_an_onboarded_origin_is_asked_for_one_at_a_time``), and no optional
+    # API permission is declared at all.
+    assert manifest["optional_host_permissions"] == ["https://*/*"]
+    assert "optional_permissions" not in manifest
     assert "content_scripts" not in manifest and "web_accessible_resources" not in manifest
     assert "externally_connectable" not in manifest
     assert manifest["background"] == {"service_worker": "service_worker.js", "type": "module"}
@@ -154,6 +159,53 @@ def test_the_extension_reads_no_cookie_storage_or_header_and_downloads_nothing()
         assert gone not in everything, gone
 
 
+def test_an_onboarded_origin_is_asked_for_one_at_a_time() -> None:
+    # ADR-0036 §8, OB-08: the extension asks Chrome for one origin ICBM lists as ACTIVE, on the
+    # operator's click in its own page, and removes every optional origin ICBM no longer lists.
+    everything = {path.name: _read(path) for path in sorted(EXTENSION.rglob("*.js"))}
+    script = everything["sidepanel.js"]
+    worker = everything["service_worker.js"]
+    # One request in the whole extension: the side panel's, of one origin built from ICBM's list.
+    requests = {
+        name: re.findall(r"chrome\.permissions\.request\((.*)\);", text)
+        for name, text in everything.items()
+    }
+    assert {name: calls for name, calls in requests.items() if calls} == {
+        "sidepanel.js": ["{ origins: [originPattern(entry.origin)] }"]
+    }
+    assert "const originPattern = (origin) => `${origin}/*`;" in script
+    # Only from the operator's click on a listed row, never on load or from the worker.
+    assert script.count("askOrigin(") == 2
+    assert "(entry.granted ? giveBackOrigin(entry) : askOrigin(entry))" in script
+    assert "entries.map(originRow)" in script
+    # No literal pattern is ever asked for or held beyond the manifest's one declaration.
+    for name, text in everything.items():
+        for pattern in ("https://*/*", "<all_urls>", "*://", 'permissions.request({ origins: ["'):
+            assert pattern not in text, (name, pattern)
+    # ICBM's list is the worker's, read through the signed client, and an entry is an exact origin.
+    assert "fetchOnboardedOrigins(paired, chrome.runtime.id)" in worker
+    assert "const ORIGIN_FORM = /^https:\\/\\/[a-z0-9-]+(\\.[a-z0-9-]+)+$/;" in worker
+    assert "ORIGIN_FORM.test(entry.origin)" in worker
+    assert '"/api/v1/collect/extension/onboarded-origins"' in everything["client.js"]
+    # Disabling (§8): every held optional origin that is not listed is removed, and nothing of the
+    # manifest's own; nothing is removed when the list could not be read.
+    assert (
+        "const REQUIRED_ORIGINS = new Set(chrome.runtime.getManifest().host_permissions" in worker
+    )
+    assert "if (REQUIRED_ORIGINS.has(pattern) || keep.has(pattern)) continue;" in worker
+    assert "chrome.permissions.remove({ origins: [pattern] })" in worker
+    read = worker.split("async function onboardedOrigins()", 1)[1]
+    assert read.index("fetchOnboardedOrigins(") < read.index("chrome.permissions.remove(")
+    assert re.findall(r"chrome\.permissions\.remove\((.*)\);", script) == [
+        "{ origins: [originPattern(entry.origin)] }"
+    ]
+    # An origin this browser does not hold is never cut, searched or queued.
+    assert "chrome.permissions.contains({ origins: [originPattern(url.origin)] })" in worker
+    assert worker.count("if (!target.granted)") == 3
+    for permission in re.findall(r"chrome\.permissions\.(\w+)", "\n".join(everything.values())):
+        assert permission in {"request", "remove", "contains", "getAll", "onAdded", "onRemoved"}
+
+
 def test_the_side_panel_keeps_the_axes_apart() -> None:
     # ADR-0019 §12.3–§12.4 (AC-21, AC-22): a transport state, a run outcome, a code and the field
     # truth of a recorded revision are separate things, and a run outcome is shown only when ICBM
@@ -229,14 +281,17 @@ def test_the_extension_surface_is_exactly_its_routes_and_their_preflights() -> N
     )
     # E1: the policy read and the capture. E3 (ADR-0019 §8.1): the queue policy read, the
     # declaration, the queue read, the server-issued next read, the cancel and the release of a
-    # read the extension could not capture. ADR-0030 §6: the supplier-host read. Each has its own
-    # preflight and nothing else does.
+    # read the extension could not capture. ADR-0030 §6: the supplier-host read. ADR-0036 §8 and
+    # §10 (the amendment of this E1 pin): the ACTIVE onboarded origins the extension may ask Chrome
+    # for. Each has its own preflight and nothing else does.
     assert routes == [
+        ("get", "ONBOARDED_ORIGINS_PATH"),
         ("get", "POLICY_PATH"),
         ("get", "QUEUE_PATH"),
         ("get", "QUEUE_POLICY_PATH"),
         ("get", "SUPPLIERS_PATH"),
         ("options", "CAPTURE_PATH"),
+        ("options", "ONBOARDED_ORIGINS_PATH"),
         ("options", "POLICY_PATH"),
         ("options", "QUEUES_PATH"),
         ("options", "QUEUE_CANCEL_PATH"),
@@ -262,6 +317,7 @@ def test_the_extension_surface_is_exactly_its_routes_and_their_preflights() -> N
         'QUEUE_CANCEL_PATH = "/api/v1/collect/extension/queues/{queue_id}/cancel"',
         'QUEUE_RELEASE_PATH = "/api/v1/collect/extension/queues/{queue_id}/release"',
         'SUPPLIERS_PATH = "/api/v1/collect/extension/suppliers"',
+        'ONBOARDED_ORIGINS_PATH = "/api/v1/collect/extension/onboarded-origins"',
     ):
         assert path in source, path
 

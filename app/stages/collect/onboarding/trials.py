@@ -49,6 +49,7 @@ from app.platform.core.errors import (
     AppError,
     ErrorClass,
     InputValidationError,
+    NotFoundError,
     PolicyBlockedError,
     RateLimitedError,
 )
@@ -76,10 +77,13 @@ from app.stages.collect.onboarding.site import HostRole, OnboardingRecord, Onboa
 from app.stages.collect.onboarding.store import (
     CORE_FIELDS,
     ONBOARDING_NOT_RECON,
+    ONBOARDING_SAMPLE_RETIRED,
+    ONBOARDING_TRIAL_UNKNOWN,
     READ_STATUSES,
     OnboardingConflictError,
     OnboardingStore,
     StoredTrial,
+    StoredVerification,
     TrialInput,
 )
 from app.stages.collect.runs import PacingKey
@@ -117,6 +121,9 @@ ONBOARDING_TRIAL_BUDGET: Final = "ONBOARDING_TRIAL_BUDGET"
 ONBOARDING_SAMPLE_UNREAD: Final = "ONBOARDING_SAMPLE_UNREAD"
 ONBOARDING_ANALYSIS_UNAVAILABLE: Final = "ONBOARDING_ANALYSIS_UNAVAILABLE"
 ONBOARDING_HOST_ROLE_UNOBSERVED: Final = "ONBOARDING_HOST_ROLE_UNOBSERVED"
+ONBOARDING_TRIAL_NOT_VERIFIABLE: Final = "ONBOARDING_TRIAL_NOT_VERIFIABLE"
+VERIFIED: Final = "CORRECT"
+REFUTED: Final = "WRONG"
 
 _CONFIRMABLE_ROLES: Final = frozenset({HostRole.IMAGE.value, HostRole.LOGIN.value})
 _ROLE_ORDER: Final = {"image": 0, "login": 1, "asset": 2}
@@ -413,17 +420,35 @@ class SiteAnalysisService:
         trials = self._store.trials(key)
         newest = newest_by_sample(trials)
         site = self._bound(record)
+        verdicts = _verdicts(trials, self._store.verifications(key))
+        retired = {r.sample_url_key: r.reason for r in self._store.retirements(key)}
         samples: list[TrialView] = []
         stale: list[StaleSampleView] = []
         for trial in newest.values():
             if trial.words_seq == record.words_seq and trial.template_revision == template.revision:
-                samples.append(self._trial_view(site, trial))
+                view = self._trial_view(site, trial, verdicts.get(trial.trial_id))
+                if trial.sample_url_key in retired:
+                    view = view.model_copy(
+                        update={
+                            "retired_reason": retired[trial.sample_url_key],
+                            "verifiable": False,
+                        }
+                    )
+                samples.append(view)
             else:
                 stale.append(
                     StaleSampleView(
                         sample_url=trial.sample_url_key,
                         words_seq=trial.words_seq,
                         template_revision=trial.template_revision,
+                        retired_reason=retired.get(trial.sample_url_key),
+                        retired_trial=self._retired_view(
+                            record,
+                            template,
+                            trial,
+                            retired.get(trial.sample_url_key),
+                            verdicts.get(trial.trial_id),
+                        ),
                     )
                 )
         proof = self._store.activation(key)
@@ -442,7 +467,71 @@ class SiteAnalysisService:
             ),
             activation=proof.details(),
             verifiable_samples=sum(1 for sample in samples if sample.verifiable),
+            can_activate=record.state is OnboardingState.RECON and proof.proven,
         )
+
+    def _retired_view(
+        self,
+        record: OnboardingRecord,
+        template: PlatformTemplate,
+        trial: StoredTrial,
+        reason: str | None,
+        verdict: str | None,
+    ) -> TrialView | None:
+        """A retired sample under older words, read again under the words of its own trial so its
+        flags and values stay shown (amendment 6160586049); ``None`` for a sample not retired."""
+        if reason is None or template.analysis is None:
+            return None
+        bound, _ = self._catalog.bind_words(
+            record, self._store.words_at(record.supplier_key, trial.words_seq)
+        )
+        site = None if bound is None else _Site(record, bound, template, template.analysis)
+        view = self._trial_view(site, trial, verdict)
+        return view.model_copy(update={"retired_reason": reason, "verifiable": False})
+
+    # ------------------------------------------------------------------ approval (§7, slice O5)
+
+    def verify(
+        self, key: str, trial_id: str, verdict: str, *, shown_fingerprint: str, actor: str
+    ) -> AnalysisView:
+        """Record the operator's verdict on what one sample's trial showed. ``CORRECT`` is taken
+        only for a trial the report calls verifiable — every core field read, no structural
+        problem, and a stored capture that still reproduces exactly the facts shown; ``WRONG`` for
+        any current trial. The store refuses a verdict on facts other than the trial's own."""
+        site = self._site(key)
+        trial = next((t for t in self._store.trials(key) if t.trial_id == trial_id), None)
+        if trial is None:
+            raise NotFoundError(ONBOARDING_TRIAL_UNKNOWN, "no trial of this supplier has that id")
+        if any(r.sample_url_key == trial.sample_url_key for r in self._store.retirements(key)):
+            raise OnboardingConflictError(
+                ONBOARDING_SAMPLE_RETIRED, "a retired sample is not verified"
+            )
+        if verdict == VERIFIED and not self._trial_view(site, trial, None).verifiable:
+            raise OnboardingConflictError(
+                ONBOARDING_TRIAL_NOT_VERIFIABLE,
+                "only a sample whose core fields were all read, with no structural problem, is"
+                " confirmed",
+            )
+        self._store.record_verification(
+            key, trial_id, verdict, shown_fingerprint=shown_fingerprint, actor=actor
+        )
+        return self.view(key)
+
+    def retire(self, key: str, sample_url: str, reason: str, *, actor: str) -> AnalysisView:
+        """「분석에서 제외」: retire one sample from the analysis with the operator's reason
+        (amendment 6160586049). It is not read again, still counts toward the 5, and neither proves
+        the site nor keeps its structural problem open; the store refuses everything else."""
+        self._site(key)
+        self._store.retire_sample(key, sample_url, reason, actor=actor)
+        return self.view(key)
+
+    def activate(self, key: str, *, actor: str) -> AnalysisView:
+        """「사용 시작」: ``RECON → ACTIVE`` through the store's gate (§7), which names the verified
+        evidence and is enforced by the database as well; nothing here decides it."""
+        self._store.transition(
+            key, OnboardingState.ACTIVE, actor=actor, reason="approved on the analysis screen"
+        )
+        return self.view(key)
 
     # ------------------------------------------------------------------ internals
 
@@ -620,7 +709,7 @@ class SiteAnalysisService:
             and trial.template_revision == site.template.revision
         )
 
-    def _trial_view(self, site: _Site | None, trial: StoredTrial) -> TrialView:
+    def _trial_view(self, site: _Site | None, trial: StoredTrial, verdict: str | None) -> TrialView:
         summary: dict[str, Any] | None = None
         notes: Mapping[str, str] = {}
         if site is not None:
@@ -667,6 +756,7 @@ class SiteAnalysisService:
             ],
             structural=list(trial.structural),
             verifiable=core_read and not trial.structural and summary is not None,
+            verdict=verdict,
         )
 
     @staticmethod
@@ -714,6 +804,18 @@ def _cookie_values(session: bytes) -> list[str]:
     except Exception:
         return []
     return [cookie.get("value", "") for cookie in cookies if cookie.get("value")]
+
+
+def _verdicts(
+    trials: Iterable[StoredTrial], verifications: Iterable[StoredVerification]
+) -> dict[str, str]:
+    """Each trial's verdict on exactly the facts it showed: ``WRONG`` over any ``CORRECT``."""
+    shown = {t.trial_id: t.facts_fingerprint for t in trials}
+    verdicts: dict[str, str] = {}
+    for v in verifications:
+        if shown.get(v.trial_id) == v.shown_fingerprint and verdicts.get(v.trial_id) != REFUTED:
+            verdicts[v.trial_id] = v.verdict
+    return verdicts
 
 
 def newest_by_sample(trials: Iterable[StoredTrial]) -> dict[str, StoredTrial]:

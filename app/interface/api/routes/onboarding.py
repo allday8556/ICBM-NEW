@@ -113,6 +113,22 @@ class HostDisableRequest(BaseModel):
     role: str = Field(max_length=16)
 
 
+class VerificationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    # ``CORRECT`` or ``WRONG`` of exactly the facts the report showed (its fingerprint).
+    verdict: str = Field(max_length=8)
+    shown_fingerprint: str = Field(max_length=64)
+
+
+class RetirementRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    # The sample exactly as the report names it (``sample_url``), and the operator's reason.
+    sample_url: str = Field(max_length=512)
+    reason: str = Field(max_length=200)
+
+
 class WordsPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
@@ -193,4 +209,36 @@ def save_words(supplier_key: str, body: WordsSaveRequest, container: ContainerDe
         body.words,
         expected_seq=body.expected_seq,
         actor=container.config.operator_actor,
+    )
+
+
+@router.post(f"{BASE}/suppliers/{{supplier_key}}/trials/{{trial_id}}/verification")
+def verify_trial(
+    supplier_key: str, trial_id: str, body: VerificationRequest, container: ContainerDep
+) -> AnalysisView:
+    """The operator's verdict on what one sample's trial showed (§7). Reads nothing."""
+    return container.onboarding_analysis.verify(
+        supplier_key,
+        trial_id,
+        body.verdict,
+        shown_fingerprint=body.shown_fingerprint,
+        actor=container.config.operator_actor,
+    )
+
+
+@router.post(f"{BASE}/suppliers/{{supplier_key}}/activate")
+def activate(supplier_key: str, container: ContainerDep) -> AnalysisView:
+    """「사용 시작」: RECON → ACTIVE, only when the store's gate is proven (§7, D2)."""
+    return container.onboarding_analysis.activate(
+        supplier_key, actor=container.config.operator_actor
+    )
+
+
+@router.post(f"{BASE}/suppliers/{{supplier_key}}/samples/retire")
+def retire_sample(
+    supplier_key: str, body: RetirementRequest, container: ContainerDep
+) -> AnalysisView:
+    """「분석에서 제외」: retire one sample with the operator's reason (ADR-0036 §7, 6160586049)."""
+    return container.onboarding_analysis.retire(
+        supplier_key, body.sample_url, body.reason, actor=container.config.operator_actor
     )

@@ -1,7 +1,7 @@
 """ADR-0038 O1a: the source currency of a product facts revision.
 
 Revision ID: 0063_source_currency
-Revises: 0061_supplier_sales_policy
+Revises: 0062_onboarding_sample_retirements
 Create Date: 2026-10-14
 
 ADR-0038 §1 (FX-01). One change, nothing else: **``product_facts_revisions.source_currency``**, the
@@ -34,7 +34,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0063_source_currency"
-down_revision: str | None = "0061_supplier_sales_policy"
+down_revision: str | None = "0062_onboarding_sample_retirements"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

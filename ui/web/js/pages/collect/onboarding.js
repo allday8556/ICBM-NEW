@@ -86,6 +86,14 @@ export function onboardingChip(record) {
 }
 
 // DRAFT → RECON, once CONNECT's test passed. The server checks every condition itself.
+// ADR-0036 §7 (O5): 「비활성화」 appends DISABLED — no collection, no registration preparation,
+// and the supplier's egress grant is withdrawn. Asked once; the server decides and records it.
+export async function disableOnboarded(record) {
+  if (!window.confirm(`${record.display_name}을(를) 비활성화할까요?\n수집과 등록 준비에 더 이상 쓰이지 않고, 접속 허용 호스트도 거둡니다.`)) return false;
+  await sendJson('POST', `${ONBOARDING}/suppliers/${record.supplier_key}/disable`);
+  return true;
+}
+
 export async function startRecon(key) {
   return sendJson('POST', `${ONBOARDING}/suppliers/${key}/recon`);
 }

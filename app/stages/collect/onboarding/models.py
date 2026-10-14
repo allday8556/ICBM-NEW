@@ -232,3 +232,24 @@ class OnboardingVerification(Base):
     verdict: Mapped[str] = mapped_column(String(8))
     verified_by: Mapped[str] = mapped_column(String(64))
     verified_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class OnboardingSampleRetirement(Base):
+    """A sample the operator retired from the analysis (ADR-0036 §7, amendment 6160586049)."""
+
+    __tablename__ = "onboarding_sample_retirements"
+    __table_args__ = (
+        CheckConstraint("length(trim(reason)) BETWEEN 1 AND 200", name="reason_stated"),
+        CheckConstraint("retired_by <> ''", name="retired_by_present"),
+        CheckConstraint("sample_url_key <> ''", name="sample_present"),
+        UniqueConstraint("supplier_key", "sample_url_key"),
+    )
+
+    retirement_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    supplier_key: Mapped[str] = mapped_column(
+        String(40), ForeignKey("onboarded_suppliers.supplier_key")
+    )
+    sample_url_key: Mapped[str] = mapped_column(String(512))
+    reason: Mapped[str] = mapped_column(Text)
+    retired_by: Mapped[str] = mapped_column(String(64))
+    retired_at: Mapped[datetime] = mapped_column(UTCDateTime)

@@ -180,6 +180,12 @@ class TrialView(BaseModel):
     structural: list[str]
     # Every core field read and no structural problem: what O5 may ask the operator to verify.
     verifiable: bool
+    # The operator's verdict on exactly these facts (``CORRECT`` or ``WRONG``; a ``WRONG`` stands
+    # over any ``CORRECT``), or ``None`` before one (§7, slice O5).
+    verdict: str | None = None
+    # The operator's reason when the sample was retired from the analysis (amendment
+    # 6160586049): a retired sample neither proves nor blocks, and is shown with its warning.
+    retired_reason: str | None = None
 
 
 class StaleSampleView(BaseModel):
@@ -188,6 +194,10 @@ class StaleSampleView(BaseModel):
     sample_url: str
     words_seq: int
     template_revision: str
+    # A retirement outlives the words it was made under (amendment 6160586049): a retired sample
+    # stays shown with its reason, flags and values, read again under the words of its own trial.
+    retired_reason: str | None = None
+    retired_trial: TrialView | None = None
 
 
 class AnalysisView(BaseModel):
@@ -207,6 +217,8 @@ class AnalysisView(BaseModel):
     activation: dict[str, int | str]
     # Samples whose newest trial under the current words is verifiable: "샘플 n/3 확인 가능".
     verifiable_samples: int
+    # 「사용 시작」 is enabled: the site is RECON and the ACTIVE gate is proven (§7).
+    can_activate: bool = False
 
 
 class ReanalysisView(BaseModel):
