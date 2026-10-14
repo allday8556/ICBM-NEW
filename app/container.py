@@ -225,6 +225,8 @@ from integrations.marketplaces.smartstore.notice_schema import SmartStoreNoticeR
 from integrations.marketplaces.smartstore.orders import SmartStoreOrderSource
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
 from integrations.marketplaces.smartstore.tags import SmartStoreTagSource
+from integrations.suppliers.ali1688 import PROFILE as ALI1688_PROFILE
+from integrations.suppliers.ali1688.collect.images import ROLE_TABLE as ALI1688_ROLE_TABLE
 from integrations.suppliers.base import PublicReader, SupplierDefinition, SupplierGateway
 from integrations.suppliers.collection import ImageRole as SupplierImageRole
 from integrations.suppliers.collection import SupplierCollection
@@ -232,8 +234,14 @@ from integrations.suppliers.extraction import supplier_manifest
 from integrations.suppliers.kmretail import PROFILE as KM_PROFILE
 from integrations.suppliers.kmretail.collect.images import OG_IMAGE_RULE as KM_OG_IMAGE_RULE
 from integrations.suppliers.kmretail.collect.images import ROLE_RULES as KM_ROLE_RULES
-from integrations.suppliers.registry import COLLECTIONS, SITE_PROBLEMS, SITES, SUPPLIERS
-from integrations.suppliers.sites import PACKAGED_HOSTS, capture_policy_bytes
+from integrations.suppliers.registry import (
+    COLLECTIONS,
+    SITE_PROBLEMS,
+    SITES,
+    SUPPLIERS,
+    repository_active,
+)
+from integrations.suppliers.sites import PACKAGED_HOSTS, PACKAGED_SUPPLIERS, capture_policy_bytes
 from integrations.suppliers.transport.collection import DeferredCollectionGateway
 from integrations.suppliers.transport.gateway import (
     PolicedPublicReader,
@@ -424,6 +432,10 @@ def supplier_image_roles() -> dict[str, dict[str, ImageSlot]]:
             ((rule.rule_id, rule.role.value) for rule in (*KM_ROLE_RULES, KM_OG_IMAGE_RULE)),
             slot_of,
         ),
+        # ADR-0040 §1: 1688's own rules.
+        ALI1688_PROFILE.supplier_key: slot_table(
+            ((rule, role.value) for rule, role in ALI1688_ROLE_TABLE), slot_of
+        ),
         # ADR-0030 §6: a site's rule names are its template's.
         **{key: slot_table(site.template.role_table, slot_of) for key, site in SITES.items()},
     }
@@ -499,14 +511,15 @@ def build_container(
         db,
         clock,
         audit,
-        reserved_keys={d.profile.supplier_key for d in suppliers} | set(SITES),
+        # ADR-0040: a packaged supplier without a CONNECT definition (1688) is reserved too.
+        reserved_keys={d.profile.supplier_key for d in suppliers} | set(SITES) | PACKAGED_SUPPLIERS,
         reserved_hosts=_repository_hosts(suppliers),
     )
     supplier_catalog = SupplierCatalog(
         definitions=suppliers,
         collections=registered_collections,
         capture_policies={key: capture_policy_bytes(site) for key, site in SITES.items()},
-        repository_active=lambda key: SITES[key].config.active if key in SITES else None,
+        repository_active=repository_active,
         store=onboarding,
     )
 
@@ -1385,7 +1398,8 @@ def build_container(
         review=ReviewService(ReviewCounts(review_items, review_reconciler)),
         execution_mode=execution_mode,
         editable_surfaces=editable_surfaces(),
-        collection_suppliers=collection.supplier_keys,
+        # ADR-0040 §1: a supplier read only from captured pages takes no submitted URL.
+        collection_suppliers=collection.submittable_supplier_keys,
     )
     return Container(
         listing_sync=listing_sync,
