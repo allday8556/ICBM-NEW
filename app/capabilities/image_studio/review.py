@@ -52,7 +52,7 @@ from app.capabilities.image_studio.checks import (
     NUMBER_UNIT_DROPPED,
     region_flags,
 )
-from app.capabilities.image_studio.contracts import OcrRegion, check_language
+from app.capabilities.image_studio.contracts import LANGUAGES, OcrRegion, check_language
 from app.capabilities.image_studio.renderer import (
     COMPLEX_BACKGROUND,
     LAYOUT_OVERFLOW,
@@ -267,6 +267,15 @@ def _rgb(colour: str) -> matched.Rgb:
 
 def _ordered(flags: set[str]) -> tuple[str, ...]:
     return tuple(flag for flag in FLAG_ORDER if flag in flags)
+
+
+def _flags_under(
+    region: OcrRegion, languages: Sequence[str], korean: str | None
+) -> tuple[str, ...]:
+    """A region's review flags under each of several source languages, together."""
+    return _ordered(
+        {flag for language in languages for flag in review_flags(region, language, korean)}
+    )
 
 
 def review_flags(region: OcrRegion, source_language: str, korean: str | None) -> tuple[str, ...]:
@@ -523,6 +532,9 @@ class ImageStudioReviewService:
             raise InputValidationError(
                 IMAGE_STUDIO_NOTHING_INCLUDED, "an applied edit translates at least one region"
             )
+        # The caller's language never narrows the checks: SCRIPT_MISMATCH is judged against the
+        # language the server recorded for this edit as well (IT-05).
+        languages = self._bound_languages(revision, observation, source_language)
         source = self._sources.read(sha256)
         styles = _matched_styles(source, observation)
         result = render(source, _render_regions(observation, items, styles))
@@ -530,7 +542,7 @@ class ImageStudioReviewService:
             region.region_id: tuple(
                 flag
                 for flag in _merged(
-                    review_flags(region, source_language, items[region.region_id].text),
+                    _flags_under(region, languages, items[region.region_id].text),
                     result,
                     region.region_id,
                     True,
@@ -612,6 +624,28 @@ class ImageStudioReviewService:
             seq=revision.seq,
             qa_verdict=None if qa is None else qa.verdict.value,
         )
+
+    def _bound_languages(
+        self, revision: EditRevisionRecord, observation: ObservationRecord, claimed: str
+    ) -> tuple[str, ...]:
+        """The languages an applied edit is checked against: the caller's and the recorded one,
+        which is the revision's own candidate's, else the observation's newest candidate's. With
+        no candidate at all, the observation's most common script; on a tie, every language."""
+        candidates = self._store.candidates(observation.observation_id)
+        bound = next(
+            (c for c in candidates if c.candidate_id == revision.candidate_id),
+            candidates[0] if candidates else None,
+        )
+        if bound is not None:
+            recorded: tuple[str, ...] = (bound.source_language,)
+        else:
+            counts = {
+                language: sum(1 for r in observation.regions if r.script == language)
+                for language in LANGUAGES
+            }
+            top = max(counts.values())
+            recorded = tuple(language for language in LANGUAGES if counts[language] == top)
+        return tuple(language for language in LANGUAGES if language in {claimed, *recorded})
 
     # ------------------------------------------------------------ 「확인 완료」, 「되돌리기」
 
