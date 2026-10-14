@@ -16,6 +16,7 @@ const CAPTURE_PATH = "/api/v1/collect/extension/captures";
 const QUEUE_POLICY_PATH = (supplierKey) => `/api/v1/collect/extension/queue-policies/${supplierKey}`;
 const QUEUES_PATH = "/api/v1/collect/extension/queues";
 const SUPPLIERS_PATH = "/api/v1/collect/extension/suppliers";
+const ONBOARDED_ORIGINS_PATH = "/api/v1/collect/extension/onboarded-origins";
 const QUEUE_PATH = (queueId) => `${QUEUES_PATH}/${encodeURIComponent(queueId)}`;
 const RUN_PATH = (runId) => `/api/v1/collect/collections/${encodeURIComponent(runId)}`;
 const REVISION_PATH = (revisionId) => `/api/v1/collect/revisions/${encodeURIComponent(revisionId)}`;
@@ -145,6 +146,12 @@ async function signedJson(pairing, extensionId, { method, path, body, expected =
 // The reviewed supplier hosts and their keys: the server's registry (ADR-0030 §6).
 export function fetchSuppliers(pairing, extensionId) {
   return signedJson(pairing, extensionId, { method: "GET", path: SUPPLIERS_PATH });
+}
+
+// The exact storefront origin of each ACTIVE onboarded supplier (ADR-0036 §8): the only origins
+// this extension may ask Chrome for, and the list every other optional origin is removed against.
+export function fetchOnboardedOrigins(pairing, extensionId) {
+  return signedJson(pairing, extensionId, { method: "GET", path: ONBOARDED_ORIGINS_PATH });
 }
 
 // The supplier's reviewed product path form and its declared queue limits (ADR-0019 §8.1).

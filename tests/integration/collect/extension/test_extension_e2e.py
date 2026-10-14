@@ -41,6 +41,16 @@ from tests.support.extension_support import (
     table_counts,
     untouched,
 )
+from tests.support.jobs_support import FakeClock
+from tests.support.onboarding_trial_support import (
+    CAFE24_ORIGIN,
+    TrialShop,
+    active_cafe24_site,
+    cafe24_page,
+    cafe24_url,
+    trial_container,
+)
+from tests.support.onboarding_trial_support import StubSessions as TrialSessions
 
 pytestmark = pytest.mark.integration
 
@@ -708,3 +718,42 @@ def test_only_the_chosen_products_are_queued_and_the_bound_stays_the_operators(
             (_product("9002"), CollectionOutcome.RECORDED),
             (_product("9003"), CollectionOutcome.RECORDED),
         ]
+
+
+# ---------------------------------------------------------------- ADR-0036 O5c: onboarded origins
+
+
+def test_an_onboarded_origin_waits_for_the_operators_grant(
+    chromium: BrowserContext, config: AppConfig, clock: FakeClock
+) -> None:
+    """An ACTIVE onboarded supplier is listed with 「권한 요청」, and its page is neither captured
+    nor searched while Chrome does not hold its origin (ADR-0036 §8, OB-08): Chrome does not even
+    name that tab's URL to the extension. A grant is Chrome's own prompt, answered by the
+    operator; no test answers it."""
+    shop = TrialShop()
+    with trial_container(config, clock, shop, TrialSessions()) as built:
+        key = active_cafe24_site(built, clock, shop, name="셀프등록 상점")
+    with _served(config) as (app, origin, _server):
+        panel = _paired_panel(chromium, app, origin)
+        row = panel.locator(f"{_role('onboarded-rows')} .origin-row[data-origin='{CAFE24_ORIGIN}']")
+        expect(row).to_be_visible(timeout=TIMEOUT_MS)
+        assert row.locator(".chip").inner_text() == "권한 없음"
+        assert row.locator("[data-action='origin-request']").inner_text() == "권한 요청"
+        assert "셀프등록 상점" in row.inner_text() and key in row.inner_text()
+        page = chromium.new_page()
+        page.route(
+            "**/*",
+            lambda route: route.fulfill(
+                status=200, content_type="text/html; charset=utf-8", body=cafe24_page(901)
+            ),
+        )
+        page.goto(cafe24_url(901))
+        page.bring_to_front()
+        expect(panel.locator(_role("supplier-state"))).to_contain_text("아님", timeout=TIMEOUT_MS)
+        assert panel.locator(CAPTURE).is_disabled()
+        assert panel.locator("[data-action='discover']").is_disabled()
+        worker = _service_worker(chromium)
+        assert worker is not None
+        held = worker.evaluate("async () => (await chrome.permissions.getAll()).origins")
+        assert f"{CAFE24_ORIGIN}/*" not in held and "https://*/*" not in held
+        assert app.collection.recent_runs() == ()
