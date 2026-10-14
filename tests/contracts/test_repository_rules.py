@@ -2784,6 +2784,9 @@ def test_supplier_packages_hold_site_knowledge_only() -> None:
     }
     assert "integrations/suppliers/kmretail/__init__.py" in packages
     assert "integrations/suppliers/kmretail/collect/images.py" in packages
+    # ADR-0040 C1: 슈퍼딜리버리 is a packaged supplier under the same rule.
+    assert "integrations/suppliers/superdelivery/__init__.py" in packages
+    assert "integrations/suppliers/superdelivery/collect/facts.py" in packages
     for path, tree in packages.items():
         # A package may import its own modules: site knowledge is allowed more than one file.
         own = "integrations.suppliers." + path.split("/")[2]
@@ -2891,6 +2894,7 @@ def test_every_collection_definition_pins_its_extraction_identity() -> None:
         if path.is_dir() and path.name not in {"transport", "__pycache__"}
     ]
     assert suppliers / "kmretail" in packages
+    assert suppliers / "superdelivery" in packages
     # ADR-0030 §4: a platform template is pinned the same way as a supplier package.
     templates = [path for path in (suppliers / "platforms").iterdir() if path.is_dir()]
     templates = [path for path in templates if path.name != "__pycache__"]
@@ -2913,6 +2917,19 @@ def test_image_role_rules_are_bound_to_the_extraction_identity() -> None:
     )
     assert IMAGE_ROLES.identity == ROLE_RULES_REVISION == manifest.revision
     assert len({rule.rule_id for rule in ROLE_RULES}) == len(ROLE_RULES), "rule ids are distinct"
+    # ADR-0040 C1: 슈퍼딜리버리's rules are bound to its own identity the same way.
+    from integrations.suppliers import superdelivery
+    from integrations.suppliers.superdelivery.collect import images as sd_images
+
+    sd_manifest = read_manifest(
+        REPO_ROOT / "integrations" / "suppliers" / "superdelivery" / "extraction_identity.py"
+    )
+    assert (
+        superdelivery.IMAGE_ROLES.identity == sd_images.ROLE_RULES_REVISION == sd_manifest.revision
+    )
+    rule_ids = [rule.rule_id for rule in sd_images.ROLE_RULES]
+    assert len(set(rule_ids)) == len(rule_ids), "rule ids are distinct"
+    assert all(rule_id.startswith("sd.") for rule_id in rule_ids)
 
 
 def test_a_supplier_parser_owns_nothing_but_reading() -> None:
@@ -2923,10 +2940,15 @@ def test_a_supplier_parser_owns_nothing_but_reading() -> None:
         path: tree
         for path, tree in _production_modules().items()
         if path.startswith(
-            ("integrations/suppliers/kmretail/", "integrations/suppliers/platforms/")
+            (
+                "integrations/suppliers/kmretail/",
+                "integrations/suppliers/superdelivery/",
+                "integrations/suppliers/platforms/",
+            )
         )
     }
     assert "integrations/suppliers/kmretail/collect/facts.py" in package
+    assert "integrations/suppliers/superdelivery/collect/facts.py" in package
     assert "integrations/suppliers/platforms/cafe24/collect/facts.py" in package
     assert "integrations/suppliers/platforms/godomall/collect/facts.py" in package
     assert "integrations/suppliers/kmretail/collect/identity.py" in package
@@ -3004,6 +3026,35 @@ def test_one_extraction_identity_covers_the_whole_collect_package() -> None:
         path.relative_to(REPO_ROOT).as_posix() for path in (package / "collect").rglob("*.py")
     }
     assert modules == set(manifest.inputs), "every collect module is part of the identity"
+
+
+def test_superdelivery_is_one_extraction_identity_and_a_capture_only_supplier() -> None:
+    # ADR-0040 C1: 슈퍼딜리버리's identity rule, facts parser and image roles share one revision;
+    # it is collected (COLLECTIONS) and never connected (no SUPPLIERS definition, OC-02); its
+    # profile declares no direct-URL read and no list queue (OC-01, ADR-0019 AC-28); and its
+    # key and product host are packaged, so no site or onboarded supplier can take either.
+    from integrations.suppliers.extraction import read_manifest
+    from integrations.suppliers.registry import COLLECTIONS, SUPPLIERS, repository_active
+    from integrations.suppliers.sites import PACKAGED_HOSTS, PACKAGED_SUPPLIERS
+    from integrations.suppliers.superdelivery import IMAGE_ROLES
+    from integrations.suppliers.superdelivery.collect.revision import EXTRACTION_REVISION
+    from integrations.suppliers.superdelivery.collection import COLLECTION
+
+    package = REPO_ROOT / "integrations" / "suppliers" / "superdelivery"
+    manifest = read_manifest(package / "extraction_identity.py")
+    assert EXTRACTION_REVISION == manifest.revision == IMAGE_ROLES.identity == "superdelivery-4"
+    modules = {
+        path.relative_to(REPO_ROOT).as_posix() for path in (package / "collect").rglob("*.py")
+    }
+    assert modules == set(manifest.inputs), "every collect module is part of the identity"
+    assert COLLECTION in COLLECTIONS
+    assert "superdelivery" not in {d.profile.supplier_key for d in SUPPLIERS}
+    profile = COLLECTION.profile
+    assert profile.direct_url_reads is False and profile.queue_limits is None
+    assert "superdelivery" in PACKAGED_SUPPLIERS
+    assert profile.storefront_host in PACKAGED_HOSTS
+    # ADR-0030 §7: RECON until its acceptance.
+    assert repository_active("superdelivery") is False
 
 
 def test_a_platform_template_is_one_extraction_identity() -> None:
