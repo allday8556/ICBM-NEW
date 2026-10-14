@@ -1,10 +1,9 @@
 // Image Studio (ADR-0041 §6, §7; I5): the registration editor's 「이미지 자동번역」 buttons and the
 // Studio panel that translates the Chinese or Japanese text inside product images into Korean.
 //
-// The buttons keep the place the AI placeholder decision gave them (Issue #219 comment
-// 6054956408). While the server's image_translate capability is NOT_CONFIGURED — no OCR engine,
-// no translation task or no approved AI profile — they stay inert, marked 준비 중, and their
-// tooltip names what is missing. Only when it reads READY do they open the panel.
+// The buttons are drawn only when the server's image_translate capability reads READY and the
+// unit is editable. While it is NOT_CONFIGURED — no OCR engine, no translation task or no approved
+// AI profile — nothing is drawn: since #352 the editor omits a control that cannot work.
 //
 // Everything the panel shows is the server's: the images an Item uses, the OCR regions with their
 // flags and defaults, the candidate on offer (a stale one is never offered), the current edit, a
