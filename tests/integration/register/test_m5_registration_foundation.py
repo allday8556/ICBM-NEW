@@ -573,6 +573,8 @@ ADAPTIVE_TABLES = (
     "image_translation_candidates",
     "image_edit_revisions",
     "image_edit_current",
+    # ADR-0038 §4, §8 (0066): each overseas source product's landed-cost inputs.
+    "overseas_cost_override_revisions",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

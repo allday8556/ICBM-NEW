@@ -4,9 +4,10 @@
 // way to change a fact. A field the source did not state reads 없음, and one it stated but could not
 // be read from the page alone reads 확인 필요, exactly as recorded.
 
-import { getJson } from '../core/api.js';
+import { getJson, sendJson } from '../core/api.js';
 import { fragment, h } from '../core/dom.js';
 import { withHelp } from '../core/help.js';
+import { toast } from '../core/toast.js';
 
 const REVISIONS = '/api/v1/collect/revisions';
 const PRODUCTS = '/api/v1/products';
@@ -397,6 +398,99 @@ function kv(label, value) {
   return h('div', { class: 'kv' }, h('span', {}, label), h('b', {}, value));
 }
 
+// ---------------------------------------------------------------- 해외 구매대행 원가 (ADR-0038 §4, §8)
+//
+// A source-currency product's own landed-cost inputs: its overseas shipping (the supplier's local
+// delivery, the 배대지 and the international freight, in won) and its duty rate. Blank means the
+// 설정 › 해외구매대행 default applies. The server owns both (an append-only revision per source
+// product) and validates them; the page computes no price and no duty, and saves with the revision
+// it read, so a moved one is refused and read again.
+const OVERSEAS_COSTS_COPY = {
+  OVERSEAS_COSTS_REVISION_MOVED: '다른 곳에서 값이 바뀌었습니다. 새로 불러온 값을 확인한 뒤 다시 저장하세요.',
+  OVERSEAS_COSTS_UNCHANGED: '바뀐 값이 없습니다.',
+  OVERSEAS_COSTS_SOURCE_UNKNOWN: '아직 상품DB에 없는 원천 상품입니다. 상품이 만들어진 뒤 입력할 수 있습니다.',
+  REQUEST_INVALID: '입력값을 확인하세요. 해외 배송비는 0~10,000,000원, 관세율은 0~100(소수 둘째 자리까지)입니다.',
+};
+const OVERSEAS_COSTS_HELP =
+  '해외 구매대행 상품의 원가 입력입니다. 해외 배송비는 공급처 현지 배송·배대지·국제 배송을 합친 1개당 금액이고, ' +
+  '비워 두면 설정 › 해외구매대행의 기본값을 씁니다. 가격은 서버가 송금 보낼때 환율(TTS)로 계산합니다.';
+
+function overseasCostsText(error) {
+  const code = error?.error?.code;
+  return OVERSEAS_COSTS_COPY[code] ?? error?.error?.message ?? String(error?.message ?? error);
+}
+
+// A whole number as typed, or the text itself so the server refuses it; blank is the default (null).
+function wholeOrDefault(value) {
+  const text = value.trim();
+  if (!text) return null;
+  return /^\d+$/.test(text) ? Number(text) : text;
+}
+
+function overseasCostsBlock(revision) {
+  const path = `${PRODUCTS}/by-source/${encodeURIComponent(revision.supplier_key)}/${encodeURIComponent(revision.source_product_id)}/overseas-costs`;
+  const body = h('div', { 'data-role': 'overseas-costs-body' }, h('span', { class: 'mini' }, '불러오는 중…'));
+  const holder = h(
+    'div',
+    { class: 'detail-group', 'data-role': 'overseas-costs', 'data-currency': revision.source_currency, 'data-state': 'loading' },
+    withHelp(h('h4', { class: 'panel-title' }, '해외 구매대행 원가'), OVERSEAS_COSTS_HELP),
+    body,
+  );
+  const render = (view) => {
+    holder.dataset.state = 'ready';
+    holder.dataset.revision = view.revision_no === null || view.revision_no === undefined ? '' : String(view.revision_no);
+    const shipping = h('input', {
+      id: 'overseas-costs-shipping',
+      type: 'text',
+      inputmode: 'numeric',
+      autocomplete: 'off',
+      placeholder: '비우면 설정의 기본 해외배송비',
+      value: view.overseas_shipping_krw ?? '',
+      'data-field': 'overseas_shipping_krw',
+    });
+    const duty = h('input', {
+      id: 'overseas-costs-duty',
+      type: 'text',
+      inputmode: 'decimal',
+      autocomplete: 'off',
+      placeholder: '비우면 설정의 기본 관세율',
+      value: view.duty_rate_percent ?? '',
+      'data-field': 'duty_rate_percent',
+    });
+    const save = h('button', { type: 'button', class: 'btn blue', 'data-action': 'save-overseas-costs' }, '원가 입력 저장');
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      try {
+        const saved = await sendJson('PUT', path, {
+          expected_revision_no: view.revision_no ?? null,
+          overseas_shipping_krw: wholeOrDefault(shipping.value),
+          duty_rate_percent: duty.value.trim() || null,
+        });
+        toast('해외 구매대행 원가', '저장했습니다. 가격은 다시 계산해야 반영됩니다.');
+        render(saved);
+      } catch (error) {
+        toast('해외 구매대행 원가', overseasCostsText(error));
+        save.disabled = false;
+        if (error?.error?.code === 'OVERSEAS_COSTS_REVISION_MOVED') load();
+      }
+    });
+    body.replaceChildren(
+      h('div', { class: 'form-row' }, h('label', { for: 'overseas-costs-shipping' }, '해외 배송비 (원, 1개당)'), shipping),
+      h('div', { class: 'form-row' }, h('label', { for: 'overseas-costs-duty' }, '관세율 (%)'), duty),
+      h('div', { class: 'supplier-actions' }, save),
+    );
+  };
+  const load = () =>
+    getJson(path)
+      .then(render)
+      .catch((error) => {
+        holder.dataset.state = 'error';
+        body.replaceChildren(h('div', { class: 'note', 'data-reason': error?.error?.code ?? '' }, overseasCostsText(error)));
+      });
+  load();
+  return holder;
+}
+
 // One read of a RECORDED run's revision and of its bound Item's auto-selection notes, shared by the
 // 수집 미리보기 and the 수집 사실 blocks. A failed read keeps the server's reason.
 export async function readRevisionFacts(revisionId, product = null) {
@@ -433,6 +527,8 @@ export function collectFactsBlock(read, run, errorCopy) {
       h('b', {}, `포함 ${included} / 전체 ${revision.images.length}`),
     ),
     selectionSummary(selection, errorCopy),
+    // ADR-0038 §4: a source-currency product's own landed-cost inputs, beside its facts.
+    revision.source_currency ? overseasCostsBlock(revision) : null,
     revision.fingerprints_intact ? null : h('div', { class: 'note', 'data-reason': 'FINGERPRINTS_NOT_INTACT' }, '저장된 지문이 다시 계산한 값과 다릅니다.'),
     h(
       'table',
