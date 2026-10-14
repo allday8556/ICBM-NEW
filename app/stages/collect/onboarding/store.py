@@ -797,7 +797,9 @@ class OnboardingStore:
         operator's; a sample no trial of this supplier read, or one already retired, is refused.
         The retirement is audited and never undone."""
         stated = reason.strip() if isinstance(reason, str) else ""
-        if not 1 <= len(stated) <= _REASON_LIMIT or any(ord(ch) < 32 for ch in stated):
+        if not 1 <= len(stated) <= _REASON_LIMIT or any(
+            ord(ch) < 32 or 127 <= ord(ch) <= 159 for ch in stated
+        ):
             raise InputValidationError(
                 ONBOARDING_RETIREMENT_REASON_INVALID,
                 f"a retirement states its reason in 1 to {_REASON_LIMIT} characters",
@@ -850,6 +852,20 @@ class OnboardingStore:
             return _stored_retirement(row)
 
     # ------------------------------------------------------------------ reads
+
+    def words_at(self, key: str, seq: int) -> Mapping[str, tuple[str, ...]]:
+        """The site's words as revision ``seq`` stated them (``0``: none, the template's own)."""
+        if seq == 0:
+            return {}
+        with self._db.read() as session:
+            row = session.scalars(
+                select(OnboardingWordRevision).where(
+                    OnboardingWordRevision.supplier_key == key, OnboardingWordRevision.seq == seq
+                )
+            ).one_or_none()
+            if row is None:
+                raise NotFoundError(ONBOARDING_SUPPLIER_UNKNOWN, "no such words revision")
+            return {slot: tuple(values) for slot, values in json.loads(row.words_json).items()}
 
     def retirements(self, key: str) -> tuple[StoredRetirement, ...]:
         with self._db.read() as session:

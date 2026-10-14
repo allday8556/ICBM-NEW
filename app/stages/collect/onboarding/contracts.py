@@ -194,8 +194,10 @@ class StaleSampleView(BaseModel):
     sample_url: str
     words_seq: int
     template_revision: str
-    # A retirement outlives the words it was made under (amendment 6160586049).
+    # A retirement outlives the words it was made under (amendment 6160586049): a retired sample
+    # stays shown with its reason, flags and values, read again under the words of its own trial.
     retired_reason: str | None = None
+    retired_trial: TrialView | None = None
 
 
 class AnalysisView(BaseModel):

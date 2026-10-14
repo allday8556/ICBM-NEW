@@ -390,13 +390,19 @@ export async function openSiteAnalysis(record, { waitForJob, errorMessage, onCha
     samples.replaceChildren(
       ...view.samples.map((sample) => sampleBlock(sample, verify, retire)),
       ...view.stale.map((s) =>
-        h(
-          'div',
-          { class: s.retired_reason ? 'analysis-sample retired' : 'analysis-sample', 'data-sample': s.sample_url, 'data-stale': 'true' },
-          h('b', { class: 'analysis-url' }, s.sample_url),
-          h('div', { class: 'note' }, `이전 수집 규칙(w${s.words_seq})의 결과입니다. 「다시 분석」으로 저장된 캡처를 다시 읽습니다.`),
-          s.retired_reason ? retirementLine({ retired_reason: s.retired_reason }, null) : null,
-        ),
+        s.retired_trial
+          ? h(
+              'div',
+              { 'data-stale': 'true', 'data-stale-sample': s.sample_url },
+              h('div', { class: 'note' }, `이전 수집 규칙(w${s.words_seq})의 결과입니다. 분석에서 제외한 샘플이라 그때의 값과 경고를 그대로 보여 줍니다.`),
+              sampleBlock(s.retired_trial, verify, retire),
+            )
+          : h(
+              'div',
+              { class: 'analysis-sample', 'data-sample': s.sample_url, 'data-stale': 'true' },
+              h('b', { class: 'analysis-url' }, s.sample_url),
+              h('div', { class: 'note' }, `이전 수집 규칙(w${s.words_seq})의 결과입니다. 「다시 분석」으로 저장된 캡처를 다시 읽습니다.`),
+            ),
       ),
     );
     if (!view.samples.length && !view.stale.length) {

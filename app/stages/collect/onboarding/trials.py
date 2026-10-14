@@ -442,6 +442,13 @@ class SiteAnalysisService:
                         words_seq=trial.words_seq,
                         template_revision=trial.template_revision,
                         retired_reason=retired.get(trial.sample_url_key),
+                        retired_trial=self._retired_view(
+                            record,
+                            template,
+                            trial,
+                            retired.get(trial.sample_url_key),
+                            verdicts.get(trial.trial_id),
+                        ),
                     )
                 )
         proof = self._store.activation(key)
@@ -462,6 +469,25 @@ class SiteAnalysisService:
             verifiable_samples=sum(1 for sample in samples if sample.verifiable),
             can_activate=record.state is OnboardingState.RECON and proof.proven,
         )
+
+    def _retired_view(
+        self,
+        record: OnboardingRecord,
+        template: PlatformTemplate,
+        trial: StoredTrial,
+        reason: str | None,
+        verdict: str | None,
+    ) -> TrialView | None:
+        """A retired sample under older words, read again under the words of its own trial so its
+        flags and values stay shown (amendment 6160586049); ``None`` for a sample not retired."""
+        if reason is None or template.analysis is None:
+            return None
+        bound, _ = self._catalog.bind_words(
+            record, self._store.words_at(record.supplier_key, trial.words_seq)
+        )
+        site = None if bound is None else _Site(record, bound, template, template.analysis)
+        view = self._trial_view(site, trial, verdict)
+        return view.model_copy(update={"retired_reason": reason, "verifiable": False})
 
     # ------------------------------------------------------------------ approval (§7, slice O5)
 

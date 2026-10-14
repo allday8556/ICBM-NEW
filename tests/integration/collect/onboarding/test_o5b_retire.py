@@ -144,6 +144,10 @@ def test_a_retired_sample_never_proves_is_never_verified_or_read_again(
     app.onboarding.save_words(key, {"brand": ["상표"]}, expected_seq=0, actor=OPERATOR)
     (stale,) = [s for s in app.onboarding_analysis.view(key).stale if s.sample_url == samples[0]]
     assert stale.retired_reason == "대표 상품이 아님"
+    # ... and its values, read again under the words of its own trial.
+    assert stale.retired_trial is not None and stale.retired_trial.summary is not None
+    assert stale.retired_trial.retired_reason == "대표 상품이 아님"
+    assert not stale.retired_trial.verifiable
     clock.advance(600)
     refused(
         ONBOARDING_SAMPLE_ALREADY_READ,
@@ -155,7 +159,9 @@ def test_a_retired_sample_never_proves_is_never_verified_or_read_again(
     )
 
 
-@pytest.mark.parametrize("reason", ["", "   ", "가" * 201, "줄\n바꿈"])
+@pytest.mark.parametrize(
+    "reason", ["", "   ", "가" * 201, "줄\n바꿈", "삭제\x7f표시", "제어\x85문자"]
+)
 def test_a_retirement_states_its_reason(
     app: Container, clock: FakeClock, shop: TrialShop, reason: str
 ) -> None:
@@ -235,3 +241,17 @@ def test_the_api_retires_a_sample_with_the_client_header(api: TestClient, shop: 
     assert again.status_code == 409 and again.json()["error"]["code"] == ONBOARDING_SAMPLE_RETIRED
     long = api.post(url, json={**body, "reason": "가" * 201}, headers=HEADERS)
     assert long.status_code == 422
+
+
+def test_a_retired_structural_sample_keeps_its_flags_and_values_under_new_words(
+    app: Container, clock: FakeClock, shop: TrialShop
+) -> None:
+    key = recon_site(app, CAFE24_ORIGIN, "cafe24")
+    bad = read(app, clock, shop, key, 861, duplicate_module=True)
+    app.onboarding_analysis.retire(key, bad, "모듈 두 개", actor=OPERATOR)
+    app.onboarding.save_words(key, {"brand": ["상표"]}, expected_seq=0, actor=OPERATOR)
+    (stale,) = app.onboarding_analysis.view(key).stale
+    shown = stale.retired_trial
+    assert shown is not None and shown.structural == ["DUPLICATED_ORDER_LIST"]
+    assert shown.summary is not None and shown.summary["name"] == "트라이얼 상품 861"
+    assert {f.field: f.status for f in shown.fields}["original_name"] == "CONFIRMED"
