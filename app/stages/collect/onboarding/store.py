@@ -532,29 +532,10 @@ class OnboardingStore:
         """Append the next words revision (§6, OB-03). ``expected_seq`` is the words revision the
         operator edited (``0`` before the first); a supplier whose words moved since is refused.
         A change to an ``ACTIVE`` supplier returns it to ``RECON`` in the same unit (OB-04)."""
-        try:
-            parsed = label_words(dict(words) if isinstance(words, Mapping) else words)
-        except SiteConfigError as exc:
-            raise InputValidationError(
-                ONBOARDING_WORDS_INVALID, "words are plain words per template slot"
-            ) from exc
         with self._db.write() as session:
             record = _current(session, key)
             self._require_open(record)
-            template = self.template(record.template)
-            if unknown := sorted(set(parsed) - set(template.label_slots)):
-                raise InputValidationError(
-                    ONBOARDING_WORDS_SLOT_UNKNOWN,
-                    "words go into the template's own slots only",
-                    details={"slots": unknown},
-                )
-            candidate = onboarded_site(record, template, words=parsed, require_storefront=False)
-            if found := template_problems(candidate, template):
-                raise InputValidationError(
-                    ONBOARDING_WORDS_INVALID,
-                    "the words break a template rule",
-                    details={"problems": found},
-                )
+            parsed = self._checked_words(record, words)
             if record.words_seq != expected_seq:
                 raise OnboardingConflictError(
                     ONBOARDING_WORDS_MOVED,
@@ -865,6 +846,40 @@ class OnboardingStore:
             raise OnboardingConflictError(
                 ONBOARDING_HOST_TAKEN, "that storefront belongs to another onboarded supplier"
             )
+
+    def check_words(self, key: str, words: Mapping[str, Any]) -> Mapping[str, tuple[str, ...]]:
+        """The words exactly as :meth:`save_words` would store them, or the same refusal; nothing
+        is written (the editor's preview, §6)."""
+        record = self.current(key)
+        self._require_open(record)
+        return self._checked_words(record, words)
+
+    def _checked_words(
+        self, record: OnboardingRecord, words: Mapping[str, Any]
+    ) -> Mapping[str, tuple[str, ...]]:
+        """Only words pass (ADR-0030 PT-01, §6): plain words per template slot, under the site
+        configuration's own word rules, and nothing a template rule refuses."""
+        try:
+            parsed = label_words(dict(words) if isinstance(words, Mapping) else words)
+        except SiteConfigError as exc:
+            raise InputValidationError(
+                ONBOARDING_WORDS_INVALID, "words are plain words per template slot"
+            ) from exc
+        template = self.template(record.template)
+        if unknown := sorted(set(parsed) - set(template.label_slots)):
+            raise InputValidationError(
+                ONBOARDING_WORDS_SLOT_UNKNOWN,
+                "words go into the template's own slots only",
+                details={"slots": unknown},
+            )
+        candidate = onboarded_site(record, template, words=parsed, require_storefront=False)
+        if found := template_problems(candidate, template):
+            raise InputValidationError(
+                ONBOARDING_WORDS_INVALID,
+                "the words break a template rule",
+                details={"problems": found},
+            )
+        return parsed
 
     @staticmethod
     def _require_open(record: OnboardingRecord) -> None:

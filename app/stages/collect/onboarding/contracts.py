@@ -214,3 +214,57 @@ class ReanalysisView(BaseModel):
     current: int
     missing: int
     analysis: AnalysisView
+
+
+# ---------------------------------------------------------------- 「수집 규칙」 (§6, slice O4)
+
+
+class WordsSlotView(BaseModel):
+    slot: str
+    # ``row`` names an information row by its label, ``phrase`` a sales-channel phrase, ``mark``
+    # anything else the template matches by a word (a sold-out mark, a purchase control, a title
+    # suffix).
+    kind: str
+    # The template's own words for the slot (read-only) and the site's words appended to them.
+    defaults: list[str]
+    site: list[str]
+
+
+class WordsView(BaseModel):
+    supplier_key: str
+    state: str
+    template: str
+    # The words revision a save must name as ``expected_seq`` (``0`` before the first).
+    words_seq: int
+    slots: list[WordsSlotView]
+    words_per_slot: int
+    word_limit: int
+
+
+class FieldChangeView(BaseModel):
+    field: str
+    now: str
+    proposed: str
+
+
+class WordsPreviewSampleView(BaseModel):
+    sample_url: str
+    trial_id: str
+    # The capture reads differently from its page (``CAPTURE_DIVERGES``): no words make it prove.
+    diverged: bool
+    # The fields whose status the proposed words change.
+    changes: list[FieldChangeView]
+    # Unread rows and phrases the proposed words read, and those they no longer read.
+    newly_read: list[str]
+    newly_unread: list[str]
+    unread_now: int
+    unread_proposed: int
+    structural_now: list[str]
+    structural_proposed: list[str]
+
+
+class WordsPreviewView(BaseModel):
+    words_seq: int
+    samples: list[WordsPreviewSampleView]
+    # Samples whose stored capture is missing or no longer matches its checksum.
+    missing: int

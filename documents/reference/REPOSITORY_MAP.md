@@ -127,6 +127,10 @@ sanitized sample captures `capture.py`, the store's trial writer, the templates'
 (row scanner and structure rules), the panel `ui/web/js/pages/collect/analysis.js`, one test support
 module and three integration suites; no new migration (migration `0060`'s ACTIVE gate reads a stated
 "no options" as read).
+ADR-0036 O4 added 「수집 규칙」: the words editor service `app/stages/collect/onboarding/words.py`
+(view, save through the store's words revisions, and an offline preview over the stored captures),
+the store's `check_words` and the catalog's `bind_words`, the editor `ui/web/js/pages/collect/words.js`
+and two integration suites; no new migration.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -180,11 +184,11 @@ customer or financial data, and grant no provider call or LIVE authority.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 378 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 379 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 68 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
 | `app/interface/` | 30 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 91 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 184 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/stages/` | 185 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -206,13 +210,13 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `integrations/` | 94 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 44 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 384 | tests |
+| `tests/` | 386 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 157 | integration tests by runtime owner |
+| `tests/integration/` | 159 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
 | `tests/unit/` | 143 | unit tests by runtime owner |
-| `ui/` | 73 | operator clients: the served web client and the capture extension |
+| `ui/` | 74 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 64 | the served web client |
+| `ui/web/` | 65 | the served web client |

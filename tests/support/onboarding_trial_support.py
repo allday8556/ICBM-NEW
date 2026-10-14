@@ -207,3 +207,12 @@ def recon_site(container: Container, origin: str, template: str, name: str = "íŠ
     )
     container.onboarding.transition(record.supplier_key, OnboardingState.RECON, actor=OPERATOR)
     return record.supplier_key
+
+
+def run_trial(container: Container, key: str, url: str) -> str:
+    """Submit one sample and run its job; the job's id."""
+    submitted = container.onboarding_analysis.submit(key, url, actor=OPERATOR)
+    container.runner.run_next()
+    job = container.jobs.get(submitted.job_id)
+    assert job.state == "SUCCEEDED", (job.last_error_code, job.last_error_message)
+    return submitted.job_id
