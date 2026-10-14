@@ -140,6 +140,10 @@ the catalog's `active_origins` and its signed extension read
 `GET /api/v1/collect/extension/onboarded-origins`, the side panel's `셀프등록 공급처 권한` section
 (one origin requested per operator click, unlisted origins removed) in the existing `ui/extension/`
 files and one integration suite; no new migration.
+ADR-0036 O5b (amendment `6160586049`) added retiring a sample: migration
+`0062_onboarding_sample_retirements` (the append-only retirement record and the ACTIVE gate that
+leaves a retired sample out), the store's `retire_sample` and `retirements`, the analysis service's
+`retire`, its route, `분석에서 제외` in the analysis panel and two integration suites.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -193,10 +197,10 @@ customer or financial data, and grant no provider call or LIVE authority.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 379 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 380 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 68 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
 | `app/interface/` | 30 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 91 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/platform/` | 92 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 185 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
@@ -219,11 +223,11 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `integrations/` | 94 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 44 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 389 | tests |
+| `tests/` | 391 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 162 | integration tests by runtime owner |
+| `tests/integration/` | 164 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
 | `tests/unit/` | 143 | unit tests by runtime owner |
 | `ui/` | 74 | operator clients: the served web client and the capture extension |

@@ -4011,6 +4011,8 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "onboarding_word_revisions",
         "onboarding_policy_reads",
         "onboarding_verifications",
+        # ADR-0036 O5b (amendment 6160586049): the samples retired from an onboarding analysis.
+        "onboarding_sample_retirements",
         # ADR-0039 §1: each supplier's sales policy, its append-only revisions.
         "supplier_sales_policy_revisions",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over

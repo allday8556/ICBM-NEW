@@ -77,6 +77,7 @@ from app.stages.collect.onboarding.site import HostRole, OnboardingRecord, Onboa
 from app.stages.collect.onboarding.store import (
     CORE_FIELDS,
     ONBOARDING_NOT_RECON,
+    ONBOARDING_SAMPLE_RETIRED,
     ONBOARDING_TRIAL_UNKNOWN,
     READ_STATUSES,
     OnboardingConflictError,
@@ -420,17 +421,34 @@ class SiteAnalysisService:
         newest = newest_by_sample(trials)
         site = self._bound(record)
         verdicts = _verdicts(trials, self._store.verifications(key))
+        retired = {r.sample_url_key: r.reason for r in self._store.retirements(key)}
         samples: list[TrialView] = []
         stale: list[StaleSampleView] = []
         for trial in newest.values():
             if trial.words_seq == record.words_seq and trial.template_revision == template.revision:
-                samples.append(self._trial_view(site, trial, verdicts.get(trial.trial_id)))
+                view = self._trial_view(site, trial, verdicts.get(trial.trial_id))
+                if trial.sample_url_key in retired:
+                    view = view.model_copy(
+                        update={
+                            "retired_reason": retired[trial.sample_url_key],
+                            "verifiable": False,
+                        }
+                    )
+                samples.append(view)
             else:
                 stale.append(
                     StaleSampleView(
                         sample_url=trial.sample_url_key,
                         words_seq=trial.words_seq,
                         template_revision=trial.template_revision,
+                        retired_reason=retired.get(trial.sample_url_key),
+                        retired_trial=self._retired_view(
+                            record,
+                            template,
+                            trial,
+                            retired.get(trial.sample_url_key),
+                            verdicts.get(trial.trial_id),
+                        ),
                     )
                 )
         proof = self._store.activation(key)
@@ -452,6 +470,25 @@ class SiteAnalysisService:
             can_activate=record.state is OnboardingState.RECON and proof.proven,
         )
 
+    def _retired_view(
+        self,
+        record: OnboardingRecord,
+        template: PlatformTemplate,
+        trial: StoredTrial,
+        reason: str | None,
+        verdict: str | None,
+    ) -> TrialView | None:
+        """A retired sample under older words, read again under the words of its own trial so its
+        flags and values stay shown (amendment 6160586049); ``None`` for a sample not retired."""
+        if reason is None or template.analysis is None:
+            return None
+        bound, _ = self._catalog.bind_words(
+            record, self._store.words_at(record.supplier_key, trial.words_seq)
+        )
+        site = None if bound is None else _Site(record, bound, template, template.analysis)
+        view = self._trial_view(site, trial, verdict)
+        return view.model_copy(update={"retired_reason": reason, "verifiable": False})
+
     # ------------------------------------------------------------------ approval (§7, slice O5)
 
     def verify(
@@ -465,6 +502,10 @@ class SiteAnalysisService:
         trial = next((t for t in self._store.trials(key) if t.trial_id == trial_id), None)
         if trial is None:
             raise NotFoundError(ONBOARDING_TRIAL_UNKNOWN, "no trial of this supplier has that id")
+        if any(r.sample_url_key == trial.sample_url_key for r in self._store.retirements(key)):
+            raise OnboardingConflictError(
+                ONBOARDING_SAMPLE_RETIRED, "a retired sample is not verified"
+            )
         if verdict == VERIFIED and not self._trial_view(site, trial, None).verifiable:
             raise OnboardingConflictError(
                 ONBOARDING_TRIAL_NOT_VERIFIABLE,
@@ -474,6 +515,14 @@ class SiteAnalysisService:
         self._store.record_verification(
             key, trial_id, verdict, shown_fingerprint=shown_fingerprint, actor=actor
         )
+        return self.view(key)
+
+    def retire(self, key: str, sample_url: str, reason: str, *, actor: str) -> AnalysisView:
+        """「분석에서 제외」: retire one sample from the analysis with the operator's reason
+        (amendment 6160586049). It is not read again, still counts toward the 5, and neither proves
+        the site nor keeps its structural problem open; the store refuses everything else."""
+        self._site(key)
+        self._store.retire_sample(key, sample_url, reason, actor=actor)
         return self.view(key)
 
     def activate(self, key: str, *, actor: str) -> AnalysisView:
