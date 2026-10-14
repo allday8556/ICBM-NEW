@@ -72,6 +72,7 @@ from app.stages.products.pricing import (
     SHIPPING_CONDITIONAL,
     SHIPPING_UNKNOWN,
     SHIPPING_UNRESOLVED,
+    SOURCE_CURRENCY_UNSUPPORTED,
     TARGET_MARGIN_UNREACHABLE,
 )
 from app.stages.products.pricing_service import (
@@ -157,6 +158,8 @@ M4_PRICING_REVIEWED: Final = frozenset(
         MINIMUM_SALE_PRICE_NOT_OFFER_BOUND,
         QUANTITY_OFFER_UNRESOLVED,
         TARGET_MARGIN_UNREACHABLE,
+        # ADR-0038 §1 (O1a): a revision in a source currency is not priced until O2.
+        SOURCE_CURRENCY_UNSUPPORTED,
         # The fallback an M4 layer states when it is not READY but gives no reason.
         ReadinessStatus.REVIEW_REQUIRED.value,
     }

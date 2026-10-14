@@ -211,8 +211,17 @@ CANONICAL_TABLES = (
     "supplier_sales_policy_revisions",
     # ADR-0036 O5b (amendment 6160586049): the samples retired from an onboarding analysis.
     "onboarding_sample_retirements",
+    # ADR-0038 §3, §5: the immutable FX snapshots and the overseas settings revisions.
+    "fx_snapshots",
+    "overseas_settings_revisions",
+    # ADR-0041 §3 (I1): the Image Studio translation owner — OCR observations, translation
+    # candidates, edit revisions and their forward-only current pointer.
+    "image_ocr_observations",
+    "image_translation_candidates",
+    "image_edit_revisions",
+    "image_edit_current",
 )
-HEAD = "0062_onboarding_sample_retirements"
+HEAD = "0065_image_studio_translation"
 
 
 def _url(path: Path) -> str:

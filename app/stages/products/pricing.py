@@ -44,6 +44,10 @@ pricing. The minimum the source stated is kept beside the price (``stated_minimu
 and the snapshot records ``minimum_applied=False``; a statement it could not read is
 ``minimum_unresolved``. Either is the warning ``PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED`` (SP-04).
 The applied path, and every fingerprint it produces, is unchanged.
+
+**A source currency is not priced yet** (ADR-0038 §1, slice O1a). A revision that states its prices
+in CNY or JPY is ``PRICING_SOURCE_CURRENCY_UNSUPPORTED`` on every path — base, offer and AtomicSKU —
+before any amount is read (:func:`source_currency_reasons`). The landed cost and its FX pins are O2.
 """
 
 import hashlib
@@ -247,6 +251,10 @@ MINIMUM_SALE_PRICE_NOT_OFFER_BOUND = "PRICING_MINIMUM_SALE_PRICE_NOT_OFFER_BOUND
 # ADR-0039 §3: a minimum the source states (or could not be read) that the supplier's sales policy
 # does not apply. A non-blocking warning, never a reason not to price.
 MINIMUM_SALE_PRICE_NOT_APPLIED = "PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED"
+# ADR-0038 §1, O1a: a revision whose prices are stated in a source currency (CNY, JPY). Nothing
+# here converts one into won; until the landed-cost inputs and their FX pins (O2) exist, such a
+# revision is not priced at all.
+SOURCE_CURRENCY_UNSUPPORTED = "PRICING_SOURCE_CURRENCY_UNSUPPORTED"
 
 SourceField = OfferField
 
@@ -277,6 +285,15 @@ class SourceInputs:
 
 def _review(code: str, subject: str) -> Reason:
     return Reason(code, ReadinessStatus.REVIEW_REQUIRED, subject)
+
+
+def source_currency_reasons(source_currency: str | None) -> tuple[Reason, ...]:
+    """ADR-0038 §1: the reason a revision stated in a source currency is not priced, or none for
+    a KRW revision. Every pricing path asks this first, before it reads a single amount, so no
+    CNY or JPY amount is ever read as won (fail closed until O2)."""
+    if source_currency is None:
+        return ()
+    return (_review(SOURCE_CURRENCY_UNSUPPORTED, "prices"),)
 
 
 def _supplier_shipping(fields: Mapping[str, SourceField], reasons: list[Reason]) -> int | None:

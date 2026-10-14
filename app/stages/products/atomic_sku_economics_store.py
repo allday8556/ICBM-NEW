@@ -228,6 +228,14 @@ class AtomicSKUEconomicsUnit:
             raise InputValidationError(
                 "PRODUCTS_ATOMIC_SKU_SOURCE_STALE", "the proving source revision is not current"
             )
+        if fact_revision.source_currency is not None:
+            # ADR-0038 §1 (O1a): the binding's costs are whole KRW, and a CNY or JPY amount is
+            # never read as one; nothing converts until the FX and landed-cost slice (O2).
+            raise InputValidationError(
+                "PRODUCTS_ATOMIC_SKU_SOURCE_CURRENCY_UNSUPPORTED",
+                "the proving source revision states its prices in a source currency, which is"
+                " not priced yet",
+            )
         prices_row = self.session.get(ProductFactsField, (fact_revision.revision_id, "prices"))
         prices = (
             None

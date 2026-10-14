@@ -144,8 +144,12 @@ ADR-0036 O5b (amendment `6160586049`) added retiring a sample: migration
 `0062_onboarding_sample_retirements` (the append-only retirement record and the ACTIVE gate that
 leaves a retired sample out), the store's `retire_sample` and `retirements`, the analysis service's
 `retire`, its route, `분석에서 제외` in the analysis panel and two integration suites.
-ADR-0041 I3 added the Image Studio capability `app/capabilities/image_studio/` with its
-deterministic renderer `image-translate-renderer/v1`: `style.py` reads a region's background
+ADR-0041 I1 added the Image Studio translation owner `app/capabilities/image_studio/` (the region
+and fingerprint contract with the minimal OCR and composition seams, the models, the append-only
+store of OCR observations, translation candidates and edit revisions with their forward-only
+pointer, and the provider-zero `image.translate` job), migration `0065_image_studio_translation`
+and one integration suite; production binds no OCR engine and no translation task.
+ADR-0041 I3 added to it the deterministic renderer `image-translate-renderer/v1`: `style.py` reads a region's background
 (erase only where clean) and the source text's colour, weight and size, and `renderer.py` draws
 the Korean text with the bundled Noto Sans KR (shrink-to-fit, `LAYOUT_OVERFLOW`, a label box on a
 complex background, the completeness verdict). One integration suite; no migration.
@@ -202,10 +206,10 @@ customer or financial data, and grant no provider call or LIVE authority.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 383 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 71 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
-| `app/interface/` | 30 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 92 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/` | 396 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 80 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
+| `app/interface/` | 31 | operator surfaces: HTTP api, screens, cli |
+| `app/platform/` | 95 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 185 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
@@ -225,16 +229,16 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 94 | adapters: suppliers and marketplaces |
+| `integrations/` | 96 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 44 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 393 | tests |
+| `tests/` | 405 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 166 | integration tests by runtime owner |
+| `tests/integration/` | 173 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
-| `tests/unit/` | 143 | unit tests by runtime owner |
-| `ui/` | 74 | operator clients: the served web client and the capture extension |
+| `tests/unit/` | 148 | unit tests by runtime owner |
+| `ui/` | 75 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 65 | the served web client |
+| `ui/web/` | 66 | the served web client |

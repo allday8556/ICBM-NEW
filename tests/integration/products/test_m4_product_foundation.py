@@ -745,9 +745,12 @@ def _url(path: Path) -> str:
     return f"sqlite:///{path.as_posix()}"
 
 
-# Migration 0034 (ADR-0019 E1) appends the transport provenance to the revision: nullable and
-# never backfilled. Rows compare across revisions on what each revision holds.
-LATER_COLUMNS = frozenset({"transport_kind", "capture_policy_revision", "capture_policy_digest"})
+# Migration 0034 (ADR-0019 E1) appends the transport provenance to the revision, and 0063
+# (ADR-0038 §1) its source currency: nullable and never backfilled. Rows compare across revisions
+# on what each revision holds.
+LATER_COLUMNS = frozenset(
+    {"transport_kind", "capture_policy_revision", "capture_policy_digest", "source_currency"}
+)
 
 
 def _m3_rows(database: Path) -> dict[str, list[tuple[object, ...]]]:

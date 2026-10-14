@@ -1,10 +1,10 @@
 """Append-only ProductFactsRevision storage and read-back (M3 PR-B, ADR-0010 §6).
 
 ``append`` stores exactly what :func:`app.stages.collect.facts.evaluate` computed — fields,
-evidence,
-image references, fingerprints and ``facts_status`` — in one write transaction, as the next
-sequence number of its source identity. Every successful call creates a new immutable revision,
-even when nothing changed (Issue #52 §4). Nothing here updates or deletes, and the database
+evidence, image references, fingerprints, ``facts_status`` and the one source currency the values
+state (ADR-0038 §1) — in one write transaction, as the next sequence number of its source
+identity. Every successful call creates a new immutable revision, even when nothing changed
+(Issue #52 §4). Nothing here updates or deletes, and the database
 refuses both anyway.
 """
 
@@ -39,6 +39,7 @@ from app.stages.collect.facts import (
     evidence_digest,
     field_fingerprint,
     image_order,
+    revision_source_currency,
     source_fingerprint,
     value_from_json,
 )
@@ -97,6 +98,9 @@ class StoredRevision:
     transport_kind: str | None = None
     capture_policy_revision: str | None = None
     capture_policy_digest: str | None = None
+    # ADR-0038 §1 (migration 0063): the one currency the revision's values state, or None for a
+    # KRW page. Never an input of any digest: each foreign value carries its own currency.
+    source_currency: str | None = None
 
     def fingerprints_intact(self) -> bool:
         """Recompute every evidence digest and fingerprint from the stored content alone."""
@@ -135,6 +139,7 @@ class ProductFactsRevisionStore:
         no fingerprint is computed from it. A revision appended without one states none.
         """
         evaluated = evaluate(collected, url_policy)
+        source_currency = self._source_currency(evaluated)
         revision_id = str(uuid.uuid4())
         with self._db.write() as session:
             self._require_stored_assets(session, evaluated)
@@ -160,6 +165,7 @@ class ProductFactsRevisionStore:
                     collection_run_id=collected.collection_run_id,
                     correlation_id=collected.correlation_id,
                     facts_status=evaluated.facts_status.value,
+                    source_currency=source_currency,
                     **(
                         {}
                         if provenance is None
@@ -337,6 +343,22 @@ class ProductFactsRevisionStore:
             return None if row is None else self._load(session, row)
 
     @staticmethod
+    def _source_currency(evaluated: EvaluatedFacts) -> str | None:
+        """The one source currency the values to be stored state (ADR-0038 §1), read back from
+        the canonical value JSON exactly as it will be stored. Values that mix currencies, or that
+        disagree with what the evaluation derived, are refused: a revision is never stored mixed.
+        """
+        stored = revision_source_currency(
+            value_from_json(field.key, field.value_json) for field in evaluated.fields
+        )
+        if stored != evaluated.source_currency:
+            raise InputValidationError(
+                "COLLECT_FACTS_CURRENCY_MIXED",
+                "the stored values do not state the currency the evaluation derived",
+            )
+        return stored
+
+    @staticmethod
     def _require_stored_assets(session: Session, evaluated: EvaluatedFacts) -> None:
         named = {ref.sha256 for ref in evaluated.images if ref.sha256 is not None}
         if not named:
@@ -436,4 +458,5 @@ class ProductFactsRevisionStore:
             transport_kind=row.transport_kind,
             capture_policy_revision=row.capture_policy_revision,
             capture_policy_digest=row.capture_policy_digest,
+            source_currency=row.source_currency,
         )

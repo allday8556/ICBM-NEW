@@ -74,6 +74,7 @@ def make_config(data_dir: Path, **overrides: object) -> AppConfig:
         "operate_listing_sync_interval_s": 0.0,
         "operate_stock_recheck_interval_s": 0.0,
         "operate_order_sync_interval_s": 0.0,
+        "fx_refresh_interval_s": 0.0,
     }
     values.update(overrides)
     return AppConfig(**values)  # type: ignore[arg-type]

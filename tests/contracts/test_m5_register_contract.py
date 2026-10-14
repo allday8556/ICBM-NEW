@@ -275,7 +275,16 @@ SUPPLIER_SALES_POLICY = "0061_supplier_sales_policy"
 # ADR-0036 O5b (amendment 6160586049): retiring an onboarding sample, and the ACTIVE gate
 # that leaves a retired sample out.
 ONBOARDING_RETIREMENTS = "0062_onboarding_sample_retirements"
-SCHEMA_HEAD = ONBOARDING_RETIREMENTS
+# ADR-0038 O1a: the source currency of a product facts revision. Source truth, never registration
+# state.
+SOURCE_CURRENCY = "0063_source_currency"
+# ADR-0038 O1b: the FX snapshots and the overseas settings. Supporting-capability state, never
+# registration state.
+FX_SNAPSHOTS = "0064_fx_snapshots"
+# ADR-0041 I1: the Image Studio translation owner. Derived-image authoring state, never
+# registration state.
+IMAGE_STUDIO_TRANSLATION = "0065_image_studio_translation"
+SCHEMA_HEAD = IMAGE_STUDIO_TRANSLATION
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -319,6 +328,9 @@ AFTER_M5 = (
     SUPPLIER_ONBOARDING,
     SUPPLIER_SALES_POLICY,
     ONBOARDING_RETIREMENTS,
+    SOURCE_CURRENCY,
+    FX_SNAPSHOTS,
+    IMAGE_STUDIO_TRANSLATION,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

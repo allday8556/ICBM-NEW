@@ -16,6 +16,7 @@ from starlette.types import Scope
 
 from app import MILESTONE, __version__
 from app.capabilities.jobs.registry import JobDefinition
+from app.capabilities.overseas.fx import FxSource
 from app.config import AppConfig
 from app.container import build_container
 from app.interface.api.errors import install_error_handlers
@@ -30,6 +31,7 @@ from app.interface.api.routes import (
     enrichment,
     onboarding,
     operate,
+    overseas,
     product_images,
     products,
     register,
@@ -70,6 +72,7 @@ def create_app(
     collections: Sequence[RegisteredCollection] | None = None,
     capture_policy_root: Path | None = None,
     extension_report_sink: ReportSink | None = None,
+    fx_source: FxSource | None = None,
 ) -> FastAPI:
     """Build the application for one data directory (ADR-0006).
 
@@ -104,6 +107,7 @@ def create_app(
             collections=collections,
             capture_policy_root=capture_policy_root,
             extension_report_sink=extension_report_sink,
+            fx_source=fx_source,
         )
     except BaseException:
         if owns_lease:
@@ -162,11 +166,14 @@ def create_app(
             services.order_sync_scheduler.start()
             # Owner decision 2026-10-07: renew the SmartStore session automatically.
             services.smartstore_keeper.start()
+            # ADR-0038 §3: the daily Korea Eximbank TTS, read after 11:00 KST on business days.
+            services.fx_refresh_scheduler.start()
         else:
             logger.error("app.schema_not_at_head", extra={"hint": "run `icbm db upgrade`"})
         try:
             yield
         finally:
+            await asyncio.to_thread(services.fx_refresh_scheduler.stop)
             await asyncio.to_thread(services.smartstore_keeper.stop)
             await asyncio.to_thread(services.order_sync_scheduler.stop)
             await asyncio.to_thread(services.stock_recheck_scheduler.stop)
@@ -205,6 +212,7 @@ def create_app(
     app.include_router(settings.router)
     app.include_router(detail_guidance.router)
     app.include_router(sales_policy.router)
+    app.include_router(overseas.router)
     app.include_router(ai.router)
     app.include_router(review.router)
 

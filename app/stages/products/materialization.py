@@ -501,7 +501,9 @@ class ProductMaterializer:
 
         # 5. Product-level quantity offers, their quantity Items and exact SOURCE_OFFER bindings,
         #    only when the current revision states them (ruling 5738760913). Each total is the
-        #    tier's own; nothing is divided, multiplied or read from the generic prices.
+        #    tier's own; nothing is divided, multiplied or read from the generic prices. A revision
+        #    in a source currency (ADR-0038 §1) reads as that currency and states no KRW offer, so
+        #    none is opened for it: a QuantityOffer total is won, and nothing converts until O2.
         readings, currency = unit.offer_fields(target.revision_id)
         quantity_evidence, terms = product_level_offers(readings, currency or "")
         offers = []

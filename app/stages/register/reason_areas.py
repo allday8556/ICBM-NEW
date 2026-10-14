@@ -196,6 +196,8 @@ M4_AREAS: Final[Mapping[str, tuple[ReasonArea, ...]]] = {
     "PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED": (_A.PRICE,),
     "PRICING_TARGET_MARGIN_UNREACHABLE": (_A.PRICE,),
     "PRICING_QUANTITY_OFFER_UNRESOLVED": (_A.PRICE,),
+    # ADR-0038 §1 (O1a): a revision in a source currency, not priced until O2.
+    "PRICING_SOURCE_CURRENCY_UNSUPPORTED": (_A.PRICE,),
     # images
     "IMAGE_SELECTION_MISSING": (_A.IMAGES,),
     "IMAGE_SELECTION_EMPTY": (_A.IMAGES,),
