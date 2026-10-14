@@ -144,6 +144,11 @@ ADR-0036 O5b (amendment `6160586049`) added retiring a sample: migration
 `0062_onboarding_sample_retirements` (the append-only retirement record and the ACTIVE gate that
 leaves a retired sample out), the store's `retire_sample` and `retirements`, the analysis service's
 `retire`, its route, `분석에서 제외` in the analysis panel and two integration suites.
+ADR-0041 I1 added the Image Studio translation owner `app/capabilities/image_studio/` (the region
+and fingerprint contract with the minimal OCR and composition seams, the models, the append-only
+store of OCR observations, translation candidates and edit revisions with their forward-only
+pointer, and the provider-zero `image.translate` job), migration `0065_image_studio_translation`
+and one integration suite; production binds no OCR engine and no translation task.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -197,10 +202,10 @@ customer or financial data, and grant no provider call or LIVE authority.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 390 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 73 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
+| `app/` | 396 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 78 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
 | `app/interface/` | 31 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 94 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/platform/` | 95 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 187 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
@@ -209,12 +214,12 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 192 | all canonical and historical documents |
+| `documents/` | 193 | all canonical and historical documents |
 | `documents/acceptance/` | 73 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 12 | platform and UI contracts |
-| `documents/decisions/` | 42 | ADRs and architect review records |
+| `documents/decisions/` | 43 | ADRs and architect review records |
 | `documents/evidence/` | 30 | external provider evidence catalog |
 | `documents/reference/` | 3 | this map and the path migration map |
 | `documents/reviews/` | 4 | Claude proposal channel |
@@ -223,11 +228,11 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `integrations/` | 97 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 45 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 405 | tests |
+| `tests/` | 407 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 170 | integration tests by runtime owner |
+| `tests/integration/` | 172 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
 | `tests/unit/` | 151 | unit tests by runtime owner |
 | `ui/` | 75 | operator clients: the served web client and the capture extension |
