@@ -88,6 +88,10 @@ class CoupangLivePreflightStore:
             results[attempt.category_code] = category_metadata_to_mapping(attempt.metadata)
             failures.pop(attempt.category_code, None)
         else:
+            # A failed refresh invalidates any earlier success for this category.  Keeping the
+            # stale contract would let a later live bundle pass despite the newest provider read
+            # having failed, so the closed record must become incomplete immediately.
+            results.pop(attempt.category_code, None)
             failures[attempt.category_code] = {
                 name: value
                 for name, value in {

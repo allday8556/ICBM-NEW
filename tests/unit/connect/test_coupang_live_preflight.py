@@ -69,6 +69,29 @@ def test_metadata_attempt_is_saved_immediately_without_raw_response() -> None:
     assert store.require_category_metadata(("101",), generation=2)["101"]
 
 
+def test_failed_metadata_refresh_invalidates_an_earlier_success() -> None:
+    secrets = MemorySecretStore()
+    store = CoupangLivePreflightStore(secrets)
+    metadata = CategoryMetadata(True, (), (), (), (), ("NEW",))
+
+    store.save_category_metadata_attempt(
+        CategoryMetadataAttempt("101", metadata, http_status=200), generation=2
+    )
+    store.save_category_metadata_attempt(
+        CategoryMetadataAttempt("101", None, ErrorClass.TRANSIENT, "COUPANG_TRANSPORT_FAILED"),
+        generation=2,
+    )
+
+    record = json.loads(secrets.get(CATEGORY_METADATA_KEY) or "null")
+    assert "101" not in record["results"]
+    assert record["failures"]["101"] == {
+        "error_class": "TRANSIENT",
+        "error_code": "COUPANG_TRANSPORT_FAILED",
+    }
+    with pytest.raises(ValueError, match="METADATA_INCOMPLETE"):
+        store.require_category_metadata(("101",), generation=2)
+
+
 def test_incomplete_metadata_and_malformed_recommendations_fail_closed() -> None:
     secrets = MemorySecretStore()
     store = CoupangLivePreflightStore(secrets)
