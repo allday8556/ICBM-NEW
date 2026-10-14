@@ -1,6 +1,6 @@
 # ADR-0038 — Overseas 구매대행 suppliers: source currency, FX snapshot, landed cost and SmartStore cross-border fields
 
-Status: **PROPOSED** 2026-10-11. Its owner questions are answered (§8). It becomes ACCEPTED once reconnaissance of 1688 and Super Delivery confirms §1–§2 (scheduled 2026-10-12).
+Status: **ACCEPTED** 2026-10-14. The owner questions are answered (§8). Reconnaissance of 1688 and Super Delivery on 2026-10-14 confirmed §1–§2, and the owner's answers to it are recorded in §9 (Issue #219 `6158621894`, `6158624981`).
 
 This is the currency and FX-snapshot ADR that ARCHITECTURE §6 and ROADMAP §14.3 require before any second-currency supplier.
 
@@ -130,6 +130,35 @@ Per-item duty, confirmed and phased:
 
 Phase 1 is in this ADR. Phase 2 follows. Phase 3 is optional.
 
+## 9. Reconnaissance (2026-10-14) and the owner's answers
+
+The owner signed in to both sites; the reconnaissance only read pages.
+
+**What the pages state.**
+- **1688.** A product page carries its data in the page itself:
+  - the option axes;
+  - per-SKU price and stock;
+  - the ship-from location;
+  - the domestic freight to the account's receive address (the 배대지).
+  Prices are CNY in one of two modes: per-SKU prices, or quantity tiers (for example 1 → ¥5.80, 90 → ¥5.30). Titles and option labels are Chinese.
+- **Super Delivery.** The account is a domestic (Japan) member.
+  - A wholesale price is shown only once that supplier company has approved the member. Until then the page shows a request link and no price.
+  - A shown price has both 税抜 and 税込, beside the maker's suggested retail price, the JAN and the SD item number.
+  - Shipping is each supplier company's own text and table, within Japan.
+  - Some companies state "domestic retailers only" or "no drop shipping".
+
+**The owner's answers.**
+1. **One page, by the user.** The user opens a product page and presses 수집 in the capture extension (ADR-0019). Exactly that page is read, in the user's own signed-in session. There is no list or whole-site crawling, and ICBM holds no credential for these sites. Super Delivery keeps the domestic member account.
+2. **The page, exactly.** What the page states is read as stated (ADR-0010), and nothing is inferred.
+   - A supplier company's terms, such as "domestic retailers only" or "no drop shipping", are kept as its words. They are not a new gate. Applying a supplier's sales policy stays the user's choice (ADR-0039).
+   - A price the page does not show, such as an unapproved Super Delivery company, is not read: the product is `REVIEW_REQUIRED`.
+3. **The price actually paid.** The purchase cost is what an order of one unit would pay now:
+   - Super Delivery: the 税込 price;
+   - 1688: the SKU's current (promotion or member) price, or the first quantity tier.
+   The other stated prices are kept beside it as facts.
+
+These shape the collector ADR (slice O4+); they do not change §1–§8.
+
 ## Invariants
 
 - **FX-01** Source facts keep the source currency. Nothing is converted in a revision.
@@ -142,10 +171,10 @@ Phase 1 is in this ADR. Phase 2 follows. Phase 3 is optional.
 
 | # | slice |
 | --- | --- |
-| O0 | this ADR (after §8 and reconnaissance) |
+| O0 | this ADR |
 | O1 | currency on facts and money values; FX snapshot owner and fetcher; settings card |
 | O2 | landed-cost inputs in pricing, with the pins |
 | O3 | SmartStore cross-border projection |
-| O4+ | the 1688 and Super Delivery collectors (their own ADR after reconnaissance) |
+| O4+ | the 1688 and Super Delivery collectors, one captured page each (their own ADR, after §9) |
 
 Migrations are numbered 0062 or later.
