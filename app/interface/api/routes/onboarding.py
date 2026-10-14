@@ -16,6 +16,8 @@ from app.stages.collect.onboarding.contracts import (
     OnboardingView,
     ReanalysisView,
     TrialSubmitted,
+    WordsPreviewView,
+    WordsView,
 )
 
 router = APIRouter(tags=["onboarding"])
@@ -111,6 +113,19 @@ class HostDisableRequest(BaseModel):
     role: str = Field(max_length=16)
 
 
+class WordsPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    # Each template slot's site words (the template's own are never sent): the whole set, as a
+    # save would store it. The store's word rules decide what passes (PT-01).
+    words: dict[str, list[str]] = Field(max_length=64)
+
+
+class WordsSaveRequest(WordsPreviewRequest):
+    # The words revision the operator edited (``0`` before the first).
+    expected_seq: int = Field(ge=0)
+
+
 @router.post(f"{BASE}/suppliers/{{supplier_key}}/trials", status_code=202)
 def submit_trial(supplier_key: str, body: TrialRequest, container: ContainerDep) -> TrialSubmitted:
     """Queue one trial read of a sample product page (paced; one read; never a revision)."""
@@ -154,3 +169,28 @@ def disable_host(
         supplier_key, body.host, body.role, actor=container.config.operator_actor
     )
     return container.onboarding_service.view(supplier_key)
+
+
+@router.get(f"{BASE}/suppliers/{{supplier_key}}/words")
+def words(supplier_key: str, container: ContainerDep) -> WordsView:
+    """Each template slot's own words beside the site's words, and the current revision."""
+    return container.onboarding_words.view(supplier_key)
+
+
+@router.post(f"{BASE}/suppliers/{{supplier_key}}/words/preview")
+def preview_words(
+    supplier_key: str, body: WordsPreviewRequest, container: ContainerDep
+) -> WordsPreviewView:
+    """The stored captures under the current and the proposed words. Saves and reads nothing."""
+    return container.onboarding_words.preview(supplier_key, body.words)
+
+
+@router.put(f"{BASE}/suppliers/{{supplier_key}}/words")
+def save_words(supplier_key: str, body: WordsSaveRequest, container: ContainerDep) -> WordsView:
+    """Append a words revision (OB-03); an ACTIVE supplier returns to RECON (OB-04)."""
+    return container.onboarding_words.save(
+        supplier_key,
+        body.words,
+        expected_seq=body.expected_seq,
+        actor=container.config.operator_actor,
+    )

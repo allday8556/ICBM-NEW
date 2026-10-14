@@ -5,7 +5,7 @@ application under test, whose collection gateway reads a scripted storefront
 (``tests.support.onboarding_trial_support``) with a fixed session. Proven here:
 
 - 「사이트 분석」 is live on an onboarded supplier's card while it is 분석 중 and opens the analysis
-  panel; 「수집 규칙」 stays inert;
+  panel (「수집 규칙」 beside it is O4's, proven in its own suite);
 - 「샘플 읽기」 queues one trial; the panel then shows the sample's field table (읽음/없음/못 읽음
   with the value summary), its unread rows with the slot a rule proposes, its structural problem as
   "템플릿 수정 필요", the progress line "샘플 n/3 확인 가능" and the observed hosts;
@@ -141,7 +141,8 @@ def _sample_page(number: int) -> str:
 def _open_analysis(page: Page, key: str) -> None:
     card = page.locator(f"[data-supplier='{key}']")
     card.locator("[data-onboarding-state='RECON']").wait_for(timeout=15_000)
-    assert card.get_by_role("button", name="수집 규칙").get_attribute("data-inert")
+    # 「수집 규칙」 is live as well (O4, collect/words.js).
+    assert card.locator("[data-action='collection-words']").get_attribute("data-inert") is None
     button = card.locator("[data-action='site-analysis']")
     assert button.get_attribute("data-inert") is None
     button.click()
