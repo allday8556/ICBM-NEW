@@ -612,6 +612,11 @@ SELECTION_OPERATORS = {
     # The operator's own route to the owner's operator entry point (owner decision 2026-10-03):
     # it hands over an operator's complete decision and never selects on anyone's behalf.
     "app/interface/api/routes/product_images.py": frozenset({"record_operator_selection"}),
+    # ADR-0041 §6 (I5): the Studio panel's 「확인 완료」 and 「되돌리기」 hand the operator's own
+    # request to the same operator entry point: one image's decision moves to USE_DERIVED (after
+    # the operator's PASS on that exact artifact) or back to USE_SOURCE, every other decision and
+    # output of the current selection kept. It never selects on anyone's behalf.
+    "app/capabilities/image_studio/review.py": frozenset({"record_operator_selection"}),
     # The image auto-selection rule (Issue #219, owner decision 2026-10-03; ADR-0013 §9
     # amendment): it records the rule's own selection through the owner's shared entry point,
     # as DecisionOrigin.RULE, and never moves an operator's.

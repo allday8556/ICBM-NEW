@@ -25,6 +25,8 @@ since every other item is reused. Nothing here ever writes a source (IT-01) or a
 **Reads.** A candidate's staleness is derived on read, never stored, by recomputing the
 fingerprint from today's inputs (``REASONS``). So are its regions' flags (``checks``: low
 confidence, a number or unit the Korean drops, a contact detail): the candidate schema holds none.
+The Studio panel (I5, ``review``) offers ``current_candidate``: the newest candidate that is fresh
+for exactly the regions it sent, else the newest one as stale, never as a suggestion.
 """
 
 import logging
@@ -181,7 +183,7 @@ class ImageTranslationService:
     def capability(self) -> CapabilityReport:
         """``NOT_CONFIGURED`` while any of the OCR engine, the translation task or the AI
         provider is missing: never a core failure."""
-        missing = self._missing()
+        missing = self.missing()
         if missing:
             return CapabilityReport(
                 key=CAPABILITY_KEY,
@@ -417,6 +419,40 @@ class ImageTranslationService:
             reasons = (*reasons, "provider")
         return CandidateView(mine[0], "STALE", reasons, _flags(observation, mine[0]))
 
+    def observation_of(self, source_sha256: str) -> ObservationRecord | None:
+        """The recorded reading of one image by the OCR engine bound now, or ``None`` (no engine,
+        or never read by it). Nothing is read here."""
+        identity = self._ocr.identity()
+        return None if identity is None else self._store.observation(identity.key(source_sha256))
+
+    def current_candidate(
+        self, observation: ObservationRecord, source_language: str
+    ) -> CandidateView | None:
+        """The candidate the Studio panel offers (I5): the newest one in that language that is
+        ``FRESH`` for exactly the regions it sent — its own fingerprint recomputed from today's
+        inputs — else the newest one, ``STALE`` with what changed. Whichever regions were kept or
+        included when it ran, a stale one is never offered as a suggestion."""
+        check_language(source_language)
+        texts = {r.region_id: r.text for r in observation.regions}
+        newest: CandidateView | None = None
+        for candidate in self._store.candidates(observation.observation_id):
+            if candidate.source_language != source_language:
+                continue
+            sent = tuple(SentRegion(rid, texts[rid]) for rid in candidate.sent_region_ids)
+            now = self._current_inputs(observation.fingerprint, source_language, sent)
+            if now is not None and now.fingerprint == candidate.fingerprint:
+                return CandidateView(candidate, "FRESH", (), _flags(observation, candidate))
+            if newest is None:
+                if now is not None:
+                    reasons = stale_reasons(candidate.inputs, now)
+                else:
+                    # With no composer or no provider today, nothing can be fresh.
+                    reasons = ("prompt", "policy") if self._composer is None else ()
+                    if self._execution.identity() is None:
+                        reasons = (*reasons, "provider")
+                newest = CandidateView(candidate, "STALE", reasons, _flags(observation, candidate))
+        return newest
+
     # -------------------------------------------------------------- inputs
 
     def _current_inputs(
@@ -443,7 +479,9 @@ class ImageTranslationService:
             output_schema_version=self._schema,
         )
 
-    def _missing(self) -> list[str]:
+    def missing(self) -> list[str]:
+        """What keeps the capability ``NOT_CONFIGURED``, by name: ``ocr``, ``translation task``,
+        ``ai provider`` (the Studio buttons name it in their 준비 중 tooltip)."""
         missing = []
         if self._ocr.identity() is None:
             missing.append("ocr")
@@ -454,7 +492,7 @@ class ImageTranslationService:
         return missing
 
     def _require_configured(self) -> None:
-        missing = self._missing()
+        missing = self.missing()
         if missing:
             raise PolicyBlockedError(
                 IMAGE_TRANSLATE_NOT_CONFIGURED,

@@ -370,10 +370,10 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
      - `AI 추천 적용` applies the exact result revision shown to the name as `AI_SUGGESTION`, against the Preparation revision read (ADR-0026 §7).
      - It is enabled only for a fresh OK result, on a saved Preparation whose name holds no confirmed value. A confirmed name is never overwritten.
      - `AI 추천 적용됨 · 저장하면 확인됩니다` marks an applied name. The operator's own save makes it `OPERATOR_CONFIRMED`.
-  2. `대표이미지`: the Item image editor. The bulk `배경 이미지 제거 / 리사이즈 / 이미지 편집 / 이미지 자동번역` are inert. `자동 선택 다시 실행` is the image owner's own.
+  2. `대표이미지`: the Item image editor. The bulk `배경 이미지 제거 / 리사이즈 / 이미지 편집` are inert. The bulk `이미지 자동번역` follows the Image Studio capability (below). `자동 선택 다시 실행` is the image owner's own.
   3. `옵션·가격`: the repin and the Items table. The price facts no read states read `데이터 없음`, and the option tools are inert.
   4. `상품정보고시`: the category requirements and their fields.
-  5. `상세페이지`: the image-editor mode. `HTML 방식` is inert. The body is the authoring form's. `미리보기` opens the snapshot preview, frozen notices included (G6). The top and bottom notices (ADR-0033 §5, G4):
+  5. `상세페이지`: the image-editor mode. `HTML 방식` is inert. The body is the authoring form's. `이미지 자동번역` follows the Image Studio capability (below). `미리보기` opens the snapshot preview, frozen notices included (G6). The top and bottom notices (ADR-0033 §5, G4):
      - `상단 공지` and `하단 공지` each show the notices the server resolves for the unit now (`GET /api/v1/register/detail-guidance`), in order — the active period notices, then the product's own notice or the store-wide standing one — each with its image, `기간 공지 / 상시 공지 / 이 상품 공지` and its template. With none, the group says so.
      - `기본값 / 끄기 / 직접 작성` choose the placement's mode. A changed mode says it applies once the preparation is saved; the list stays the server's for the saved choice.
      - `직접 작성` shows the settings card's own editor (`components/guidance-editor.js`): the same inputs, five-template live preview and `국내배송 / 해외배송` presets. The save is refused locally, sending nothing, until its text and template are chosen; the server validates and draws the text when the preparation is saved.
@@ -387,9 +387,23 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
   - red: a BLOCKED or DUPLICATE reason;
   - grey: no preflight yet.
   - Hovering a step lists its reasons; clicking it moves to that step.
-- **AI controls are inert placeholders.** This covers `배경 이미지 제거` and `이미지 자동번역` in 대표이미지 and `이미지 자동번역` in 상세페이지, under owner decision 2026-10-08 (Issue #219 comment `6054956408`; ROADMAP, Issue #127). Each keeps its approved position, disabled and marked 준비 중, and sends nothing. It becomes active only with its server owner.
+- **AI controls are inert placeholders.** This covers `배경 이미지 제거` in 대표이미지, under owner decision 2026-10-08 (Issue #219 comment `6054956408`; ROADMAP, Issue #127). It keeps its approved position, disabled and marked 준비 중, and sends nothing. It becomes active only with its server owner. The two `이미지 자동번역` buttons have theirs since ADR-0041 I5, and stay such placeholders while it reads `NOT_CONFIGURED` (below).
 - **Edit mode is read-only.** No contract yet edits a registered listing on the marketplace. `상품수정` shows the registered unit's contents and says so. A unit with a Snapshot or an Intent is never authored in the editor.
 - **The register page is unchanged.** Every section the Gate 3 surface reads stays on `#/register`.
+
+### 상품 편집기 › 이미지 자동번역 (ADR-0041 I5)
+
+- **Two buttons, one panel.** `✨ 이미지 자동번역` sits in ② 대표이미지's bulk bar (the images the operator ticks in the panel, any role, D3) and in ⑤ 상세페이지 (the panel opens with the Item's detail images ticked). Both open the same Image Studio panel (`components/image-studio.js`) for the unit's Items.
+- **Live only when READY.** The buttons read `GET /api/v1/image-studio/capability`. While it reads `NOT_CONFIGURED` they keep their place as inert 준비 중 placeholders (`data-ai-placeholder`), send nothing, and their tooltip names what is missing: no OCR engine (`NoOcrProvider`, until I7), no translation task, or no AI provider (an approved CLIProxyAPI profile with its data-transfer approval). Production reads `NOT_CONFIGURED`. On a unit with a Snapshot or an Intent they stay inert too.
+- **The run.** The panel shows every CONFIRMED source image of the chosen Item with what its selection does now (`원본 사용 · 대표/상세`, `번역본 사용 중`, `사용 안 함`, `쓰임 미정`) and whether its text was read. The operator ticks images (at most 30), picks `중국어 → 한국어` or `일본어 → 한국어` and presses `번역 시작`: one `image.translate` job, read until it ends. Only text is sent; the copy says so.
+- **One image's review.** `검토` opens it:
+  - the original and the live preview side by side (a stateless `POST …/preview` PNG; nothing is stored), with `미리보기 · 완전함` or what overflowed;
+  - the candidate's state: `AI 번역 제안 · 최신`, or `제안이 최신이 아님 · <what changed>` with no suggestion offered, or `번역 없음`;
+  - one row per region: its id, the source text, the editable Korean text, the confidence, the flag badges (`인식 신뢰도 낮음`, `숫자 · 단위 빠짐`, `연락처`, `다른 언어`, `복잡한 배경`, `칸에 넘침`, `그릴 수 없는 글자`), `번역 적용` and, on a flagged row, `확인함`.
+- **Defaults and confirmation.** Every row starts as `원문 유지`. `모두 적용` includes every unflagged row with a text and never a flagged one: a contact detail and a complex background stay kept by default. A flagged row included needs its own `확인함`. `적용` stays disabled, saying which region still needs it, until every included flagged row is confirmed and the preview is complete. The server checks the same again.
+- **적용 → 확인 완료.** `적용` saves the edit revision against the sequence it read, renders it and records the translated image through the M4 image owner. The panel then shows that exact image and `확인 완료`, which records the operator's PASS on its SHA-256 and only then uses it in place of the source (`USE_DERIVED`, operator origin); every other image keeps its decision and place. `사용 중인 번역본` shows the image in use.
+- **되돌리기.** It uses the source image again (`USE_SOURCE`). Nothing is deleted.
+- **Layout.** Neither the screen nor the panel scrolls sideways at 1920×1080 or 390×844; on a narrow screen the original and the preview, and each region row, stack.
 
 ### 설정 › AI / Prompt (ADR-0026 AIF-1)
 

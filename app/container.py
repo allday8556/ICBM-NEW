@@ -27,6 +27,7 @@ from app.capabilities.detail_guidance.service import DetailGuidanceService
 from app.capabilities.detail_guidance.store import DetailGuidanceStore
 from app.capabilities.image_studio.contracts import NoOcrProvider
 from app.capabilities.image_studio.ocr import ocr_capability
+from app.capabilities.image_studio.review import ImageStudioReviewService
 from app.capabilities.image_studio.store import ImageStudioStore
 from app.capabilities.image_studio.task import RegistryTranslationComposer
 from app.capabilities.image_studio.translation import ImageTranslationService
@@ -318,6 +319,8 @@ class Container:
     # ADR-0041 I1: the Image Studio translation owner and the image.translate job (provider-zero).
     image_studio: ImageStudioStore
     image_translation: ImageTranslationService
+    # ADR-0041 I5: the Studio panel's owner (review, preview, save, apply, QA, select, revert).
+    image_studio_review: ImageStudioReviewService
     # ADR-0039 §1, §4: each supplier's sales policy, saved from the supplier card.
     sales_policies: SalesPolicyService
     # ADR-0038 §3, §5: Settings' 해외 구매대행 — the settings card, the FX snapshots, the Korea
@@ -1068,6 +1071,18 @@ def build_container(
         execution=ai_execution,
     )
     registry.register(image_translation.job_definition())
+    # ADR-0041 I5: the Studio panel. A translated image is recorded, QA'd and selected only through
+    # the M4 image owner; the source is only read.
+    image_studio_review = ImageStudioReviewService(
+        clock=clock,
+        audit=audit,
+        store=image_studio,
+        translation=image_translation,
+        images=images,
+        products=product_store,
+        sources=source_assets,
+        derived=derived_images,
+    )
     registration_preparations = RegistrationPreparationService(
         registrations=registrations,
         preflight=registration_preflight,
@@ -1477,6 +1492,7 @@ def build_container(
         detail_guidance=detail_guidance,
         image_studio=image_studio,
         image_translation=image_translation,
+        image_studio_review=image_studio_review,
         sales_policies=sales_policies,
         overseas_settings=overseas_settings,
         fx=fx,

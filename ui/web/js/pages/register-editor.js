@@ -19,6 +19,11 @@
 // live preview and presets. The choice is saved with the preparation through the same save; the
 // server validates and draws a product's own notice, and states PUBLICATION_GUIDANCE_UNPLACED while
 // the unit's composition cannot place a notice (since G5 only an older composition revision).
+//
+// ADR-0041 I5: 「이미지 자동번역」 in ② (the images the operator ticks) and ⑤ (the detail images)
+// open the Image Studio panel (components/image-studio.js) once the image_translate capability
+// reads READY; while it is NOT_CONFIGURED they stay inert 준비 중 placeholders naming what is
+// missing, as before.
 
 import { ApiError, getJson, sendJson } from '../core/api.js';
 import { fragment, h } from '../core/dom.js';
@@ -30,6 +35,7 @@ import { NAME_RESULT, NAME_TASK, aiNamePanel } from '../components/ai-name.js';
 import { TAG_RESULT, TAG_TASK, aiTagsPanel } from '../components/ai-tags.js';
 import { CATEGORY_RESULT, CATEGORY_TASK, aiCategoryPanel } from '../components/ai-category.js';
 import { itemImagesEditor } from '../components/item-images.js';
+import { translateButton } from '../components/image-studio.js';
 import { emptyState } from '../components/states.js';
 import {
   GUIDANCE_BASE,
@@ -605,7 +611,7 @@ function editor(unit, ctx, labels, mode, step) {
         aiPending('배경 이미지 제거'),
         pending('리사이즈', '리사이즈는 준비 중'),
         pending('이미지 편집', '이미지 편집은 준비 중'),
-        aiPending('이미지 자동번역'),
+        translateButton(unit, { scope: 'selected', editable }),
       ),
       editable ? null : h('div', { class: 'note' }, '등록 요청이나 스냅샷이 있어 이미지는 보기만 합니다.'),
       ...unit.items.map((item) =>
@@ -637,7 +643,7 @@ function editor(unit, ctx, labels, mode, step) {
       h('div', { class: 'mode-switch' }, h('button', { type: 'button', class: 'mode-card on' }, h('b', {}, '이미지 에디터 방식'), h('span', { class: 'mini' }, '상세 이미지는 대표이미지 단계에서 「상세」로 고릅니다')), markInert(h('button', { type: 'button', class: 'mode-card' }, h('b', {}, 'HTML 방식'), h('span', { class: 'mini' }, '준비 중')), 'HTML 방식은 준비 중')),
       guidance.TOP,
       parts ? parts.detail : h('div', { class: 'kv' }, h('span', {}, '상세 본문'), h('b', {}, unit.authored?.inputs?.detail_body ?? '—')),
-      h('div', { class: 'row' }, pending('이미지 편집', '상세 이미지 편집은 준비 중'), aiPending('이미지 자동번역'), h('button', { type: 'button', class: 'btn', 'data-action': 'open-preview', onclick: () => previewModal(unit) }, '미리보기')),
+      h('div', { class: 'row' }, pending('이미지 편집', '상세 이미지 편집은 준비 중'), translateButton(unit, { scope: 'detail', editable }), h('button', { type: 'button', class: 'btn', 'data-action': 'open-preview', onclick: () => previewModal(unit) }, '미리보기')),
       guidance.BOTTOM,
     ),
     pane(
