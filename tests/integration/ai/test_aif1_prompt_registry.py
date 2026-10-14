@@ -93,11 +93,13 @@ def test_the_registry_is_the_v29_prototypes_and_its_seed_is_the_prototypes_text(
     client: TestClient,
 ) -> None:
     entries = _registry(client)
-    # Every entry of the prototype's registry, and nothing else, in the catalog's order.
+    # Every entry of the prototype's registry, the image-text translation task of the ADR-0041 §9
+    # amendment, and nothing else, in the catalog's order.
     assert list(entries) == [entry.key for entry in CATALOG]
     assert [entries[k]["layer"] for k in entries].count("ROLE") == 6
     assert [entries[k]["layer"] for k in entries].count("POLICY") == 4
-    assert [entries[k]["layer"] for k in entries].count("TASK") == 15
+    assert [entries[k]["layer"] for k in entries].count("TASK") == 16
+    assert list(entries)[-1] == "TASK_IMAGE_TEXT_TRANSLATE_V1"
     # Revision 1 of each is the prototype's text, byte for byte, and nothing is modified yet.
     assert entries["ICBM_GLOBAL_RULES_V2"]["content"]["prompt"] == _prototype_literal(
         "ICBM_GLOBAL_RULES_V2"
@@ -327,20 +329,20 @@ def test_a_migrated_database_starts_empty_and_the_application_seeds_it_once(
             assert len(_registry(client)) == len(CATALOG)
     with sqlite3.connect(database_path(config.data_dir)) as raw:
         assert [raw.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables] == [
-            22,
-            22,
+            23,
+            23,
             4,
         ]
         assert raw.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0] == 0
         origins = raw.execute(
             "SELECT DISTINCT origin, seed_version, authored_by FROM ai_prompt_template_revisions"
         ).fetchall()
-    assert origins == [("SEED", "v29-ai3", "system:seed")]
+    assert origins == [("SEED", "v29-ai4", "system:seed")]
 
 
 def test_the_seed_file_is_the_catalog(client: TestClient) -> None:
     seed = load_seed()
-    assert seed["seed_version"] == "v29-ai3"
+    assert seed["seed_version"] == "v29-ai4"
     assert {**seed["templates"], **seed["policies"]}.keys() == {entry.key for entry in CATALOG}
     for entry in CATALOG:
         if entry.layer is Layer.POLICY:

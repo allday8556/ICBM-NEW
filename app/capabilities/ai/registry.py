@@ -6,6 +6,9 @@ catalog names each entry, its layer, its display title and, for a task, the scre
 and the role it composes with — exactly as the prototype pairs them. It holds no prompt text:
 every prompt is read from the PromptTemplate or PlatformPolicy store, whose revision 1 is the
 prototype's text (``seed_v29.json``, written by the application at startup).
+
+One task is not the prototype's: ``TASK_IMAGE_TEXT_TRANSLATE_V1``, the image-text translation of
+ADR-0041 §9 (the ADR-0026 §3.1 amendment of 2026-10-14, slice I4). Its seed is in the same file.
 """
 
 from dataclasses import dataclass
@@ -163,6 +166,14 @@ CATALOG: Final[tuple[CatalogEntry, ...]] = (
         "경쟁강도 필터",
         screen="AI 인사이트",
         role_key="ROLE_SHOPPING_INSIGHT_V1",
+    ),
+    # ADR-0041 §9: the recognised text of one image's regions, translated into Korean.
+    CatalogEntry(
+        "TASK_IMAGE_TEXT_TRANSLATE_V1",
+        Layer.TASK,
+        "이미지 문구 번역",
+        screen="등록관리",
+        role_key="ROLE_PRODUCT_MD_V1",
     ),
 )
 
