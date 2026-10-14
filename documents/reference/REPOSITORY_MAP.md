@@ -212,9 +212,9 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 106 | adapters: suppliers and marketplaces |
+| `integrations/` | 107 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 44 |  |
-| `integrations/suppliers/` | 56 | the KM통상 and 슈퍼딜리버리 packages (ADR-0040), platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
+| `integrations/suppliers/` | 57 | the KM통상 and 슈퍼딜리버리 packages (ADR-0040), platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
 | `tests/` | 403 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 18 | test fixtures (byte-pinned) |

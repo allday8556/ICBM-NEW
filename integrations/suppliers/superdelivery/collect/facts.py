@@ -2,7 +2,8 @@
 
 This turns one captured product page into supplier-neutral facts and the evidence for each. It
 reads; it never fetches, stores, hashes, persists or retries. Every value is quoted from the page in
-its own currency, JPY, and nothing is converted, computed or completed (ADR-0010 §7, FX-01): a field
+its own currency, JPY, and nothing is converted or completed (ADR-0010 §7, FX-01) — the one
+computation is the consumption tax the owner decided for the purchase price (*Prices*). A field
 the page does not state is ``ABSENT``, and a field whose words are present but do not say what the
 field needs is ``REVIEW_REQUIRED``.
 
@@ -29,27 +30,32 @@ notice,
 quantity_tiers
 ===================  ===========================================================================
 
-**Prices** (ADR-0040 §2, OC-07; ADR-0038 §9 answer 3). The purchase price is the 税込 price of one
-set — what an order of one set pays now. The set table states its amounts under one price column
-whose header names the tax basis, ``価格（税抜）`` or ``価格（税込）``.
+**Prices** (ADR-0040 §2, OC-07; the owner's decision, Issue #219 ``6164685916``). The purchase
+price is the 税込 price of one set at its *regular* price. The set table states its amounts under
+one price column whose header names the tax basis, ``価格（税抜）`` or ``価格（税込）``.
 
-- A page that shows no wholesale price — the company has not approved the member, and the page
-  offers 「卸価格を見る（申請）」 instead — is ``REVIEW_REQUIRED`` with the reason
+- **Undisclosed.** A page that shows no wholesale price — the company has not approved the member,
+  and the page offers 「卸価格を見る（申請）」 instead — is ``REVIEW_REQUIRED`` with the reason
   ``PRICE_NOT_DISCLOSED``. Nothing is guessed.
-- A page whose prices are stated 税抜 states no 税込 price. Adding the consumption tax would be a
-  computation (and its rate, 8 % or 10 %, a judgement), so ``prices`` is ``REVIEW_REQUIRED`` with
-  the reason ``TAX_INCLUDED_PRICE_NOT_STATED``; every price the page states is kept in the
-  evidence, as stated. Every capture of 2026-10-14 is of this kind.
-- A page whose prices are stated 税込 is ``CONFIRMED``: the first set's price is the ``PURCHASE``
-  price, labelled with the set's own words (``1セット（1点）``); the wholesale unit price keeps its
-  stated ratio in its label (``卸単価（66%）``) and no role; the maker's suggested retail price is
-  a ``LIST`` price. A price struck through beside a campaign price is the evidence's, not the
-  value's: the page names no label for it.
+- **The regular price.** When a time-limited campaign shows a price struck through beside the
+  campaign price (``¥97`` struck, ``¥92`` under 期間限定割引5%OFF … まで), the purchase cost uses
+  the struck *regular* price; the campaign price and its end date are recorded beside it, never
+  used. With one price shown, that price is used. A set whose regular price the page does not
+  state (a campaign set of several units whose own cell shows the campaign price alone) is
+  ``REVIEW_REQUIRED`` with ``REGULAR_PRICE_NOT_STATED``.
+- **税抜.** The 税抜 regular price plus the Japanese consumption tax, rounded up to the whole yen,
+  is the ``PURCHASE`` price: 8 % when the page marks the product 軽減税率対象, 10 % otherwise
+  (``tax.py``, ICBM's versioned constant). Its label says how it was made, and its evidence names
+  the mark, the rate and the constant's version. The 税抜 regular price, the campaign price, the
+  wholesale unit price with its stated ratio (``卸単価（66%）``) and the maker's suggested retail
+  price (``LIST``) are recorded beside it as stated.
+- **税込.** A column stated 税込 states the purchase price itself: no tax is added.
+- A column that names neither basis is ``REVIEW_REQUIRED`` with ``PRICE_BASIS_NOT_STATED``.
 
 **Options** (ADR-0040 §2, ADR-0013 ruling B). A page with one set states no option: ``ABSENT``. A
 page with several sets states one axis, the table's 内訳 column, whose values are each set's 内訳
 words, and one configuration per set whose supplier SKU is its SD item number (``12064384S2``). A
-configuration carries its set's price only when the price is a ``CONFIRMED`` 税込 one.
+configuration carries its set's purchase price (as for ``prices``) when every set has one.
 
 **Stock.** 「在庫有り」 is on sale. A company that keeps no stock count writes no 在庫状況 column;
 its page is on sale while the reader is shown the purchase control 「カートに入れる」, and is
@@ -60,7 +66,8 @@ one order threshold (``20,000円（未満）`` / ``20,000円（以上）``). Whe
 free over the threshold states one fee under it — or the company states that fee as
 「送料全国一律」 — that fee and threshold are a ``CONDITIONAL`` policy in JPY. The regions that
 deviate (北海道, 沖縄・離島) are kept as words in its policy text (ADR-0035 RS-01). Anything else
-is ``REVIEW_REQUIRED``.
+is ``REVIEW_REQUIRED``. The amounts are kept exactly as stated, 税抜, and the policy text says so:
+no consumption tax is added to a fee or a threshold (the owner, Issue #219 ``6164685916``).
 
 **Company terms** (ADR-0040 §2, OC-08; ADR-0038 §9 answer 2). The company's 販売規制 table
 (消費者への直送, 仕入れ前の販売, 画像転載, ネット販売, 代金引換 with ○ / × / △) and its free-text
@@ -93,14 +100,25 @@ from app.stages.collect.facts import (
 )
 from integrations.suppliers.collection import DocumentView
 from integrations.suppliers.superdelivery.collect.dom import Node, find, first, read
+from integrations.suppliers.superdelivery.collect.tax import (
+    NAME_MARK,
+    NAME_MARK_EXPLAINED,
+    REDUCED_MARK,
+    REDUCED_RATE_PERCENT,
+    STANDARD_RATE_PERCENT,
+    TAX_REVISION,
+    tax_included,
+)
 
 # ADR-0038 §1, ADR-0040 §5: every amount this site states is in Japanese yen.
 CURRENCY: SourceCurrency = "JPY"
 # ADR-0040 §2: the reasons a price field states no purchase price.
 PRICE_NOT_DISCLOSED = "PRICE_NOT_DISCLOSED"
-TAX_INCLUDED_PRICE_NOT_STATED = "TAX_INCLUDED_PRICE_NOT_STATED"
 PRICE_BASIS_NOT_STATED = "PRICE_BASIS_NOT_STATED"
 PRICE_NOT_STATED = "PRICE_NOT_STATED"
+REGULAR_PRICE_NOT_STATED = "REGULAR_PRICE_NOT_STATED"
+SET_COUNT = re.compile(r"（(\d+)点）")
+TAX_BLOCK = ".reduce-tax"
 
 SET_TABLE = ".set-list"
 SET_CODE = re.compile(r"^S(\d+)$")
@@ -201,10 +219,36 @@ class SetRow:
     unit_price: Stated | None = None
     struck: Stated | None = None
     set_price: Stated | None = None
+    set_struck: Stated | None = None
+    count: int | None = None
 
     @property
     def number(self) -> str:
         return f"S{self.code}"
+
+    @property
+    def campaign(self) -> bool:
+        """Whether the page shows a struck regular price beside a campaign price for this set."""
+        return self.struck is not None or self.set_struck is not None
+
+    def regular(self) -> Stated | None:
+        """The set's regular price as the page states it, or None when it states none.
+
+        With one price shown, that price. With a campaign, the struck price of the set's own cell;
+        for a set of one unit (``1セット（1点）``), the struck unit price is the set's. A set of
+        several units whose own cell shows the campaign price alone states no regular set price.
+        """
+        if self.set_price is None:
+            return None
+        if self.set_struck is not None:
+            return self.set_struck
+        if self.struck is None:
+            return self.set_price
+        if self.count == 1:
+            return Stated(
+                self.set_price.label, self.struck.amount, self.struck.locator, self.struck.observed
+            )
+        return None
 
     @property
     def words(self) -> str:
@@ -283,10 +327,12 @@ def _set_rows(table: Node) -> list[SetRow]:
                 now, before = _price_cell(following, cell.text, f"{locator} td.td-price02")
                 current.unit_price, current.struck = now, before
             elif cell.marks(".set-num") and following is not None:
-                now, _ = _price_cell(
+                now, before = _price_cell(
                     following, cell.text, f"{locator} td.maker-wholesale-set-price"
                 )
-                current.set_price = now
+                current.set_price, current.set_struck = now, before
+                count = SET_COUNT.search(cell.text)
+                current.count = None if count is None else int(count.group(1))
     return sets
 
 
@@ -325,7 +371,78 @@ def _stated_evidence(stated: Stated, status: FieldStatus) -> Evidence:
     return _evidence(stated.locator, status, stated.observed, f"{CURRENCY} {stated.amount}")
 
 
-def _prices(nodes: Sequence[Node], sets: Sequence[SetRow], header: Sequence[str]) -> FieldFact:
+@dataclass(frozen=True)
+class TaxRate:
+    """The consumption tax rate a page's product takes, and the page's words that decide it."""
+
+    percent: int
+    evidence: Evidence
+
+
+def _tax_rate(nodes: Sequence[Node], name: str) -> TaxRate:
+    """The reduced rate when the page marks the product 軽減税率対象, else the standard rate
+    (``tax.py``, the owner's decision, Issue #219 ``6164685916``)."""
+    reduced = f"消費税{REDUCED_RATE_PERCENT}% ({TAX_REVISION})"
+    block = first(nodes, TAX_BLOCK)
+    mark = (
+        None
+        if block is None
+        else next((s.text for s in block.find(tag="span") if REDUCED_MARK in s.text), None)
+    )
+    if mark:
+        return TaxRate(
+            REDUCED_RATE_PERCENT, _evidence(TAX_BLOCK, FieldStatus.CONFIRMED, mark, reduced)
+        )
+    if name.startswith(NAME_MARK):
+        explained = next(
+            (
+                line
+                for comment in find(nodes, ".product-comment")
+                for line in comment.lines()
+                if NAME_MARK_EXPLAINED.search(line)
+            ),
+            None,
+        )
+        if explained is not None:
+            return TaxRate(
+                REDUCED_RATE_PERCENT,
+                _evidence(".product-comment", FieldStatus.CONFIRMED, explained, reduced),
+            )
+    return TaxRate(
+        STANDARD_RATE_PERCENT,
+        _evidence(
+            TAX_BLOCK,
+            FieldStatus.CONFIRMED,
+            None,
+            f"消費税{STANDARD_RATE_PERCENT}% ({TAX_REVISION})",
+        ),
+    )
+
+
+def _purchase(row: SetRow, basis: str | None, rate: TaxRate) -> int | None:
+    """One set's purchase price in whole yen: its regular price, 税込. None when the page does not
+    state it (no price, no regular price, or no tax basis)."""
+    regular = row.regular()
+    if regular is None or basis is None:
+        return None
+    amount = int(regular.amount)
+    return amount if basis == TAX_INCLUDED else tax_included(amount, rate.percent)
+
+
+def _campaign_words(nodes: Sequence[Node]) -> str | None:
+    """The company's time-limited price campaign as it names it, with its end date: why a struck
+    price stands beside the price charged now."""
+    campaign = first(nodes, ".campaign-info")
+    if campaign is None or not campaign.text:
+        return None
+    period = next(campaign.find(".cp-date-period"), None)
+    name = campaign.text_outside(".cp-date-period")
+    return f"{name}（{period.text}）" if period is not None and period.text else name
+
+
+def _prices(
+    nodes: Sequence[Node], sets: Sequence[SetRow], header: Sequence[str], rate: TaxRate
+) -> FieldFact:
     if not sets:
         return _absent("table.set-list")
     words, basis = _basis(header)
@@ -335,16 +452,16 @@ def _prices(nodes: Sequence[Node], sets: Sequence[SetRow], header: Sequence[str]
         observed.append(_evidence("th:価格", FieldStatus.CONFIRMED, words, basis))
     for stated in (
         first_set.set_price,
+        first_set.set_struck,
         first_set.unit_price,
         first_set.struck,
         first_set.maker_price,
     ):
         if stated is not None:
             observed.append(_stated_evidence(stated, FieldStatus.CONFIRMED))
-    campaign = first(nodes, ".campaign-info")
-    if campaign is not None and campaign.text:
-        # The company's price campaign: why a struck price stands beside the price charged now.
-        observed.append(_evidence(".campaign-info", FieldStatus.CONFIRMED, campaign.text))
+    campaign = _campaign_words(nodes)
+    if campaign is not None:
+        observed.append(_evidence(".campaign-info", FieldStatus.CONFIRMED, campaign))
     if first_set.maker_words:
         observed.append(
             _evidence(
@@ -370,27 +487,71 @@ def _prices(nodes: Sequence[Node], sets: Sequence[SetRow], header: Sequence[str]
             *observed,
             _evidence("table.set-list", FieldStatus.REVIEW_REQUIRED, None, PRICE_NOT_STATED),
         )
-    if basis != TAX_INCLUDED:
-        reason = TAX_INCLUDED_PRICE_NOT_STATED if basis == TAX_EXCLUDED else PRICE_BASIS_NOT_STATED
+    if basis is None:
         return _review(
             *observed,
-            _evidence("th:価格", FieldStatus.REVIEW_REQUIRED, words, reason),
+            _evidence("th:価格", FieldStatus.REVIEW_REQUIRED, words, PRICE_BASIS_NOT_STATED),
         )
-    roled = (
-        (first_set.set_price, PriceRole.PURCHASE),
-        (first_set.unit_price, None),
-        (first_set.maker_price, PriceRole.LIST),
+    regular = first_set.regular()
+    purchase = _purchase(first_set, basis, rate)
+    if regular is None or purchase is None or first_set.set_price is None:
+        # A campaign set of several units whose own cell shows the campaign price alone.
+        return _review(
+            *observed,
+            _evidence(
+                f"table.set-list {first_set.number} td.maker-wholesale-set-price",
+                FieldStatus.REVIEW_REQUIRED,
+                None,
+                REGULAR_PRICE_NOT_STATED,
+            ),
+        )
+    set_words = regular.label
+    if basis == TAX_INCLUDED:
+        prices = [_price(f"{set_words} {TAX_INCLUDED}", str(purchase), PriceRole.PURCHASE)]
+    else:
+        # The owner's rule: the 税抜 regular price plus the consumption tax, rounded up.
+        how = f"税抜{regular.amount}円＋消費税{rate.percent}%、円未満切上げ"
+        prices = [
+            _price(f"{set_words} {TAX_INCLUDED}（{how}）", str(purchase), PriceRole.PURCHASE),
+            _price(f"{set_words} {basis}", regular.amount, None),
+        ]
+        observed.append(rate.evidence)
+        observed.append(
+            _evidence(
+                "prices:purchase",
+                FieldStatus.CONFIRMED,
+                None,
+                f"{CURRENCY} {regular.amount} {basis} × {100 + rate.percent}/100 → "
+                f"{CURRENCY} {purchase} (円未満切上げ, {TAX_REVISION})",
+            )
+        )
+    if first_set.campaign:
+        # Recorded only: a time-limited price is never the purchase cost.
+        prices.append(
+            _price(
+                f"{set_words} {basis} {campaign or ''}".rstrip(), first_set.set_price.amount, None
+            )
+        )
+    if first_set.unit_price is not None:
+        prices.append(_price(first_set.unit_price.label, first_set.unit_price.amount, None))
+    if first_set.maker_price is not None:
+        maker = first_set.maker_price
+        prices.append(_price(maker.label, maker.amount, PriceRole.LIST))
+    return FieldFact(
+        FieldStatus.CONFIRMED, ForeignPricesValue(prices=tuple(prices)), tuple(observed)
     )
-    prices = tuple(_price(stated, role) for stated, role in roled if stated is not None)
-    return FieldFact(FieldStatus.CONFIRMED, ForeignPricesValue(prices=prices), tuple(observed))
 
 
-def _price(stated: Stated, role: PriceRole | None) -> ForeignPrice:
-    return ForeignPrice(label=stated.label, currency=CURRENCY, amount=stated.amount, role=role)
+def _price(label: str, amount: str, role: PriceRole | None) -> ForeignPrice:
+    return ForeignPrice(label=label, currency=CURRENCY, amount=amount, role=role)
 
 
 def _options(
-    sets: Sequence[SetRow], header: Sequence[str], number: str | None, prices: FieldFact
+    sets: Sequence[SetRow],
+    header: Sequence[str],
+    number: str | None,
+    prices: FieldFact,
+    rate: TaxRate,
 ) -> FieldFact:
     if not sets:
         return _absent("table.set-list")
@@ -424,16 +585,20 @@ def _options(
         (words.split("（", 1)[0].strip() for words in header if words.startswith(DETAIL_HEADER)),
         DETAIL_HEADER,
     )
-    priced = prices.status is FieldStatus.CONFIRMED
+    # Each set's own purchase price, read by the same rule as ``prices`` — or none at all, when
+    # the price field holds none or any set's price is not stated.
+    _, basis = _basis(header)
+    purchases = [_purchase(row, basis, rate) for row in sets]
+    priced = prices.status is FieldStatus.CONFIRMED and None not in purchases
     configurations = tuple(
         OptionConfiguration(
             selections=(row.detail,),
             supplier_sku_id=f"{number}S{row.code}",
             sold_out=_sold_out(row.stock),
-            unit_price=row.set_price.amount if priced and row.set_price is not None else None,
-            currency=CURRENCY if priced and row.set_price is not None else None,
+            unit_price=str(purchase) if priced else None,
+            currency=CURRENCY if priced else None,
         )
-        for row in sets
+        for row, purchase in zip(sets, purchases, strict=True)
     )
     return FieldFact(
         FieldStatus.CONFIRMED,
@@ -588,7 +753,8 @@ def _shipping(nodes: Sequence[Node]) -> FieldFact:
         if fee != (flat, 0)
     ]
     parts = [part for part in (statement,) if part]
-    parts.append(f"{header} {tiers[0]} {flat}円・{tiers[1]} {FREE_WORD}")
+    # The amounts stay as stated, 税抜 (the owner, Issue #219 6164685916): said here in words.
+    parts.append(f"{header} {tiers[0]} {flat}円（{TAX_EXCLUDED}）・{tiers[1]} {FREE_WORD}")
     parts.extend(deviating)
     value = ForeignShippingValue(
         kind=ShippingKind.CONDITIONAL,
@@ -710,11 +876,13 @@ def parse_fields(document: DocumentView) -> dict[str, FieldFact]:
     header = () if table is None else _header(table)
     numbers = {row.sku[0] for row in sets if row.sku is not None}
     number = next(iter(numbers)) if len(numbers) == 1 else None
-    prices = _prices(nodes, sets, header)
+    name = _name(nodes)
+    rate = _tax_rate(nodes, name.value.text if isinstance(name.value, TextValue) else "")
+    prices = _prices(nodes, sets, header, rate)
     return {
-        "original_name": _name(nodes),
+        "original_name": name,
         "prices": prices,
-        "options": _options(sets, header, number, prices),
+        "options": _options(sets, header, number, prices, rate),
         "stock": _stock(nodes, sets),
         "shipping": _shipping(nodes),
         "minimum_sale_price": _absent("table.set-list"),

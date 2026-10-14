@@ -49,7 +49,13 @@ from integrations.suppliers.extraction import supplier_manifest
 from integrations.suppliers.superdelivery import PROFILE, STATUS
 from integrations.suppliers.superdelivery.collect.facts import (
     PRICE_NOT_DISCLOSED,
-    TAX_INCLUDED_PRICE_NOT_STATED,
+    REGULAR_PRICE_NOT_STATED,
+)
+from integrations.suppliers.superdelivery.collect.tax import (
+    REDUCED_RATE_PERCENT,
+    STANDARD_RATE_PERCENT,
+    TAX_REVISION,
+    tax_included,
 )
 from integrations.suppliers.superdelivery.collection import COLLECTION, IMAGE_HOSTS
 from integrations.suppliers.transport.collection import CollectionTargetRefused, check_target
@@ -238,11 +244,11 @@ def test_the_extension_may_reach_the_product_host() -> None:
 # ---------------------------------------------------------------- the facts
 
 
-def test_a_disclosed_page_states_its_prices_tax_excluded_and_is_held_for_review() -> None:
+def test_a_disclosed_page_is_priced_at_its_regular_price_with_consumption_tax() -> None:
     found = fields("11728767")
     assert statuses(found) == {
         "original_name": "CONFIRMED",
-        "prices": "REVIEW_REQUIRED",
+        "prices": "CONFIRMED",
         "options": "ABSENT",
         "stock": "CONFIRMED",
         "shipping": "CONFIRMED",
@@ -259,10 +265,24 @@ def test_a_disclosed_page_states_its_prices_tax_excluded_and_is_held_for_review(
     assert found["original_name"].value.text == (  # type: ignore[union-attr]
         "※ヘルシークラブ バランスパワービッグ ナッツグラノーラ 2袋(4本)入"
     )
-    # OC-07: the page states 価格（税抜） only. No 税込 price is computed; every stated price is
-    # kept in the evidence as stated, and the field names why it holds no purchase price.
+    # The owner's rule (Issue #219 6164685916): the regular (struck) 税抜 price ¥97, not the
+    # campaign price ¥92, plus the reduced 8 % consumption tax the page marks
+    # (「（軽減税率対象商品）」), rounded up: 97 × 1.08 = 104.76 → ¥105.
     prices = found["prices"]
-    assert prices.value is None
+    assert isinstance(prices.value, ForeignPricesValue)
+    assert [(p.label, p.currency, p.amount, p.role) for p in prices.value.prices] == [
+        (
+            "1セット（1点） 税込（税抜97円＋消費税8%、円未満切上げ）",
+            "JPY",
+            "105",
+            PriceRole.PURCHASE,
+        ),
+        ("1セット（1点） 税抜", "JPY", "97", None),
+        ("1セット（1点） 税抜 期間限定割引5%OFF（2026/10/15まで）", "JPY", "92", None),
+        ("卸単価（66%）", "JPY", "92", None),
+        ("メーカー希望小売価格", "JPY", "140", PriceRole.LIST),
+    ]
+    assert prices.value.purchase() == prices.value.prices[0]
     assert [(e.locator, e.status.value, e.observed, e.normalized) for e in prices.evidence] == [
         ("th:価格", "CONFIRMED", "価格（税抜）", "税抜"),
         (
@@ -274,8 +294,14 @@ def test_a_disclosed_page_states_its_prices_tax_excluded_and_is_held_for_review(
         ("table.set-list S1 td.td-price02 .cmp-price", "CONFIRMED", "¥97 ¥92", "JPY 92"),
         ("table.set-list S1 td.td-price02 .list-price", "CONFIRMED", "¥97 ¥92", "JPY 97"),
         ("table.set-list S1 td.td-price01", "CONFIRMED", "¥140", "JPY 140"),
-        (".campaign-info", "CONFIRMED", "期間限定割引5%OFF2026/10/15まで", None),
-        ("th:価格", "REVIEW_REQUIRED", "価格（税抜）", TAX_INCLUDED_PRICE_NOT_STATED),
+        (".campaign-info", "CONFIRMED", "期間限定割引5%OFF（2026/10/15まで）", None),
+        (".reduce-tax", "CONFIRMED", "（軽減税率対象商品）", "消費税8% (jp-consumption-tax-1)"),
+        (
+            "prices:purchase",
+            "CONFIRMED",
+            None,
+            "JPY 97 税抜 × 108/100 → JPY 105 (円未満切上げ, jp-consumption-tax-1)",
+        ),
     ]
     # One set (S1 単品1個) is no choice: ADR-0013 ruling B.
     assert found["options"].evidence[0].observed == "S1 単品1個 JAN：4902621005517"
@@ -292,7 +318,7 @@ def test_a_disclosed_page_states_its_prices_tax_excluded_and_is_held_for_review(
         fee="610",
         free_over="20000",
         policy_text=(
-            "送料全国一律 610円（税抜） / ご購入金額（税抜） 20,000円（未満） 610円"
+            "送料全国一律 610円（税抜） / ご購入金額（税抜） 20,000円（未満） 610円（税抜）"
             "・20,000円（以上） 無料 / 北海道 880円・無料 / 沖縄 ・離島 4,500円・4,500円"
         ),
     )
@@ -377,7 +403,7 @@ def test_an_undisclosed_page_names_why_and_records_each_set() -> None:
         fee="600",
         free_over="25000",
         policy_text=(
-            "ご購入金額（税抜） 25,000円（未満） 600円・25,000円（以上） 無料"
+            "ご購入金額（税抜） 25,000円（未満） 600円（税抜）・25,000円（以上） 無料"
             " / 北海道 1,680円・1,680円 / 沖縄県 ・離島 5,050円・5,050円"
         ),
     )
@@ -397,22 +423,126 @@ def test_the_second_disclosed_page_reads_like_the_first() -> None:
     assert found["original_name"].value.text == (  # type: ignore[union-attr]
         "※ヘルシークラブ バランスパワービッグ 北海道バター 2袋(4本)入【食品・サプリメント】"
     )
-    assert found["prices"].evidence[-1].normalized == TAX_INCLUDED_PRICE_NOT_STATED
+    # The same regular ¥97 税抜 and the same marked reduced rate: ¥105.
+    assert found["prices"].value == fields("11728767")["prices"].value
 
 
-def test_a_tax_included_price_column_is_the_purchase_price_of_one_set() -> None:
-    # Not seen on 2026-10-14: a page whose price column states 税込 states the price paid.
+def test_the_consumption_tax_is_ceil_whole_yen() -> None:
+    assert tax_included(97, 8) == 105  # 104.76
+    assert tax_included(92, 8) == 100  # 99.36
+    assert tax_included(97, 10) == 107  # 106.7
+    assert tax_included(100, 10) == 110  # exact: nothing is added by the rounding
+    assert (TAX_REVISION, STANDARD_RATE_PERCENT, REDUCED_RATE_PERCENT) == (
+        "jp-consumption-tax-1",
+        10,
+        8,
+    )
+
+
+def _purchase_of(html: str) -> tuple[str, str, tuple[str | None, ...]]:
+    prices = fields("11728767", html)["prices"]
+    assert isinstance(prices.value, ForeignPricesValue)
+    purchase = prices.value.purchase()
+    assert purchase is not None
+    rate = next(e for e in prices.evidence if e.normalized and e.normalized.startswith("消費税"))
+    return purchase.amount, purchase.label, (rate.locator, rate.observed)
+
+
+def test_the_reduced_rate_is_read_from_the_page_mark_or_the_explained_name_mark() -> None:
+    html = body("11728767")
+    no_block_mark = html.replace("（軽減税率対象商品）", "")
+    # The name's ※, which the company's description explains, still marks the reduced rate.
+    amount, _, (locator, observed) = _purchase_of(no_block_mark)
+    assert (amount, locator) == ("105", ".product-comment")
+    assert observed is not None and "【※】マークは軽減税率対象" in observed
+    # Neither mark: the standard rate, 97 × 1.10 = 106.7 → ¥107.
+    unmarked = no_block_mark.replace("【※】マークは軽減税率対象", "【※】マークは在庫限り")
+    amount, label, (locator, observed) = _purchase_of(unmarked)
+    assert (amount, locator, observed) == ("107", ".reduce-tax", None)
+    assert label == "1セット（1点） 税込（税抜97円＋消費税10%、円未満切上げ）"
+
+
+def test_with_one_price_shown_that_price_is_the_regular_price() -> None:
+    # No campaign: the set's one 税抜 price ¥92 is its regular price, 92 × 1.08 → ¥100.
+    html = body("11728767")
+    one_price = html.replace(
+        '<p class="list-price"><span class="price-unit">¥</span>97</p>', ""
+    ).replace('<span class="list-price"><span class="price-unit">¥</span>97</span>', "")
+    prices = fields("11728767", one_price)["prices"].value
+    assert isinstance(prices, ForeignPricesValue)
+    assert [(p.label, p.amount, p.role) for p in prices.prices] == [
+        ("1セット（1点） 税込（税抜92円＋消費税8%、円未満切上げ）", "100", PriceRole.PURCHASE),
+        ("1セット（1点） 税抜", "92", None),
+        ("卸単価（66%）", "92", None),
+        ("メーカー希望小売価格", "140", PriceRole.LIST),
+    ]
+
+
+def _second_set(html: str, set_cell: str) -> str:
+    """The capture with a second set, S2 of three units, whose set cell is ``set_cell``."""
+    start = html.index('<td rowspan="3" class=" co-align-center')
+    start = html.rindex("<tr>", 0, start)
+    # The set table's own body ends last inside the cart form (its rows nest tables of their own).
+    end = html.rindex("</tbody>", start, html.index("</form>", start))
+    group = html[start:end]
+    # The set cell's own price is the one .cmp-price span written without whitespace inside.
+    cell = '<span class="cmp-price"><span class="price-unit">¥</span>92</span>'
+    assert group.count(cell) == 1
+    second = (
+        group.replace("S1", "S2")
+        .replace("単品1個", "単品3個")
+        .replace("（1点）", "（3点）")
+        .replace(cell, set_cell)
+    )
+    return html[:end] + second + html[end:]
+
+
+def test_each_set_carries_its_own_regular_price_with_tax() -> None:
+    struck = (
+        '<p class="list-price"><span class="price-unit">¥</span>291</p>'
+        '<p class="cmp-price"><span class="price-unit">¥</span>276</p>'
+    )
+    found = fields("11728767", _second_set(body("11728767"), struck))
+    options = found["options"].value
+    assert isinstance(options, OptionsValue)
+    # S1 ¥97 → ¥105; S2's own struck regular ¥291 → 314.28 → ¥315.
+    assert [(c.supplier_sku_id, c.unit_price, c.currency) for c in options.configurations] == [
+        ("11728767S1", "105", "JPY"),
+        ("11728767S2", "315", "JPY"),
+    ]
+    # A campaign set of three whose cell shows the campaign price alone states no regular price:
+    # no set carries a price, and the first set's purchase price is unchanged.
+    alone = '<span class="cmp-price"><span class="price-unit">¥</span>276</span>'
+    found = fields("11728767", _second_set(body("11728767"), alone))
+    configurations = found["options"].value.configurations  # type: ignore[union-attr]
+    assert [(c.unit_price, c.currency) for c in configurations] == [(None, None), (None, None)]
+    assert found["prices"].value.purchase().amount == "105"  # type: ignore[union-attr]
+
+
+def test_a_campaign_set_without_its_regular_price_is_held() -> None:
+    # One set of three units under a campaign, its own cell showing the campaign price alone.
+    html = body("11728767").replace("（1点）", "（3点）")
+    prices = fields("11728767", html)["prices"]
+    assert prices.status is FieldStatus.REVIEW_REQUIRED and prices.value is None
+    assert prices.evidence[-1].normalized == REGULAR_PRICE_NOT_STATED
+
+
+def test_a_tax_included_price_column_is_the_purchase_price_itself() -> None:
+    # Not seen on 2026-10-14: a column stated 税込 states the price paid; no tax is added.
     html = body("11728767").replace("価格（税抜）", "価格（税込）")
-    found = fields("11728767", html)
-    prices = found["prices"]
+    prices = fields("11728767", html)["prices"]
     assert prices.status is FieldStatus.CONFIRMED
     assert isinstance(prices.value, ForeignPricesValue)
     assert [(p.label, p.currency, p.amount, p.role) for p in prices.value.prices] == [
-        ("1セット（1点）", "JPY", "92", PriceRole.PURCHASE),
+        ("1セット（1点） 税込", "JPY", "97", PriceRole.PURCHASE),
+        ("1セット（1点） 税込 期間限定割引5%OFF（2026/10/15まで）", "JPY", "92", None),
         ("卸単価（66%）", "JPY", "92", None),
         ("メーカー希望小売価格", "JPY", "140", PriceRole.LIST),
     ]
-    assert prices.value.purchase() == prices.value.prices[0]
+    neither = body("11728767").replace("価格（税抜）", "価格")
+    held = fields("11728767", neither)["prices"]
+    assert held.status is FieldStatus.REVIEW_REQUIRED
+    assert held.evidence[-1].normalized == "PRICE_BASIS_NOT_STATED"
 
 
 def test_stock_words_are_read_as_stated_or_held() -> None:
@@ -479,11 +609,11 @@ def test_the_images_take_the_roles_the_product_block_gives_them() -> None:
 # ---------------------------------------------------------------- the revision and pricing
 
 # ADR-0040 §6: a fresh run over the same capture yields zero diffs. These are the revisions' source
-# fingerprints (ADR-0010 §6) for the captures with no image observed, under superdelivery-1.
+# fingerprints (ADR-0010 §6) for the captures with no image observed, under superdelivery-2.
 SOURCE_FINGERPRINTS = {
-    "11728767": "a4cf5e1b0e9f8c77bf5a6c298b09d4975fcd3839c85b470888689aeedc9879e3",
-    "12064384": "10c294e70ffbac5c8a3b3fc05df793273408961f3352d0878446c16529f22358",
-    "6554423": "b385e0f249b881e8ecb63d6a0ad3d79f2ffaf0feb01fa8686817d1b2c5260a2c",
+    "11728767": "df48c6eef5e55fa2c5c444057f26c3fa9b54aab65763fbdcc516832ab8c38d43",
+    "12064384": "210afb21cf1fdc06dc7cb79f28f2b3b855ce08b46f77faae0b5792c2b321104c",
+    "6554423": "3a78480dd16143e434713b2fac1a055933105b16d9eebf573d4560a680cafefa",
 }
 
 
