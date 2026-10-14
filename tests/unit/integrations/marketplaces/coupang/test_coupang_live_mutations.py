@@ -550,6 +550,58 @@ def test_recovery_candidate_or_readback_mismatch_never_advances_journal(
     assert first == {"state": "create_inflight"}
 
 
+def test_recovery_requires_provider_assigned_item_identity(tmp_path: Path) -> None:
+    def ambiguous(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("ambiguous", request=request)
+
+    with pytest.raises(CoupangLiveMutationError):
+        _owner(tmp_path, httpx.MockTransport(ambiguous)).run()
+
+    binding = TEST_PRODUCT_BINDINGS[0]
+
+    def incomplete(request: httpx.Request) -> httpx.Response:
+        if "external-vendor-sku-codes" in request.url.path:
+            return httpx.Response(
+                200,
+                json={
+                    "code": "SUCCESS",
+                    "data": [
+                        {
+                            "sellerProductId": 1001,
+                            "sellerProductName": "ICBM TEST 1",
+                            "vendorId": "A0001",
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "code": "SUCCESS",
+                "data": {
+                    "sellerProductId": 1001,
+                    "sellerProductName": "ICBM TEST 1",
+                    "vendorId": "A0001",
+                    "status": "SAVED",
+                    "items": [
+                        {
+                            "externalVendorSku": binding.source_product_id,
+                            "vendorItemId": None,
+                        }
+                    ],
+                },
+            },
+        )
+
+    with pytest.raises(CoupangLiveMutationError) as refused:
+        _recovery_owner(tmp_path, httpx.MockTransport(incomplete)).recover()
+
+    assert refused.value.code == "COUPANG_MUTATION_UPDATE_ITEM_IDENTITY_MISSING"
+    persisted = json.loads((tmp_path / "coupang-live-mutations.json").read_text())
+    first = persisted["records"][binding.synthetic_id]
+    assert first == {"state": "create_inflight"}
+
+
 def test_duplicate_create_identity_holds_before_second_product_mutation(tmp_path: Path) -> None:
     calls: list[str] = []
     first_source = TEST_PRODUCT_BINDINGS[0].source_product_id

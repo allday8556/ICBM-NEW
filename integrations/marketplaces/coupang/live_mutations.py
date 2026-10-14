@@ -964,6 +964,14 @@ class CoupangAmbiguousCreateRecovery(CoupangTestProductMutationRun):
             raise CoupangLiveMutationError(
                 ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_RECOVERY_VENDOR_MISMATCH"
             )
+        # Recovery may lift the durable ambiguity barrier only when the detailed
+        # read-back is complete enough for the documented full-modification path.
+        # This is validation only; no update is sent here.
+        self._full_update_document(
+            plan,
+            seller_product_id=seller_product_id,
+            readback=remote,
+        )
         self._transition(
             state,
             plan.binding.synthetic_id,
