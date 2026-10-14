@@ -6,9 +6,12 @@ import sqlite3
 import uuid
 from collections.abc import Sequence
 from dataclasses import replace
+from datetime import date
 
 import pytest
 
+from app.capabilities.overseas.fx import FxSnapshotStore, RefreshTrigger
+from app.capabilities.overseas.settings import SaveOverseasSettingsRequest
 from app.config import AppConfig, database_path
 from app.container import Container
 from app.platform.core.errors import InputValidationError
@@ -37,15 +40,23 @@ from app.stages.products.common_options import (
     CommonSalesOptionAxisSpec,
     CommonSalesOptionValueSpec,
 )
+from app.stages.products.landed_cost import (
+    FX_UNAVAILABLE,
+    LANDED_COST_COLUMNS,
+    OVERSEAS_SHIPPING_UNSET,
+)
 from app.stages.products.model import CompositionSpec, MoveReason, ReadinessStatus, Reason
+from app.stages.products.overseas_costs import SaveOverseasCostsRequest
 from app.stages.products.pricing import (
     MINIMUM_SALE_PRICE_NOT_APPLIED,
-    SOURCE_CURRENCY_UNSUPPORTED,
+    PURCHASE_PRICE_UNRESOLVED,
     PriceBasis,
 )
 from app.stages.products.pricing_service import PricingOutcome
 from app.stages.products.sales_policy import SaveSalesPolicyRequest
+from tests.integration.overseas.test_fx_snapshots import publication
 from tests.support.collect_support import collected, confirmed
+from tests.support.jobs_support import FakeClock
 from tests.support.product_support import SUPPLIER, context, minimum, product
 
 pytestmark = pytest.mark.integration
@@ -447,7 +458,7 @@ def test_raw_database_cannot_rewrite_binding_or_pricing_history(
             )
 
 
-# ---------------------------------------------------------------- ADR-0038 O1a: source currency
+# ---------------------------------------------------------------- ADR-0038: source currency
 
 
 def _cny_overrides() -> dict[str, FieldFact]:
@@ -463,16 +474,129 @@ def _cny_overrides() -> dict[str, FieldFact]:
     }
 
 
-def test_a_source_currency_revision_is_never_bound_in_won(
+def _cny_configurations() -> tuple[OptionConfiguration, ...]:
+    return (
+        OptionConfiguration(
+            selections=("300mg",), supplier_sku_id="sku-a", unit_price="9.50", currency="CNY"
+        ),
+        OptionConfiguration(
+            selections=("500mg",), supplier_sku_id="sku-b", unit_price="12.00", currency="CNY"
+        ),
+    )
+
+
+def _rates_and_shipping(container: Container, clock: FakeClock) -> None:
+    FxSnapshotStore(container.db, clock, container.audit).record(
+        publication(date(2026, 9, 11)),
+        trigger=RefreshTrigger.MANUAL,
+        actor="test",
+        correlation_id="cid-fx",
+    )
+    container.overseas_settings.save(
+        SaveOverseasSettingsRequest(
+            expected_revision_no=None,
+            fx_margin_percent="5",
+            overseas_shipping_default_krw=8000,
+            duties_included_over_usd150=True,
+            duty_rate_percent="8",
+            smartstore_overseas_shipping_address_id=None,
+            overseas_delivery_days_min=7,
+            overseas_delivery_days_max=14,
+            importer_label=None,
+        ),
+        actor="operator:local",
+        correlation_id="cid-settings",
+    )
+
+
+def test_a_source_currency_configuration_is_bound_at_its_own_unit_price_and_landed_cost(
+    container: Container, config: AppConfig, clock: FakeClock
+) -> None:
+    _group, revision, _source, items = _build(container, _cny_configurations(), **_cny_overrides())
+    assert revision.source_currency == "CNY"
+    bindings = tuple(
+        container.atomic_sku_economics.bind_source_configuration(
+            item.atomic_sku_item_id, decided_by="owner", correlation_id=f"bind-{index}"
+        )
+        for index, item in enumerate(items)
+    )
+    # The binding states no won: the unit price as stated, in its currency.
+    assert [(b.source_currency, b.source_unit_price) for b in bindings] == [
+        ("CNY", "9.50"),
+        ("CNY", "12.00"),
+    ]
+    assert {
+        (b.base_purchase_cost_krw, b.option_additional_price_krw, b.purchase_cost_krw)
+        for b in bindings
+    } == {(0, 0, 0)}
+    again = container.atomic_sku_economics.bind_source_configuration(
+        items[0].atomic_sku_item_id, decided_by="owner", correlation_id="same"
+    )
+    assert again == bindings[0]
+    ctx = context()
+    # No rate and no overseas shipping: nothing is priced.
+    refused = container.pricing.price_atomic_sku(items[0].atomic_sku_item_id, ctx)
+    assert refused.outcome is PricingOutcome.NOT_PRICED
+    assert {(r.code, r.subject) for r in refused.reasons} == {
+        (FX_UNAVAILABLE, "fx:CNY"),
+        (FX_UNAVAILABLE, "fx:USD"),
+        (OVERSEAS_SHIPPING_UNSET, "overseas_shipping"),
+    }
+    _rates_and_shipping(container, clock)
+    results = [container.pricing.price_atomic_sku(item.atomic_sku_item_id, ctx) for item in items]
+    assert [r.outcome for r in results] == [PricingOutcome.RECORDED, PricingOutcome.RECORDED]
+    snapshots = [r.snapshot for r in results]
+    assert snapshots[0] is not None and snapshots[1] is not None
+    # 9.50 × 195.12 × 1.05 = 1946.322 → 1947; 12.00 × 195.12 × 1.05 = 2458.512 → 2459.
+    assert [s.purchase_cost_krw for s in snapshots if s is not None] == [1947, 2459]
+    assert {s.supplier_shipping_krw for s in snapshots if s is not None} == {8000}
+    pin = snapshots[0].landed_cost
+    assert pin is not None
+    assert (pin.source_currency, pin.source_price, pin.fx_publication_date) == (
+        "CNY",
+        "9.50",
+        "2026-09-11",
+    )
+    with contextlib.closing(sqlite3.connect(database_path(config.data_dir))) as raw:
+        raw.row_factory = sqlite3.Row
+        row = raw.execute(
+            "SELECT * FROM atomic_sku_pricing_snapshots WHERE pricing_snapshot_id = ?",
+            (snapshots[0].pricing_snapshot_id,),
+        ).fetchone()
+        (details,) = raw.execute(
+            "SELECT details_json FROM audit_events WHERE target_ref = ?"
+            " AND action = 'atomic_sku_pricing_snapshot.record'",
+            (snapshots[0].pricing_snapshot_id,),
+        ).fetchone()
+    assert {name: row[name] for name in LANDED_COST_COLUMNS} == pin.columns()
+    assert json.loads(details)["landed_cost"] == pin.columns()
+    readiness = container.product_readiness.atomic_pricing_readiness(
+        items[0].atomic_sku_item_id, ctx
+    )
+    assert readiness.status is ReadinessStatus.READY, readiness.reasons
+    # The product's own overseas shipping makes the current price STALE.
+    container.overseas_costs.save(
+        SUPPLIER,
+        "1234",
+        SaveOverseasCostsRequest(
+            expected_revision_no=None, overseas_shipping_krw=12000, duty_rate_percent=None
+        ),
+        actor="operator:local",
+        correlation_id="cid-costs",
+    )
+    stale = container.product_readiness.atomic_pricing_readiness(items[0].atomic_sku_item_id, ctx)
+    assert stale.status is ReadinessStatus.STALE
+    repriced = container.pricing.price_atomic_sku(items[0].atomic_sku_item_id, ctx)
+    assert repriced.outcome is PricingOutcome.RECORDED and repriced.snapshot is not None
+    assert repriced.snapshot.supplier_shipping_krw == 12000
+
+
+def test_a_source_currency_configuration_without_its_own_price_is_not_bound(
     container: Container, config: AppConfig
 ) -> None:
     _group, revision, _source, (item,) = _build(
         container,
-        (
-            OptionConfiguration(
-                selections=("300mg",), supplier_sku_id="sku-a", unit_price="9.50", currency="CNY"
-            ),
-        ),
+        (OptionConfiguration(selections=("300mg",), supplier_sku_id="sku-a"),),
         **_cny_overrides(),
     )
     assert revision.source_currency == "CNY"
@@ -480,14 +604,14 @@ def test_a_source_currency_revision_is_never_bound_in_won(
         container.atomic_sku_economics.bind_source_configuration(
             item.atomic_sku_item_id, decided_by="owner", correlation_id="bind"
         )
-    assert caught.value.code == "PRODUCTS_ATOMIC_SKU_SOURCE_CURRENCY_UNSUPPORTED"
+    assert caught.value.code == "PRODUCTS_ATOMIC_SKU_UNIT_PRICE_UNRESOLVED"
     with contextlib.closing(sqlite3.connect(database_path(config.data_dir))) as raw:
         assert raw.execute("SELECT COUNT(*) FROM atomic_sku_source_bindings").fetchone() == (0,)
     result = container.pricing.price_atomic_sku(item.atomic_sku_item_id, context())
     assert result.outcome is PricingOutcome.NOT_PRICED and result.snapshot is None
 
 
-def test_the_atomic_path_reads_no_amount_of_a_source_currency_revision(
+def test_the_atomic_path_never_reads_a_won_binding_as_a_source_currency_price(
     container: Container, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _group, _revision, _source, (item,) = _build(
@@ -497,8 +621,8 @@ def test_the_atomic_path_reads_no_amount_of_a_source_currency_revision(
     container.atomic_sku_economics.bind_source_configuration(
         item.atomic_sku_item_id, decided_by="owner", correlation_id="bind"
     )
-    # The bound revision as a source-currency revision reads back: a binding cannot be opened on
-    # one, so the read is what changes here.
+    # The bound revision as a source-currency revision reads back: its won binding states no
+    # unit price in that currency, so nothing is read and nothing is priced.
     read = ProductFactsRevisionStore.get
 
     def as_cny(self: ProductFactsRevisionStore, revision_id: str) -> StoredRevision | None:
@@ -510,8 +634,63 @@ def test_the_atomic_path_reads_no_amount_of_a_source_currency_revision(
 
     monkeypatch.setattr(ProductFactsRevisionStore, "get", as_cny)
     monkeypatch.setattr(pricing_service, "source_inputs", no_amount_is_read)
+    monkeypatch.setattr(pricing_service, "foreign_source_inputs", no_amount_is_read)
     result = container.pricing.price_atomic_sku(item.atomic_sku_item_id, context())
     assert result.outcome is PricingOutcome.NOT_PRICED
     assert result.reasons == (
-        Reason(SOURCE_CURRENCY_UNSUPPORTED, ReadinessStatus.REVIEW_REQUIRED, "prices"),
+        Reason(PURCHASE_PRICE_UNRESOLVED, ReadinessStatus.REVIEW_REQUIRED, "options"),
     )
+
+
+def test_the_database_keeps_a_foreign_binding_and_its_price_exact(
+    container: Container, config: AppConfig, clock: FakeClock
+) -> None:
+    _group, _revision, _source, (item, _other) = _build(
+        container, _cny_configurations(), **_cny_overrides()
+    )
+    binding = container.atomic_sku_economics.bind_source_configuration(
+        item.atomic_sku_item_id, decided_by="owner", correlation_id="bind"
+    )
+    _rates_and_shipping(container, clock)
+    result = container.pricing.price_atomic_sku(item.atomic_sku_item_id, context())
+    assert result.snapshot is not None
+    with contextlib.closing(sqlite3.connect(database_path(config.data_dir))) as raw:
+        # Close-only: the unit price of an open binding never changes.
+        with pytest.raises(sqlite3.IntegrityError, match="may only be closed"):
+            raw.execute(
+                "UPDATE atomic_sku_source_bindings SET source_unit_price = '1.00'"
+                " WHERE binding_id = ?",
+                (binding.binding_id,),
+            )
+        columns = [r[1] for r in raw.execute("PRAGMA table_info(atomic_sku_source_bindings)")]
+
+        def copy_binding(**changes: object) -> None:
+            values = {"binding_id": "b-x", "valid_to": None, **changes}
+            select = ", ".join("?" if name in values else name for name in columns)
+            raw.execute(
+                f"INSERT INTO atomic_sku_source_bindings ({', '.join(columns)}) SELECT {select}"
+                " FROM atomic_sku_source_bindings WHERE binding_id = ?",
+                (*[values[name] for name in columns if name in values], binding.binding_id),
+            )
+
+        # A foreign binding states no won, and a scale its currency allows.
+        with pytest.raises(sqlite3.IntegrityError, match="foreign_unit_price_recorded"):
+            copy_binding(base_purchase_cost_krw=1000, purchase_cost_krw=1000)
+        with pytest.raises(sqlite3.IntegrityError, match="foreign_unit_price_recorded"):
+            copy_binding(source_unit_price="9.505")
+        snapshot_columns = [
+            r[1] for r in raw.execute("PRAGMA table_info(atomic_sku_pricing_snapshots)")
+        ]
+        values = {"pricing_snapshot_id": "s-x", "source_price": "1.00"}
+        select = ", ".join("?" if name in values else name for name in snapshot_columns)
+        # A foreign snapshot prices its open binding's own unit price, and no other.
+        with pytest.raises(sqlite3.IntegrityError, match="exact open binding"):
+            raw.execute(
+                f"INSERT INTO atomic_sku_pricing_snapshots ({', '.join(snapshot_columns)})"
+                f" SELECT {select} FROM atomic_sku_pricing_snapshots"
+                " WHERE pricing_snapshot_id = ?",
+                (
+                    *[values[name] for name in snapshot_columns if name in values],
+                    result.snapshot.pricing_snapshot_id,
+                ),
+            )

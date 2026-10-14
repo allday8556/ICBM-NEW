@@ -23,7 +23,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.platform.db.base import Base
 from app.platform.db.types import UTCDateTime
-from app.stages.products.models import MINIMUM_APPLIED_FLAG, MINIMUM_POLICY_RECORDED
+from app.stages.products.models import (
+    MINIMUM_APPLIED_FLAG,
+    MINIMUM_POLICY_RECORDED,
+    LandedCostPinColumns,
+    landed_cost_checks,
+)
 from app.stages.products.pricing import (
     PRICING_RULE_VERSION,
     GuardReason,
@@ -34,6 +39,22 @@ from app.stages.products.pricing import (
 )
 
 ATOMIC_ACQUISITION_BASIS = "BASE_PRICE_PLUS_OPTION_DELTA"
+# ADR-0038 §4 (migration 0066): a binding of a source-currency revision acquires at its
+# configuration's own unit price, in that currency. It states no won: its three KRW costs are 0, and
+# the unit price is the pricing owner's source price. (``acquisition_basis`` keeps the value its
+# frozen 0047 CHECK allows; ``source_currency`` is what names the foreign basis.)
+FOREIGN_UNIT_PRICE_RECORDED = (
+    "(source_currency IS NULL AND source_unit_price IS NULL)"
+    " OR (source_currency IN ('CNY', 'JPY') AND source_unit_price IS NOT NULL"
+    " AND source_unit_price <> '' AND source_unit_price NOT GLOB '*[^0-9.]*'"
+    " AND source_unit_price NOT GLOB '*.*.*' AND source_unit_price NOT GLOB '.*'"
+    " AND source_unit_price NOT GLOB '*.'"
+    " AND (source_currency <> 'JPY' OR instr(source_unit_price, '.') = 0)"
+    " AND (instr(source_unit_price, '.') = 0"
+    " OR length(source_unit_price) - instr(source_unit_price, '.') BETWEEN 1 AND 2)"
+    " AND base_purchase_cost_krw = 0 AND option_additional_price_krw = 0"
+    " AND purchase_cost_krw = 0)"
+)
 
 
 def _hex64(column: str) -> str:
@@ -67,6 +88,12 @@ class AtomicSKUSourceBinding(Base):
         CheckConstraint("decided_by <> ''", name="decided_by_present"),
         CheckConstraint("correlation_id <> ''", name="correlation_present"),
         CheckConstraint("valid_to IS NULL OR valid_to >= valid_from", name="validity_ordered"),
+        # ADR-0038 §4 (migration 0066).
+        CheckConstraint(
+            "source_currency IS NULL OR source_currency IN ('CNY', 'JPY')",
+            name="source_currency_valid",
+        ),
+        CheckConstraint(FOREIGN_UNIT_PRICE_RECORDED, name="foreign_unit_price_recorded"),
     )
 
     binding_id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -88,6 +115,10 @@ class AtomicSKUSourceBinding(Base):
     correlation_id: Mapped[str] = mapped_column(String(64))
     valid_from: Mapped[datetime] = mapped_column(UTCDateTime)
     valid_to: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # ADR-0038 §4 (migration 0066): the configuration's own unit price of a source-currency
+    # revision, as stated; NULL on a KRW binding.
+    source_currency: Mapped[str | None] = mapped_column(String(3))
+    source_unit_price: Mapped[str | None] = mapped_column(String(24))
 
 
 _LOSS = "purchase_cost_krw + supplier_shipping_krw + platform_fee_krw >= final_sale_price_krw"
@@ -111,7 +142,7 @@ def _ceiling_cost(column: str, prefix: str) -> str:
     )
 
 
-class AtomicSKUPricingSnapshot(Base):
+class AtomicSKUPricingSnapshot(LandedCostPinColumns, Base):
     """One immutable context-specific price of one AtomicSKU-qualified Item."""
 
     __tablename__ = "atomic_sku_pricing_snapshots"
@@ -196,6 +227,8 @@ class AtomicSKUPricingSnapshot(Base):
         # ADR-0039 §3 (migration 0061): whether the supplier's minimum resale price was applied.
         CheckConstraint(MINIMUM_APPLIED_FLAG, name="minimum_applied_flag"),
         CheckConstraint(MINIMUM_POLICY_RECORDED, name="minimum_policy_recorded"),
+        # ADR-0038 §4 (migration 0066): a source-currency price's landed-cost pins.
+        *landed_cost_checks(),
     )
 
     pricing_snapshot_id: Mapped[str] = mapped_column(String(36), primary_key=True)

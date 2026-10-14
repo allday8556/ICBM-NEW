@@ -220,8 +220,10 @@ CANONICAL_TABLES = (
     "image_translation_candidates",
     "image_edit_revisions",
     "image_edit_current",
+    # ADR-0038 §4, §8: each overseas source product's landed-cost inputs.
+    "overseas_cost_override_revisions",
 )
-HEAD = "0065_image_studio_translation"
+HEAD = "0066_landed_cost"
 
 
 def _url(path: Path) -> str:

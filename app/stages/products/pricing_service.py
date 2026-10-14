@@ -23,6 +23,16 @@ The member's supplier's sales policy (ADR-0039 §3) decides whether the minimum 
 pricing input; it is read in the same unit of work and pinned in the dependency fingerprint only
 when the minimum is not applied. The AtomicSKU (v2) path reads it the same way, through the member
 its source binding names.
+
+**A source currency** (ADR-0038 §4, O2). A revision stating CNY or JPY is priced at its landed cost
+(``app.stages.products.landed_cost``), on the base path and the AtomicSKU path alike. In the same
+unit of work this owner reads the FX snapshots of today's KST day (the newest that may price, of
+the source currency and USD, of one publication day), the current overseas settings and the
+member's source product's own inputs (``overseas_costs``). A missing or stale rate, or no overseas
+shipping at all, is REVIEW_REQUIRED and nothing is priced. The landed cost's every input enters the
+dependency fingerprint, so a new rate, a settings or product-input change, or a policy patch makes
+the current snapshot STALE; a KRW price reads none of it. A quantity offer of such a revision stays
+``PRICING_SOURCE_CURRENCY_UNSUPPORTED``.
 """
 
 import logging
@@ -35,10 +45,12 @@ from sqlalchemy.orm import Session
 
 from app.capabilities.audit.models import AuditEventType, AuditOutcome
 from app.capabilities.audit.service import AuditEntry, AuditLog
+from app.capabilities.overseas.fx_rules import kst_day, newest_snapshot
+from app.capabilities.overseas.settings import overseas_settings_of
 from app.platform.core.clock import Clock
 from app.platform.core.correlation import get_correlation_id, new_correlation_id
 from app.platform.core.errors import NotFoundError
-from app.stages.collect.revisions import ProductFactsRevisionStore
+from app.stages.collect.revisions import ProductFactsRevisionStore, StoredRevision
 from app.stages.products.atomic_sku_economics_store import (
     AtomicPricingDependencies,
     AtomicPricingMove,
@@ -50,6 +62,13 @@ from app.stages.products.atomic_sku_economics_store import (
 from app.stages.products.atomic_sku_item_store import AtomicSKUItemRecord
 from app.stages.products.atomic_sku_models import AtomicSKURevisionMember
 from app.stages.products.atomic_sku_store import AtomicSKUStore
+from app.stages.products.landed_cost import (
+    OVERSEAS_SHIPPING_UNSET,
+    LandedCost,
+    cost_terms,
+    landed_cost,
+    same_day_rates,
+)
 from app.stages.products.model import (
     DEFAULT_SINGLE_UNIT_SIGNATURE,
     BindingKind,
@@ -61,13 +80,17 @@ from app.stages.products.model import (
     composition_signature,
 )
 from app.stages.products.models import SourceProduct
+from app.stages.products.overseas_costs import overseas_cost_override_of
 from app.stages.products.pricing import (
     PRICING_RULE_VERSION,
+    PURCHASE_PRICE_UNRESOLVED,
     Calculation,
     PricingContextInput,
     PricingDependencies,
     SourceInputs,
     calculate,
+    foreign_source_inputs,
+    landed_source_inputs,
     offer_source_inputs,
     source_currency_reasons,
     source_inputs,
@@ -480,13 +503,26 @@ class ProductPricingService:
         stored = self._revisions.get(dependencies.source_revision_id)
         if stored is None:  # pragma: no cover - a foreign key guarantees the revision
             raise NotFoundError("COLLECT_REVISION_UNKNOWN", "the bound revision is missing")
-        # ADR-0038 §1: a revision in a source currency is not priced until O2; no amount is read.
-        if unsupported := source_currency_reasons(stored.source_currency):
+        offer = dependencies.binding_kind == BindingKind.SOURCE_OFFER.value
+        # ADR-0038 §1: a quantity offer of a source-currency revision is never priced; no amount
+        # of it is read.
+        if offer and (unsupported := source_currency_reasons(stored.source_currency)):
             return _with(base, reasons=unsupported)
         # ADR-0039 §3: the member's supplier's sales policy, read in this unit of work.
         apply_minimum = self._applies_minimum(unit, procurement)
         dependencies = replace(dependencies, minimum_applied=apply_minimum)
-        if dependencies.binding_kind == BindingKind.SOURCE_OFFER.value:
+        inputs: SourceInputs | tuple[Reason, ...]
+        if stored.source_currency is not None:
+            # ADR-0038 §4: the landed cost of one unit of the member's overseas source.
+            assert procurement.member is not None  # dependencies exist only for a member
+            landed = self._landed(
+                unit.session, procurement.member.source_product_uid, stored, apply_minimum
+            )
+            if isinstance(landed, tuple):
+                return _with(base, reasons=landed)
+            inputs = landed_source_inputs(landed)
+            dependencies = replace(dependencies, landed_cost=landed.dependency())
+        elif offer:
             # The bound offer's own total; the generic prices are never read (ruling 5738760913).
             assert procurement.offer is not None  # no reason means the offer fits
             inputs = offer_source_inputs(
@@ -513,6 +549,39 @@ class ProductPricingService:
             calculation=calculation,
             current_snapshot=current,
         )
+
+    def _landed(
+        self,
+        session: Session,
+        source_product_uid: str,
+        stored: StoredRevision,
+        apply_minimum: bool,
+        *,
+        unit_price: str | None = None,
+    ) -> LandedCost | tuple[Reason, ...]:
+        """ADR-0038 §4: the landed cost of one unit of a source-currency revision, read in the
+        caller's unit of work, or every reason it cannot be made: the source's own inputs first,
+        then every rate and the overseas shipping together."""
+        currency = stored.source_currency
+        assert currency is not None
+        foreign = foreign_source_inputs(
+            stored.fields, currency, apply_minimum=apply_minimum, unit_price=unit_price
+        )
+        if isinstance(foreign, tuple):
+            return foreign
+        terms = cost_terms(
+            overseas_settings_of(session), overseas_cost_override_of(session, source_product_uid)
+        )
+        today = kst_day(self._clock.now())
+        rates = same_day_rates(
+            currency, today, lambda wanted, day: newest_snapshot(session, wanted, day)
+        )
+        reasons = list(rates) if isinstance(rates, tuple) else []
+        if terms.overseas_shipping_krw is None:
+            reasons.append(_review(OVERSEAS_SHIPPING_UNSET, "overseas_shipping"))
+        if reasons or isinstance(rates, tuple):
+            return tuple(reasons)
+        return landed_cost(foreign, rates.rate, rates.usd, terms)
 
     def _applies_minimum_to(self, session: Session, group_member_id: str) -> bool:
         """Whether the sales policy of a group member's supplier applies the minimum sale price
@@ -630,16 +699,39 @@ class ProductPricingService:
         stored = self._revisions.get(dependencies.source_revision_id)
         if stored is None:  # pragma: no cover - foreign keys guarantee the revision
             raise NotFoundError("COLLECT_REVISION_UNKNOWN", "the bound revision is missing")
-        # ADR-0038 §1: a revision in a source currency is not priced until O2; no amount is read.
-        if unsupported := source_currency_reasons(stored.source_currency):
-            return _with_atomic(base, reasons=unsupported)
         # ADR-0039 §3: the bound member's supplier's sales policy, read in this unit of work.
-        apply_minimum = self._applies_minimum_to(unit.session, dependencies.binding.group_member_id)
+        binding = dependencies.binding
+        apply_minimum = self._applies_minimum_to(unit.session, binding.group_member_id)
         dependencies = replace(dependencies, minimum_applied=apply_minimum)
-        source = source_inputs(stored.fields, apply_minimum=apply_minimum)
-        if isinstance(source, tuple):
-            return _with_atomic(base, reasons=source)
-        inputs = replace(source, purchase_cost_krw=dependencies.binding.purchase_cost_krw)
+        if stored.source_currency is not None or binding.source_currency is not None:
+            # ADR-0038 §4: the configuration's own unit price, at its landed cost. A binding that
+            # states no unit price in the revision's own currency is never read as one.
+            if (
+                binding.source_currency != stored.source_currency
+                or binding.source_unit_price is None
+            ):
+                unresolved = _review(PURCHASE_PRICE_UNRESOLVED, "options")
+                return _with_atomic(base, reasons=(unresolved,))
+            member = ProductFoundationUnit(unit.session, self._clock).member_detail(
+                binding.group_member_id
+            )
+            assert member is not None  # a binding's foreign key names its member
+            landed = self._landed(
+                unit.session,
+                member.source_product_uid,
+                stored,
+                apply_minimum,
+                unit_price=binding.source_unit_price,
+            )
+            if isinstance(landed, tuple):
+                return _with_atomic(base, reasons=landed)
+            inputs = landed_source_inputs(landed)
+            dependencies = replace(dependencies, landed_cost=landed.dependency())
+        else:
+            source = source_inputs(stored.fields, apply_minimum=apply_minimum)
+            if isinstance(source, tuple):
+                return _with_atomic(base, reasons=source)
+            inputs = replace(source, purchase_cost_krw=binding.purchase_cost_krw)
         calculation = calculate(inputs, context)
         if isinstance(calculation, Reason):
             return _with_atomic(base, reasons=(calculation,))
@@ -654,6 +746,12 @@ class ProductPricingService:
             calculation,
             current,
         )
+
+
+def _review(code: str, subject: str) -> Reason:
+    """A pricing reason (per context, like ``pricing._review``): REVIEW_REQUIRED, with its
+    subject."""
+    return Reason(code, ReadinessStatus.REVIEW_REQUIRED, subject)
 
 
 def _with(evaluation: PricingEvaluation, *, reasons: Sequence[Reason]) -> PricingEvaluation:
@@ -725,6 +823,12 @@ def _recorded_entry(
                     "stated_minimum_sale_price_krw": snapshot.stated_minimum_sale_price_krw,
                 }
             ),
+            # ADR-0038 §4 (FX-02): named only for a source-currency price.
+            **(
+                {}
+                if snapshot.landed_cost is None
+                else {"landed_cost": snapshot.landed_cost.columns()}
+            ),
         },
         correlation_id=correlation,
     )
@@ -784,6 +888,12 @@ def _atomic_recorded_entry(snapshot: AtomicPricingSnapshotRecord, correlation: s
                     "minimum_applied": False,
                     "stated_minimum_sale_price_krw": snapshot.stated_minimum_sale_price_krw,
                 }
+            ),
+            # ADR-0038 §4 (FX-02): named only for a source-currency price.
+            **(
+                {}
+                if snapshot.landed_cost is None
+                else {"landed_cost": snapshot.landed_cost.columns()}
             ),
         },
         correlation_id=correlation,
