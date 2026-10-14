@@ -735,6 +735,8 @@ def test_0065_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     database = tmp_path / "icbm.db"
     url = f"sqlite:///{database.as_posix()}"
     upgrade_to_head(url)
+    # Judged at 0065 itself, whatever later revisions add (0066: ADR-0038 O2).
+    command.downgrade(alembic_config(url), HEAD)
 
     def tables() -> set[str]:
         with contextlib.closing(sqlite3.connect(database)) as connection:
@@ -751,7 +753,7 @@ def test_0065_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         names = {r[0] for r in connection.execute("SELECT name FROM sqlite_master")}
     assert not any(name.startswith(tuple(f"trg_{t}_" for t in TABLES)) for name in names)
     assert "ix_image_translation_candidates_observation_id" not in names
-    command.upgrade(alembic_config(url), "head")
+    command.upgrade(alembic_config(url), HEAD)
     assert tables() == before
     with contextlib.closing(sqlite3.connect(database)) as connection:
         connection.execute(

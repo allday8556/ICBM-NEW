@@ -1,7 +1,7 @@
 """ADR-0038 O2: the landed-cost pins of a source-currency price, and the per-product inputs.
 
-Revision ID: 0065_landed_cost
-Revises: 0064_fx_snapshots
+Revision ID: 0066_landed_cost
+Revises: 0065_image_studio_translation
 Create Date: 2026-10-14
 
 ADR-0038 §4, §8 (FX-02, FX-04). Four changes, nothing else:
@@ -39,8 +39,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0065_landed_cost"
-down_revision: str | None = "0064_fx_snapshots"
+revision: str = "0066_landed_cost"
+down_revision: str | None = "0065_image_studio_translation"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -189,7 +189,7 @@ FOREIGN_UNIT_PRICE_RECORDED = (
     " AND purchase_cost_krw = 0)"
 )
 
-# The binding's close-only trigger: 0047's columns, then (0065) the two foreign ones.
+# The binding's close-only trigger: 0047's columns, then (0066) the two foreign ones.
 _CLOSE_ONLY_COLUMNS = (
     "binding_id",
     "atomic_sku_item_id",
@@ -216,7 +216,7 @@ def _close_only(columns: Sequence[str]) -> str:
     )
 
 
-# 0047's current-state trigger of an AtomicSKU snapshot, with the one condition 0065 changes as a
+# 0047's current-state trigger of an AtomicSKU snapshot, with the one condition 0066 changes as a
 # parameter: which acquisition of the open binding the snapshot prices.
 _KRW_ACQUISITION = " AND b.purchase_cost_krw = NEW.purchase_cost_krw)"
 _LANDED_ACQUISITION = (

@@ -13,7 +13,7 @@ Proven here:
 - duties above USD 150 are included, then excluded by the user's choice;
 - the database refuses a pin that does not describe its row or names no recorded rate;
 - the product's own inputs: API (GET/PUT, CSRF, 404/409/422) and audit;
-- migration 0065 is additive, restores 0064 exactly and fails closed while it holds anything.
+- migration 0066 is additive, restores 0065 exactly and fails closed while it holds anything.
 """
 
 import contextlib
@@ -417,7 +417,7 @@ def test_the_database_refuses_a_pin_that_does_not_describe_its_row(
     assert count(config, "pricing_snapshots") == 1
 
 
-def test_a_foreign_snapshot_holds_the_0065_downgrade(
+def test_a_foreign_snapshot_holds_the_0066_downgrade(
     container: Container, config: AppConfig, clock: FakeClock, sources: Collections, tmp_path: Path
 ) -> None:
     item_id = _item(container, sources, _foreign())
@@ -433,7 +433,7 @@ def test_a_foreign_snapshot_holds_the_0065_downgrade(
         source.backup(target)
     url = f"sqlite:///{copy.as_posix()}"
     with pytest.raises(RuntimeError, match="never silently destroyed"):
-        command.downgrade(alembic_config(url), "0064_fx_snapshots")
+        command.downgrade(alembic_config(url), "0065_image_studio_translation")
     with contextlib.closing(sqlite3.connect(copy)) as connection:
         held = connection.execute(
             "SELECT COUNT(*) FROM pricing_snapshots WHERE source_currency = 'CNY'"
@@ -511,15 +511,15 @@ def test_the_overseas_costs_api_reads_saves_and_refuses(
             )
 
 
-# ---------------------------------------------------------------- migration 0065
+# ---------------------------------------------------------------- migration 0066
 
 
-def test_0065_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None:
+def test_0066_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None:
     database = tmp_path / "icbm.db"
     url = f"sqlite:///{database.as_posix()}"
     upgrade_to_head(url)
-    # Judged at 0065 itself, whatever later revisions add.
-    command.downgrade(alembic_config(url), "0065_landed_cost")
+    # Judged at 0066 itself, whatever later revisions add.
+    command.downgrade(alembic_config(url), "0066_landed_cost")
 
     def schema() -> dict[str, str]:
         with contextlib.closing(sqlite3.connect(database)) as connection:
@@ -531,22 +531,22 @@ def test_0065_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         with contextlib.closing(sqlite3.connect(database)) as connection:
             return [r[1] for r in connection.execute(f"PRAGMA table_info({table})")]
 
-    at_0065 = schema()
+    at_0066 = schema()
     for table in ("pricing_snapshots", "atomic_sku_pricing_snapshots"):
         assert columns(table)[-len(LANDED_COST_COLUMNS) :] == list(LANDED_COST_COLUMNS)
     assert columns("atomic_sku_source_bindings")[-2:] == ["source_currency", "source_unit_price"]
-    assert "overseas_cost_override_revisions" in at_0065
-    # Empty, it steps down to exactly 0064 — both 0047 triggers restored — and back up.
-    command.downgrade(alembic_config(url), "0064_fx_snapshots")
-    at_0064 = schema()
-    assert "overseas_cost_override_revisions" not in at_0064
+    assert "overseas_cost_override_revisions" in at_0066
+    # Empty, it steps down to exactly 0065 — both 0047 triggers restored — and back up.
+    command.downgrade(alembic_config(url), "0065_image_studio_translation")
+    at_0065 = schema()
+    assert "overseas_cost_override_revisions" not in at_0065
     assert columns("pricing_snapshots")[-1] == "stated_minimum_sale_price_krw"
     trigger = "trg_atomic_sku_pricing_snapshots_prices_current_state"
-    assert "source_currency" not in at_0064[trigger]
-    assert "b.purchase_cost_krw = NEW.purchase_cost_krw)" in at_0064[trigger]
-    assert "source_currency" in at_0065[trigger]
-    command.upgrade(alembic_config(url), "0065_landed_cost")
-    assert schema() == at_0065
+    assert "source_currency" not in at_0065[trigger]
+    assert "b.purchase_cost_krw = NEW.purchase_cost_krw)" in at_0065[trigger]
+    assert "source_currency" in at_0066[trigger]
+    command.upgrade(alembic_config(url), "0066_landed_cost")
+    assert schema() == at_0066
     with contextlib.closing(sqlite3.connect(database)) as connection:
         connection.execute(
             "INSERT INTO overseas_cost_override_revisions VALUES ('r-1', 'sp-1', 1, 12000, NULL,"
@@ -555,8 +555,8 @@ def test_0065_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         )
         connection.commit()
     with pytest.raises(RuntimeError, match="never silently destroyed"):
-        command.downgrade(alembic_config(url), "0064_fx_snapshots")
-    assert schema() == at_0065
+        command.downgrade(alembic_config(url), "0065_image_studio_translation")
+    assert schema() == at_0066
 
 
 def test_the_fixture_clock_is_sunday_morning_kst(clock: FakeClock) -> None:

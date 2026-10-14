@@ -39,7 +39,7 @@ from app.stages.products.pricing import (
 )
 
 ATOMIC_ACQUISITION_BASIS = "BASE_PRICE_PLUS_OPTION_DELTA"
-# ADR-0038 §4 (migration 0065): a binding of a source-currency revision acquires at its
+# ADR-0038 §4 (migration 0066): a binding of a source-currency revision acquires at its
 # configuration's own unit price, in that currency. It states no won: its three KRW costs are 0, and
 # the unit price is the pricing owner's source price. (``acquisition_basis`` keeps the value its
 # frozen 0047 CHECK allows; ``source_currency`` is what names the foreign basis.)
@@ -88,7 +88,7 @@ class AtomicSKUSourceBinding(Base):
         CheckConstraint("decided_by <> ''", name="decided_by_present"),
         CheckConstraint("correlation_id <> ''", name="correlation_present"),
         CheckConstraint("valid_to IS NULL OR valid_to >= valid_from", name="validity_ordered"),
-        # ADR-0038 §4 (migration 0065).
+        # ADR-0038 §4 (migration 0066).
         CheckConstraint(
             "source_currency IS NULL OR source_currency IN ('CNY', 'JPY')",
             name="source_currency_valid",
@@ -115,7 +115,7 @@ class AtomicSKUSourceBinding(Base):
     correlation_id: Mapped[str] = mapped_column(String(64))
     valid_from: Mapped[datetime] = mapped_column(UTCDateTime)
     valid_to: Mapped[datetime | None] = mapped_column(UTCDateTime)
-    # ADR-0038 §4 (migration 0065): the configuration's own unit price of a source-currency
+    # ADR-0038 §4 (migration 0066): the configuration's own unit price of a source-currency
     # revision, as stated; NULL on a KRW binding.
     source_currency: Mapped[str | None] = mapped_column(String(3))
     source_unit_price: Mapped[str | None] = mapped_column(String(24))
@@ -227,7 +227,7 @@ class AtomicSKUPricingSnapshot(LandedCostPinColumns, Base):
         # ADR-0039 §3 (migration 0061): whether the supplier's minimum resale price was applied.
         CheckConstraint(MINIMUM_APPLIED_FLAG, name="minimum_applied_flag"),
         CheckConstraint(MINIMUM_POLICY_RECORDED, name="minimum_policy_recorded"),
-        # ADR-0038 §4 (migration 0065): a source-currency price's landed-cost pins.
+        # ADR-0038 §4 (migration 0066): a source-currency price's landed-cost pins.
         *landed_cost_checks(),
     )
 

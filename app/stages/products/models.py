@@ -440,7 +440,7 @@ MINIMUM_POLICY_RECORDED = (
 )
 
 
-# ADR-0038 §4 (FX-02), frozen by migration 0065: what a snapshot of a source-currency price records
+# ADR-0038 §4 (FX-02), frozen by migration 0066: what a snapshot of a source-currency price records
 # beside its won amounts — the source price as stated, the FX snapshots of one publication day, the
 # margin, the settings and product-input revisions, the overseas shipping and where it came from,
 # the duty decision, its rate and amount, and the declared value. Each column states its own
@@ -526,7 +526,7 @@ LANDED_COST_RECORDED = (
 
 
 def landed_cost_checks() -> tuple[CheckConstraint, ...]:
-    """The landed-cost CHECKs of one snapshot table (migration 0065)."""
+    """The landed-cost CHECKs of one snapshot table (migration 0066)."""
     return (
         *(CheckConstraint(text, name=name) for name, text in LANDED_COST_CHECKS.values()),
         CheckConstraint(LANDED_COST_RECORDED, name="landed_cost_recorded"),
@@ -535,13 +535,13 @@ def landed_cost_checks() -> tuple[CheckConstraint, ...]:
 
 class LandedCostPinColumns:
     """ADR-0038 §4 (FX-02): the landed-cost pins of a pricing snapshot, added in place by migration
-    0065 to ``pricing_snapshots`` and ``atomic_sku_pricing_snapshots``. NULL on every KRW price."""
+    0066 to ``pricing_snapshots`` and ``atomic_sku_pricing_snapshots``. NULL on every KRW price."""
 
     source_currency: Mapped[str | None] = mapped_column(String(3))
     # The source price as stated, decimal text in its currency (never a float).
     source_price: Mapped[str | None] = mapped_column(String(24))
     # The FX snapshots of one publication day: the source currency's, and USD's (the declared
-    # value's). Both rows are immutable (migration 0064); 0065's trigger names them.
+    # value's). Both rows are immutable (migration 0064); 0066's trigger names them.
     fx_snapshot_id: Mapped[str | None] = mapped_column(String(36))
     fx_publication_date: Mapped[str | None] = mapped_column(String(10))
     usd_fx_snapshot_id: Mapped[str | None] = mapped_column(String(36))
@@ -633,7 +633,7 @@ class PricingSnapshot(LandedCostPinColumns, Base):
         # ADR-0039 §3 (migration 0061): whether the supplier's minimum resale price was applied.
         CheckConstraint(MINIMUM_APPLIED_FLAG, name="minimum_applied_flag"),
         CheckConstraint(MINIMUM_POLICY_RECORDED, name="minimum_policy_recorded"),
-        # ADR-0038 §4 (migration 0065): a source-currency price's landed-cost pins.
+        # ADR-0038 §4 (migration 0066): a source-currency price's landed-cost pins.
         *landed_cost_checks(),
     )
 

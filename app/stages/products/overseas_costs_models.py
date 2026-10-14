@@ -1,5 +1,5 @@
 """Persistence of the per-product landed-cost inputs of a purchase-agency source (ADR-0038 §4, §8;
-migration 0065).
+migration 0066).
 
 One table, ``overseas_cost_override_revisions``: the append-only revisions of one overseas source
 product's own landed-cost inputs, keyed by ``source_product_uid`` — the overseas shipping the user
@@ -19,7 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.platform.db.base import Base
 from app.platform.db.types import UTCDateTime
 
-# Frozen with migration 0065 (``overseas_costs`` validation states the same bounds, which are the
+# Frozen with migration 0066 (``overseas_costs`` validation states the same bounds, which are the
 # overseas settings' own: ``app.capabilities.overseas.settings_models``).
 OVERRIDE_CHECKS = {
     "revision_no_positive": "revision_no >= 1",

@@ -5,7 +5,7 @@ unit of work, and decides nothing: the pricing service calculates and chooses; m
 refuses any snapshot that does not price the current state it names, and any pointer move out of
 order.
 
-A source-currency price records its landed-cost pins (ADR-0038 §4, FX-02; migration 0065) through
+A source-currency price records its landed-cost pins (ADR-0038 §4, FX-02; migration 0066) through
 ``landed_cost.pin_columns``, the store-level rule that they describe the amounts the row records;
 a KRW price records none of them.
 """

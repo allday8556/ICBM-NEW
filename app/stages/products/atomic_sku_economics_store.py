@@ -1,6 +1,6 @@
 """Persistence for AtomicSKU-qualified M4 source bindings and pricing history.
 
-A binding of a source-currency revision (ADR-0038 §4, migration 0065) acquires at its
+A binding of a source-currency revision (ADR-0038 §4, migration 0066) acquires at its
 configuration's own unit price, as stated in that currency: it states no won (its KRW costs are 0)
 and the pricing owner prices it at the landed cost of the day. A configuration that states no unit
 price of its own is not bound (``PRODUCTS_ATOMIC_SKU_UNIT_PRICE_UNRESOLVED``). A source-currency

@@ -236,7 +236,7 @@ def _cents_up(value: Fraction) -> str:
 @dataclass(frozen=True)
 class LandedCostPin:
     """What a pricing snapshot of a foreign price records (FX-02), column for column, in
-    ``pricing_snapshots`` and ``atomic_sku_pricing_snapshots`` (migration 0065). A KRW price
+    ``pricing_snapshots`` and ``atomic_sku_pricing_snapshots`` (migration 0066). A KRW price
     records none of it: every column stays NULL."""
 
     source_currency: str
