@@ -826,8 +826,8 @@ def _coupang_complete_rejected_test_products(
         )
         bundle = build_live_test_product_bundle(
             credentials=credentials,
-            vendor_user_id=preflight.vendor_user_id(),
-            logistics=preflight.logistics(),
+            vendor_user_id=preflight.vendor_user_id(credentials=credentials),
+            logistics=preflight.logistics(credentials=credentials),
             category_codes_by_test=recommendations.category_codes_by_test,
             category_metadata=metadata,
             revision_of=container.revisions.latest,

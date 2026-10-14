@@ -7,10 +7,14 @@ import pytest
 from app.platform.core.errors import ErrorClass
 from app.platform.core.secrets import MemorySecretStore
 from app.stages.connect.coupang.live_preflight import (
+    ACCOUNT_INPUTS_KEY,
     CATEGORY_METADATA_KEY,
     CATEGORY_RECOMMENDATION_KEY,
+    LOGISTICS_SELECTION_KEY,
+    VENDOR_USER_ID_KEY,
     CoupangLivePreflightStore,
 )
+from integrations.marketplaces.coupang.auth import Credentials
 from integrations.marketplaces.coupang.catalog import CategoryMetadata
 from integrations.marketplaces.coupang.live_category_metadata import CategoryMetadataAttempt
 
@@ -74,3 +78,72 @@ def test_incomplete_metadata_and_malformed_recommendations_fail_closed() -> None
         store.category_recommendations()
     with pytest.raises(ValueError, match="METADATA_INCOMPLETE"):
         store.require_category_metadata(("101",), generation=1)
+
+
+def _logistics() -> dict[str, object]:
+    return {
+        "companyContactNumber": "01000000000",
+        "deliveryCompanyCode": "CJGLS",
+        "outboundShippingPlaceCode": "1",
+        "returnAddress": "부산광역시",
+        "returnAddressDetail": "테스트",
+        "returnCenterCode": "2",
+        "returnChargeName": "테스트 반품지",
+        "returnZipCode": "00000",
+    }
+
+
+def test_account_values_are_bound_to_credential_generation_and_vendor() -> None:
+    secrets = MemorySecretStore()
+    store = CoupangLivePreflightStore(secrets)
+    credentials = Credentials("access", "secret", "vendor-1", 3)
+
+    store.bind_account_values(
+        credentials=credentials,
+        vendor_user_id="wing-user",
+        logistics=_logistics(),
+    )
+
+    assert store.vendor_user_id(credentials=credentials) == "wing-user"
+    assert store.logistics(credentials=credentials) == _logistics()
+    record = json.loads(secrets.get(ACCOUNT_INPUTS_KEY) or "null")
+    assert record["v"] == 2
+    assert record["credential_generation"] == 3
+    assert record["vendor_id"] == "vendor-1"
+
+
+@pytest.mark.parametrize(
+    "credentials",
+    [
+        Credentials("access", "secret", "vendor-1", 4),
+        Credentials("access", "secret", "vendor-2", 3),
+    ],
+)
+def test_account_values_fail_closed_for_other_generation_or_vendor(
+    credentials: Credentials,
+) -> None:
+    secrets = MemorySecretStore()
+    store = CoupangLivePreflightStore(secrets)
+    store.bind_account_values(
+        credentials=Credentials("access", "secret", "vendor-1", 3),
+        vendor_user_id="wing-user",
+        logistics=_logistics(),
+    )
+
+    with pytest.raises(ValueError, match="ACCOUNT_MISMATCH"):
+        store.vendor_user_id(credentials=credentials)
+    with pytest.raises(ValueError, match="ACCOUNT_MISMATCH"):
+        store.logistics(credentials=credentials)
+
+
+def test_legacy_unbound_account_values_are_never_accepted() -> None:
+    secrets = MemorySecretStore()
+    secrets.set(VENDOR_USER_ID_KEY, "wing-user")
+    secrets.set(LOGISTICS_SELECTION_KEY, json.dumps(_logistics()))
+    store = CoupangLivePreflightStore(secrets)
+    credentials = Credentials("access", "secret", "vendor-1", 3)
+
+    with pytest.raises(ValueError, match="ACCOUNT_INPUTS_MISSING"):
+        store.vendor_user_id(credentials=credentials)
+    with pytest.raises(ValueError, match="ACCOUNT_INPUTS_MISSING"):
+        store.logistics(credentials=credentials)

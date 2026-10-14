@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 
 from app.platform.core.secrets import SecretStore
+from integrations.marketplaces.coupang.auth import Credentials
 from integrations.marketplaces.coupang.catalog import category_metadata_to_mapping
 from integrations.marketplaces.coupang.live_category_metadata import CategoryMetadataAttempt
 
@@ -14,7 +15,9 @@ CATEGORY_RECOMMENDATION_KEY = "marketplace:coupang:category-preflight-v1"
 CATEGORY_METADATA_KEY = "marketplace:coupang:category-metadata-v1"
 VENDOR_USER_ID_KEY = "marketplace:coupang:vendor-user-id"
 LOGISTICS_SELECTION_KEY = "marketplace:coupang:live-logistics-selection-v1"
+ACCOUNT_INPUTS_KEY = "marketplace:coupang:live-account-inputs-v2"
 _CATEGORY_CODE = re.compile(r"^[0-9]+$")
+_ACCOUNT_RECORD_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -117,20 +120,81 @@ class CoupangLivePreflightStore:
             selected[code] = value
         return selected
 
-    def vendor_user_id(self) -> str:
-        value = self._secrets.get(VENDOR_USER_ID_KEY)
-        if not isinstance(value, str) or not value.strip() or len(value) > 100:
+    def _account_record(self, credentials: Credentials) -> dict[str, object]:
+        raw = self._secrets.get(ACCOUNT_INPUTS_KEY)
+        if not raw:
+            raise ValueError("COUPANG_ACCOUNT_INPUTS_MISSING")
+        try:
+            record = json.loads(raw)
+        except ValueError as exc:
+            raise ValueError("COUPANG_ACCOUNT_INPUTS_INVALID") from exc
+        if (
+            not isinstance(record, dict)
+            or record.get("v") != _ACCOUNT_RECORD_VERSION
+            or record.get("credential_generation") != credentials.credential_generation
+            or record.get("vendor_id") != credentials.vendor_id
+        ):
+            raise ValueError("COUPANG_ACCOUNT_INPUTS_ACCOUNT_MISMATCH")
+        return record
+
+    def bind_account_values(
+        self,
+        *,
+        credentials: Credentials,
+        vendor_user_id: str,
+        logistics: dict[str, object],
+    ) -> None:
+        """Atomically replace account inputs in one record bound to active credentials.
+
+        Callers must obtain both values from an authenticated/operator-confirmed preflight.
+        Legacy unbound values are intentionally never accepted by the read methods.
+        """
+        vendor_user_id = vendor_user_id.strip()
+        if not vendor_user_id or len(vendor_user_id) > 100:
             raise ValueError("COUPANG_VENDOR_USER_ID_MISSING")
+        required = {
+            "companyContactNumber",
+            "deliveryCompanyCode",
+            "outboundShippingPlaceCode",
+            "returnAddress",
+            "returnAddressDetail",
+            "returnCenterCode",
+            "returnChargeName",
+            "returnZipCode",
+        }
+        if set(logistics) != required:
+            raise ValueError("COUPANG_LOGISTICS_SELECTION_INVALID")
+        if not all(
+            isinstance(item, (str, int)) and not isinstance(item, bool) and str(item).strip()
+            for item in logistics.values()
+        ):
+            raise ValueError("COUPANG_LOGISTICS_SELECTION_INVALID")
+        self._secrets.set(
+            ACCOUNT_INPUTS_KEY,
+            json.dumps(
+                {
+                    "v": _ACCOUNT_RECORD_VERSION,
+                    "credential_generation": credentials.credential_generation,
+                    "vendor_id": credentials.vendor_id,
+                    "vendor_user_id": vendor_user_id,
+                    "logistics": logistics,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+
+    def vendor_user_id(self, *, credentials: Credentials) -> str:
+        record = self._account_record(credentials)
+        value = record.get("vendor_user_id")
+        if not isinstance(value, str) or not value.strip() or len(value) > 100:
+            raise ValueError("COUPANG_VENDOR_USER_ID_INVALID")
         return value
 
-    def logistics(self) -> dict[str, object]:
-        raw = self._secrets.get(LOGISTICS_SELECTION_KEY)
-        if not raw:
-            raise ValueError("COUPANG_LOGISTICS_SELECTION_MISSING")
-        try:
-            value = json.loads(raw)
-        except ValueError as exc:
-            raise ValueError("COUPANG_LOGISTICS_SELECTION_INVALID") from exc
+    def logistics(self, *, credentials: Credentials) -> dict[str, object]:
+        record = self._account_record(credentials)
+        value = record.get("logistics")
         required = {
             "companyContactNumber",
             "deliveryCompanyCode",
@@ -152,6 +216,7 @@ class CoupangLivePreflightStore:
 
 
 __all__ = [
+    "ACCOUNT_INPUTS_KEY",
     "CATEGORY_METADATA_KEY",
     "CATEGORY_RECOMMENDATION_KEY",
     "LOGISTICS_SELECTION_KEY",
