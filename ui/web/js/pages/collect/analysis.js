@@ -105,13 +105,21 @@ function won(amount) {
   return `${Number(amount).toLocaleString('ko-KR')}원`;
 }
 
+// ADR-0038 §1: a source-currency price is the page's own decimal text, in its currency.
+const CURRENCY_FORMAT = { CNY: (amount) => `¥${amount}`, JPY: (amount) => `${amount}円` };
+
+function price(p) {
+  if (!p.currency) return won(p.amount_krw);
+  return CURRENCY_FORMAT[p.currency]?.(p.amount) ?? `${p.amount} ${p.currency}`;
+}
+
 function valueText(field, summary, note) {
   if (!summary) return note ?? '-';
   switch (field) {
     case 'original_name':
       return summary.name ?? note ?? '-';
     case 'prices':
-      return summary.prices?.length ? summary.prices.map((p) => `${p.label} ${won(p.amount_krw)}`).join(' · ') : note ?? '-';
+      return summary.prices?.length ? summary.prices.map((p) => `${p.label} ${price(p)}`).join(' · ') : note ?? '-';
     case 'options': {
       if (summary.options?.status === 'ABSENT') return '옵션 없음';
       const value = summary.options?.value;

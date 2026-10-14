@@ -9,6 +9,14 @@ status that this module did not compute.
 Values are strict: money is an ``int`` of whole KRW and a float is never coerced into one, a
 minimum sale price exists only as an observed value, and quantity tiers keep their original
 ``(quantity, total_price)`` pairs.
+
+**Source currency** (ADR-0038 §1, FX-01). An overseas page states its prices in its own currency,
+CNY or JPY, and they are kept exactly as stated: nothing is converted here. Each money field then
+holds its foreign twin (``ForeignPricesValue`` beside ``PricesValue``, and so on), whose amount is
+a decimal string at the currency's own scale and never a float. A KRW value keeps its shape, its
+canonical JSON and every fingerprint computed from it. A revision states one currency: a page that
+mixes them is ``REVIEW_REQUIRED`` (:func:`evaluate`), and the revision store records the one
+currency it states (:func:`revision_source_currency`).
 """
 
 import hashlib
@@ -21,7 +29,7 @@ from datetime import datetime
 from enum import StrEnum
 from fractions import Fraction
 from types import MappingProxyType
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal, Protocol, Self, get_args
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -52,6 +60,15 @@ IDENTIFIER_MAX_LENGTH = 64
 SOURCE_PRODUCT_ID_MAX_LENGTH = 200
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
+
+# ADR-0038 §1: the currencies a source may state besides KRW, and how many decimal places each
+# states (CNY to the fen, JPY in whole yen).
+SourceCurrency = Literal["CNY", "JPY"]
+SOURCE_CURRENCIES: tuple[SourceCurrency, ...] = get_args(SourceCurrency)
+CURRENCY_SCALE: Mapping[str, int] = MappingProxyType({"CNY": 2, "JPY": 0})
+# ASCII digits only: ``\d`` would admit the digits of other scripts.
+FOREIGN_AMOUNT_PATTERN = r"^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$"
+_FOREIGN_AMOUNT = re.compile(FOREIGN_AMOUNT_PATTERN)
 _HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
 
 
@@ -195,6 +212,27 @@ SALES_CHANNEL_MARKETPLACES = frozenset({"smartstore", "coupang"})
 
 NonEmpty = Annotated[str, StringConstraints(min_length=1)]
 Krw = Annotated[int, Field(ge=0)]
+# ADR-0038 §1: an exact non-negative decimal amount in a source currency's unit, as text. A float
+# is never one (the models are strict), and its scale is checked against the stated currency.
+ForeignAmount = Annotated[str, StringConstraints(pattern=FOREIGN_AMOUNT_PATTERN, max_length=24)]
+
+
+def _check_scale(currency: str, *amounts: str | None) -> None:
+    """Every amount is stated at most to its currency's scale: ``9.50`` CNY, ``92`` JPY."""
+    scale = CURRENCY_SCALE[currency]
+    for amount in amounts:
+        if amount is None:
+            continue
+        if not _FOREIGN_AMOUNT.fullmatch(amount):
+            raise ValueError("a foreign amount is decimal text such as '9.50'")
+        _, _, places = amount.partition(".")
+        if len(places) > scale:
+            raise ValueError(f"a {currency} amount has at most {scale} decimal places")
+
+
+def _one_currency(currencies: Iterable[str]) -> None:
+    if len(set(currencies)) > 1:
+        raise ValueError("a value states one currency")
 
 
 class FactValue(BaseModel):
@@ -226,21 +264,73 @@ class SourcePrice(FactValue):
         return data
 
 
+class _Roled(Protocol):
+    @property
+    def role(self) -> PriceRole | None: ...
+
+
+def _purchase[P: _Roled](prices: tuple[P, ...]) -> P | None:
+    """The purchase price, or None when the page does not establish one (ADR-0032 §3).
+
+    A declared ``PURCHASE`` role decides when exactly one price carries it. Without one, the only
+    price that carries no role is the purchase price. A ``LIST`` price is never a cost, even alone,
+    and nothing is ever chosen by label text, name or order.
+    """
+    declared = [price for price in prices if price.role is PriceRole.PURCHASE]
+    if declared:
+        return declared[0] if len(declared) == 1 else None
+    unroled = [price for price in prices if price.role is None]
+    return unroled[0] if len(unroled) == 1 else None
+
+
 class PricesValue(FactValue):
     prices: tuple[SourcePrice, ...] = Field(min_length=1)
 
     def purchase(self) -> SourcePrice | None:
-        """The purchase price, or None when the page does not establish one (ADR-0032 §3).
+        """The purchase price, or None when the page does not establish one (ADR-0032 §3)."""
+        return _purchase(self.prices)
 
-        A declared ``PURCHASE`` role decides when exactly one price carries it. Without one, the
-        only price that carries no role is the purchase price. A ``LIST`` price is never a cost,
-        even alone, and nothing is ever chosen by label text, name or order.
-        """
-        declared = [price for price in self.prices if price.role is PriceRole.PURCHASE]
-        if declared:
-            return declared[0] if len(declared) == 1 else None
-        unroled = [price for price in self.prices if price.role is None]
-        return unroled[0] if len(unroled) == 1 else None
+
+class ForeignPrice(FactValue):
+    """ADR-0038 §1: one source price in the source's own currency, exactly as the page states it,
+    with its label and its role (ADR-0032 §2)."""
+
+    label: NonEmpty
+    currency: SourceCurrency
+    amount: ForeignAmount
+    role: PriceRole | None = None
+
+    @model_validator(mode="after")
+    def _scaled(self) -> Self:
+        _check_scale(self.currency, self.amount)
+        return self
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_role(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        data: dict[str, object] = handler(self)
+        if data.get("role") is None:
+            data.pop("role", None)
+        return data
+
+
+class ForeignPricesValue(FactValue):
+    """ADR-0038 §1: the source prices of an overseas page, all in one currency. The purchase price
+    is read by the same rule as :class:`PricesValue`'s."""
+
+    prices: tuple[ForeignPrice, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _one_currency(self) -> Self:
+        _one_currency(price.currency for price in self.prices)
+        return self
+
+    @property
+    def currency(self) -> SourceCurrency:
+        return self.prices[0].currency
+
+    def purchase(self) -> ForeignPrice | None:
+        """The purchase price, or None when the page does not establish one (ADR-0032 §3)."""
+        return _purchase(self.prices)
 
 
 class SalesChannelsValue(FactValue):
@@ -270,6 +360,19 @@ class MoneyValue(FactValue):
     amount_krw: Krw
 
 
+class ForeignMoneyValue(FactValue):
+    """ADR-0038 §1: an explicitly observed amount in the source's own currency, with its label."""
+
+    label: NonEmpty
+    currency: SourceCurrency
+    amount: ForeignAmount
+
+    @model_validator(mode="after")
+    def _scaled(self) -> Self:
+        _check_scale(self.currency, self.amount)
+        return self
+
+
 class QuantityTier(FactValue):
     """An original ``(quantity, total_price)`` pair; never divided into a unit price."""
 
@@ -289,6 +392,46 @@ class QuantityTiersValue(FactValue):
         return self
 
 
+class ForeignQuantityTier(FactValue):
+    """ADR-0038 §1: an original ``(quantity, total_price)`` pair in the source's own currency;
+    never divided into a unit price."""
+
+    quantity: int = Field(ge=1)
+    currency: SourceCurrency
+    total_price: ForeignAmount
+    label: NonEmpty | None = None
+
+    @model_validator(mode="after")
+    def _scaled(self) -> Self:
+        _check_scale(self.currency, self.total_price)
+        return self
+
+
+class ForeignQuantityTiersValue(FactValue):
+    tiers: tuple[ForeignQuantityTier, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _distinct_quantities_one_currency(self) -> Self:
+        quantities = [tier.quantity for tier in self.tiers]
+        if len(set(quantities)) != len(quantities):
+            raise ValueError("quantity tiers must have distinct quantities")
+        _one_currency(tier.currency for tier in self.tiers)
+        return self
+
+    @property
+    def currency(self) -> SourceCurrency:
+        return self.tiers[0].currency
+
+
+def _shipping_consistent(kind: ShippingKind, fee: object, free_over: object) -> None:
+    if kind is ShippingKind.FREE and (fee is not None or free_over is not None):
+        raise ValueError("a FREE policy carries no fee and no threshold")
+    if kind is ShippingKind.FIXED and (fee is None or free_over is not None):
+        raise ValueError("a FIXED policy carries a fee and no threshold")
+    if kind is ShippingKind.UNKNOWN and (fee is not None or free_over is not None):
+        raise ValueError("an UNKNOWN policy carries no guessed fee")
+
+
 class ShippingValue(FactValue):
     """The structured reading plus the exact source policy text. A conditional or unknown policy
     is never flattened into a guessed fixed fee (ADR-0010 §7)."""
@@ -300,18 +443,24 @@ class ShippingValue(FactValue):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        if self.kind is ShippingKind.FREE and (
-            self.fee_krw is not None or self.free_over_krw is not None
-        ):
-            raise ValueError("a FREE policy carries no fee and no threshold")
-        if self.kind is ShippingKind.FIXED and (
-            self.fee_krw is None or self.free_over_krw is not None
-        ):
-            raise ValueError("a FIXED policy carries a fee and no threshold")
-        if self.kind is ShippingKind.UNKNOWN and (
-            self.fee_krw is not None or self.free_over_krw is not None
-        ):
-            raise ValueError("an UNKNOWN policy carries no guessed fee")
+        _shipping_consistent(self.kind, self.fee_krw, self.free_over_krw)
+        return self
+
+
+class ForeignShippingValue(FactValue):
+    """ADR-0038 §1: :class:`ShippingValue` in the source's own currency, under the same rules for
+    each kind. A FREE or UNKNOWN policy states no amount, and still names the page's currency."""
+
+    kind: ShippingKind
+    policy_text: NonEmpty
+    currency: SourceCurrency
+    fee: ForeignAmount | None = None
+    free_over: ForeignAmount | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        _shipping_consistent(self.kind, self.fee, self.free_over)
+        _check_scale(self.currency, self.fee, self.free_over)
         return self
 
 
@@ -336,6 +485,30 @@ class OptionConfiguration(FactValue):
     additional_price_krw: int | None = None
     # Option-level sold-out evidence, where observable.
     sold_out: bool | None = None
+    # ADR-0038 §1: an overseas page's own price for this configuration (1688 states one per SKU),
+    # in the source's currency. Stated together or not at all, and never beside a KRW surcharge.
+    unit_price: ForeignAmount | None = None
+    currency: SourceCurrency | None = None
+
+    @model_validator(mode="after")
+    def _priced_in_one_currency(self) -> Self:
+        if (self.unit_price is None) != (self.currency is None):
+            raise ValueError("a configuration's unit price and its currency are stated together")
+        if self.currency is not None:
+            if self.additional_price_krw is not None:
+                raise ValueError("a configuration states its price in one currency")
+            _check_scale(self.currency, self.unit_price)
+        return self
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_unit_price(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        # A configuration without a foreign unit price serializes exactly as it did before
+        # ADR-0038, so every existing options value keeps its canonical JSON.
+        data: dict[str, object] = handler(self)
+        if data.get("unit_price") is None and data.get("currency") is None:
+            data.pop("unit_price", None)
+            data.pop("currency", None)
+        return data
 
 
 class OptionsValue(FactValue):
@@ -363,6 +536,7 @@ class OptionsValue(FactValue):
             if configuration.selections in seen:
                 raise ValueError("each configuration is listed once")
             seen.add(configuration.selections)
+        _one_currency(c.currency for c in self.configurations if c.currency is not None)
         return self
 
 
@@ -450,8 +624,41 @@ class ImagesValue(FactValue):
 
 @dataclass(frozen=True)
 class FieldSpec:
+    """A field's level and value type. A money field also names its source-currency twin
+    (ADR-0038 §1), and holds either; ``value_type`` stays the KRW shape every existing reader
+    knows."""
+
     level: FieldLevel
     value_type: type[FactValue]
+    foreign_type: type[FactValue] | None = None
+
+    @property
+    def value_types(self) -> tuple[type[FactValue], ...]:
+        return (
+            (self.value_type,)
+            if self.foreign_type is None
+            else (self.value_type, self.foreign_type)
+        )
+
+    def type_of(self, data: object) -> type[FactValue]:
+        """The type a JSON value is read as, by its keys: a value that names a ``currency`` (on
+        itself or on its listed entries) is the foreign twin, any other the KRW shape. Each shape
+        forbids the other's keys, so a value mixing them is refused by either."""
+        if self.foreign_type is not None and _names_currency(data):
+            return self.foreign_type
+        return self.value_type
+
+
+def _names_currency(data: object) -> bool:
+    if not isinstance(data, dict):
+        return False
+    if "currency" in data:
+        return True
+    return any(
+        isinstance(part, list)
+        and any(isinstance(item, dict) and "currency" in item for item in part)
+        for part in data.values()
+    )
 
 
 # ADR-0010 §7: the M3 field registry. Source identity and URL are revision columns, because a
@@ -461,13 +668,16 @@ IMAGES_FIELD = "images"
 FIELD_REGISTRY: Mapping[str, FieldSpec] = MappingProxyType(
     {
         "original_name": FieldSpec(FieldLevel.CORE, TextValue),
-        "prices": FieldSpec(FieldLevel.CORE, PricesValue),
+        # ADR-0038 §1: each money field holds its KRW shape or its source-currency twin.
+        "prices": FieldSpec(FieldLevel.CORE, PricesValue, ForeignPricesValue),
         "options": FieldSpec(FieldLevel.CORE, OptionsValue),
         IMAGES_FIELD: FieldSpec(FieldLevel.CORE, ImagesValue),
         "stock": FieldSpec(FieldLevel.CORE, StockValue),
-        "shipping": FieldSpec(FieldLevel.COVERAGE, ShippingValue),
-        "minimum_sale_price": FieldSpec(FieldLevel.COVERAGE, MoneyValue),
-        "quantity_tiers": FieldSpec(FieldLevel.COVERAGE, QuantityTiersValue),
+        "shipping": FieldSpec(FieldLevel.COVERAGE, ShippingValue, ForeignShippingValue),
+        "minimum_sale_price": FieldSpec(FieldLevel.COVERAGE, MoneyValue, ForeignMoneyValue),
+        "quantity_tiers": FieldSpec(
+            FieldLevel.COVERAGE, QuantityTiersValue, ForeignQuantityTiersValue
+        ),
         "brand": FieldSpec(FieldLevel.COVERAGE, TextValue),
         "manufacturer": FieldSpec(FieldLevel.COVERAGE, TextValue),
         "origin": FieldSpec(FieldLevel.COVERAGE, TextValue),
@@ -575,6 +785,8 @@ class EvaluatedFacts:
     images: tuple[ImageReference, ...]  # representative first, then source order
     source_fingerprint: str
     facts_status: FactsStatus
+    # ADR-0038 §1: the one source currency the values state, or None for a KRW page.
+    source_currency: SourceCurrency | None = None
 
 
 # ---------------------------------------------------------------- digests and fingerprints
@@ -649,7 +861,67 @@ def value_from_json(key: str, value_json: str | None) -> FactValue | None:
     """Rebuild a stored field value, validated against the registry again."""
     if value_json is None:
         return None
-    return FIELD_REGISTRY[key].value_type.model_validate_json(value_json)
+    spec = FIELD_REGISTRY[key]
+    try:
+        data = json.loads(value_json) if spec.foreign_type is not None else None
+    except ValueError:
+        data = None  # not JSON at all: the KRW shape refuses it with its own validation error
+    return spec.type_of(data).model_validate_json(value_json)
+
+
+# ---------------------------------------------------------------- source currency (ADR-0038 §1)
+
+_KRW_MONEY = (PricesValue, MoneyValue, ShippingValue, QuantityTiersValue)
+_FOREIGN_MONEY = (
+    ForeignPricesValue,
+    ForeignMoneyValue,
+    ForeignShippingValue,
+    ForeignQuantityTiersValue,
+)
+
+
+def stated_currencies(value: FactValue | None) -> tuple[frozenset[str], bool]:
+    """The source currencies one value states, and whether it states a KRW money value.
+
+    A KRW money shape is KRW whatever its amounts (a FREE ``ShippingValue`` still reads as won);
+    an options value states money only through its configurations' own prices.
+    """
+    if isinstance(value, _KRW_MONEY):
+        return frozenset(), True
+    if isinstance(value, _FOREIGN_MONEY):
+        return frozenset({value.currency}), False
+    if isinstance(value, OptionsValue):
+        configurations = value.configurations
+        return (
+            frozenset(c.currency for c in configurations if c.currency is not None),
+            any(c.additional_price_krw is not None for c in configurations),
+        )
+    return frozenset(), False
+
+
+def _mixed_currencies(values: Iterable[FactValue | None]) -> tuple[frozenset[str], str | None]:
+    """The source currencies some values state, and, when they state more than one currency in
+    all, every currency they state as ``CNY+KRW``."""
+    foreign: frozenset[str] = frozenset()
+    krw = False
+    for value in values:
+        currencies, states_krw = stated_currencies(value)
+        foreign |= currencies
+        krw = krw or states_krw
+    if len(foreign) > 1 or (foreign and krw):
+        return foreign, "+".join(sorted(foreign | ({CURRENCY} if krw else set())))
+    return foreign, None
+
+
+def revision_source_currency(values: Iterable[FactValue | None]) -> SourceCurrency | None:
+    """The one source currency a revision's values state, or None when they state only KRW or no
+    money at all. Values that mix currencies are refused: a revision is never stored mixed."""
+    foreign, mixed = _mixed_currencies(values)
+    if mixed is not None:
+        raise InputValidationError(
+            "COLLECT_FACTS_CURRENCY_MIXED", f"a revision states one currency, not {mixed}"
+        )
+    return next((currency for currency in SOURCE_CURRENCIES if currency in foreign), None)
 
 
 # ---------------------------------------------------------------- evaluation
@@ -739,8 +1011,9 @@ def _check_field(key: str, spec: FieldSpec, fact: FieldFact, policy: UrlPolicy) 
     if not isinstance(fact.status, FieldStatus):
         raise _invalid(f"{key}: status must be a FieldStatus")
     value = fact.value
-    if value is not None and type(value) is not spec.value_type:
-        raise _invalid(f"{key}: value must be {spec.value_type.__name__}")
+    if value is not None and type(value) not in spec.value_types:
+        names = " or ".join(value_type.__name__ for value_type in spec.value_types)
+        raise _invalid(f"{key}: value must be {names}")
     if fact.status is FieldStatus.ABSENT and value is not None:
         raise _invalid(f"{key}: an ABSENT field has no value")
     if fact.status is FieldStatus.CONFIRMED and value is None:
@@ -754,7 +1027,7 @@ def _check_field(key: str, spec: FieldSpec, fact: FieldFact, policy: UrlPolicy) 
         return None
     raw = value.model_dump_json()
     try:  # again, so a value built without validation (model_construct) is still refused
-        spec.value_type.model_validate_json(raw)
+        type(value).model_validate_json(raw)
     except ValidationError as exc:
         raise _invalid(f"{key}: value failed validation ({exc.error_count()} errors)") from None
     if isinstance(value, StockValue):
@@ -762,7 +1035,7 @@ def _check_field(key: str, spec: FieldSpec, fact: FieldFact, policy: UrlPolicy) 
         if decided != (fact.status is FieldStatus.CONFIRMED):
             raise _invalid("stock: a decided availability is CONFIRMED, and only a decided one")
     if (
-        isinstance(value, ShippingValue)
+        isinstance(value, ShippingValue | ForeignShippingValue)
         and value.kind is ShippingKind.UNKNOWN
         and fact.status is not FieldStatus.REVIEW_REQUIRED
     ):
@@ -998,6 +1271,17 @@ def _images_field(
     return FieldStatus.REVIEW_REQUIRED, value, (*evidence, *guards)
 
 
+# ADR-0038 §1: the derived evidence entry that stands for a page stating money in more than one
+# currency, on every money field it lowers. Like the images guards it is REVIEW_REQUIRED evidence
+# of its own; its kind is DOM_TEXT because the currencies are what the page's text states.
+CURRENCY_MIXED_LOCATOR = "currency:mixed"
+
+
+def _states_money(value: FactValue | None) -> bool:
+    currencies, states_krw = stated_currencies(value)
+    return bool(currencies) or states_krw
+
+
 def evaluate(
     collected: CollectedFacts, url_policy: UrlPolicy = STRICT_URL_POLICY
 ) -> EvaluatedFacts:
@@ -1005,6 +1289,14 @@ def evaluate(
 
     ``url_policy`` names the explicitly safe query keys per host (the supplier's collection
     profile, PR-C). The default keeps none: every URL with a query fails closed.
+
+    **One currency** (ADR-0038 §1). A page whose values state money in more than one currency —
+    CNY beside KRW, or CNY beside JPY — is ``REVIEW_REQUIRED``. Each field whose value states
+    money is lowered here, after its value was validated as supplied: it keeps every evidence entry
+    it had, gains one REVIEW_REQUIRED guard (:data:`CURRENCY_MIXED_LOCATOR`) naming the currencies,
+    and stores no value. The evidence still says what the page stated; the revision states no
+    amount in any currency, so it is never stored mixed and no reader can take one currency for
+    another. This is the one place that sees every field at once, before anything is digested.
     """
     _check_provenance(collected, url_policy)
     supplied = set(collected.fields)
@@ -1013,7 +1305,10 @@ def evaluate(
     if unknown := supplied - SUPPLIED_FIELDS:
         raise _invalid(f"unknown or derived fields supplied: {sorted(unknown)}")
     images = _check_images(collected.images, url_policy)
+    _, mixed = _mixed_currencies(fact.value for fact in collected.fields.values())
     fields = []
+    values: list[FactValue | None] = []
+    value: FactValue | None
     for key, spec in FIELD_REGISTRY.items():
         if key == IMAGES_FIELD:
             status, value, evidence = _images_field(images)
@@ -1022,7 +1317,21 @@ def evaluate(
         else:
             fact = collected.fields[key]
             value_json = _check_field(key, spec, fact, url_policy)
-            status, evidence = fact.status, fact.evidence
+            status, evidence, value = fact.status, fact.evidence, fact.value
+            if mixed is not None and _states_money(value):
+                guard = Evidence(
+                    kind=EvidenceKind.DOM_TEXT,
+                    locator=CURRENCY_MIXED_LOCATOR,
+                    status=FieldStatus.REVIEW_REQUIRED,
+                    normalized=mixed,
+                )
+                status, evidence, value, value_json = (
+                    FieldStatus.REVIEW_REQUIRED,
+                    (*evidence, guard),
+                    None,
+                    None,
+                )
+        values.append(value)
         evaluated = tuple(EvaluatedEvidence(e, evidence_digest(e)) for e in evidence)
         fingerprint = field_fingerprint(key, status, value_json, (e.digest for e in evaluated))
         fields.append(EvaluatedField(key, spec.level, status, value_json, evaluated, fingerprint))
@@ -1035,4 +1344,5 @@ def evaluate(
             ((ref.role, ref.ordinal, ref.sha256) for ref in images),
         ),
         facts_status=facts_status({field.key: field.status for field in fields}),
+        source_currency=revision_source_currency(values),
     )

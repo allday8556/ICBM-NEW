@@ -1069,15 +1069,22 @@ class ProductFoundationUnit:
         return readings
 
     def offer_fields(self, revision_id: str) -> tuple[dict[str, FieldReading], str | None]:
-        """The ``options`` and ``quantity_tiers`` fields of a revision, and its currency: all a
-        product-level offer is read from. Reading decides nothing."""
+        """The ``options`` and ``quantity_tiers`` fields of a revision, and the currency its
+        amounts are stated in: all a product-level offer is read from. Reading decides nothing.
+
+        That currency is the revision's source currency when it states one (ADR-0038 §1), else
+        its ``currency`` (KRW). A CNY or JPY revision therefore states no KRW offer, and the
+        materializer opens none for it until O2."""
         readings = self.source_fields(revision_id, OFFER_FIELDS)
-        currency = self.session.scalar(
-            select(ProductFactsRevision.currency).where(
+        row = self.session.execute(
+            select(ProductFactsRevision.currency, ProductFactsRevision.source_currency).where(
                 ProductFactsRevision.revision_id == revision_id
             )
-        )
-        return readings, currency
+        ).first()
+        if row is None:
+            return readings, None
+        currency, source_currency = row
+        return readings, source_currency or currency
 
     def quantity_offer(
         self, source_product_uid: str, source_revision_id: str, terms: OfferTerms, *, currency: str

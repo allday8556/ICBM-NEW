@@ -28,6 +28,7 @@ from app.platform.db.base import Base
 from app.platform.db.types import UTCDateTime
 from app.stages.collect.facts import (
     EVIDENCE_OBSERVED_MAX_BYTES,
+    SOURCE_CURRENCIES,
     EvidenceKind,
     FactsStatus,
     FetchTargetRefusal,
@@ -84,6 +85,9 @@ class ProductFactsRevision(Base):
         CheckConstraint(
             _hex64("capture_policy_digest", nullable=True), name="capture_policy_digest_hex"
         ),
+        CheckConstraint(
+            _in("source_currency", SOURCE_CURRENCIES, nullable=True), name="source_currency_valid"
+        ),
     )
 
     revision_id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -106,6 +110,11 @@ class ProductFactsRevision(Base):
     transport_kind: Mapped[str | None] = mapped_column(String(10))
     capture_policy_revision: Mapped[str | None] = mapped_column(String(64))
     capture_policy_digest: Mapped[str | None] = mapped_column(String(64))
+    # ADR-0038 §1 (migration 0063): the one currency an overseas page states its prices in, as the
+    # page states it; NULL on a KRW page. ``currency`` stays KRW, the unit of every ``*_krw``
+    # amount. Written only by the revision store, from the values themselves; never an identity
+    # input (each foreign value carries its currency inside its hashed JSON).
+    source_currency: Mapped[str | None] = mapped_column(String(3))
 
 
 class ProductFactsField(Base):

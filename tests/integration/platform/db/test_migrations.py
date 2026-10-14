@@ -210,7 +210,7 @@ CANONICAL_TABLES = (
     # ADR-0039 §1: each supplier's sales policy, its append-only revisions.
     "supplier_sales_policy_revisions",
 )
-HEAD = "0061_supplier_sales_policy"
+HEAD = "0063_source_currency"
 
 
 def _url(path: Path) -> str:
