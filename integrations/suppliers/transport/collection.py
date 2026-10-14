@@ -167,6 +167,17 @@ def _require_http(profile: CollectionProfile) -> None:
         )
 
 
+def _require_direct_url(profile: CollectionProfile) -> None:
+    """A supplier read only from pages the user captured (ADR-0040 §1, OC-01) has no document the
+    server may read: neither its product page nor a policy document linked from one. It is refused
+    before a target is judged, a request reserved or a byte sent. Its images are not documents."""
+    if not profile.direct_url_reads:
+        raise PolicyBlockedError(
+            "COLLECT_DIRECT_URL_NOT_DECLARED",
+            "this supplier is read only from pages the user captured",
+        )
+
+
 def _https(url: str) -> SplitResult:
     """The parts of an https URL without credentials, another port, a fragment or whitespace.
 
@@ -337,6 +348,7 @@ class PolicedCollectionGateway:
         if kind is ReadKind.IMAGE_REQUEST:
             raise ValueError("images are read with read_image")
         _require_http(profile)
+        _require_direct_url(profile)
         subject = check_target(profile, url, kind)
         budget.reserve(kind, subject)
         cookies: list[dict[str, str]] = []
@@ -351,6 +363,7 @@ class PolicedCollectionGateway:
         """One public document linked from a product page: same storefront, no session (there is
         no session parameter), no query, and at most once per budget."""
         _require_http(profile)
+        _require_direct_url(profile)
         path = check_discovered_policy(profile, url)
         budget.reserve(ReadKind.POLICY_READ, f"{DISCOVERED_POLICY_PREFIX}{path}")
         return self._document(profile, url, ReadKind.POLICY_READ, [], DEFAULT_USER_AGENT)
