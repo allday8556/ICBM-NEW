@@ -27,6 +27,8 @@ def test_contract_cites_the_official_auth_sources_and_safety_boundary() -> None:
     assert "One exact KR `GET`" in text
     assert "Ambiguous create recovery" in text
     assert "zero results never authorize a repeated create" in text
+    assert "corrected-payload owner" in text
+    assert "It still never sends a\nsecond create" in text
 
 
 def test_c_auth_1_contains_no_network_client_outside_reviewed_live_owners() -> None:
@@ -47,10 +49,12 @@ def test_c_auth_1_contains_no_network_client_outside_reviewed_live_owners() -> N
 
     assert imports_by_file == {
         "canary.py": {"httpx"},
+        "live_category_metadata.py": {"httpx"},
         "live_mutations.py": {"httpx"},
     }
     assert sorted(name for name, source in sources.items() if "EGRESS.grant" in source) == [
         "canary.py",
+        "live_category_metadata.py",
         "live_mutations.py",
     ]
     canary = sources["canary.py"]
@@ -75,7 +79,26 @@ def test_cli_accepts_secrets_only_through_no_echo_prompts() -> None:
     assert 'add_argument("--secret-key"' not in source
     assert '("coupang", "save-credentials"): _coupang_credentials' in source
     assert '("coupang", "read-canary"): _coupang_read_canary' in source
+    assert '("coupang", "read-category-metadata"): _coupang_read_category_metadata' in source
     assert '("coupang", "mutate-test-products"): _coupang_mutate_test_products' in source
+    assert '"complete-rejected-test-products"' in source
+    assert "_coupang_complete_rejected_test_products" in source
     assert (
         '("coupang", "recover-test-product-create"): _coupang_recover_test_product_create'
     ) in source
+
+
+def test_corrected_live_mutation_requires_the_reviewed_approval_identity() -> None:
+    source = CLI.read_text(encoding="utf-8")
+    corrected = source[source.index("corrected = coupang_commands.add_parser(") :]
+    corrected = corrected[: corrected.index("recovery = coupang_commands.add_parser(")]
+    for option in ("--scope-id", "--payload-digest", "--approved-at", "--expires-at"):
+        assert f'"{option}", required=True' in corrected
+
+    handler = source[source.index("def _coupang_complete_rejected_test_products(") :]
+    handler = handler[: handler.index("class _OperatorInputError")]
+    assert 'args.scope_id != "C-LIVE-MUT-1"' in handler
+    assert "bundle.payload_digest != args.payload_digest" in handler
+    assert '_instant(args.approved_at, "--approved-at")' in handler
+    assert '_instant(args.expires_at, "--expires-at")' in handler
+    assert "expires_at=now +" not in handler

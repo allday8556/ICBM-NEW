@@ -137,7 +137,7 @@ def test_the_screen_authors_with_null_revisions_and_leaves_freeze_disabled(
         freeze = unit.locator("button[data-action='FREEZE']")
         assert freeze.is_disabled()
         cell = unit.locator(".register-action", has=page.locator("button[data-action='FREEZE']"))
-        assert "Preflight가 READY가 아니어서" in cell.inner_text()
+        assert "등록 준비 확인을 먼저 완료" in cell.inner_text()
         # A reload rebuilds the same state from durable rows.
         page.reload()
         page.wait_for_selector(".register-canary", timeout=15_000)
@@ -154,8 +154,12 @@ def test_the_screen_authors_with_null_revisions_and_leaves_freeze_disabled(
         served = api.get("/api/v1/register/readiness", headers={"X-ICBM-Client": "pytest"}).json()
         assert summary.get_attribute("data-population") == str(served["population"]) == "1"
         for status, count in served["statuses"].items():
-            shown = summary.locator(f"[data-status-count='{status}']").inner_text()
-            assert shown == f"{status} {count}"
+            marker = summary.locator(f"[data-status-count='{status}']")
+            if count:
+                assert marker.count() == 1
+                assert marker.inner_text().endswith(f" {count}")
+            else:
+                assert marker.count() == 0
         # B-UX2: the fix-only panel says where to act on the server's reason, and only that.
         fix = page.locator(f".register-fixes [data-fix='{AUTHORING_REVISIONS_UNOWNED}']")
         assert fix.count() == 1
