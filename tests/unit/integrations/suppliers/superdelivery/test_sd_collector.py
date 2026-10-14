@@ -11,6 +11,7 @@ capture must yield exactly these facts and this source fingerprint (ADR-0040 §6
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -471,19 +472,67 @@ def test_the_reduced_rate_is_read_from_the_page_mark_or_the_explained_name_mark(
     assert label == "1セット（1点） 税込（税抜97円＋消費税10%、円未満切上げ）"
 
 
-def test_with_one_price_shown_that_price_is_the_regular_price() -> None:
-    # No campaign: the set's one 税抜 price ¥92 is its regular price, 92 × 1.08 → ¥100.
-    html = body("11728767")
-    one_price = html.replace(
+def _one_price(html: str) -> str:
+    """The capture with its struck regular price ¥97 removed: one price, ¥92, shown."""
+    return html.replace(
         '<p class="list-price"><span class="price-unit">¥</span>97</p>', ""
     ).replace('<span class="list-price"><span class="price-unit">¥</span>97</span>', "")
-    prices = fields("11728767", one_price)["prices"].value
-    assert isinstance(prices, ForeignPricesValue)
-    assert [(p.label, p.amount, p.role) for p in prices.prices] == [
+
+
+def _unmarked(html: str) -> str:
+    """The capture without the page's discount mark (期間限定割引5%OFF … まで)."""
+    unmarked = re.sub(r'<div class="campaign-info">.*?</div>', "", html, count=1, flags=re.S)
+    assert "期間限定割引" not in unmarked
+    return unmarked
+
+
+def test_one_price_under_a_discount_mark_is_never_the_purchase_basis() -> None:
+    # The owner's rule: the purchase cost is the regular price. With the page's 期間限定割引 mark
+    # still shown and no struck regular price, the ¥92 shown is the discounted price: held.
+    found = fields("11728767", _one_price(body("11728767")))
+    prices = found["prices"]
+    assert prices.status is FieldStatus.REVIEW_REQUIRED and prices.value is None
+    assert prices.evidence[-1].normalized == REGULAR_PRICE_NOT_STATED
+    assert (".campaign-info", "期間限定割引5%OFF（2026/10/15まで）") in [
+        (e.locator, e.observed) for e in prices.evidence
+    ]
+
+
+def test_one_price_with_no_discount_mark_is_the_regular_price() -> None:
+    # No discount marked anywhere: the set's one 税抜 price ¥92 is its regular price,
+    # 92 × 1.08 = 99.36 → ¥100.
+    found = fields("11728767", _unmarked(_one_price(body("11728767"))))
+    prices = found["prices"]
+    assert prices.status is FieldStatus.CONFIRMED
+    assert isinstance(prices.value, ForeignPricesValue)
+    assert [(p.label, p.amount, p.role) for p in prices.value.prices] == [
         ("1セット（1点） 税込（税抜92円＋消費税8%、円未満切上げ）", "100", PriceRole.PURCHASE),
         ("1セット（1点） 税抜", "92", None),
         ("卸単価（66%）", "92", None),
         ("メーカー希望小売価格", "140", PriceRole.LIST),
+    ]
+
+
+def test_sets_under_a_discount_mark_without_a_struck_price_hold_the_options() -> None:
+    # Two sets, each showing one price and no struck price, under the page's 期間限定割引 mark:
+    # neither states its regular price, so prices and options are held naming both sets.
+    one = '<span class="cmp-price"><span class="price-unit">¥</span>276</span>'
+    html = _one_price(_second_set(body("11728767"), one))
+    marked = fields("11728767", html)
+    assert marked["prices"].status is FieldStatus.REVIEW_REQUIRED
+    options = marked["options"]
+    assert options.status is FieldStatus.REVIEW_REQUIRED and options.value is None
+    assert [(e.locator, e.normalized) for e in options.evidence[-2:]] == [
+        ("table.set-list S1 td.maker-wholesale-set-price", REGULAR_PRICE_NOT_STATED),
+        ("table.set-list S2 td.maker-wholesale-set-price", REGULAR_PRICE_NOT_STATED),
+    ]
+    # Without the mark, each one price is its set's regular price: ¥92 → ¥100, ¥276 → 298.08
+    # → ¥299.
+    unmarked = fields("11728767", _unmarked(html))
+    configurations = unmarked["options"].value.configurations  # type: ignore[union-attr]
+    assert [(c.supplier_sku_id, c.unit_price) for c in configurations] == [
+        ("11728767S1", "100"),
+        ("11728767S2", "299"),
     ]
 
 
@@ -652,7 +701,7 @@ def test_the_images_take_the_roles_the_product_block_gives_them() -> None:
 # ---------------------------------------------------------------- the revision and pricing
 
 # ADR-0040 §6: a fresh run over the same capture yields zero diffs. These are the revisions' source
-# fingerprints (ADR-0010 §6) for the captures with no image observed, under superdelivery-3.
+# fingerprints (ADR-0010 §6) for the captures with no image observed, under superdelivery-4.
 SOURCE_FINGERPRINTS = {
     "11728767": "5bc7cef6a9467f30f034f30e969d4c02c99bddf76b31c9e0820c7c957dca829d",
     "12064384": "210afb21cf1fdc06dc7cb79f28f2b3b855ce08b46f77faae0b5792c2b321104c",

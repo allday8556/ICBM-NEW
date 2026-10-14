@@ -41,9 +41,11 @@ one price column whose header names the tax basis, ``価格（税抜）`` or ``�
 - **The regular price.** When a time-limited campaign shows a price struck through beside the
   campaign price (``¥97`` struck, ``¥92`` under 期間限定割引5%OFF … まで), the purchase cost uses
   the struck *regular* price; the campaign price and its end date are recorded beside it, never
-  used. With one price shown, that price is used. A set whose regular price the page does not
-  state (a campaign set of several units whose own cell shows the campaign price alone) is
-  ``REVIEW_REQUIRED`` with ``REGULAR_PRICE_NOT_STATED``.
+  used. With one price shown and no discount marked, that price is used. A set whose regular
+  price the page does not state — one price shown under the page's discount mark
+  (``.campaign-info``), or a campaign set of several units whose own cell shows the campaign
+  price alone — is ``REVIEW_REQUIRED`` with ``REGULAR_PRICE_NOT_STATED``: a discounted price is
+  never the purchase basis.
 - **税抜.** The 税抜 regular price plus the Japanese consumption tax, rounded up to the whole yen,
   is the ``PURCHASE`` price: 8 % when the page marks the product 軽減税率対象, 10 % otherwise
   (``tax.py``, ICBM's versioned constant). Its label says how it was made, and its evidence names
@@ -227,6 +229,9 @@ class SetRow:
     set_price: Stated | None = None
     set_struck: Stated | None = None
     count: int | None = None
+    # The page marks a time-limited discount (``.campaign-info``: 期間限定割引, 初回限定割引 …). The
+    # mark is the product's, so it applies to every set.
+    marked: bool = False
 
     @property
     def number(self) -> str:
@@ -234,22 +239,26 @@ class SetRow:
 
     @property
     def campaign(self) -> bool:
-        """Whether the page shows a struck regular price beside a campaign price for this set."""
-        return self.struck is not None or self.set_struck is not None
+        """Whether a discount applies to this set: a struck regular price beside a campaign price,
+        or the page's own discount mark."""
+        return self.struck is not None or self.set_struck is not None or self.marked
 
     def regular(self) -> Stated | None:
         """The set's regular price as the page states it, or None when it states none.
 
-        With one price shown, that price. With a campaign, the struck price of the set's own cell;
-        for a set of one unit (``1セット（1点）``), the struck unit price is the set's. A set of
-        several units whose own cell shows the campaign price alone states no regular set price.
+        With one price shown and no discount marked, that price. With a campaign, the struck price
+        of the set's own cell; for a set of one unit (``1セット（1点）``), the struck unit price is
+        the set's. A set whose price stands under a discount mark with no struck regular price
+        beside it, or a set of several units whose own cell shows the campaign price alone, states
+        no regular set price: the price shown is the discounted one (the owner's rule, Issue #219
+        ``6164685916``).
         """
         if self.set_price is None:
             return None
         if self.set_struck is not None:
             return self.set_struck
         if self.struck is None:
-            return self.set_price
+            return None if self.marked else self.set_price
         if self.count == 1:
             return Stated(
                 self.set_price.label, self.struck.amount, self.struck.locator, self.struck.observed
@@ -501,7 +510,7 @@ def _prices(
     regular = first_set.regular()
     purchase = _purchase(first_set, basis, rate)
     if regular is None or purchase is None or first_set.set_price is None:
-        # A campaign set of several units whose own cell shows the campaign price alone.
+        # A price under a discount whose regular price the page does not state.
         return _review(
             *observed,
             _evidence(
@@ -590,7 +599,8 @@ def _options(
     # Every set is checked, not only the first: a set under a campaign whose own regular price
     # the page does not state has no purchase price, and its configuration is never recorded
     # without one beside sets that have theirs.
-    unstated = [row for row in sets if row.campaign and row.regular() is None]
+    # (An undisclosed set states no price at all; ``prices`` names why.)
+    unstated = [row for row in sets if row.set_price is not None and row.regular() is None]
     if unstated:
         return _review(
             *evidence,
@@ -901,6 +911,11 @@ def parse_fields(document: DocumentView) -> dict[str, FieldFact]:
     nodes = read(document.body)
     table = first(nodes, SET_TABLE, tag="table")
     sets = [] if table is None else _set_rows(table)
+    # The product's own discount mark applies to every set (the owner's rule: never a discounted
+    # price as the purchase basis).
+    marked = _campaign_words(nodes) is not None
+    for row in sets:
+        row.marked = marked
     header = () if table is None else _header(table)
     numbers = {row.sku[0] for row in sets if row.sku is not None}
     number = next(iter(numbers)) if len(numbers) == 1 else None

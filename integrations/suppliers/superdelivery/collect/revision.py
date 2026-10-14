@@ -22,6 +22,11 @@ The description is stored whole (its evidence still quotes the first 200 charact
 review when it carries URL material; the shipping policy text is whole. Every set is checked for
 its regular price: a campaign set of several units without its own holds the options for review
 (``REGULAR_PRICE_NOT_STATED``), whichever set it is.
+
+``superdelivery-4`` (2026-10-14, the PR #351 re-audit): one price shown is the regular price only
+when the page marks no discount. Under the page's discount mark (``.campaign-info``) with no struck
+regular price beside it, the price shown is the discounted one: ``prices`` and the options are
+``REVIEW_REQUIRED`` (``REGULAR_PRICE_NOT_STATED``), never priced on it.
 """
 
-EXTRACTION_REVISION = "superdelivery-3"
+EXTRACTION_REVISION = "superdelivery-4"
