@@ -502,6 +502,9 @@ v29's `+ 공급처 추가` and its `새 공급처 추가` card open v29's `suppl
   `초안` (DRAFT), `분석 중` (RECON), `사용 중` (ACTIVE), `비활성` (DISABLED). A disabled supplier,
   which CONNECT no longer lists, keeps a card with its chip and no action. `사이트 분석` turns live
   on a `분석 중` card with O3, and `수집 규칙` on a `분석 중` or `사용 중` card with O4 (below).
+  Every onboarded card but a `비활성` one has `비활성화` (O5): it asks once, then `POST
+  …/disable` appends DISABLED — no collection, no registration preparation, and the supplier's
+  egress grant is withdrawn — and the card reads `비활성`.
 - **Server-owned.** Detection, the warnings, the conditions for `RECON` and every state belong to the
   onboarding owner. The page decides none of them and keeps nothing in browser storage.
 
@@ -526,8 +529,19 @@ existing modal language:
   count and addresses) and, for a field not read, the template's own quoted evidence. Below it, the
   unread rows and phrases with the slot a rule proposes (`제안 슬롯`, or `제안 없음`). A structural
   problem shows as `템플릿 수정 필요` with its reason; such a sample is never `확인 가능`.
-- **Progress.** `샘플 n/3 확인 가능`, the current words revision (`w<seq>`), the template revision and
-  the sample count. Verification and `사용 시작` are the next step (O5) and are not on this panel.
+- **Progress.** `샘플 n/3 확인 가능`, `값 확인 n/3`, the current words revision (`w<seq>`), the
+  template revision, the sample count and `사용 시작` (O5, below).
+- **값 확인 (O5).** Under each verifiable sample's values: `위 값이 실제 상품 페이지와 같습니까?` with
+  `값이 맞음` and `값이 틀림` (`POST …/trials/{trial_id}/verification` with `CORRECT` or `WRONG` and
+  the fingerprint of exactly the facts shown). A confirmed sample shows `값 확인함`, a refuted one
+  `값 틀림` (it never proves the site, and a `틀림` stands over any `맞음`). The server refuses a
+  `맞음` on a sample that is not verifiable, a verdict on facts other than those shown, and any
+  verdict on a trial under older words.
+- **사용 시작 (O5).** Enabled only when the server says the site can start (3 distinct samples
+  confirmed under the current words and template revision, every core field read, no structural
+  problem): it asks once (`window.confirm`), then `POST …/activate` moves the supplier to `사용 중`
+  (ACTIVE) through the store's gate, which the database enforces as well, and the screen is drawn
+  again from the server. The ACTIVE row names the verifications as its evidence.
 - **다시 분석.** Enabled when a sample's newest trial ran under older words: `POST …/reanalyse`
   re-reads the stored local captures under the current words and reads nothing from the supplier.
 - **관찰된 호스트.** One table `호스트 | 역할 | 횟수` over the samples: an image or login host the

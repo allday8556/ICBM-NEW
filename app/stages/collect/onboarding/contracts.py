@@ -180,6 +180,9 @@ class TrialView(BaseModel):
     structural: list[str]
     # Every core field read and no structural problem: what O5 may ask the operator to verify.
     verifiable: bool
+    # The operator's verdict on exactly these facts (``CORRECT`` or ``WRONG``; a ``WRONG`` stands
+    # over any ``CORRECT``), or ``None`` before one (§7, slice O5).
+    verdict: str | None = None
 
 
 class StaleSampleView(BaseModel):
@@ -207,6 +210,8 @@ class AnalysisView(BaseModel):
     activation: dict[str, int | str]
     # Samples whose newest trial under the current words is verifiable: "샘플 n/3 확인 가능".
     verifiable_samples: int
+    # 「사용 시작」 is enabled: the site is RECON and the ACTIVE gate is proven (§7).
+    can_activate: bool = False
 
 
 class ReanalysisView(BaseModel):
