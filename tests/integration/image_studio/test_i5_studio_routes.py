@@ -387,6 +387,53 @@ def test_an_incomplete_rendering_records_nothing_and_leaves_the_source_selected(
     assert nothing.json()["error"]["code"] == "IMAGE_STUDIO_NOTHING_INCLUDED"
 
 
+def test_the_callers_language_never_narrows_the_checks_on_apply(
+    client: TestClient,
+    container: Container,
+    config: AppConfig,
+    item: StudioProduct,
+    tmp_path: Path,
+) -> None:
+    """IT-05: a run in Japanese makes every Chinese line SCRIPT_MISMATCH. Claiming Chinese at
+    「적용」 does not lift it: the recorded language is checked as well."""
+    make_ready(container, tmp_path)
+    response = client.post(
+        f"{BASE}/products/{item.group}/translations",
+        json={"images": [item.detail], "source_language": "ja", "actor": OPERATOR},
+        headers=HEADERS,
+    )
+    assert response.status_code == 200, response.json()
+    job_id = str(response.json()["job_id"])
+    wait_until(lambda: container.jobs.get(job_id).state in ("SUCCEEDED", "DEAD"))
+    assert container.jobs.get(job_id).state == "SUCCEEDED"
+    state = client.get(_image(item), params={"source_language": "ja"}).json()
+    regions = {r["region_id"]: r for r in state["regions"]}
+    assert state["candidate"]["status"] == "FRESH"
+    assert regions["r0"]["flags"] == ["SCRIPT_MISMATCH"]
+    saved = client.post(
+        _image(item, "/revisions"),
+        json={
+            "observation_id": state["observation_id"],
+            "source_language": "ja",
+            "items": _draft(state, r0="순수 천연 참기름"),
+            "expected_seq": state["expected_seq"],
+            "actor": OPERATOR,
+        },
+        headers=HEADERS,
+    )
+    assert saved.status_code == 200, saved.json()
+    revision = saved.json()
+    assert revision["candidate_id"] == state["candidate"]["candidate_id"]
+    # Under a Chinese claim alone r0 would carry no flag; it is refused all the same.
+    refused = _apply(client, item, revision["revision_id"], [])
+    assert refused.status_code == 422
+    assert refused.json()["error"]["code"] == "IMAGE_STUDIO_FLAGGED_UNCONFIRMED"
+    assert refused.json()["error"]["details"]["regions"] == ["r0"]
+    assert count(config, "derived_image_derivations") == 0
+    applied = _apply(client, item, revision["revision_id"], ["r0"])
+    assert applied.status_code == 200, applied.json()
+
+
 def test_a_stale_candidate_is_never_offered_as_a_suggestion(
     client: TestClient, container: Container, item: StudioProduct, tmp_path: Path
 ) -> None:

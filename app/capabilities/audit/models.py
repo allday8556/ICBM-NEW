@@ -181,6 +181,10 @@ class AuditEventType(StrEnum):
     # nothing. Ids, hashes, versions, counts and codes only; never OCR text, a translation or
     # image bytes.
     IMAGE_STUDIO_RECORDED = "IMAGE_STUDIO_RECORDED"
+    # ADR-0038 §4, §8: one overseas source product's landed-cost inputs revised — its overseas
+    # shipping and duty rate. The source product, the revision number, both values and the
+    # fingerprint only.
+    OVERSEAS_COST_OVERRIDE_REVISED = "OVERSEAS_COST_OVERRIDE_REVISED"
 
 
 class AuditOutcome(StrEnum):

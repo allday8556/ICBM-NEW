@@ -284,7 +284,10 @@ FX_SNAPSHOTS = "0064_fx_snapshots"
 # ADR-0041 I1: the Image Studio translation owner. Derived-image authoring state, never
 # registration state.
 IMAGE_STUDIO_TRANSLATION = "0065_image_studio_translation"
-SCHEMA_HEAD = IMAGE_STUDIO_TRANSLATION
+# ADR-0038 O2: the landed-cost pins of a source-currency price and each overseas source product's
+# own inputs. Pricing evidence and product inputs, never registration state.
+LANDED_COST = "0066_landed_cost"
+SCHEMA_HEAD = LANDED_COST
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -331,6 +334,7 @@ AFTER_M5 = (
     SOURCE_CURRENCY,
     FX_SNAPSHOTS,
     IMAGE_STUDIO_TRANSLATION,
+    LANDED_COST,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

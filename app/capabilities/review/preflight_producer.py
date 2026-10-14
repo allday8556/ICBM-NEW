@@ -62,10 +62,13 @@ from app.platform.core.errors import AppError, ErrorClass
 from app.platform.db.database import DatabaseWriteReentryError
 from app.stages.products.model import ReadinessStatus
 from app.stages.products.pricing import (
+    FX_STALE,
+    FX_UNAVAILABLE,
     MINIMUM_SALE_PRICE_NOT_APPLIED,
     MINIMUM_SALE_PRICE_NOT_OFFER_BOUND,
     MINIMUM_SALE_PRICE_NOT_POSITIVE,
     MINIMUM_SALE_PRICE_UNRESOLVED,
+    OVERSEAS_SHIPPING_UNSET,
     PURCHASE_PRICE_AMBIGUOUS,
     PURCHASE_PRICE_UNRESOLVED,
     QUANTITY_OFFER_UNRESOLVED,
@@ -158,8 +161,13 @@ M4_PRICING_REVIEWED: Final = frozenset(
         MINIMUM_SALE_PRICE_NOT_OFFER_BOUND,
         QUANTITY_OFFER_UNRESOLVED,
         TARGET_MARGIN_UNREACHABLE,
-        # ADR-0038 §1 (O1a): a revision in a source currency is not priced until O2.
+        # ADR-0038 §1 (O1a): a quantity offer of a revision in a source currency is never priced.
         SOURCE_CURRENCY_UNSUPPORTED,
+        # ADR-0038 §3, §4 (O2): a landed cost without a rate that may price (FX-03), or without
+        # any overseas shipping.
+        FX_STALE,
+        FX_UNAVAILABLE,
+        OVERSEAS_SHIPPING_UNSET,
         # The fallback an M4 layer states when it is not READY but gives no reason.
         ReadinessStatus.REVIEW_REQUIRED.value,
     }

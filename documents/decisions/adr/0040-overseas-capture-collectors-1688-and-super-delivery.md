@@ -50,7 +50,7 @@ Date: 2026-10-14
   - It excludes the header, the member menu, the coupon and point widgets, reviews, and recommendations.
   - It keeps ADR-0019's no-script rule unchanged.
 - **Fields** (ADR-0038 §9.3):
-  - `prices`: JPY. The purchase price is the **税込** price of one set. The 税抜 price, the maker's suggested retail price (メーカー希望小売価格) and the stated wholesale ratio are kept as stated.
+  - `prices`: JPY. The purchase price is the set's **regular 税抜 price plus Japanese consumption tax** (8% when the page marks 軽減税率対象, else 10%, rounded up to the yen; an ICBM-patched constant; Issue #219 `6164685916`). The 税抜 price, a time-limited campaign price, the maker's suggested retail price (メーカー希望小売価格) and the stated wholesale ratio are kept as stated, and the evidence shows the computation.
   - **Undisclosed price.** A page whose price is undisclosed ("卸価格を見る（申請）") has `prices` `REVIEW_REQUIRED` with the reason `PRICE_NOT_DISCLOSED`. Nothing is guessed.
   - `options`: each SD item number of the page (`…S1`, `…S2`, such as a ×18 set) with its own price.
   - `stock`: as stated ("在庫有り" or sold out). A company that keeps no stock count reads as stated.
@@ -106,7 +106,7 @@ The allowlisted paths are under `result.data`.
 | --- | --- | --- |
 | `original_name` | the page title in the DOM | as stated (Chinese) |
 | `prices` | `mainPrice.fields.priceModel` | CNY. `priceDisplayType` `skuPrice`: per-SKU prices. `rangePrice`: the first tier (`beginAmount` 1) is the purchase price |
-| `options` | `Root.fields.dataJson.skuModel.skuProps`, `skuInfoMap` | axes and values as stated. Each SKU's own `discountPrice` (or `price` when none) is its purchase price (ADR-0038 §9.3) |
+| `options` | `Root.fields.dataJson.skuModel.skuProps`, `skuInfoMap` | axes and values as stated. Each SKU's original `price` is its purchase price; a `discountPrice` is kept as a fact (ADR-0038 §9.3 as amended) |
 | `stock` | `skuInfoMap.*.canBookCount` | per SKU, as stated |
 | `quantity_tiers` | `priceModel.currentPrices` when `rangePrice` | each tier as stated |
 | `shipping` | `shippingServices.fields.freightInfo.totalCost`, `location` | CNY freight from the stated ship-from location to the user's receive address (the 배대지). A `FIXED` fee as stated, without the address |
@@ -114,7 +114,7 @@ The allowlisted paths are under `result.data`.
 | `images` | the DOM main gallery | server-fetched (§1) |
 | `minimum_sale_price`, `sales_channels` | not stated on 1688 | `ABSENT` |
 
-- **A promotion price is the price actually paid now** (ADR-0038 §9.3). The line price is kept beside it as a fact.
+- **The original (line) price is the purchase price** (ADR-0038 §9.3 as amended, Issue #219 `6164685916`). A promotion or member price is kept beside it as a fact.
 - **Units.** The unit (套, 件, 个) and the minimum order (`beginAmount`) are kept as stated. A minimum order above one is `REVIEW_REQUIRED`: 구매대행 sells one unit.
 
 ## 5. Currency
@@ -139,7 +139,7 @@ The allowlisted paths are under `result.data`.
 - **OC-04** A mismatch in the embedded data refuses that member fail-closed. Its fields are `REVIEW_REQUIRED`, never inferred from the DOM's selected option.
 - **OC-05** The member's receive address and identity never leave the browser. The allowlist excludes them, and the server refuses a member that holds any path outside it.
 - **OC-06** Only allowlisted paths are read, and only canonical facts and evidence are stored.
-- **OC-07** A price the page does not disclose is `REVIEW_REQUIRED`. The purchase price is the price actually paid for one unit, in the source currency.
+- **OC-07** A price the page does not disclose is `REVIEW_REQUIRED`. The purchase price is what one unit costs at the regular price, in the source currency. Super Delivery adds the consumption tax its page's mark decides, and no discount sets the cost.
 - **OC-08** A company's terms are kept as its words. They are not a gate.
 
 ## Slices

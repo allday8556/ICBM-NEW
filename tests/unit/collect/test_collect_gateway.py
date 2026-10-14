@@ -452,6 +452,39 @@ def test_the_extension_envelope_is_a_profile_the_gateway_never_sends_for() -> No
     assert site.requests == [] and budget.reserved == []
 
 
+def test_a_capture_only_profile_has_no_document_the_gateway_reads() -> None:
+    # ADR-0040 §1 (OC-01): a supplier read only from pages the user captured declares no
+    # direct-URL read. The gateway reads none of its documents — no product page and no policy
+    # document — before a target is judged or a request reserved; its images are still fetched.
+    captured_only = _profile(direct_url_reads=False)
+    site = Site(httpx.Response(200, content=PNG, headers={"content-type": "image/png"}))
+    budget = Budget()
+    gateway = _gateway(site)
+    for read in (
+        lambda: gateway.read_document(
+            captured_only, PRODUCT, kind=ReadKind.PRODUCT_READ, budget=budget
+        ),
+        lambda: gateway.read_document(
+            captured_only,
+            "https://supplier.test/robots.txt",
+            kind=ReadKind.POLICY_READ,
+            budget=budget,
+        ),
+        lambda: gateway.read_discovered_policy(
+            captured_only, "https://supplier.test/policy.html", budget=budget
+        ),
+    ):
+        with pytest.raises(PolicyBlockedError) as refused:
+            read()
+        assert refused.value.code == "COLLECT_DIRECT_URL_NOT_DECLARED"
+    assert site.requests == [] and budget.reserved == []
+    image = gateway.read_image(captured_only, "https://img.supplier.test/a.png", budget=budget)
+    assert image.status == 200 and image.content == PNG
+    assert budget.reserved == [(ReadKind.IMAGE_REQUEST, "img.supplier.test")]
+    # Every profile that does not say otherwise keeps its direct-URL read.
+    assert _profile().direct_url_reads is True
+
+
 # ---------------------------------------------------------------- an image host's own robots
 # Issue #52 ruling 5699776908 §3: an image host is a distinct origin, so its own rules are read
 # before anything is requested from it — and that one document is all it ever answers for.

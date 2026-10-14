@@ -84,6 +84,8 @@ LATER_TABLES = frozenset(
         "image_translation_candidates",
         "image_edit_revisions",
         "image_edit_current",
+        # ADR-0038 §4, §8 (0066): each overseas source product's landed-cost inputs.
+        "overseas_cost_override_revisions",
     }
 )
 TOP: dict[str, Any] = {"blocks": [{"heading": "당일발송", "lines": ["12시 이전 주문시 당일발송"]}]}

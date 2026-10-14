@@ -123,6 +123,8 @@ COLLECT_POLICY = RetryPolicy(max_attempts=3, base_delay_s=90.0, factor=2.0, max_
 # How many recent runs the COLLECT screen may ask for at once (Gate 1 G1-E).
 RECENT_RUNS_DEFAULT = 10
 RECENT_RUNS_MAX = 50
+# ADR-0040 §1 (OC-01): a supplier read only from pages the user captured has no direct-URL run.
+DIRECT_URL_NOT_DECLARED = "COLLECT_DIRECT_URL_NOT_DECLARED"
 
 # What a supplier's own page role means in the revision's canonical vocabulary. A page's primary
 # image is the product's representative one; everything else the role rules recognise as product
@@ -368,14 +370,26 @@ class ProductCollectionService:
             key for key in self._collections if self._collectable is None or self._collectable(key)
         )
 
+    def submittable_supplier_keys(self) -> list[str]:
+        """The suppliers a product URL may be submitted for now: those that can be collected and
+        whose profile declares a direct-URL read (ADR-0040 §1). A supplier read only from captured
+        pages is collected through the extension alone."""
+        return [
+            key
+            for key in self.supplier_keys()
+            if self._collections[key].collection.profile.direct_url_reads
+        ]
+
     def submit(self, supplier_key: str, product_url: str) -> SubmittedCollection:
         """Accept exactly one product URL and return the run's durable identity.
 
         The URL is checked against the supplier's own profile here, so an unacceptable target is
-        refused before a job exists rather than becoming a failed run.
+        refused before a job exists rather than becoming a failed run. A supplier read only from
+        pages the user captured (ADR-0040 §1, OC-01) is refused here too, before anything else.
         """
         registered = self._registered(supplier_key)
         profile = registered.collection.profile
+        _require_direct_url(profile)
         try:
             # The same rule the transport applies, so a URL the profile already knows is
             # unacceptable — a foreign host, a listing path, a query key that is not explicitly
@@ -572,6 +586,7 @@ class ProductCollectionService:
         registered = self._registered(supplier_key)
         collection = registered.collection
         profile = collection.profile
+        _require_direct_url(profile)
         budget = RunBudget(
             max_product_reads=1, max_image_requests=profile.limits.max_image_requests_per_run
         )
@@ -1010,6 +1025,17 @@ def require_collectable(collectable: Callable[[str], bool] | None, supplier_key:
             SUPPLIER_NOT_ACTIVE,
             "this supplier is not ACTIVE: only its trial reads run until it is approved",
             details={"supplier_key": supplier_key},
+        )
+
+
+def _require_direct_url(profile: CollectionProfile) -> None:
+    """ADR-0040 §1 (OC-01): a supplier read only from pages the user captured has no direct-URL
+    run. It is refused before a job, a reservation or a read exists."""
+    if not profile.direct_url_reads:
+        raise PolicyBlockedError(
+            DIRECT_URL_NOT_DECLARED,
+            "this supplier is read only from pages the user captured with the extension",
+            details={"supplier_key": profile.supplier.supplier_key},
         )
 
 
