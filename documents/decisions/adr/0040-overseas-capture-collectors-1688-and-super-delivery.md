@@ -78,21 +78,24 @@ window.context=(function(b,d){…})(window.contextPath,{ … JSON … });
   - the **argument marker** (`})(window.contextPath,`);
   - the **terminator** (`);` at the end of the script);
   - a **byte bound**.
-- **What the extension sends.** It finds **exactly one** inline script, with no `src`, that matches the prefix. It sends the script's text, and nothing else of any script.
-  - Zero or more than one match: nothing is sent for the member, and the capture says so.
-  - It never runs the text and never reads a JS global.
+- **The scope cut happens in the browser** (ADR-0019 §6: scope first). The extension:
+  - finds **exactly one** inline script, with no `src`, that matches the prefix. With zero or more than one match, nothing is sent for the member, and the capture says so;
+  - cuts the argument between the marker and the terminator, under the byte bound;
+  - parses it with `JSON.parse`, which is a data parser, under a depth bound. It never runs the script and never reads a JS global;
+  - **projects** the parsed document onto the allowlist the policy declares: exactly the paths of §4, as listed there. Nothing outside the allowlist leaves the browser.
+    - The member's receive address (`freightInfo.recieveAddress`, `receiveAddressId`, the area codes) is never on the allowlist.
+    - No other account or member payload is on it either (ADR-0019 AC-07).
+  - sends only the projection, as the `embedded_data` member of the capture. It never sends the script's text.
+- **Any mismatch** sends no member, fail-closed, so the fields it would have supplied are `REVIEW_REQUIRED`. A mismatch is:
+  - the prefix, the marker or a trailing byte;
+  - invalid JSON;
+  - an over-bound size or depth;
+  - an allowlisted path whose value has the wrong shape.
 
-**What the server does:**
-- It cuts the argument between the marker and the terminator, and parses it with a **strict JSON parser** under the byte bound and a depth bound. It never evaluates it.
-- Any mismatch refuses the member, fail-closed, so the fields it would have supplied are `REVIEW_REQUIRED`:
-  - the prefix;
-  - the marker;
-  - a trailing byte;
-  - an invalid or oversized JSON document.
-- The security gate (ADR-0019 §6.1) runs over the parsed strings as it does over DOM text.
-  - A secret or the member's own identity refuses the capture.
-  - **The receive address** (`freightInfo.recieveAddress`, `receiveAddressId`, and the area codes) is the member's own and is dropped before extraction. It is never stored.
-- The extractor reads **only the allowlisted paths** of §4. The parsed document and its text are dropped once the facts are written. Only canonical facts and their evidence are stored (§6.1).
+**What the server does** (it never trusts the browser's cut alone, ADR-0019 §6):
+- It refuses a member that holds any key or path outside the allowlist, or any value of the wrong type. The server's allowlist is the same reviewed list, digested into the policy.
+- The security gate (ADR-0019 §6.1) runs over every string in the member as it does over DOM text. A secret or the member's own identity refuses the capture.
+- The extractor reads the member's allowlisted paths (§4). The member is dropped once the facts are written. Only canonical facts and their evidence are stored (§6.1).
 - **Evidence.** A fact from the member carries evidence kind `EMBEDDED_DATA` with its JSON path as the locator. This is one new `EvidenceKind`, authorized here.
 
 ## 4. 1688 fields
@@ -132,9 +135,9 @@ The allowlisted paths are under `result.data`.
 
 - **OC-01** Neither supplier is read except by a page the user captured. There is no direct read, list queue or crawl.
 - **OC-02** ICBM holds no credential for either site.
-- **OC-03** The only script content any capture carries is 1688's one declared embedded-data member. It is parsed as strict JSON and never executed.
+- **OC-03** No capture carries script text. 1688's one declared embedded-data member is a browser-side projection, onto the reviewed allowlist, of one script's JSON argument. That argument is parsed as data and never executed.
 - **OC-04** A mismatch in the embedded data refuses that member fail-closed. Its fields are `REVIEW_REQUIRED`, never inferred from the DOM's selected option.
-- **OC-05** The member's receive address and identity are never stored.
+- **OC-05** The member's receive address and identity never leave the browser. The allowlist excludes them, and the server refuses a member that holds any path outside it.
 - **OC-06** Only allowlisted paths are read, and only canonical facts and evidence are stored.
 - **OC-07** A price the page does not disclose is `REVIEW_REQUIRED`. The purchase price is the price actually paid for one unit, in the source currency.
 - **OC-08** A company's terms are kept as its words. They are not a gate.
