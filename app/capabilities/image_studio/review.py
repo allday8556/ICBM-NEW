@@ -18,8 +18,12 @@ revision, as the M4 image owner reads it. This owner decides nothing for the ope
   against the sequence it was read at. Each included region's text is the candidate's suggestion
   (``AI_SUGGESTION``) only when it is that suggestion unchanged, and the operator's
   (``OPERATOR_CONFIRMED``) otherwise; its style is the one matched from the source (§5).
-- **「적용」** (``apply``) renders exactly the current revision. Every included flagged region must
-  be confirmed one by one in the request (IT-05), the completeness verdict must pass, and only
+- **「적용」** (``apply``) renders exactly the current revision. A complete rendering is read again
+  by the OCR engine bound now for the source script it still holds (the leftover-text QA,
+  ``leftover``; I6): an included region with source text left is flagged
+  ``LEFTOVER_SOURCE_TEXT``. With no engine bound the QA cannot run, so nothing is applied. Every
+  included flagged region must be confirmed one by one in the request (IT-05) — a refusal names
+  the regions and their codes only — the completeness verdict must pass, and only
   then the derived artifact ``image-translate/v1`` is recorded by the M4 image owner
   (``ProductImageService.record_completed_derivation``). Its transformation spec names only the
   edit revision id and its content fingerprint (``MAX_SPEC_BYTES``). The rendering is a pure
@@ -52,7 +56,12 @@ from app.capabilities.image_studio.checks import (
     NUMBER_UNIT_DROPPED,
     region_flags,
 )
-from app.capabilities.image_studio.contracts import OcrRegion, check_language
+from app.capabilities.image_studio.contracts import (
+    IMAGE_OCR_NOT_CONFIGURED,
+    OcrRegion,
+    check_language,
+)
+from app.capabilities.image_studio.leftover import LEFTOVER_SOURCE_TEXT, find_leftover
 from app.capabilities.image_studio.renderer import (
     COMPLEX_BACKGROUND,
     LAYOUT_OVERFLOW,
@@ -82,7 +91,7 @@ from app.capabilities.image_studio.translation import (
     SourceImages,
 )
 from app.platform.core.clock import Clock
-from app.platform.core.errors import InputValidationError, NotFoundError
+from app.platform.core.errors import InputValidationError, NotFoundError, PolicyBlockedError
 from app.stages.products.image_model import (
     CompletedDerivation,
     DerivationInput,
@@ -112,14 +121,16 @@ RENDER_CAPABILITY: Final = "IMAGE_TEXT_TRANSLATE_RENDER"
 FONT_HASHES: Final = {FONT_FILE.name: FONT_SHA256}
 
 SCRIPT_MISMATCH: Final = "SCRIPT_MISMATCH"
-# A region's flags in the order the panel names them. The first five need the region's own
+# A region's flags in the order the panel names them. The first six need the region's own
 # confirmation (§6, IT-05); the last two fail the completeness verdict and are never applied.
+# ``LEFTOVER_SOURCE_TEXT`` is found only by 「적용」, on the rendered image (I6).
 CONFIRM_FLAGS: Final = (
     LOW_CONFIDENCE,
     NUMBER_UNIT_DROPPED,
     CONTACT_DETAIL,
     SCRIPT_MISMATCH,
     COMPLEX_BACKGROUND,
+    LEFTOVER_SOURCE_TEXT,
 )
 FLAG_ORDER: Final = (*CONFIRM_FLAGS, LAYOUT_OVERFLOW, MISSING_GLYPHS)
 
@@ -523,22 +534,41 @@ class ImageStudioReviewService:
             raise InputValidationError(
                 IMAGE_STUDIO_NOTHING_INCLUDED, "an applied edit translates at least one region"
             )
+        if self._translation.ocr_identity() is None:
+            # The leftover-text QA reads the rendering again: with no engine it cannot run (§6).
+            raise PolicyBlockedError(
+                IMAGE_OCR_NOT_CONFIGURED, "no OCR engine is installed to check the rendering"
+            )
         source = self._sources.read(sha256)
         styles = _matched_styles(source, observation)
         result = render(source, _render_regions(observation, items, styles))
+        included = frozenset(rid for rid, item in items.items() if item.include)
+        leftover = None
+        qa_engine = None
+        if result.completeness.complete:
+            identity, reread = self._translation.read_rendered(result.png)
+            leftover = find_leftover(observation.regions, included, reread)
+            qa_engine = identity.engine_id
         flagged = {
-            region.region_id: tuple(
-                flag
-                for flag in _merged(
-                    review_flags(region, source_language, items[region.region_id].text),
-                    result,
-                    region.region_id,
-                    True,
+            region.region_id: _ordered(
+                {
+                    flag
+                    for flag in _merged(
+                        review_flags(region, source_language, items[region.region_id].text),
+                        result,
+                        region.region_id,
+                        True,
+                    )
+                    if flag in CONFIRM_FLAGS
+                }
+                | (
+                    {LEFTOVER_SOURCE_TEXT}
+                    if leftover is not None and region.region_id in leftover.regions
+                    else set()
                 )
-                if flag in CONFIRM_FLAGS
             )
             for region in observation.regions
-            if items[region.region_id].include
+            if region.region_id in included
         }
         unconfirmed = sorted(
             rid for rid, flags in flagged.items() if flags and rid not in confirmed
@@ -547,7 +577,11 @@ class ImageStudioReviewService:
             raise InputValidationError(
                 IMAGE_STUDIO_FLAGGED_UNCONFIRMED,
                 "a flagged region is applied only with its own confirmation",
-                details={"regions": unconfirmed},
+                # Region ids and flag codes only: never the text (§8).
+                details={
+                    "regions": unconfirmed,
+                    "flags": {rid: list(flagged[rid]) for rid in unconfirmed},
+                },
             )
         if not result.completeness.complete:
             raise InputValidationError(
@@ -600,6 +634,13 @@ class ImageStudioReviewService:
                     "confirmed_flagged": [
                         [rid, list(flags)] for rid, flags in flagged.items() if flags
                     ],
+                    # The leftover-text QA of the rendering (I6), as ids and counts.
+                    "leftover_qa": {
+                        "engine_id": qa_engine,
+                        "regions": [] if leftover is None else list(leftover.regions),
+                        "lines": 0 if leftover is None else leftover.lines,
+                        "unattributed": 0 if leftover is None else leftover.unattributed,
+                    },
                 },
                 correlation_id=correlation_id,
             )

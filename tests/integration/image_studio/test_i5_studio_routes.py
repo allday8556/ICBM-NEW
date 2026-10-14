@@ -262,7 +262,10 @@ def test_run_review_preview_save_apply_qa_select_and_revert(
     refused = _apply(client, item, second["revision_id"], [])
     assert refused.status_code == 422
     assert refused.json()["error"]["code"] == "IMAGE_STUDIO_FLAGGED_UNCONFIRMED"
-    assert refused.json()["error"]["details"] == {"regions": ["r3"]}
+    assert refused.json()["error"]["details"] == {
+        "regions": ["r3"],
+        "flags": {"r3": ["LOW_CONFIDENCE"]},
+    }
     assert count(config, "derived_image_derivations") == 0
     # An older revision is never applied.
     stale = _apply(client, item, revision["revision_id"], ["r3"])
@@ -343,9 +346,10 @@ def test_run_review_preview_save_apply_qa_select_and_revert(
     assert nothing.status_code == 409
     assert nothing.json()["error"]["code"] == "IMAGE_STUDIO_NOTHING_TO_REVERT"
 
-    # The source was read, never written (IT-01); one OCR reading of it (D4: one request).
+    # The source was read, never written (IT-01); one OCR reading of it (D4: one request). Every
+    # other reading is the leftover-text QA's of a rendering (I6).
     _source_untouched(config, item.detail)
-    assert len(ocr.reads) == 1
+    assert ocr.reads_of(item.detail) == 1
     # No OCR text and no Korean text in an audit row or a log record (§8).
     dump = _dump(config)
     assert not [t for t in TEXTS if t in dump]

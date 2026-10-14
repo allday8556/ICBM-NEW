@@ -40,9 +40,12 @@ from app.capabilities.audit.models import AuditEventType, AuditOutcome
 from app.capabilities.audit.service import AuditEntry, AuditLog
 from app.capabilities.image_studio.checks import region_flags
 from app.capabilities.image_studio.contracts import (
+    IMAGE_OCR_NOT_CONFIGURED,
     MAX_IMAGES_PER_RUN,
     OUTPUT_SCHEMA_VERSION,
+    OcrIdentity,
     OcrProvider,
+    OcrRegion,
     SentRegion,
     TranslationComposer,
     TranslationInputs,
@@ -424,6 +427,18 @@ class ImageTranslationService:
         or never read by it). Nothing is read here."""
         identity = self._ocr.identity()
         return None if identity is None else self._store.observation(identity.key(source_sha256))
+
+    def ocr_identity(self) -> OcrIdentity | None:
+        """The OCR engine bound now, or ``None`` when none is installed."""
+        return self._ocr.identity()
+
+    def read_rendered(self, image: bytes) -> tuple[OcrIdentity, tuple[OcrRegion, ...]]:
+        """The leftover-text QA's reading of a rendered image (I6), by the OCR engine bound now.
+        Nothing is recorded: a rendering is no source, and its reading is no observation."""
+        identity = self._ocr.identity()
+        if identity is None:
+            raise PolicyBlockedError(IMAGE_OCR_NOT_CONFIGURED, "no OCR engine is installed")
+        return identity, checked_regions(self._ocr.read(image))
 
     def current_candidate(
         self, observation: ObservationRecord, source_language: str

@@ -11,7 +11,9 @@
 // stateless preview and the selection. It never judges a region itself. A run starts only on the
 // operator's 「번역 시작」 for the images ticked (D4, at most 30). 「모두 적용」 includes every
 // unflagged region and never a flagged one; a flagged region needs its own 「확인함」 before
-// 「적용」. 「적용」 saves the edit, renders it and records the translated image (the M4 image owner);
+// 「적용」. 「적용」 saves the edit, renders it, reads the rendering again for source text left over
+// (I6: a refusal names such a region `원문 글자 남음`, which then needs its own 「확인함」) and
+// records the translated image (the M4 image owner);
 // 「확인 완료」 records the operator's PASS on exactly that image and then uses it in place of the
 // source (USE_DERIVED); 「되돌리기」 uses the source again. Nothing is deleted.
 
@@ -40,16 +42,19 @@ const FLAG_COPY = {
   CONTACT_DETAIL: ['연락처', 'warn'],
   SCRIPT_MISMATCH: ['다른 언어', 'warn'],
   COMPLEX_BACKGROUND: ['복잡한 배경', 'warn'],
+  LEFTOVER_SOURCE_TEXT: ['원문 글자 남음', 'warn'],
   LAYOUT_OVERFLOW: ['칸에 넘침', 'bad'],
   MISSING_GLYPHS: ['그릴 수 없는 글자', 'bad'],
 };
-// The flags a region is confirmed for one by one (IT-05); the last two block 「적용」 outright.
-const CONFIRM_FLAGS = new Set(['LOW_CONFIDENCE', 'NUMBER_UNIT_DROPPED', 'CONTACT_DETAIL', 'SCRIPT_MISMATCH', 'COMPLEX_BACKGROUND']);
+// The flags a region is confirmed for one by one (IT-05); the other two block 「적용」 outright.
+// LEFTOVER_SOURCE_TEXT is found only by 「적용」 reading the rendered image again (I6).
+const CONFIRM_FLAGS = new Set(['LOW_CONFIDENCE', 'NUMBER_UNIT_DROPPED', 'CONTACT_DETAIL', 'SCRIPT_MISMATCH', 'COMPLEX_BACKGROUND', 'LEFTOVER_SOURCE_TEXT']);
 const STALE_COPY = { input: '입력', prompt: '프롬프트', policy: '정책', provider: 'AI 공급자', schema: '결과 형식' };
 const ERROR_COPY = {
   IMAGE_TRANSLATE_NOT_CONFIGURED: '이미지 번역이 준비되지 않았습니다.',
   IMAGE_EDIT_MOVED: '다른 곳에서 먼저 저장했습니다. 다시 불러온 뒤 적용하세요.',
   IMAGE_STUDIO_FLAGGED_UNCONFIRMED: '확인이 필요한 영역을 하나씩 확인해야 적용할 수 있습니다.',
+  IMAGE_OCR_NOT_CONFIGURED: 'OCR 엔진이 없어 번역본에 남은 원문 글자를 확인할 수 없습니다.',
   IMAGE_STUDIO_RENDER_INCOMPLETE: '번역문이 칸에 다 들어가지 않았습니다. 문구를 줄이세요.',
   IMAGE_STUDIO_NOTHING_INCLUDED: '번역을 적용할 영역이 없습니다.',
   IMAGE_STUDIO_QA_REQUIRED: '번역본을 확인한 뒤에 사용할 수 있습니다.',
@@ -241,6 +246,8 @@ export function openStudio(unit, { scope, languages, max }) {
         erase: edit?.erase && edit.erase !== 'NONE' ? edit.erase : region.default_erase,
         confirmed: false,
         flags: region.flags,
+        // Flags 「적용」 found on the rendered image (I6): kept until the review reloads.
+        found: [],
       };
     });
     let edit = state.edit;
@@ -268,6 +275,23 @@ export function openStudio(unit, { scope, languages, max }) {
 
     const flagged = (row) => row.flags.some((flag) => CONFIRM_FLAGS.has(flag));
     const blocked = (row) => row.flags.some((flag) => !CONFIRM_FLAGS.has(flag));
+
+    function withFound(flags, more) {
+      return [...flags, ...more.filter((flag) => !flags.includes(flag))];
+    }
+
+    // A refusal of 「적용」 names each unconfirmed region with its codes; the panel shows the codes
+    // only the rendering revealed (LEFTOVER_SOURCE_TEXT) and asks for that region's 「확인함」.
+    function showRefusedFlags(error) {
+      const named = error instanceof ApiError && error.error?.code === 'IMAGE_STUDIO_FLAGGED_UNCONFIRMED' ? error.error.details?.flags : null;
+      if (!named) return;
+      for (const row of rows) {
+        const more = (named[row.region.region_id] ?? []).filter((flag) => !row.flags.includes(flag));
+        row.found = withFound(row.found, more);
+        row.flags = withFound(row.flags, more);
+      }
+      repaint();
+    }
 
     function draft() {
       return rows.map((row) => ({ region_id: row.region.region_id, include: row.include, text: row.text || null, erase: row.erase }));
@@ -371,7 +395,7 @@ export function openStudio(unit, { scope, languages, max }) {
         const found = JSON.parse(headers.get('X-Image-Studio-Review') ?? '{}');
         previewImage.src = await blobToDataUrl(blob);
         previewImage.hidden = false;
-        for (const row of rows) row.flags = found.flags?.[row.region.region_id] ?? row.flags;
+        for (const row of rows) row.flags = withFound(found.flags?.[row.region.region_id] ?? row.flags, row.found);
         previewOk = Boolean(found.complete);
         previewState.className = previewOk ? 'chip good' : 'chip bad';
         previewState.textContent = previewOk ? '미리보기 · 완전함' : '미리보기 · 넘치거나 그릴 수 없는 글자가 있습니다';
@@ -426,6 +450,7 @@ export function openStudio(unit, { scope, languages, max }) {
         showQa(applied);
         why.textContent = '번역본을 만들었습니다. 확인한 뒤 「확인 완료」를 누르세요.';
       } catch (error) {
+        showRefusedFlags(error);
         why.textContent = errorText(error);
         toast('적용하지 못했습니다', errorText(error));
       } finally {

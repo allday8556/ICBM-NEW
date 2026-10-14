@@ -391,7 +391,7 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
 - **Edit mode is read-only.** No contract yet edits a registered listing on the marketplace. `상품수정` shows the registered unit's contents and says so. A unit with a Snapshot or an Intent is never authored in the editor.
 - **The register page is unchanged.** Every section the Gate 3 surface reads stays on `#/register`.
 
-### 상품 편집기 › 이미지 자동번역 (ADR-0041 I5)
+### 상품 편집기 › 이미지 자동번역 (ADR-0041 I5, I6)
 
 - **Two buttons, one panel.** `✨ 이미지 자동번역` sits in ② 대표이미지's bulk bar (the images the operator ticks in the panel, any role, D3) and in ⑤ 상세페이지 (the panel opens with the Item's detail images ticked). Both open the same Image Studio panel (`components/image-studio.js`) for the unit's Items.
 - **Live only when READY.** The buttons read `GET /api/v1/image-studio/capability`. While it reads `NOT_CONFIGURED` they keep their place as inert 준비 중 placeholders (`data-ai-placeholder`), send nothing, and their tooltip names what is missing: no OCR engine (`NoOcrProvider`, until I7), no translation task, or no AI provider (an approved CLIProxyAPI profile with its data-transfer approval). Production reads `NOT_CONFIGURED`. On a unit with a Snapshot or an Intent they stay inert too.
@@ -399,9 +399,9 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
 - **One image's review.** `검토` opens it:
   - the original and the live preview side by side (a stateless `POST …/preview` PNG; nothing is stored), with `미리보기 · 완전함` or what overflowed;
   - the candidate's state: `AI 번역 제안 · 최신`, or `제안이 최신이 아님 · <what changed>` with no suggestion offered, or `번역 없음`;
-  - one row per region: its id, the source text, the editable Korean text, the confidence, the flag badges (`인식 신뢰도 낮음`, `숫자 · 단위 빠짐`, `연락처`, `다른 언어`, `복잡한 배경`, `칸에 넘침`, `그릴 수 없는 글자`), `번역 적용` and, on a flagged row, `확인함`.
+  - one row per region: its id, the source text, the editable Korean text, the confidence, the flag badges (`인식 신뢰도 낮음`, `숫자 · 단위 빠짐`, `연락처`, `다른 언어`, `복잡한 배경`, `원문 글자 남음`, `칸에 넘침`, `그릴 수 없는 글자`), `번역 적용` and, on a flagged row, `확인함`.
 - **Defaults and confirmation.** Every row starts as `원문 유지`. `모두 적용` includes every unflagged row with a text and never a flagged one: a contact detail and a complex background stay kept by default. A flagged row included needs its own `확인함`. `적용` stays disabled, saying which region still needs it, until every included flagged row is confirmed and the preview is complete. The server checks the same again.
-- **적용 → 확인 완료.** `적용` saves the edit revision against the sequence it read, renders it and records the translated image through the M4 image owner. The panel then shows that exact image and `확인 완료`, which records the operator's PASS on its SHA-256 and only then uses it in place of the source (`USE_DERIVED`, operator origin); every other image keeps its decision and place. `사용 중인 번역본` shows the image in use.
+- **적용 → 확인 완료.** `적용` saves the edit revision against the sequence it read, renders it, reads the rendering again for source text left over (I6) and records the translated image through the M4 image owner. When the rendering still holds Chinese or Japanese text of an included region (a box the OCR read too tight), nothing is recorded: the panel marks that row `원문 글자 남음`, shows its `확인함`, and keeps `적용` disabled, naming the region, until it is confirmed; the mark stays on the row until the review is reloaded. With no OCR engine the check cannot run and `적용` is refused. The panel then shows that exact image and `확인 완료`, which records the operator's PASS on its SHA-256 and only then uses it in place of the source (`USE_DERIVED`, operator origin); every other image keeps its decision and place. `사용 중인 번역본` shows the image in use.
 - **되돌리기.** It uses the source image again (`USE_SOURCE`). Nothing is deleted.
 - **Layout.** Neither the screen nor the panel scrolls sideways at 1920×1080 or 390×844; on a narrow screen the original and the preview, and each region row, stack.
 

@@ -174,6 +174,12 @@ image owner; the operator's QA verdict, the `USE_DERIVED` selection and 「되�
 behind the editor's two 「이미지 자동번역」 buttons, the shared test support
 `tests/support/image_studio_support.py`, and one API and one UI integration suite. Production
 still reads `NOT_CONFIGURED`, so both buttons stay inert 준비 중 placeholders; no migration.
+ADR-0041 I6 added `image_studio/leftover.py`, the leftover-text QA of 「적용」: the rendering is
+read again by the bound OCR engine, and a Chinese or Japanese line left on or just past an
+included region's box flags it `LEFTOVER_SOURCE_TEXT`, to be confirmed on its own (with no engine
+「적용」 is refused). One API, one UI and one unit suite, which also prove a translated detail image
+over the upload threshold reaching the fake SmartStore as its `smartstore-upload-fit/v1` variant
+with the translation as its derived parent, through the existing owners; no migration.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -227,8 +233,8 @@ customer or financial data, and grant no provider call or LIVE authority.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 401 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 84 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
+| `app/` | 402 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 85 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
 | `app/interface/` | 32 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 95 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 185 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
@@ -253,13 +259,13 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `integrations/` | 96 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 44 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 413 | tests |
+| `tests/` | 416 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 177 | integration tests by runtime owner |
+| `tests/integration/` | 179 | integration tests by runtime owner |
 | `tests/support/` | 17 | shared test support |
-| `tests/unit/` | 151 | unit tests by runtime owner |
+| `tests/unit/` | 152 | unit tests by runtime owner |
 | `ui/` | 76 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 67 | the served web client |
