@@ -54,15 +54,19 @@ def test_the_manifest_is_exactly_the_reviewed_one() -> None:
     assert '"minimum_chrome_version": "114"' in _read(EXTENSION / "manifest.json")
     assert manifest["manifest_version"] == 3
     # Ruling B-11: the reviewed supplier hosts and the loopback, and nothing else. ADR-0030 PT-11:
-    # the supplier hosts are exactly KM통상's and each configured site's storefront host.
+    # the supplier hosts are exactly the packaged suppliers' (KM통상's, and 슈퍼딜리버리's product
+    # host, ADR-0040 §1) and each configured site's storefront host.
     from integrations.suppliers.registry import SITES
+    from integrations.suppliers.sites import PACKAGED_HOSTS
 
     sites = sorted(f"https://{site.config.storefront_host}/*" for site in SITES.values())
     assert manifest["host_permissions"] == [
         "https://kmretail.co.kr/*",
+        "https://www.superdelivery.com/*",
         *sites,
         "http://127.0.0.1/*",
     ]
+    assert {"kmretail.co.kr", "www.superdelivery.com"} == PACKAGED_HOSTS
     # No cookie, request, download, history or tab-content reach.
     assert manifest["permissions"] == ["scripting", "sidePanel", "storage"]
     assert "optional_permissions" not in manifest and "optional_host_permissions" not in manifest

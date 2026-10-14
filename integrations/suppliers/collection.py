@@ -120,6 +120,11 @@ class CollectionProfile:
     transport: SupplierTransport = SupplierTransport.HTTP
     # The list queue's bounds (ADR-0019 §8.1). None is no list queue at all, never a default one.
     queue_limits: QueueLimits | None = None
+    # ADR-0040 §1 (OC-01): whether the server may read this supplier's product page from a URL the
+    # operator gives (the DIRECT_URL transport, ADR-0019 §1). A supplier read only from pages the
+    # user captured declares False: a submit refuses before any job exists, and the policed gateway
+    # refuses to read any of its documents. Its images are still the server's own fetch (§7).
+    direct_url_reads: bool = True
 
     def __post_init__(self) -> None:
         if not self.product_path.startswith("/"):

@@ -232,8 +232,16 @@ from integrations.suppliers.extraction import supplier_manifest
 from integrations.suppliers.kmretail import PROFILE as KM_PROFILE
 from integrations.suppliers.kmretail.collect.images import OG_IMAGE_RULE as KM_OG_IMAGE_RULE
 from integrations.suppliers.kmretail.collect.images import ROLE_RULES as KM_ROLE_RULES
-from integrations.suppliers.registry import COLLECTIONS, SITE_PROBLEMS, SITES, SUPPLIERS
-from integrations.suppliers.sites import PACKAGED_HOSTS, capture_policy_bytes
+from integrations.suppliers.registry import (
+    COLLECTIONS,
+    SITE_PROBLEMS,
+    SITES,
+    SUPPLIERS,
+    repository_active,
+)
+from integrations.suppliers.sites import PACKAGED_HOSTS, PACKAGED_SUPPLIERS, capture_policy_bytes
+from integrations.suppliers.superdelivery import PROFILE as SD_PROFILE
+from integrations.suppliers.superdelivery.collect.images import ROLE_RULES as SD_ROLE_RULES
 from integrations.suppliers.transport.collection import DeferredCollectionGateway
 from integrations.suppliers.transport.gateway import (
     PolicedPublicReader,
@@ -424,6 +432,10 @@ def supplier_image_roles() -> dict[str, dict[str, ImageSlot]]:
             ((rule.rule_id, rule.role.value) for rule in (*KM_ROLE_RULES, KM_OG_IMAGE_RULE)),
             slot_of,
         ),
+        # ADR-0040 §1: 슈퍼딜리버리's own rules.
+        SD_PROFILE.supplier_key: slot_table(
+            ((rule.rule_id, rule.role.value) for rule in SD_ROLE_RULES), slot_of
+        ),
         # ADR-0030 §6: a site's rule names are its template's.
         **{key: slot_table(site.template.role_table, slot_of) for key, site in SITES.items()},
     }
@@ -499,14 +511,15 @@ def build_container(
         db,
         clock,
         audit,
-        reserved_keys={d.profile.supplier_key for d in suppliers} | set(SITES),
+        # ADR-0040: a packaged supplier without a CONNECT definition (슈퍼딜리버리) is reserved too.
+        reserved_keys={d.profile.supplier_key for d in suppliers} | set(SITES) | PACKAGED_SUPPLIERS,
         reserved_hosts=_repository_hosts(suppliers),
     )
     supplier_catalog = SupplierCatalog(
         definitions=suppliers,
         collections=registered_collections,
         capture_policies={key: capture_policy_bytes(site) for key, site in SITES.items()},
-        repository_active=lambda key: SITES[key].config.active if key in SITES else None,
+        repository_active=repository_active,
         store=onboarding,
     )
 
@@ -1385,7 +1398,8 @@ def build_container(
         review=ReviewService(ReviewCounts(review_items, review_reconciler)),
         execution_mode=execution_mode,
         editable_surfaces=editable_surfaces(),
-        collection_suppliers=collection.supplier_keys,
+        # ADR-0040 §1: a supplier read only from captured pages takes no submitted URL.
+        collection_suppliers=collection.submittable_supplier_keys,
     )
     return Container(
         listing_sync=listing_sync,
