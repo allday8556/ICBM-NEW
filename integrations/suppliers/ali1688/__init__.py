@@ -43,4 +43,7 @@ PROFILE = SupplierProfile(
         auth_retry_limit=1,
         request_timeout_s=20.0,
     ),
+    # ADR-0038 §6 (O3): a Chinese wholesale marketplace — the origin country of its 구매대행
+    # products.
+    country="CN",
 )

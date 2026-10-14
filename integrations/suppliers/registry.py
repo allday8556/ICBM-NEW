@@ -56,20 +56,14 @@ def repository_active(supplier_key: str) -> bool | None:
     return _PACKAGED_ACTIVE.get(supplier_key)
 
 
-# ADR-0038 §6 (O3): the country each overseas (구매대행) supplier sells from, as its definition
-# declares it (``SupplierProfile.country``). ``ali1688`` has no package yet (ADR-0040 C2): its key
-# is ADR-0040 §1's and its country ADR-0038 §9's (1688 is a Chinese marketplace), declared here
-# until its own profile declares it — the package must state the same country, and this entry then
-# goes. A domestic supplier, or any other key, declares none.
-_PENDING_COUNTRIES: Mapping[str, str] = MappingProxyType({"ali1688": "CN"})
+# ADR-0038 §6 (O3): the country each overseas (구매대행) supplier sells from, exactly as its own
+# definition declares it (``SupplierProfile.country``). A domestic supplier, or any other key,
+# declares none.
 SOURCE_COUNTRIES: Mapping[str, str] = MappingProxyType(
     {
-        **_PENDING_COUNTRIES,
-        **{
-            profile.supplier_key: profile.country
-            for profile in (kmretail.PROFILE, superdelivery.PROFILE)
-            if profile.country is not None
-        },
+        profile.supplier_key: profile.country
+        for profile in (kmretail.PROFILE, superdelivery.PROFILE, ali1688.PROFILE)
+        if profile.country is not None
     }
 )
 

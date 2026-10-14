@@ -22,6 +22,7 @@ from app.stages.register.overseas import OVERSEAS_MARKETPLACES, OVERSEAS_REASON_
 from app.stages.register.preparation import REASON_CODES
 from app.stages.register.reason_areas import REGISTER_AREAS
 from integrations.marketplaces.smartstore import product, registry
+from integrations.suppliers import ali1688, kmretail, superdelivery
 from integrations.suppliers.base import SupplierProfile
 from integrations.suppliers.registry import SOURCE_COUNTRIES, source_country
 
@@ -131,7 +132,11 @@ def test_the_cross_border_projection_is_smartstores_alone() -> None:
 
 
 def test_the_source_country_is_the_supplier_definitions_declaration() -> None:
-    # Declared by the supplier, never derived from a currency (ADR-0038 §2, §6).
+    # Declared by the supplier's own package profile, never derived from a currency or held
+    # beside the package (ADR-0038 §2, §6).
+    assert (superdelivery.PROFILE.country, ali1688.PROFILE.country) == ("JP", "CN")
+    assert kmretail.PROFILE.country is None
+    assert dict(SOURCE_COUNTRIES) == {"superdelivery": "JP", "ali1688": "CN"}
     assert source_country("superdelivery") == "JP"
     assert source_country("ali1688") == "CN"
     assert source_country("kmretail") is None
