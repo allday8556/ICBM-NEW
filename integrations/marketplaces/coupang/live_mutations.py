@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
 from typing import Final
+from urllib.parse import quote
 
 import httpx
 
@@ -304,6 +305,15 @@ class TestProductMutationResult:
     credential_generation: int
 
 
+@dataclass(frozen=True)
+class AmbiguousCreateRecoveryResult:
+    scope_id: str
+    payload_digest: str
+    test_name: str
+    recovered: bool
+    credential_generation: int
+
+
 class MutationJournal:
     """Atomic ambiguity barrier; it stores identities and states, never request payloads."""
 
@@ -492,6 +502,12 @@ class CoupangTestProductMutationRun:
             raise CoupangLiveMutationError(
                 classified.error_class, classified.code, http_status=status
             )
+        if parsed is not None and parsed.get("code") == "ERROR":
+            raise CoupangLiveMutationError(
+                ErrorClass.VALIDATION,
+                "COUPANG_MUTATION_PROVIDER_REJECTED",
+                http_status=status,
+            )
         if parsed is None or parsed.get("code") not in {"SUCCESS", "200", 200}:
             raise CoupangLiveMutationError(
                 ErrorClass.UNKNOWN, "COUPANG_MUTATION_SUCCESS_PREDICATE_FAILED", http_status=status
@@ -501,6 +517,10 @@ class CoupangTestProductMutationRun:
     @staticmethod
     def _created_identity(response: Mapping[str, object]) -> int:
         data = response.get("data")
+        if isinstance(data, dict) and data.get("code") == "ERROR":
+            raise CoupangLiveMutationError(
+                ErrorClass.VALIDATION, "COUPANG_MUTATION_PROVIDER_REJECTED"
+            )
         if isinstance(data, dict) and data.get("code") == "SUCCESS":
             data = data.get("data")
         if not isinstance(data, int) or isinstance(data, bool) or data < 1:
@@ -508,6 +528,55 @@ class CoupangTestProductMutationRun:
                 ErrorClass.UNKNOWN, "COUPANG_MUTATION_CREATE_IDENTITY_MISSING"
             )
         return data
+
+    @staticmethod
+    def _full_update_document(
+        plan: TestProductPlan,
+        *,
+        seller_product_id: int,
+        readback: Mapping[str, object],
+    ) -> FrozenDocument:
+        remote_items = readback.get("items")
+        if not isinstance(remote_items, list):
+            raise CoupangLiveMutationError(
+                ErrorClass.UNKNOWN, "COUPANG_MUTATION_UPDATE_ITEM_IDENTITY_MISSING"
+            )
+        matching = [
+            item
+            for item in remote_items
+            if isinstance(item, dict)
+            and item.get("externalVendorSku") == plan.binding.source_product_id
+        ]
+        if len(remote_items) != 1 or len(matching) != 1:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_UPDATE_ITEM_SCOPE_MISMATCH"
+            )
+        seller_product_item_id = matching[0].get("sellerProductItemId")
+        if (
+            not isinstance(seller_product_item_id, int)
+            or isinstance(seller_product_item_id, bool)
+            or seller_product_item_id < 1
+        ):
+            raise CoupangLiveMutationError(
+                ErrorClass.UNKNOWN, "COUPANG_MUTATION_UPDATE_ITEM_IDENTITY_MISSING"
+            )
+        document = plan.create_document.value()
+        document["sellerProductId"] = seller_product_id
+        document["sellerProductName"] = plan.update_message
+        items = document["items"]
+        assert isinstance(items, list) and isinstance(items[0], dict)
+        items[0]["sellerProductItemId"] = seller_product_item_id
+        vendor_item_id = matching[0].get("vendorItemId")
+        if vendor_item_id is not None and (
+            not isinstance(vendor_item_id, int)
+            or isinstance(vendor_item_id, bool)
+            or vendor_item_id < 1
+        ):
+            raise CoupangLiveMutationError(
+                ErrorClass.UNKNOWN, "COUPANG_MUTATION_UPDATE_VENDOR_ITEM_ID_INVALID"
+            )
+        items[0]["vendorItemId"] = vendor_item_id
+        return FrozenDocument.from_mapping(document)
 
     @staticmethod
     def _verify_identity_scope(
@@ -531,9 +600,11 @@ class CoupangTestProductMutationRun:
                 ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_READBACK_NAME_MISMATCH"
             )
         items = data.get("items")
-        if not isinstance(items, list) or not any(
-            isinstance(item, dict) and item.get("externalVendorSku") == source_product_id
-            for item in items
+        if (
+            not isinstance(items, list)
+            or len(items) != 1
+            or not isinstance(items[0], dict)
+            or items[0].get("externalVendorSku") != source_product_id
         ):
             raise CoupangLiveMutationError(
                 ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_READBACK_SCOPE_MISMATCH"
@@ -548,18 +619,13 @@ class CoupangTestProductMutationRun:
         seller_product_id: int,
         source_product_id: str,
         seller_product_name: str,
-        update_message: str,
     ) -> None:
-        data = cls._verify_identity_scope(
+        cls._verify_identity_scope(
             response,
             seller_product_id=seller_product_id,
             source_product_id=source_product_id,
             seller_product_name=seller_product_name,
         )
-        if data.get("extraInfoMessage") != update_message:
-            raise CoupangLiveMutationError(
-                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_READBACK_UPDATE_MISMATCH"
-            )
 
     @staticmethod
     def _assert_unique_identity(
@@ -641,7 +707,6 @@ class CoupangTestProductMutationRun:
         assert isinstance(records, dict)
         completed = 0
         for plan in self._bundle.plans:
-            created_in_this_run = False
             verified_in_this_run = False
             synthetic_id = plan.binding.synthetic_id
             record = records[synthetic_id]
@@ -650,13 +715,17 @@ class CoupangTestProductMutationRun:
             seller_product_id = record.get("seller_product_id")
             if phase == "pending":
                 self._transition(state, synthetic_id, "create_inflight")
-                created = self._request(Method.POST, _API, document=plan.create_document)
-                seller_product_id = self._created_identity(created)
+                try:
+                    created = self._request(Method.POST, _API, document=plan.create_document)
+                    seller_product_id = self._created_identity(created)
+                except CoupangLiveMutationError as exc:
+                    if exc.code == "COUPANG_MUTATION_PROVIDER_REJECTED":
+                        self._transition(state, synthetic_id, "create_rejected")
+                    raise
                 self._transition(
                     state, synthetic_id, "created", seller_product_id=seller_product_id
                 )
                 phase = "created"
-                created_in_this_run = True
             if not isinstance(seller_product_id, int) or seller_product_id < 1:
                 raise CoupangLiveMutationError(
                     ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_JOURNAL_IDENTITY_MISSING"
@@ -667,26 +736,24 @@ class CoupangTestProductMutationRun:
                 seller_product_id=seller_product_id,
             )
             if phase == "created":
-                if not created_in_this_run:
-                    resumed = self._request(Method.GET, f"{_API}/{seller_product_id}")
-                    self._verify_identity_scope(
-                        resumed,
-                        seller_product_id=seller_product_id,
-                        source_product_id=plan.binding.source_product_id,
-                        seller_product_name=str(plan.create_document.value()["sellerProductName"]),
-                    )
-                update = FrozenDocument.from_mapping(
-                    {
-                        "sellerProductId": seller_product_id,
-                        "extraInfoMessage": plan.update_message,
-                    }
+                resumed = self._request(Method.GET, f"{_API}/{seller_product_id}")
+                remote = self._verify_identity_scope(
+                    resumed,
+                    seller_product_id=seller_product_id,
+                    source_product_id=plan.binding.source_product_id,
+                    seller_product_name=str(plan.create_document.value()["sellerProductName"]),
+                )
+                update = self._full_update_document(
+                    plan,
+                    seller_product_id=seller_product_id,
+                    readback=remote,
                 )
                 self._transition(
                     state, synthetic_id, "update_inflight", seller_product_id=seller_product_id
                 )
                 self._request(
                     Method.PUT,
-                    f"{_API}/{seller_product_id}/partial",
+                    _API,
                     document=update,
                 )
                 self._transition(
@@ -702,8 +769,7 @@ class CoupangTestProductMutationRun:
                     readback,
                     seller_product_id=seller_product_id,
                     source_product_id=plan.binding.source_product_id,
-                    seller_product_name=str(plan.create_document.value()["sellerProductName"]),
-                    update_message=plan.update_message,
+                    seller_product_name=plan.update_message,
                 )
                 self._transition(
                     state, synthetic_id, "verified", seller_product_id=seller_product_id
@@ -717,8 +783,7 @@ class CoupangTestProductMutationRun:
                         resumed,
                         seller_product_id=seller_product_id,
                         source_product_id=plan.binding.source_product_id,
-                        seller_product_name=str(plan.create_document.value()["sellerProductName"]),
-                        update_message=plan.update_message,
+                        seller_product_name=plan.update_message,
                     )
                 self._transition(
                     state, synthetic_id, "delete_inflight", seller_product_id=seller_product_id
@@ -739,4 +804,175 @@ class CoupangTestProductMutationRun:
             completed,
             len(self._bundle.plans),
             self._approval.credential_generation,
+        )
+
+
+class CoupangAmbiguousCreateRecovery(CoupangTestProductMutationRun):
+    """Positive-only identity recovery for the one C-LIVE-MUT-1 create barrier.
+
+    This owner performs only the documented externalVendorSku summary lookup and one
+    sellerProductId read-back.  Empty, multiple, partial, or mismatching answers never prove
+    absence and never change the journal.
+    """
+
+    def __init__(
+        self,
+        *,
+        context: AuthContext,
+        bundle: TestProductBundle,
+        clock: UtcClock,
+        clock_preflight: ClockPreflight,
+        journal: MutationJournal,
+        transport: httpx.BaseTransport | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> None:
+        if transport is None and (blocker := _ci_or_test(environ)) is not None:
+            raise LiveMutationTransportRefused(
+                f"the live Coupang recovery transport never exists under {blocker}"
+            )
+        self._context = context
+        self._bundle = bundle
+        self._clock = clock
+        self._clock_preflight = clock_preflight
+        self._journal = journal
+        self._transport = transport
+        self._authenticator = Authenticator(clock)
+        self._used = False
+
+    def _recovery_preflight(self, now: datetime) -> tuple[dict[str, object], TestProductPlan]:
+        credentials = self._context.credentials
+        declaration = self._context.ip_allowlist
+        if self._context.market is not Market.KR:
+            raise CoupangLiveMutationError(ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_KR_ONLY")
+        if (
+            declaration is None
+            or declaration.credential_generation != credentials.credential_generation
+        ):
+            raise CoupangLiveMutationError(ErrorClass.POLICY_BLOCKED, "COUPANG_IP_EVIDENCE_MISSING")
+        if declaration.recorded_at > now:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_IP_EVIDENCE_FROM_FUTURE"
+            )
+        age = now - self._clock_preflight.checked_at
+        if age < timedelta(0) or age > CLOCK_PREFLIGHT_TTL:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_CLOCK_PREFLIGHT_STALE"
+            )
+        if abs(self._clock_preflight.observed_skew_seconds) > MAX_CLOCK_SKEW_SECONDS:
+            raise CoupangLiveMutationError(ErrorClass.POLICY_BLOCKED, "COUPANG_CLOCK_SKEW_UNSAFE")
+        state = self._journal.load()
+        if state is None:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_RECOVERY_JOURNAL_MISSING"
+            )
+        if (
+            state.get("version") != 1
+            or state.get("scope_id") != SCOPE_ID
+            or state.get("payload_digest") != self._bundle.payload_digest
+            or state.get("credential_generation") != credentials.credential_generation
+            or not isinstance(state.get("records"), dict)
+        ):
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_JOURNAL_BINDING_MISMATCH"
+            )
+        records = state["records"]
+        assert isinstance(records, dict)
+        expected_ids = {plan.binding.synthetic_id for plan in self._bundle.plans}
+        if set(records) != expected_ids or not all(
+            isinstance(record, dict) for record in records.values()
+        ):
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED,
+                "COUPANG_MUTATION_JOURNAL_SCOPE_MISMATCH",
+            )
+        inflight = [
+            synthetic_id
+            for synthetic_id, record in records.items()
+            if isinstance(record, dict) and record.get("state") == "create_inflight"
+        ]
+        if len(inflight) != 1:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_RECOVERY_SCOPE_INVALID"
+            )
+        plan = next(
+            (plan for plan in self._bundle.plans if plan.binding.synthetic_id == inflight[0]),
+            None,
+        )
+        if plan is None:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_JOURNAL_SCOPE_MISMATCH"
+            )
+        return state, plan
+
+    def recover(self) -> AmbiguousCreateRecoveryResult:
+        if self._used:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_RUN_ALREADY_USED"
+            )
+        self._used = True
+        state, plan = self._recovery_preflight(_aware_utc(self._clock.now(), "clock.now"))
+        source_product_id = plan.binding.source_product_id
+        summary = self._request(
+            Method.GET,
+            f"{_API}/external-vendor-sku-codes/{quote(source_product_id, safe='')}",
+        )
+        data = summary.get("data")
+        if not isinstance(data, list):
+            raise CoupangLiveMutationError(
+                ErrorClass.UNKNOWN, "COUPANG_MUTATION_RECOVERY_RESPONSE_INVALID"
+            )
+        expected_name = str(plan.create_document.value()["sellerProductName"])
+        vendor_id = self._context.credentials.vendor_id
+        if not data:
+            raise CoupangLiveMutationError(
+                ErrorClass.REVIEW_REQUIRED, "COUPANG_MUTATION_RECOVERY_NO_POSITIVE_MATCH"
+            )
+        if len(data) != 1:
+            raise CoupangLiveMutationError(
+                ErrorClass.REVIEW_REQUIRED, "COUPANG_MUTATION_RECOVERY_MULTIPLE_MATCHES"
+            )
+        candidate = data[0]
+        if (
+            not isinstance(candidate, dict)
+            or candidate.get("vendorId") != vendor_id
+            or candidate.get("sellerProductName") != expected_name
+            or not isinstance(candidate.get("sellerProductId"), int)
+            or isinstance(candidate.get("sellerProductId"), bool)
+            or int(candidate["sellerProductId"]) < 1
+        ):
+            raise CoupangLiveMutationError(
+                ErrorClass.REVIEW_REQUIRED, "COUPANG_MUTATION_RECOVERY_CANDIDATE_MISMATCH"
+            )
+        seller_product_id = int(candidate["sellerProductId"])
+        readback = self._request(Method.GET, f"{_API}/{seller_product_id}")
+        remote = self._verify_identity_scope(
+            readback,
+            seller_product_id=seller_product_id,
+            source_product_id=source_product_id,
+            seller_product_name=expected_name,
+        )
+        if remote.get("vendorId") != vendor_id:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_RECOVERY_VENDOR_MISMATCH"
+            )
+        # Recovery may lift the durable ambiguity barrier only when the detailed
+        # read-back is complete enough for the documented full-modification path.
+        # This is validation only; no update is sent here.
+        self._full_update_document(
+            plan,
+            seller_product_id=seller_product_id,
+            readback=remote,
+        )
+        self._transition(
+            state,
+            plan.binding.synthetic_id,
+            "created",
+            seller_product_id=seller_product_id,
+        )
+        return AmbiguousCreateRecoveryResult(
+            SCOPE_ID,
+            self._bundle.payload_digest,
+            plan.binding.test_name,
+            True,
+            self._context.credentials.credential_generation,
         )

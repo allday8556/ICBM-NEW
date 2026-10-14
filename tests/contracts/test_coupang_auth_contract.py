@@ -25,6 +25,8 @@ def test_contract_cites_the_official_auth_sources_and_safety_boundary() -> None:
     assert "credential readiness != endpoint adoption != LIVE authority" in text
     assert "C-LIVE-R1 bounded extension" in text
     assert "One exact KR `GET`" in text
+    assert "Ambiguous create recovery" in text
+    assert "zero results never authorize a repeated create" in text
 
 
 def test_c_auth_1_contains_no_network_client_outside_reviewed_live_owners() -> None:
@@ -60,6 +62,7 @@ def test_c_auth_1_contains_no_network_client_outside_reviewed_live_owners() -> N
     mutations = sources["live_mutations.py"]
     assert "TEST_PRODUCT_BINDINGS" in mutations
     assert "COUPANG_MUTATION_RECOVERY_REQUIRED" in mutations
+    assert "COUPANG_MUTATION_RECOVERY_NO_POSITIVE_MATCH" in mutations
     assert "tenacity" not in mutations
 
 
@@ -73,3 +76,6 @@ def test_cli_accepts_secrets_only_through_no_echo_prompts() -> None:
     assert '("coupang", "save-credentials"): _coupang_credentials' in source
     assert '("coupang", "read-canary"): _coupang_read_canary' in source
     assert '("coupang", "mutate-test-products"): _coupang_mutate_test_products' in source
+    assert (
+        '("coupang", "recover-test-product-create"): _coupang_recover_test_product_create'
+    ) in source

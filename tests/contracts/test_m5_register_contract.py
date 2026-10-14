@@ -272,6 +272,9 @@ SUPPLIER_ONBOARDING = "0060_supplier_onboarding"
 # ADR-0039 §1, §3: the per-supplier sales policy and the pricing snapshot's minimum pin. Product
 # state, never registration state.
 SUPPLIER_SALES_POLICY = "0061_supplier_sales_policy"
+# ADR-0036 O5b (amendment 6160586049): retiring an onboarding sample, and the ACTIVE gate
+# that leaves a retired sample out.
+ONBOARDING_RETIREMENTS = "0062_onboarding_sample_retirements"
 # ADR-0038 O1a: the source currency of a product facts revision. Source truth, never registration
 # state.
 SOURCE_CURRENCY = "0063_source_currency"
@@ -321,6 +324,7 @@ AFTER_M5 = (
     DETAIL_GUIDANCE_PLACEMENT,
     SUPPLIER_ONBOARDING,
     SUPPLIER_SALES_POLICY,
+    ONBOARDING_RETIREMENTS,
     SOURCE_CURRENCY,
     FX_SNAPSHOTS,
 )

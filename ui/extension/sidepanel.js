@@ -10,6 +10,10 @@
 // On a list page it shows the list queue (ADR-0019 §8.1): the products found on the operator's own
 // page, the bounds the operator declares, and each queued product's own state beside its run's own
 // outcome. ICBM decides every read; the panel only starts, pauses and cancels.
+//
+// It lists the ACTIVE onboarded suppliers ICBM names (ADR-0036 §8, D3) with whether this browser
+// holds each one's origin. The operator's own click asks Chrome for that one origin, or gives it
+// back; the service worker removes every optional origin ICBM no longer lists.
 
 const TRANSPORT_LABELS = {
   IDLE: "대기",
@@ -219,7 +223,8 @@ function render() {
   show("context-meta", answered || Boolean(inFlight));
   role("supplier-key").textContent =
     (shown && shown.supplier_key) || (status && status.supplier_key) || "—";
-  const capturable = paired && supplier;
+  // A page whose origin this browser does not hold is never offered for capture (ADR-0036 §8).
+  const capturable = paired && supplier && status.origin_granted !== false;
   action("capture").disabled = Boolean(inFlight) || !capturable;
   action("recapture").disabled = Boolean(inFlight) || !capturable;
   action("capture").hidden = answered && !inFlight && !disconnected;
@@ -235,6 +240,7 @@ function render() {
   } else {
     for (const name of ["list-context", "queue-bounds", "queue-section"]) show(name, false);
   }
+  renderOnboarded();
 }
 
 // `probe` asks ICBM whether it is reachable. A tab change only re-reads what this browser knows.
@@ -284,14 +290,20 @@ role("pairing-form").addEventListener("submit", async (event) => {
     // The code is a secret: it is cleared from the field whatever happened to it.
     field.value = "";
   }
-  if (!answer || !answer.ok) role("pairing-state").textContent = "페어링 코드가 올바르지 않음";
-  else await refresh(true);
+  if (!answer || !answer.ok) {
+    role("pairing-state").textContent = "페어링 코드가 올바르지 않음";
+  } else {
+    await refresh(true);
+    await loadOnboarded();
+  }
 });
 
 action("check").addEventListener("click", () => refresh(true));
 
 action("unpair").addEventListener("click", async () => {
   await chrome.runtime.sendMessage({ type: "unpair" });
+  onboarded = null;
+  onboardedCode = null;
   clearResult();
   await refresh();
 });
@@ -668,6 +680,99 @@ action("queue-cancel").addEventListener("click", () => {
 action("capture").addEventListener("click", capture);
 action("recapture").addEventListener("click", capture);
 
+// ---------------------------------------------------------------- onboarded origins (ADR-0036 §8)
+
+// The ACTIVE onboarded suppliers ICBM last listed, each with whether this browser holds its origin,
+// or null before the first read; and the code of a read that failed.
+let onboarded = null;
+let onboardedCode = null;
+
+const originPattern = (origin) => `${origin}/*`;
+
+function originRow(entry) {
+  const row = element("div", "queue-row origin-row");
+  row.dataset.origin = entry.origin;
+  const line = element("div", "queue-line");
+  const chip = element("span", "chip", entry.granted ? "허용됨" : "권한 없음");
+  chip.dataset.state = entry.granted ? "GRANTED" : "NOT_GRANTED";
+  line.append(element("span", "queue-name", entry.display_name), chip);
+  const note = element("div", "queue-note");
+  note.append(element("span", "mono", entry.origin), ` · ${entry.supplier_key}`);
+  const button = element("button", "row-open", entry.granted ? "권한 제거" : "권한 요청");
+  button.type = "button";
+  button.dataset.action = entry.granted ? "origin-remove" : "origin-request";
+  button.addEventListener("click", () => (entry.granted ? giveBackOrigin(entry) : askOrigin(entry)));
+  row.append(line, note, button);
+  return row;
+}
+
+// The operator's click asks Chrome for this one origin, exactly as ICBM listed it, and Chrome asks
+// the operator again in its own prompt. Nothing is ever asked for in bulk or without a click.
+async function askOrigin(entry) {
+  try {
+    await chrome.permissions.request({ origins: [originPattern(entry.origin)] });
+  } catch {
+    // Chrome refused the request: the row keeps showing what this browser holds.
+  }
+}
+
+async function giveBackOrigin(entry) {
+  try {
+    await chrome.permissions.remove({ origins: [originPattern(entry.origin)] });
+  } catch {
+    // Chrome refused the removal: the row keeps showing what this browser holds.
+  }
+}
+
+function renderOnboarded() {
+  const paired = Boolean(connection && connection.paired);
+  const entries = onboarded || [];
+  show("onboarded-section", paired && mode !== "list");
+  role("onboarded-count").textContent = `${entries.length}곳`;
+  role("onboarded-rows").replaceChildren(...entries.map(originRow));
+  show("onboarded-rows", entries.length > 0);
+  role("onboarded-status").textContent = onboardedCode
+    ? `공급처 목록을 읽지 못했습니다 · 코드 ${onboardedCode}`
+    : onboarded && entries.length === 0
+      ? "ICBM에서 사용 중인 셀프등록 공급처가 없습니다."
+      : "";
+  show("onboarded-status", role("onboarded-status").textContent !== "");
+}
+
+// Ask ICBM, through the worker, which onboarded origins are ACTIVE. The worker removes every
+// optional origin this browser holds that is not listed, and says which of the listed it holds.
+async function loadOnboarded() {
+  let answer = null;
+  try {
+    answer = await chrome.runtime.sendMessage({ type: "onboarded-origins" });
+  } catch {
+    answer = null;
+  }
+  if (answer && answer.ok) {
+    onboarded = answer.origins;
+    onboardedCode = null;
+  } else {
+    onboardedCode = answer ? answer.code : "EXTENSION_WORKER_ENDED";
+  }
+  await refresh();
+}
+
+// A grant or a removal — by this panel, by the worker, or in Chrome's own settings — is shown as
+// Chrome now holds it. Nothing is asked of ICBM for it.
+async function permissionsChanged() {
+  if (onboarded) {
+    for (const entry of onboarded) {
+      entry.granted = await chrome.permissions.contains({ origins: [originPattern(entry.origin)] });
+    }
+  }
+  await refresh();
+}
+
+// The operator's own refresh: a supplier approved or disabled in ICBM while this panel is open.
+action("onboarded-refresh").addEventListener("click", loadOnboarded);
+chrome.permissions.onAdded.addListener(permissionsChanged);
+chrome.permissions.onRemoved.addListener(permissionsChanged);
+
 // An answer belongs to the page it was captured from: another tab or a reload clears it. A list
 // belongs to its page too, unless its queue is running: then the worker itself moves the tab.
 function pageChanged() {
@@ -684,4 +789,4 @@ chrome.tabs.onActivated.addListener(pageChanged);
 chrome.tabs.onUpdated.addListener((_tabId, change, tab) => {
   if (change.status === "complete" && tab.active) pageChanged();
 });
-refresh(true);
+refresh(true).then(loadOnboarded);

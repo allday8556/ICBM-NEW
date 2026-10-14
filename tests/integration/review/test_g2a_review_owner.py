@@ -756,6 +756,8 @@ def test_0021_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "onboarding_verifications",
         # ADR-0039 §1 (0061): the supplier sales-policy revisions.
         "supplier_sales_policy_revisions",
+        # ADR-0036 O5b (0062): the samples retired from an onboarding analysis.
+        "onboarding_sample_retirements",
         # ADR-0038 §3, §5 (0064): the FX snapshots and the overseas settings.
         "fx_snapshots",
         "overseas_settings_revisions",

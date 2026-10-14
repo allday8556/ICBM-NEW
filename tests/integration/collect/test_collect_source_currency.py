@@ -33,7 +33,7 @@ from tests.support.collect_support import base_fields, collected, confirmed
 pytestmark = pytest.mark.integration
 
 TABLE = "product_facts_revisions"
-BEFORE = "0061_supplier_sales_policy"
+BEFORE = "0062_onboarding_sample_retirements"
 
 
 def _jpy_fields() -> dict[str, object]:

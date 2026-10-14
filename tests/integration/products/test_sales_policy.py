@@ -478,14 +478,12 @@ def test_the_api_reads_saves_and_refuses(client: TestClient, config: AppConfig) 
 # ---------------------------------------------------------------- migration 0061
 
 
-# Tables later revisions add, which a step down below 0061 removes first (ADR-0038 O1b, 0064).
-LATER = frozenset({"fx_snapshots", "overseas_settings_revisions"})
-
-
 def test_0061_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None:
     database = tmp_path / "icbm.db"
     url = f"sqlite:///{database.as_posix()}"
     upgrade_to_head(url)
+    # Judged at 0061 itself, whatever later revisions add (0062: ADR-0036 O5b).
+    command.downgrade(alembic_config(url), "0061_supplier_sales_policy")
 
     def shape() -> tuple[set[str], list[str]]:
         with contextlib.closing(sqlite3.connect(database)) as connection:
@@ -501,9 +499,8 @@ def test_0061_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     assert columns[-2:] == ["minimum_applied", "stated_minimum_sale_price_krw"]
     # Empty, it steps down to exactly what it added, and back up.
     command.downgrade(alembic_config(url), "0060_supplier_onboarding")
-    # 0064 (ADR-0038 O1b) follows it, and its empty tables step down with it.
-    assert shape() == (tables - {"supplier_sales_policy_revisions"} - LATER, columns[:-2])
-    command.upgrade(alembic_config(url), "head")
+    assert shape() == (tables - {"supplier_sales_policy_revisions"}, columns[:-2])
+    command.upgrade(alembic_config(url), "0061_supplier_sales_policy")
     assert shape() == (tables, columns)
     with contextlib.closing(sqlite3.connect(database)) as connection:
         connection.execute(
@@ -514,5 +511,4 @@ def test_0061_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         connection.commit()
     with pytest.raises(RuntimeError, match="never silently destroyed"):
         command.downgrade(alembic_config(url), "0060_supplier_onboarding")
-    # Each revision steps down in its own unit: the empty later tables are gone, the policy stays.
-    assert shape() == (tables - LATER, columns)
+    assert shape() == (tables, columns)

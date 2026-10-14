@@ -216,3 +216,26 @@ def run_trial(container: Container, key: str, url: str) -> str:
     job = container.jobs.get(submitted.job_id)
     assert job.state == "SUCCEEDED", (job.last_error_code, job.last_error_message)
     return submitted.job_id
+
+
+def active_cafe24_site(
+    container: Container, clock: FakeClock, shop: TrialShop, name: str = "트라이얼"
+) -> str:
+    """A Cafe24 site at ``CAFE24_ORIGIN`` taken to ``ACTIVE`` as the operator does: three samples
+    read (O3), each confirmed as shown, then 「사용 시작」 (O5a)."""
+    key = recon_site(container, CAFE24_ORIGIN, "cafe24", name)
+    for number in (901, 902, 903):
+        shop.serve(cafe24_url(number), cafe24_page(number))
+        run_trial(container, key, cafe24_url(number))
+        clock.advance(11)
+    for sample in container.onboarding_analysis.view(key).samples:
+        container.onboarding_analysis.verify(
+            key,
+            sample.trial_id,
+            "CORRECT",
+            shown_fingerprint=sample.facts_fingerprint,
+            actor=OPERATOR,
+        )
+    container.onboarding_analysis.activate(key, actor=OPERATOR)
+    assert container.onboarding.current(key).state is OnboardingState.ACTIVE
+    return key

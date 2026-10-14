@@ -887,6 +887,12 @@ body.has-registration-status .content {
   margin-top: var(--space-6);
 }
 
+/* ADR-0036 O5b: a sample retired from the analysis stays shown, muted. */
+.analysis-sample.retired {
+  opacity: 0.72;
+  border-style: dashed;
+}
+
 /* ADR-0036 O4: 「수집 규칙」 — each slot's template words beside the supplier's own words. */
 .words-table th:first-child,
 .words-table td:first-child {
