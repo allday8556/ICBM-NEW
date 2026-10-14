@@ -1,8 +1,9 @@
 """ADR-0041 I1: the Image Studio translation store, migration 0065 and the ``image.translate`` job.
 
-Production binds no OCR engine and no translation task: the capability reads NOT_CONFIGURED and
-every request is refused before anything is written. The owner's behaviour is proven over a fake
-OCR engine, a fake composition and a fake AI provider that exist only in this test:
+Production binds no OCR engine (and, since I4, the registered translation task): the capability
+reads NOT_CONFIGURED and every request is refused before anything is written. The owner's
+behaviour is proven over a fake OCR engine, a fake composition and a fake AI provider that exist
+only in this test:
 - an observation is content-addressed and reused by its key;
 - the translation fingerprint is ADR-0012 §6 / ADR-0026's: any change to the input, prompt,
   policy, provider, model, routing, proxy or schema changes it; an equal one is reused; a candidate
@@ -87,9 +88,9 @@ POLICY = "POLICY_COMMON_MARKET_V1"
 REGIONS = (
     OcrRegion("r0", (10, 10, 120, 40), "纯天然芝麻油", "zh", 0.97, 0.92),
     OcrRegion("r1", (10, 50, 120, 80), "净含量350ml", "zh", 0.88, 0.40, ((10, 50), (120, 80))),
-    OcrRegion("r2", (10, 90, 120, 120), "微信:shop8888", "zh", 0.93, 0.95),
+    OcrRegion("r2", (10, 90, 120, 120), "厂家直销", "zh", 0.93, 0.95),
 )
-SECRET_TEXTS = ("纯天然芝麻油", "净含量350ml", "微信:shop8888", "한국어")
+SECRET_TEXTS = ("纯天然芝麻油", "净含量350ml", "厂家直销", "한국어")
 STYLE = RegionStyle(Weight.BOLD, Face.SANS, 28, "#222222")
 FONTS = {"NotoSansKR-VF.ttf": "a" * 64}
 HEAD = "0065_image_studio_translation"
@@ -276,7 +277,9 @@ def test_production_binds_nothing_and_refuses_before_writing(
 ) -> None:
     report = container.image_translation.capability()
     assert report.status is CapabilityStatus.NOT_CONFIGURED
-    assert "ocr" in report.detail and "translation task" in report.detail
+    # I4 binds the registered task; no OCR engine and no approved AI profile remain.
+    assert "ocr" in report.detail and "ai provider" in report.detail
+    assert "translation task" not in report.detail
     definition = container.job_registry.get(TRANSLATE_JOB)
     assert definition.idempotent is False
     assert definition.retry_policy is not None and definition.retry_policy.max_attempts == 1
@@ -456,7 +459,7 @@ def test_a_changed_prompt_or_exclusion_is_never_served_from_an_old_candidate(
     assert len(rig.translator.requests) == 2 and len(rig.ocr.reads) == 1
     view = rig.service.candidate_view(observation.observation_id, "zh")
     assert view is not None and view.status == "FRESH"
-    # The operator keeps the contact detail: what is sent changes, so the input does.
+    # The operator keeps a region: what is sent changes, so the input does.
     stale = rig.service.candidate_view(observation.observation_id, "zh", frozenset({"r2"}))
     assert stale is not None and (stale.status, stale.stale_reasons) == ("STALE", ("input",))
     _translate(container, rig, product, images=one, excluded={one[0]: frozenset({"r2"})})
