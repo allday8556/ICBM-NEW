@@ -77,6 +77,5 @@ def test_cli_accepts_secrets_only_through_no_echo_prompts() -> None:
     assert '("coupang", "read-canary"): _coupang_read_canary' in source
     assert '("coupang", "mutate-test-products"): _coupang_mutate_test_products' in source
     assert (
-        '("coupang", "recover-test-product-create"): '
-        "_coupang_recover_test_product_create"
+        '("coupang", "recover-test-product-create"): _coupang_recover_test_product_create'
     ) in source

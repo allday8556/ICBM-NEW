@@ -843,17 +843,12 @@ class CoupangAmbiguousCreateRecovery(CoupangTestProductMutationRun):
         credentials = self._context.credentials
         declaration = self._context.ip_allowlist
         if self._context.market is not Market.KR:
-            raise CoupangLiveMutationError(
-                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_KR_ONLY"
-            )
+            raise CoupangLiveMutationError(ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_KR_ONLY")
         if (
             declaration is None
-            or declaration.credential_generation
-            != credentials.credential_generation
+            or declaration.credential_generation != credentials.credential_generation
         ):
-            raise CoupangLiveMutationError(
-                ErrorClass.POLICY_BLOCKED, "COUPANG_IP_EVIDENCE_MISSING"
-            )
+            raise CoupangLiveMutationError(ErrorClass.POLICY_BLOCKED, "COUPANG_IP_EVIDENCE_MISSING")
         if declaration.recorded_at > now:
             raise CoupangLiveMutationError(
                 ErrorClass.POLICY_BLOCKED, "COUPANG_IP_EVIDENCE_FROM_FUTURE"
@@ -864,9 +859,7 @@ class CoupangAmbiguousCreateRecovery(CoupangTestProductMutationRun):
                 ErrorClass.POLICY_BLOCKED, "COUPANG_CLOCK_PREFLIGHT_STALE"
             )
         if abs(self._clock_preflight.observed_skew_seconds) > MAX_CLOCK_SKEW_SECONDS:
-            raise CoupangLiveMutationError(
-                ErrorClass.POLICY_BLOCKED, "COUPANG_CLOCK_SKEW_UNSAFE"
-            )
+            raise CoupangLiveMutationError(ErrorClass.POLICY_BLOCKED, "COUPANG_CLOCK_SKEW_UNSAFE")
         state = self._journal.load()
         if state is None:
             raise CoupangLiveMutationError(
@@ -917,9 +910,7 @@ class CoupangAmbiguousCreateRecovery(CoupangTestProductMutationRun):
                 ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_RUN_ALREADY_USED"
             )
         self._used = True
-        state, plan = self._recovery_preflight(
-            _aware_utc(self._clock.now(), "clock.now")
-        )
+        state, plan = self._recovery_preflight(_aware_utc(self._clock.now(), "clock.now"))
         source_product_id = plan.binding.source_product_id
         summary = self._request(
             Method.GET,

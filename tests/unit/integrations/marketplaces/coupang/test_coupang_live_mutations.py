@@ -651,9 +651,7 @@ def test_resumed_created_identity_is_reverified_before_update(tmp_path: Path) ->
     def handler(request: httpx.Request) -> httpx.Response:
         methods.append(request.method)
         if request.method == "GET":
-            seller_product_name = (
-                "ICBM TEST 1 UPDATED" if "PUT" in methods else "ICBM TEST 1"
-            )
+            seller_product_name = "ICBM TEST 1 UPDATED" if "PUT" in methods else "ICBM TEST 1"
             return httpx.Response(
                 200,
                 json={

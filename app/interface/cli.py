@@ -195,9 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
     recovery.add_argument(
         "--bundle", required=True, type=Path, help="closed test 1..11 payload bundle JSON"
     )
-    recovery.add_argument(
-        "--source-ip", required=True, help="the outbound IP registered in Wing"
-    )
+    recovery.add_argument("--source-ip", required=True, help="the outbound IP registered in Wing")
     recovery.add_argument(
         "--clock-skew-seconds", required=True, type=float, help="observed absolute clock offset"
     )
