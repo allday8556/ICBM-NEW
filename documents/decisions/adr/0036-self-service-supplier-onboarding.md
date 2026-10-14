@@ -1,11 +1,12 @@
 # ADR-0036 — Self-service supplier onboarding: add, analyse, set words and approve a template-platform supplier on screen
 
-Status: **ACCEPTED** 2026-10-11. This is the contract for operator-driven onboarding of a wholesale supplier that runs on a platform ICBM already has a template for (ADR-0030: Cafe24, Godomall). It lands before its code. Each slice of §11 cites it as canon.
+Status: **ACCEPTED** 2026-10-11; **amended** 2026-10-14 (owner `6160586049`: retiring a sample, §3, §5, §7, §11). This is the contract for operator-driven onboarding of a wholesale supplier that runs on a platform ICBM already has a template for (ADR-0030: Cafe24, Godomall). It lands before its code. Each slice of §11 cites it as canon.
 
 Decision owners:
 - **Product direction:** the owner, in Issue #219.
   - `6100405361`: self-service onboarding is Track A's work. The inert v29 controls of 수집관리 → 공급처 관리 (「+ 공급처 추가」, 「사이트 분석」, 「수집 규칙」) become working, so a supplier can be added without an agent working on each site.
   - `6100495552`: the design choices D1–D4 of §2.
+  - `6160586049` (2026-10-14): a sample whose trial carries a structural problem may be retired from the analysis with a stated reason, so the site can be approved on 3 other samples (§5, §7). The retired sample stays on screen with its warning.
 - **Already decided by canon:**
   - ADR-0007: CONNECT, the credential record in the OS secret store, encrypted sessions, the egress grant per supplier.
   - ADR-0010: COLLECT, the access envelope, the `ProductFactsRevision` contract, the evidence model, pacing.
@@ -67,6 +68,7 @@ All writes go through one owner store with an injected clock and an audit event 
 | `onboarding_policy_reads` | The robots.txt and terms reads shown at add time, and the operator's acknowledgement. |
 | `onboarding_trials` | A trial read (§5): sample URL key, template revision, words revision, the local sample capture's SHA-256, per-field read status, the unread rows and the observed hosts. **Never a `ProductFactsRevision`.** |
 | `onboarding_verifications` | The operator's per-sample verification of a trial's facts, with the fingerprint of what was shown. |
+| `onboarding_sample_retirements` | **Added by migration `0062` (slice O5b, amendment `6160586049`).** One row per retired sample: the sample URL key, the operator's reason, retired_by and retired_at. Append-only and never deleted; a sample is retired at most once. |
 
 **Credentials** stay the existing `supplier:<key>:credentials` record in the OS secret store, and sessions stay encrypted (ADR-0007). They are never stored in these tables.
 
@@ -102,7 +104,7 @@ All writes go through one owner store with an injected clock and an audit event 
 
 **A trial never writes canonical product truth.** It writes an `onboarding_trials` row, not a `ProductFactsRevision`, so a product appears in 통합DB only through a normal collection after approval.
 
-**Structural problems** are flagged "a template change is needed". These are problems that words cannot fix (ADR-0035): an unreadable price block, a duplicated order list, a script-rendered page. Such a site cannot be approved until a template PR lands.
+**Structural problems** are flagged "a template change is needed". These are problems that words cannot fix (ADR-0035): an unreadable price block, a duplicated order list, a script-rendered page. Such a site cannot be approved until a template PR lands, unless the operator retires the samples that carry them (§7, amendment `6160586049`).
 
 ## 6. 「수집 규칙」 (words)
 
@@ -116,6 +118,15 @@ All writes go through one owner store with an injected clock and an audit event 
 - at least **3 distinct** samples have trials under the **current** words revision with every core field read;
 - the operator has verified each of those 3 trials' facts as correct;
 - no structural problem is open.
+
+**Retiring a sample** (amendment `6160586049`, slice O5b).
+- **What it does.** The operator may retire a sample from the analysis, stating why (for example, one product page that the template cannot read). The retirement is audited and never deleted.
+- **What a retired sample counts for.** It neither proves nor blocks: its trials do not count toward the 3 samples, and their structural problems are no longer open. The store's gate and the database trigger both apply this.
+- **What stays visible.** The sample stays on screen as `제외됨`, with its reason, its structural flags and its values.
+- **What it does not do.**
+  - A retired sample is not read again, and it still counts toward the 5 samples (§5).
+  - Retiring changes no word, no template and no other sample.
+- **The structural flags stay facts.** The operator sees them and decides; this is the seller-risk principle of `6109102895`. A collection still reads each product through the template's own fail-closed rules.
 
 **On approval.** It appends `ACTIVE` with the evidence ids, audited.
 
@@ -154,7 +165,7 @@ All writes go through one owner store with an injected clock and an audit event 
 | O2 | 「+ 공급처 추가」: the host guard, platform detection, the policy reads, credentials and the connection test. The site becomes `RECON`. |
 | O3 | 「사이트 분석」: trial reads, local captures, the read/unread report, observed-host confirmation, and offline re-analysis. |
 | O4 | 「수집 규칙」: the words editor and its revisions. |
-| O5 | Approval and disabling: verifications, `ACTIVE`, the D3 extension permissions and the §10 amendments. |
+| O5 | Approval and disabling, in three slices: **O5a** verifications, `ACTIVE` and 「비활성화」; **O5b** retiring a sample (migration `0062`, amendment `6160586049`); **O5c** the D3 extension permissions and the §10 amendments. |
 | O6 | Acceptance: one real onboarding on a Cafe24 or Godomall site that the owner names, with the owner's go-ahead. |
 
 ## Invariants
@@ -166,7 +177,7 @@ All writes go through one owner store with an injected clock and an audit event 
   It is never a wildcard, an IP literal, a loopback, private or link-local address, a port or a path.
 - **OB-02** A trial never writes a `ProductFactsRevision` or any canonical product truth.
 - **OB-03** An onboarded site's configuration holds words only, and every words revision is a distinct extraction identity.
-- **OB-04** `ACTIVE` needs 3 distinct samples with every core field read, each verified by the operator, under the current words revision. A words change returns the site to `RECON`.
+- **OB-04** `ACTIVE` needs 3 distinct samples with every core field read, each verified by the operator, under the current words revision, and no open structural problem on a sample that is not retired. A words change returns the site to `RECON`.
 - **OB-05** Credentials stay in the OS secret store, typed by the operator, and never appear in a table, log or audit row.
 - **OB-06** Pacing and limits are the template defaults, and a collection reads exactly one product page.
 - **OB-07** Repository sites, their identities and their review rules are unchanged.
