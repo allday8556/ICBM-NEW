@@ -195,6 +195,15 @@ then these sections in order:
 AIF-1 composes the saved layers with the runtime-data placeholder. AIF-2 fills that placeholder and
 adds the platform limits a policy references.
 
+**Amendment (2026-10-14, ADR-0041 §9).** The registry gains one task the prototype does not have,
+`TASK_IMAGE_TEXT_TRANSLATE_V1` (이미지 문구 번역), effective with ADR-0041 slice I4. It is a text
+task: its input is the recognised text of one image's regions and the source language, and its
+output is one Korean string per region (`image-text-translate/v1`). It composes with
+`ROLE_PRODUCT_MD_V1` and `POLICY_COMMON_MARKET_V1`, and its seed is written as
+`seed_version = v29-ai4`. It runs on the existing CLIProxyAPI profile under ADR-0041 D8: text
+only, never image bytes. It stays a suggestion (AIS-08). The registry now holds 16 tasks; Settings
+still shows the prototype's six.
+
 ## 4. The provider port and its execution
 
 **The port.** This is the `AIProvider` port of ADR-0012 §1.

@@ -27,6 +27,7 @@ from app.capabilities.detail_guidance.service import DetailGuidanceService
 from app.capabilities.detail_guidance.store import DetailGuidanceStore
 from app.capabilities.image_studio.contracts import NoOcrProvider
 from app.capabilities.image_studio.store import ImageStudioStore
+from app.capabilities.image_studio.task import RegistryTranslationComposer
 from app.capabilities.image_studio.translation import ImageTranslationService
 from app.capabilities.jobs.diagnostic import FAILING_JOB
 from app.capabilities.jobs.policy import RetryPolicy
@@ -1043,9 +1044,12 @@ def build_container(
         ),
     )
     registry.register(enrichment.job_definition())
-    # ADR-0041 I1: the Image Studio translation owner and its job. Provider-zero: no OCR engine
-    # (NoOcrProvider) and no translation task is bound, so the capability reads NOT_CONFIGURED,
-    # every request is refused before anything is written, and nothing is ever read or sent.
+    # ADR-0041 I1, I4: the Image Studio translation owner and its job. The registered translation
+    # task is composed from the prompt registry and sent only through the profiled provider: with
+    # no approved profile (data transfer included) it names no identity, and a call past the daily
+    # cap is refused (AIS-04). No OCR engine is bound (NoOcrProvider, until I7), so the capability
+    # reads NOT_CONFIGURED, every request is refused before anything is written, and nothing is
+    # ever read or sent.
     image_studio = ImageStudioStore(db, clock, audit)
     image_translation = ImageTranslationService(
         clock=clock,
@@ -1055,7 +1059,7 @@ def build_container(
         products=product_store,
         sources=source_assets,
         ocr=NoOcrProvider(),
-        composer=None,
+        composer=RegistryTranslationComposer(ai_composer),
         execution=ai_execution,
     )
     registry.register(image_translation.job_definition())

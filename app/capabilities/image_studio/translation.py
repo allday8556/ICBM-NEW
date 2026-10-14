@@ -1,10 +1,13 @@
 """The ``image.translate`` job: OCR and translation of one product's chosen images (ADR-0041 §3).
 
 **Request.** Only the operator's request starts a run, for one product (D4, IT-10): at most 30 of
-its confirmed source images (D5), with their source language. It is refused before anything is
-written while the capability reads ``NOT_CONFIGURED``: no OCR engine, no translation task or no AI
-provider. The production container binds none of the first two in I1, so nothing is ever read or
-sent (provider-zero).
+its confirmed source images (D5), with their source language, the regions the operator keeps
+(``excluded``) and the contact details the operator includes (``included``; a contact detail is
+otherwise kept and never sent, §6). It is refused before anything is written while the capability
+reads ``NOT_CONFIGURED``: no OCR engine, no translation task or no AI provider, which includes a
+profile without the owner's data-transfer approval (AIS-04, IT-08). Production binds the
+registered task (I4) but no OCR engine (``NoOcrProvider``, until I7), so nothing is ever read or
+sent.
 
 **Job.** ``image.translate`` is not idempotent (a provider call may cost money) and has one
 attempt: an interrupted run is never re-run blindly. The batch only coordinates; each image is its
@@ -20,18 +23,20 @@ since every other item is reused. Nothing here ever writes a source (IT-01) or a
 (IT-06): the derived image and its selection are later slices'.
 
 **Reads.** A candidate's staleness is derived on read, never stored, by recomputing the
-fingerprint from today's inputs (``REASONS``).
+fingerprint from today's inputs (``REASONS``). So are its regions' flags (``checks``: low
+confidence, a number or unit the Korean drops, a contact detail): the candidate schema holds none.
 """
 
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from typing import Any, Final, Protocol
+from dataclasses import dataclass, field
+from typing import Final, Protocol
 
 from app.capabilities.ai.composer import ComposedRequest
 from app.capabilities.ai.execution import AIExecution
 from app.capabilities.audit.models import AuditEventType, AuditOutcome
 from app.capabilities.audit.service import AuditEntry, AuditLog
+from app.capabilities.image_studio.checks import region_flags
 from app.capabilities.image_studio.contracts import (
     MAX_IMAGES_PER_RUN,
     OUTPUT_SCHEMA_VERSION,
@@ -50,7 +55,9 @@ from app.capabilities.image_studio.store import (
     CandidateDraft,
     CandidateRecord,
     ImageStudioStore,
+    ObservationRecord,
 )
+from app.capabilities.image_studio.task import parse_translations
 from app.capabilities.jobs.policy import RetryPolicy
 from app.capabilities.jobs.registry import JobContext, JobDefinition
 from app.capabilities.jobs.service import JobService
@@ -79,7 +86,6 @@ IMAGE_TRANSLATE_NOT_CONFIGURED: Final = "IMAGE_TRANSLATE_NOT_CONFIGURED"
 IMAGE_TRANSLATE_REQUEST_INVALID: Final = "IMAGE_TRANSLATE_REQUEST_INVALID"
 IMAGE_TRANSLATE_IMAGE_UNKNOWN: Final = "IMAGE_TRANSLATE_IMAGE_UNKNOWN"
 IMAGE_TRANSLATE_PRODUCT_UNKNOWN: Final = "IMAGE_TRANSLATE_PRODUCT_UNKNOWN"
-IMAGE_TRANSLATION_OUTPUT_INVALID: Final = "IMAGE_TRANSLATION_OUTPUT_INVALID"
 IMAGE_TRANSLATE_ITEMS_FAILED: Final = "IMAGE_TRANSLATE_ITEMS_FAILED"
 
 
@@ -110,6 +116,8 @@ class TranslateRequest:
     actor: str
     # Per image, the regions the operator keeps and never sends.
     excluded: Mapping[str, frozenset[str]] | None = None
+    # Per image, the contact details the operator explicitly sends (kept by default, §6).
+    included: Mapping[str, frozenset[str]] | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +137,9 @@ class CandidateView:
     # FRESH on an equal fingerprint; STALE otherwise, with the parts that changed.
     status: str
     stale_reasons: tuple[str, ...]
+    # Every region of the observation → its flags (``checks.FLAGS``), derived on read: low
+    # confidence, a number or unit its suggestion drops, a contact detail. Never stored.
+    flags: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 class ImageTranslationService:
@@ -195,9 +206,15 @@ class ImageTranslationService:
                 details={"images": len(images)},
             )
         excluded = dict(request.excluded or {})
-        if not set(excluded) <= set(images):
+        included = dict(request.included or {})
+        if not set(excluded) <= set(images) or not set(included) <= set(images):
             raise InputValidationError(
-                IMAGE_TRANSLATE_REQUEST_INVALID, "an exclusion names an image outside the run"
+                IMAGE_TRANSLATE_REQUEST_INVALID,
+                "an exclusion or an inclusion names an image outside the run",
+            )
+        if any(included[sha] & excluded.get(sha, frozenset()) for sha in included):
+            raise InputValidationError(
+                IMAGE_TRANSLATE_REQUEST_INVALID, "a region is both kept and included"
             )
         owned = self._product_images(request.product_group_id)
         foreign = [sha for sha in images if sha not in owned]
@@ -213,7 +230,11 @@ class ImageTranslationService:
                 "product_group_id": request.product_group_id,
                 "source_language": request.source_language,
                 "images": [
-                    {"source_sha256": sha, "excluded": sorted(excluded.get(sha, frozenset()))}
+                    {
+                        "source_sha256": sha,
+                        "excluded": sorted(excluded.get(sha, frozenset())),
+                        "included": sorted(included.get(sha, frozenset())),
+                    }
                     for sha in images
                 ],
                 "actor": request.actor,
@@ -234,6 +255,7 @@ class ImageTranslationService:
                 str(item["source_sha256"]),
                 language,
                 frozenset(str(r) for r in item.get("excluded", ())),
+                frozenset(str(r) for r in item.get("included", ())),
             )
             for item in items
         ]
@@ -253,10 +275,15 @@ class ImageTranslationService:
             )
 
     def _item(
-        self, ctx: JobContext, source_sha256: str, language: str, excluded: frozenset[str]
+        self,
+        ctx: JobContext,
+        source_sha256: str,
+        language: str,
+        excluded: frozenset[str],
+        included: frozenset[str],
     ) -> ItemOutcome:
         try:
-            return self._translate(ctx, source_sha256, language, excluded)
+            return self._translate(ctx, source_sha256, language, excluded, included)
         except AppError as error:
             return self._failed(ctx, source_sha256, error.error_class, error.code)
         except Exception as error:  # an engine or adapter fault fails its item, never the batch
@@ -267,7 +294,12 @@ class ImageTranslationService:
             return self._failed(ctx, source_sha256, ErrorClass.UNKNOWN, "IMAGE_TRANSLATE_FAULT")
 
     def _translate(
-        self, ctx: JobContext, source_sha256: str, language: str, excluded: frozenset[str]
+        self,
+        ctx: JobContext,
+        source_sha256: str,
+        language: str,
+        excluded: frozenset[str],
+        included: frozenset[str],
     ) -> ItemOutcome:
         identity = self._ocr.identity()
         if identity is None:
@@ -279,7 +311,7 @@ class ImageTranslationService:
             observed = observation_fingerprint(key, regions)
         else:
             regions, observed = existing.regions, existing.fingerprint
-        sent = sent_regions(regions, excluded)
+        sent = sent_regions(regions, excluded, included)
         if not sent:
             # Nothing to translate: the reading alone is the whole, successful result.
             record = self._store.record_observation(
@@ -304,7 +336,7 @@ class ImageTranslationService:
                 outcome.error_class or ErrorClass.UNKNOWN,
                 outcome.error_code or "AI_PROVIDER_FAILED",
             )
-        translations = _translations(outcome.value, sent)
+        translations = parse_translations(outcome.value, sent)
         observation, candidate = self._store.record_translation(
             key,
             regions,
@@ -352,14 +384,18 @@ class ImageTranslationService:
     # -------------------------------------------------------------- reads
 
     def candidate_view(
-        self, observation_id: str, source_language: str, excluded: frozenset[str] = frozenset()
+        self,
+        observation_id: str,
+        source_language: str,
+        excluded: frozenset[str] = frozenset(),
+        included: frozenset[str] = frozenset(),
     ) -> CandidateView | None:
         """The candidate for today's inputs: ``FRESH`` on an equal fingerprint, else the newest
         candidate of the observation in that language, ``STALE`` with what changed. A stale
-        candidate is never shown as a fresh suggestion."""
+        candidate is never shown as a fresh suggestion. Every region carries its flags."""
         check_language(source_language)
         observation = self._store.observation_by_id(observation_id)
-        sent = sent_regions(observation.regions, excluded)
+        sent = sent_regions(observation.regions, excluded, included)
         mine = [
             c
             for c in self._store.candidates(observation_id)
@@ -371,13 +407,15 @@ class ImageTranslationService:
         if now is not None:
             fresh = next((c for c in mine if c.fingerprint == now.fingerprint), None)
             if fresh is not None:
-                return CandidateView(fresh, "FRESH", ())
-            return CandidateView(mine[0], "STALE", stale_reasons(mine[0].inputs, now))
+                return CandidateView(fresh, "FRESH", (), _flags(observation, fresh))
+            return CandidateView(
+                mine[0], "STALE", stale_reasons(mine[0].inputs, now), _flags(observation, mine[0])
+            )
         # With no composer or no provider today, nothing can be fresh.
         reasons = ("prompt", "policy") if self._composer is None else ()
         if self._execution.identity() is None:
             reasons = (*reasons, "provider")
-        return CandidateView(mine[0], "STALE", reasons)
+        return CandidateView(mine[0], "STALE", reasons, _flags(observation, mine[0]))
 
     # -------------------------------------------------------------- inputs
 
@@ -441,28 +479,12 @@ class ImageTranslationService:
             )
 
 
-def _translations(
-    value: Mapping[str, Any] | None, sent: Sequence[SentRegion]
-) -> tuple[tuple[str, str], ...]:
-    """The answer's one Korean string per sent region, in the order sent, or refused whole."""
-    raw = None if value is None else value.get("translations")
-    if not isinstance(raw, list) or len(raw) != len(sent):
-        raise _output_invalid()
-    pairs = []
-    for region, entry in zip(sent, raw, strict=True):
-        if (
-            not isinstance(entry, dict)
-            or entry.get("region_id") != region.region_id
-            or not isinstance(entry.get("text"), str)
-            or not entry["text"].strip()
-        ):
-            raise _output_invalid()
-        pairs.append((region.region_id, entry["text"]))
-    return tuple(pairs)
-
-
-def _output_invalid() -> InputValidationError:
-    return InputValidationError(
-        IMAGE_TRANSLATION_OUTPUT_INVALID,
-        "the translation does not carry one Korean text per sent region, in order",
-    )
+def _flags(
+    observation: ObservationRecord, candidate: CandidateRecord
+) -> dict[str, tuple[str, ...]]:
+    """Every region's flags against the candidate's suggestion for it, if any (ADR-0041 §6)."""
+    suggested = dict(candidate.translations)
+    return {
+        r.region_id: region_flags(r.text, r.confidence, suggested.get(r.region_id))
+        for r in observation.regions
+    }
