@@ -40,6 +40,7 @@ from app.stages.products import common_option_models as _common_option_models  #
 from app.stages.products import enrichment_models as _enrichment_models  # noqa: F401
 from app.stages.products import image_models as _image_models  # noqa: F401
 from app.stages.products import models as _product_models  # noqa: F401
+from app.stages.products import overseas_costs_models as _overseas_costs_models  # noqa: F401
 from app.stages.products import sales_policy_models as _sales_policy_models  # noqa: F401
 from app.stages.register import authoring_revisions as _authoring_revisions  # noqa: F401
 from app.stages.register import category_catalog as _category_catalog_models  # noqa: F401

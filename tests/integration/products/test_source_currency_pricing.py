@@ -1,7 +1,8 @@
-"""ADR-0038 O1a: a revision in a source currency fails closed in M4 until O2.
+"""ADR-0038 O1a, as O2 leaves it: a revision in a source currency is never read as won.
 
-Nothing converts a CNY or JPY amount into won: the base and offer pricing paths name
-``PRICING_SOURCE_CURRENCY_UNSUPPORTED`` before they read an amount, and the materializer opens no
+The base path prices it at its landed cost (``test_landed_cost_pricing``), and without a rate or
+an overseas shipping it fails closed before anything is converted. The offer path still names
+``PRICING_SOURCE_CURRENCY_UNSUPPORTED`` before it reads an amount, and the materializer opens no
 QuantityOffer for such a revision. The AtomicSKU path is covered beside its own economics tests.
 """
 
@@ -25,6 +26,7 @@ from app.stages.collect.facts import (
 )
 from app.stages.collect.revisions import ProductFactsRevisionStore, StoredRevision
 from app.stages.products import pricing_service
+from app.stages.products.landed_cost import FX_UNAVAILABLE, OVERSEAS_SHIPPING_UNSET
 from app.stages.products.materialization import BaseProductEvidence, MaterializationStatus
 from app.stages.products.model import ReadinessStatus, Reason
 from app.stages.products.pricing import SOURCE_CURRENCY_UNSUPPORTED
@@ -63,24 +65,27 @@ def _offers(config: AppConfig) -> int:
         return int(connection.execute("SELECT COUNT(*) FROM quantity_offers").fetchone()[0])
 
 
-def test_a_base_product_in_a_source_currency_is_not_priced(
+def test_a_base_product_in_a_source_currency_without_a_rate_is_not_priced(
     container: Container, config: AppConfig, sources: Collections
 ) -> None:
     run_id, revision = sources.collect(_cny())
     assert revision.source_currency == "CNY" and revision.currency == "KRW"
     result = container.materializer.materialize_run(run_id)
-    # The Item and its binding are procurement, not price: they exist, and pricing refuses.
+    # The Item and its binding are procurement, not price: they exist, and pricing fails closed.
     assert result.base_product is BaseProductEvidence.PROVEN and result.item_id is not None
     ctx = context()
     priced = container.pricing.price(result.item_id, ctx)
-    assert priced.outcome is PricingOutcome.NOT_PRICED and priced.reasons == (UNSUPPORTED,)
+    assert priced.outcome is PricingOutcome.NOT_PRICED
+    assert {(r.code, r.subject) for r in priced.reasons} == {
+        (FX_UNAVAILABLE, "fx:CNY"),
+        (FX_UNAVAILABLE, "fx:USD"),
+        (OVERSEAS_SHIPPING_UNSET, "overseas_shipping"),
+    }
     evaluation = container.pricing.evaluate(result.item_id, ctx)
     assert evaluation.inputs is None and evaluation.calculation is None
     readiness = container.product_readiness.pricing_readiness(result.item_id, ctx)
     assert readiness.status is ReadinessStatus.REVIEW_REQUIRED
-    assert (SOURCE_CURRENCY_UNSUPPORTED, "prices") in [
-        (r.code, r.subject) for r in readiness.reasons
-    ]
+    assert (FX_UNAVAILABLE, "fx:CNY") in [(r.code, r.subject) for r in readiness.reasons]
     with contextlib.closing(raw(config)) as connection:
         assert connection.execute("SELECT COUNT(*) FROM pricing_snapshots").fetchone() == (0,)
 

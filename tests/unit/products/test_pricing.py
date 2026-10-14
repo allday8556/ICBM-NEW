@@ -332,7 +332,9 @@ def test_a_declared_purchase_price_is_chosen_and_a_list_price_never_is() -> None
 # ---------------------------------------------------------------- ADR-0038 O1a: source currency
 
 
-def test_a_source_currency_is_not_priced_until_o2() -> None:
+def test_a_source_currency_offer_is_never_priced() -> None:
+    # O2 prices the base and AtomicSKU paths at their landed cost (test_landed_cost); the offer
+    # path still asks this first.
     assert source_currency_reasons(None) == ()
     for currency in ("CNY", "JPY"):
         assert source_currency_reasons(currency) == (
