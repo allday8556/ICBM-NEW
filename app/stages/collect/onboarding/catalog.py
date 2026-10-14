@@ -175,9 +175,12 @@ class SupplierCatalog:
         self._collections = MappingProxyType({c.supplier_key: c for c in collections})
         self._policies = MappingProxyType(dict(capture_policies))
         self._repository_active = repository_active
+        # A repository supplier with a collection and no CONNECT definition (ADR-0040 §1: one read
+        # only from captured pages) holds its key and its storefront host all the same.
+        self._repository_keys = frozenset(repository) | frozenset(self._collections)
         self._repository_hosts = frozenset(
             host for host in (_host(d) for d in repository.values()) if host is not None
-        )
+        ) | frozenset(c.collection.profile.storefront_host for c in self._collections.values())
         self._templates = templates
         self._platforms = platforms
         self._lock = threading.Lock()
@@ -202,7 +205,7 @@ class SupplierCatalog:
 
     @property
     def repository_keys(self) -> frozenset[str]:
-        return frozenset(self._definitions)
+        return self._repository_keys
 
     @property
     def repository_hosts(self) -> frozenset[str]:
@@ -335,7 +338,7 @@ class SupplierCatalog:
         key = record.supplier_key
         if record.state is OnboardingState.DISABLED:
             return OnboardedEntry(record, None)
-        if key in self._definitions:
+        if key in self._repository_keys:
             return OnboardedEntry(record, None, ("the key is a repository supplier's",))
         if record.storefront_host in self._repository_hosts:
             return OnboardedEntry(record, None, ("the storefront is a repository supplier's",))
@@ -378,8 +381,16 @@ class SupplierCatalog:
             definitions=MappingProxyType(definitions),
             collections=MappingProxyType(collections),
             capture_policies=MappingProxyType(policies),
+            # A collection without a CONNECT definition (ADR-0040 §1) is named by its profile.
             names=MappingProxyType(
-                {key: d.profile.display_name for key, d in sorted(definitions.items())}
+                {
+                    key: (
+                        definitions[key].profile.display_name
+                        if key in definitions
+                        else collections[key].collection.profile.supplier.display_name
+                    )
+                    for key in sorted({*definitions, *collections})
+                }
             ),
             onboarded=MappingProxyType(dict(self._onboarded)),
         )
