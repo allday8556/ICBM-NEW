@@ -285,6 +285,10 @@ class _Sku:
         self.discount = _cny(entry.get("discountPrice"))
         self.stock = _count(entry.get("canBookCount"))
         self.promotion = entry.get("isPromotionSku") is True
+        # Exactly as stated, for the evidence: None where the page states nothing.
+        self.stated_price = entry.get("price")
+        self.stated_discount = entry.get("discountPrice")
+        self.stated_promotion = entry.get("isPromotionSku")
 
     @property
     def original(self) -> str | None:
@@ -331,7 +335,61 @@ def _tiers(data: Mapping[str, Any], name: str) -> list[tuple[int, str]] | None:
     return tiers
 
 
+PRICE_LISTS = ("originalPrices", "currentPrices")
+
+
+def _list_role(name: str, data: Mapping[str, Any]) -> str:
+    """What one price list is, in the page's own terms: the original (line) list, or the current
+    list, which is promotional when an original list stands beside it."""
+    if name == "originalPrices":
+        return "originalPrices: original/line"
+    original = at(data, *PRICE_MODEL, "originalPrices")
+    beside = isinstance(original, list) and bool(original)
+    return "currentPrices: current/promotional" if beside else "currentPrices: current/shown"
+
+
+def _quoted_tiers(
+    data: Mapping[str, Any], unit: str, status: FieldStatus, reason: str | None = None
+) -> tuple[Evidence, ...]:
+    """Every tier of every price list the page states, verbatim, one evidence entry each.
+
+    Nothing is dropped: each entry keeps its list and index in the locator, the stated
+    ``beginAmount`` and ``price`` (with the unit and CNY) as the observed text, and what the list
+    is (original/line, or current, promotional beside an original) in ``normalized``.
+    """
+    quoted: list[Evidence] = []
+    for name in PRICE_LISTS:
+        listed = at(data, *PRICE_MODEL, name)
+        for index, tier in enumerate(listed if isinstance(listed, list) else []):
+            begin = at(tier, "beginAmount")
+            price = at(tier, "price")
+            role = _list_role(name, data)
+            quoted.append(
+                Evidence(
+                    EvidenceKind.EMBEDDED_JSON,
+                    locator(*PRICE_MODEL, f"{name}[{index}]"),
+                    status,
+                    observed=f"beginAmount {begin}{unit} price {price} {CURRENCY}"[:_QUOTE],
+                    normalized=role if reason is None else f"{reason} {role}",
+                )
+            )
+    return tuple(quoted)
+
+
+def _with_tiers(fact: FieldFact, data: Mapping[str, Any], unit: str) -> FieldFact:
+    """The prices field, with every stated tier of both lists quoted beside its own evidence."""
+    return FieldFact(
+        fact.status,
+        fact.value,
+        (*fact.evidence, *_quoted_tiers(data, unit, FieldStatus.CONFIRMED)),
+    )
+
+
 def _prices(data: Mapping[str, Any], skus: Sequence[_Sku], unit: str) -> FieldFact:
+    return _with_tiers(_price_basis(data, skus, unit), data, unit)
+
+
+def _price_basis(data: Mapping[str, Any], skus: Sequence[_Sku], unit: str) -> FieldFact:
     display = at(data, *PRICE_MODEL, "priceDisplayType")
     display_path = (*PRICE_MODEL, "priceDisplayType")
     if display == SKU_PRICE:
@@ -467,19 +525,36 @@ def _options(data: Mapping[str, Any], skus: Sequence[_Sku]) -> FieldFact:
         _evidence(props_path, FieldStatus.CONFIRMED, " / ".join(name for name, _ in axes)),
         _evidence((*SKU_MODEL, "skuInfoMap", "*"), FieldStatus.CONFIRMED, f"{len(skus)} SKU"),
     ]
-    # A promotion or member price beside a SKU's original price is kept as a fact (the owner's
-    # price basis): one entry per SKU whose stated discount differs from its original price.
-    for sku in skus:
-        if sku.price and sku.discount and sku.discount != sku.price:
-            evidence.append(
-                _evidence(
-                    (*SKU_MODEL, "skuInfoMap", "*", "discountPrice"),
-                    FieldStatus.CONFIRMED,
-                    f"{sku.key.replace(SKU_KEY_SEPARATOR, ' / ')}: price {sku.price}, "
-                    f"discountPrice {sku.discount}{' (promotion)' if sku.promotion else ''}",
-                )
-            )
+    # Every SKU's stated prices, verbatim (the owner's price basis keeps a promotion or member
+    # price as a fact): its original ``price``, its ``discountPrice`` and its promotion flag, one
+    # entry per SKU under its own path, whether or not the discount differs.
+    evidence.extend(_sku_price_entry(sku) for sku in skus)
     return FieldFact(FieldStatus.CONFIRMED, value, tuple(evidence))
+
+
+def _verbatim(value: object) -> str:
+    """A stated JSON value as the page wrote it: ``-`` where it states nothing."""
+    if value is None:
+        return "-"
+    return str(value).lower() if isinstance(value, bool) else str(value)
+
+
+def _sku_price_entry(sku: _Sku) -> Evidence:
+    """One SKU's stated price, discount price and promotion flag, exactly as the page wrote them
+    (``-`` where it states nothing), labelled with its SKU id and selections."""
+    stated = (
+        ("price", sku.stated_price),
+        ("discountPrice", sku.stated_discount),
+        ("isPromotionSku", sku.stated_promotion),
+    )
+    observed = ", ".join(f"{name} {_verbatim(value)}" for name, value in stated)
+    return Evidence(
+        EvidenceKind.EMBEDDED_JSON,
+        locator(*SKU_MODEL, "skuInfoMap", sku.key),
+        FieldStatus.CONFIRMED,
+        observed=f"{observed} {CURRENCY}"[:_QUOTE],
+        normalized=f"skuId {sku.sku_id}: {sku.key.replace(SKU_KEY_SEPARATOR, ' / ')}"[:_QUOTE],
+    )
 
 
 def _stock_entry(sku: _Sku) -> Evidence:
@@ -545,21 +620,12 @@ def _quantity_tiers(data: Mapping[str, Any], unit: str) -> FieldFact:
     if not basis or len({begin for begin, _ in basis}) != len(basis):
         return _review((*PRICE_MODEL, name), PRICE_NOT_STATED)
     # A tier states a unit price from a quantity on, and a quantity tier is a stated (quantity,
-    # total) pair: no total is ever computed. Every tier is kept verbatim in the evidence, and the
-    # field waits for review.
+    # total) pair: no total is ever computed. Every tier of both lists is kept verbatim in the
+    # evidence, and the field waits for review.
     return FieldFact(
         FieldStatus.REVIEW_REQUIRED,
         None,
-        tuple(
-            Evidence(
-                EvidenceKind.EMBEDDED_JSON,
-                locator(*PRICE_MODEL, name),
-                FieldStatus.REVIEW_REQUIRED,
-                observed=f"beginAmount {begin}{unit} price {amount} {CURRENCY}",
-                normalized=TIER_UNIT_PRICE_NOT_TOTAL,
-            )
-            for begin, amount in basis
-        ),
+        _quoted_tiers(data, unit, FieldStatus.REVIEW_REQUIRED, TIER_UNIT_PRICE_NOT_TOTAL),
     )
 
 

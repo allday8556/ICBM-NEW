@@ -253,7 +253,7 @@ def _evaluated(number: str, fields: dict[str, Any]) -> Any:
             source_product_id=number,
             source_url=_url(number),
             captured_at=datetime(2026, 10, 14, tzinfo=UTC),
-            extractor_revision="ali1688-2",
+            extractor_revision="ali1688-3",
             extractor_fingerprint="0" * 64,
             collection_run_id="run-1",
             correlation_id="corr-1",
@@ -358,7 +358,12 @@ def test_golden_facts(number: str) -> None:
         # A tier states a unit price; no total is ever made of it. Every tier is quoted verbatim.
         assert tiers.status is FieldStatus.REVIEW_REQUIRED and tiers.value is None
         assert [e.observed for e in tiers.evidence] == golden["tiers"]
-        assert {e.normalized for e in tiers.evidence} == {facts.TIER_UNIT_PRICE_NOT_TOTAL}
+        assert {e.normalized for e in tiers.evidence} == {
+            f"{facts.TIER_UNIT_PRICE_NOT_TOTAL} currentPrices: current/shown"
+        }
+        # The same tiers are quoted on prices too, so each is recoverable from either field.
+        quoted = [e.observed for e in fields["prices"].evidence if "Prices[" in e.locator]
+        assert quoted == golden["tiers"]
 
     shipping = fields["shipping"].value
     assert isinstance(shipping, ForeignShippingValue)
@@ -416,9 +421,12 @@ def test_a_promotion_price_is_recorded_and_never_the_cost() -> None:
     assert isinstance(options, OptionsValue)
     promoted = next(c for c in options.configurations if c.selections == (key,))
     assert promoted.unit_price == "3.80"
-    recorded = [e for e in fields["options"].evidence if "discountPrice" in e.locator]
-    assert len(recorded) == 1 and recorded[0].observed is not None
-    assert "discountPrice 2.99" in recorded[0].observed and "promotion" in recorded[0].observed
+    recorded = {
+        e.locator.rsplit("skuInfoMap.", 1)[1]: e.observed
+        for e in fields["options"].evidence
+        if "skuInfoMap." in e.locator and not e.locator.endswith("skuInfoMap.*")
+    }
+    assert recorded[key] == "price 3.80, discountPrice 2.99, isPromotionSku true CNY"
 
 
 def test_a_sku_with_only_a_shown_price_uses_it() -> None:
@@ -449,13 +457,32 @@ def test_a_tier_page_with_an_original_price_buys_at_the_original() -> None:
         ("原价 ≥1个", "6.20", PriceRole.PURCHASE),
         ("现价 ≥1个", "5.80", None),
     ]
+    # Every tier of both lists is kept, the promotional ones included: none is dropped.
+    expected = [
+        ("originalPrices[0]", "beginAmount 1个 price 6.20 CNY", "originalPrices: original/line"),
+        ("originalPrices[1]", "beginAmount 90个 price 5.70 CNY", "originalPrices: original/line"),
+        (
+            "currentPrices[0]",
+            "beginAmount 1个 price 5.80 CNY",
+            "currentPrices: current/promotional",
+        ),
+        (
+            "currentPrices[1]",
+            "beginAmount 90个 price 5.30 CNY",
+            "currentPrices: current/promotional",
+        ),
+    ]
+    quoted = [
+        (e.locator.rsplit(".", 1)[1], e.observed, e.normalized)
+        for e in fields["prices"].evidence
+        if "Prices[" in e.locator
+    ]
+    assert quoted == expected
     tiers = fields["quantity_tiers"]
     assert tiers.status is FieldStatus.REVIEW_REQUIRED and tiers.value is None
-    assert [e.observed for e in tiers.evidence] == [
-        "beginAmount 1个 price 6.20 CNY",
-        "beginAmount 90个 price 5.70 CNY",
+    assert [(e.locator.rsplit(".", 1)[1], e.observed, e.normalized) for e in tiers.evidence] == [
+        (where, said, f"{facts.TIER_UNIT_PRICE_NOT_TOTAL} {role}") for where, said, role in expected
     ]
-    assert all("originalPrices" in e.locator for e in tiers.evidence)
 
 
 @pytest.mark.parametrize("number", ["970942992948", "990041659965"])
@@ -575,4 +602,34 @@ def test_every_skus_stated_count_is_kept_verbatim(number: str) -> None:
         assert configuration.supplier_sku_id is not None
         assert configuration.sold_out is (by_id[configuration.supplier_sku_id] == 0)
     # The whole field still evaluates, every count inside the evidence bound.
+    _evaluated(number, fields)
+
+
+@pytest.mark.parametrize("number", NUMBERS)
+def test_every_stated_price_is_recoverable(number: str) -> None:
+    # No stated price is dropped: every tier of both price lists is quoted on prices, and every
+    # SKU's price, discountPrice and promotion flag on options, exactly as the page wrote them.
+    data = _projection(number)
+    fields = _fields(number)
+    model = _price_model(data)
+    tiers = [
+        (f"{name}[{index}]", f"beginAmount {tier['beginAmount']}", f"price {tier['price']}")
+        for name in ("originalPrices", "currentPrices")
+        for index, tier in enumerate(model.get(name, []))
+    ]
+    quoted = {e.locator.rsplit(".", 1)[1]: e.observed for e in fields["prices"].evidence}
+    for where, begin, price in tiers:
+        assert begin in quoted[where] and price in quoted[where], where
+    skus = _sku_model(data)["skuInfoMap"]
+    prefix = "embedded:result.data.Root.fields.dataJson.skuModel.skuInfoMap."
+    kept = {
+        e.locator.removeprefix(prefix): e.observed
+        for e in fields["options"].evidence
+        if e.locator.startswith(prefix) and e.locator != prefix + "*"
+    }
+    assert set(kept) == set(skus)
+    for key, entry in skus.items():
+        assert f"price {entry.get('price', '-')}," in kept[key]
+        assert f"discountPrice {entry.get('discountPrice', '-')}," in kept[key]
+        assert f"isPromotionSku {str(entry['isPromotionSku']).lower()}" in kept[key]
     _evaluated(number, fields)

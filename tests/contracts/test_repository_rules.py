@@ -3094,7 +3094,7 @@ def test_ali1688_is_one_extraction_identity_and_a_capture_only_supplier() -> Non
 
     package = REPO_ROOT / "integrations" / "suppliers" / "ali1688"
     manifest = read_manifest(package / "extraction_identity.py")
-    assert EXTRACTION_REVISION == manifest.revision == IMAGE_ROLES.identity == "ali1688-2"
+    assert EXTRACTION_REVISION == manifest.revision == IMAGE_ROLES.identity == "ali1688-3"
     modules = {
         path.relative_to(REPO_ROOT).as_posix() for path in (package / "collect").rglob("*.py")
     }

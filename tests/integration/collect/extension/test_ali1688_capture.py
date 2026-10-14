@@ -115,7 +115,7 @@ def test_a_captured_page_is_recorded_as_a_cny_revision(
         config,
         "SELECT source_product_id, source_currency, extractor_revision"
         " FROM product_facts_revisions",
-    ) == [(NUMBER, "CNY", "ali1688-2")]
+    ) == [(NUMBER, "CNY", "ali1688-3")]
     status, prices = _field(config, "prices")
     assert status == "CONFIRMED" and prices is not None
     assert json.loads(prices) == {
@@ -168,6 +168,56 @@ def test_every_skus_stated_count_is_recoverable_from_the_stored_revision(
     skus = _projection()["result"]["data"]["Root"]["fields"]["dataJson"]["skuModel"]["skuInfoMap"]
     assert len(skus) == 20
     assert stored == {key: str(entry["canBookCount"]) for key, entry in skus.items()}
+
+
+def test_every_stated_tier_of_a_promotion_page_is_recoverable_from_the_stored_revision(
+    client: TestClient, config: AppConfig
+) -> None:
+    projection = json.loads((FIXTURES / "970942992948.embedded.json").read_text("utf-8"))
+    model = projection["result"]["data"]["mainPrice"]["fields"]["priceModel"]
+    model["originalPrices"] = [
+        {"price": "6.20", "beginAmount": 1},
+        {"price": "5.70", "beginAmount": 90},
+    ]
+    url = "https://detail.1688.com/offer/970942992948.html"
+    body = envelope(
+        (FIXTURES / "970942992948.html").read_text("utf-8"),
+        supplier_key=SUPPLIER,
+        policy=_reference(),
+        transport=transport(url=url, navigation_name=url),
+    )
+    body["embedded_data"] = {"projection": projection}
+    response = post_capture(client, pair(_container(client)), body)
+    assert wait_for_outcome(client, response.json()["collection_run_id"])["outcome"] == "RECORDED"
+    stored = rows(
+        config,
+        "SELECT locator, observed, normalized FROM product_facts_evidence"
+        " WHERE field_key = 'prices' AND locator LIKE '%Prices[%' ORDER BY ordinal",
+    )
+    prefix = "embedded:result.data.mainPrice.fields.priceModel."
+    assert [
+        (locator.removeprefix(prefix), observed, kind) for locator, observed, kind in stored
+    ] == [
+        ("originalPrices[0]", "beginAmount 1个 price 6.20 CNY", "originalPrices: original/line"),
+        ("originalPrices[1]", "beginAmount 90个 price 5.70 CNY", "originalPrices: original/line"),
+        (
+            "currentPrices[0]",
+            "beginAmount 1个 price 5.80 CNY",
+            "currentPrices: current/promotional",
+        ),
+        (
+            "currentPrices[1]",
+            "beginAmount 90个 price 5.30 CNY",
+            "currentPrices: current/promotional",
+        ),
+    ]
+    status, prices = _field(config, "prices")
+    assert status == "CONFIRMED" and prices is not None
+    # The purchase price is the first original tier; the first current tier stays a no-role fact.
+    assert json.loads(prices)["prices"] == [
+        {"label": "原价 ≥1个", "currency": "CNY", "amount": "6.20", "role": "PURCHASE"},
+        {"label": "现价 ≥1个", "currency": "CNY", "amount": "5.80"},
+    ]
 
 
 def test_a_member_outside_the_allowlist_is_refused_and_its_fields_wait_for_review(
