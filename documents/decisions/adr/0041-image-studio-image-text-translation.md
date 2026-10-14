@@ -73,16 +73,28 @@ All writes go through one owner store, `app/capabilities/image_studio/`, with an
 | table | holds |
 | --- | --- |
 | `image_ocr_observations` | One OCR reading of one source image, keyed by the source SHA-256, the OCR engine id and version, and the preprocessing version. It holds the regions: the box or polygon, the source text, the detected script (`zh` / `ja`), the confidence and the background-uniformity score. Content-addressed, so the same image is read once however many products use it. |
-| `image_translation_candidates` | The AI's Korean suggestion per region for one observation, with the provenance copied from the outcome (ADR-0012 §6), and a fingerprint over the observation, the task revision and the requested model identity. |
+| `image_translation_candidates` | The AI's Korean suggestion per region for one observation, with the provenance copied from the outcome (ADR-0012 §6), the composed `prompt_version`, `policy_version` and output schema version, and the input fingerprint below. |
 | `image_edit_revisions` | The operator's saved edit for one image of one product, numbered per lineage (product group and source SHA-256). Per region, it holds the final Korean text, its origin (`AI_SUGGESTION` or `OPERATOR_CONFIRMED`), include or keep-original, the erase decision and the matched style. It also holds the renderer version, the font file hashes and a content fingerprint. |
 | `image_edit_current` | The forward-only current pointer per lineage. A parent id never owns the current state. |
+
+**The translation fingerprint is ADR-0012 §6 / ADR-0026's, unchanged.** It is computed before the call, over:
+
+```text
+hash(relevant_input + policy_version + prompt_version + requested_provider + requested_model
+     + routing_config_version + proxy_version + output_schema_version)
+```
+
+- `relevant_input` is the digest, by value, of exactly what the task reads: the observation's fingerprint, the source language and the ordered region texts that are sent (a region the operator excludes, or a contact detail kept by default, is not part of it).
+- Any change to the prompt, the policy, the requested provider or model, the routing or proxy revision (ADR-0027 §2) or the output schema therefore changes the fingerprint.
+- **Reuse** happens only on an equal fingerprint, and the response says `REUSED`. A candidate whose recomputed fingerprint differs is `STALE`, derived on read and never stored, with its reason (input, prompt, policy, provider or schema). A stale candidate is never shown as a fresh suggestion.
+- No secret is ever part of a fingerprint or provenance (AIF-07).
 
 The derived artifact itself is recorded by the M4 image owner (`ProductImageService.record_completed_derivation`). Its transformation spec names only the edit revision id and fingerprint: the spec stays small (`MAX_SPEC_BYTES`) and the revision holds the detail. Facts staleness uses the existing `validated_source_revision_id`.
 
 **Jobs.**
 - The job type `image.translate` is not idempotent (`idempotent=False`), since a provider call may cost money.
 - A batch only coordinates: each image is its own item, and only failed items are retried.
-- A re-run reuses an observation or candidate with the same fingerprint, so no provider is called twice for the same input.
+- A re-run reuses an OCR observation with the same key, and a translation candidate only with an equal translation fingerprint (above), so no provider is called twice for the same inputs and a changed prompt, policy, model, routing or schema is never served from an old candidate.
 - A failed item leaves no durable artifact, and the source stays selected.
 - The editing session is not durable. A stateless preview renders without storing anything, as ADR-0033's preview does.
 
