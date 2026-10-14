@@ -2787,6 +2787,9 @@ def test_supplier_packages_hold_site_knowledge_only() -> None:
     # ADR-0040 C1: 슈퍼딜리버리 is a packaged supplier under the same rule.
     assert "integrations/suppliers/superdelivery/__init__.py" in packages
     assert "integrations/suppliers/superdelivery/collect/facts.py" in packages
+    # ADR-0040 C2: 1688 is a packaged supplier under the same rule.
+    assert "integrations/suppliers/ali1688/__init__.py" in packages
+    assert "integrations/suppliers/ali1688/collect/facts.py" in packages
     for path, tree in packages.items():
         # A package may import its own modules: site knowledge is allowed more than one file.
         own = "integrations.suppliers." + path.split("/")[2]
@@ -2895,6 +2898,7 @@ def test_every_collection_definition_pins_its_extraction_identity() -> None:
     ]
     assert suppliers / "kmretail" in packages
     assert suppliers / "superdelivery" in packages
+    assert suppliers / "ali1688" in packages
     # ADR-0030 §4: a platform template is pinned the same way as a supplier package.
     templates = [path for path in (suppliers / "platforms").iterdir() if path.is_dir()]
     templates = [path for path in templates if path.name != "__pycache__"]
@@ -2931,6 +2935,18 @@ def test_image_role_rules_are_bound_to_the_extraction_identity() -> None:
     assert len(set(rule_ids)) == len(rule_ids), "rule ids are distinct"
     assert all(rule_id.startswith("sd.") for rule_id in rule_ids)
 
+    # ADR-0040 C2: 1688's rules are bound to its own identity the same way.
+    from integrations.suppliers import ali1688
+    from integrations.suppliers.ali1688.collect import images as ali_images
+
+    ali_manifest = read_manifest(
+        REPO_ROOT / "integrations" / "suppliers" / "ali1688" / "extraction_identity.py"
+    )
+    assert ali1688.IMAGE_ROLES.identity == ali_images.ROLE_RULES_REVISION == ali_manifest.revision
+    rule_ids = [rule for rule, _ in ali_images.ROLE_TABLE]
+    assert len(set(rule_ids)) == len(rule_ids), "rule ids are distinct"
+    assert all(rule_id.startswith("ali1688.") for rule_id in rule_ids)
+
 
 def test_a_supplier_parser_owns_nothing_but_reading() -> None:
     # The KM collect package may read a document and say what it found. Requesting, retrying,
@@ -2943,12 +2959,14 @@ def test_a_supplier_parser_owns_nothing_but_reading() -> None:
             (
                 "integrations/suppliers/kmretail/",
                 "integrations/suppliers/superdelivery/",
+                "integrations/suppliers/ali1688/",
                 "integrations/suppliers/platforms/",
             )
         )
     }
     assert "integrations/suppliers/kmretail/collect/facts.py" in package
     assert "integrations/suppliers/superdelivery/collect/facts.py" in package
+    assert "integrations/suppliers/ali1688/collect/facts.py" in package
     assert "integrations/suppliers/platforms/cafe24/collect/facts.py" in package
     assert "integrations/suppliers/platforms/godomall/collect/facts.py" in package
     assert "integrations/suppliers/kmretail/collect/identity.py" in package
@@ -3055,6 +3073,36 @@ def test_superdelivery_is_one_extraction_identity_and_a_capture_only_supplier() 
     assert profile.storefront_host in PACKAGED_HOSTS
     # ADR-0030 §7: RECON until its acceptance.
     assert repository_active("superdelivery") is False
+
+
+def test_ali1688_is_one_extraction_identity_and_a_capture_only_supplier() -> None:
+    # ADR-0040 C2: 1688's identity rule, facts parser and image roles share one revision;
+    # it is collected (COLLECTIONS) and never connected (no SUPPLIERS definition,
+    # OC-02); its profile declares no direct-URL read and no list queue (OC-01, ADR-0019 AC-28);
+    # and its key and product host are packaged, so no site or onboarded supplier can take either.
+    from integrations.suppliers.ali1688 import IMAGE_ROLES
+    from integrations.suppliers.ali1688.collect.revision import EXTRACTION_REVISION
+    from integrations.suppliers.ali1688.collection import COLLECTION
+    from integrations.suppliers.extraction import read_manifest
+    from integrations.suppliers.registry import COLLECTIONS, SUPPLIERS, repository_active
+    from integrations.suppliers.sites import PACKAGED_HOSTS, PACKAGED_SUPPLIERS
+
+    package = REPO_ROOT / "integrations" / "suppliers" / "ali1688"
+    manifest = read_manifest(package / "extraction_identity.py")
+    assert EXTRACTION_REVISION == manifest.revision == IMAGE_ROLES.identity == "ali1688-1"
+    modules = {
+        path.relative_to(REPO_ROOT).as_posix() for path in (package / "collect").rglob("*.py")
+    }
+    assert modules == set(manifest.inputs), "every collect module is part of the identity"
+    assert COLLECTION in COLLECTIONS
+    assert "ali1688" not in {d.profile.supplier_key for d in SUPPLIERS}
+    profile = COLLECTION.profile
+    assert profile.direct_url_reads is False and profile.queue_limits is None
+    assert profile.policy_paths == frozenset() and profile.safe_query_keys == {}
+    assert "ali1688" in PACKAGED_SUPPLIERS
+    assert profile.storefront_host in PACKAGED_HOSTS
+    # ADR-0030 §7: RECON until its acceptance.
+    assert repository_active("ali1688") is False
 
 
 def test_a_platform_template_is_one_extraction_identity() -> None:
