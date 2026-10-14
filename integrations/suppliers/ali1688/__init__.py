@@ -9,8 +9,8 @@ argument the capture extension projects onto a reviewed allowlist (ADR-0040 §3)
 signed-in browser and presses 수집 in the capture extension; exactly that page is read. ICBM holds
 no credential for this site, never signs in and never reads its pages itself: the package declares
 a collection and a capture policy, and no CONNECT definition. Its collection profile declares no
-direct-URL read and no list queue. The server reads only the images and the one public description
-document a captured page names (§3.1).
+direct-URL read and no list queue. The server fetches only the gallery images a captured page
+references (ADR-0019 §7).
 
 **RECON** (ADR-0030 §7, ADR-0040 §6). The supplier collects, but its products cannot be prepared
 for a marketplace until a reviewed PR cites its acceptance record and makes it ``ACTIVE``.

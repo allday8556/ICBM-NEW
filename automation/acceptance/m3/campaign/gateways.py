@@ -128,15 +128,6 @@ class LedgeredCollectionGateway:
         self._verify(campaign, ReadKind.IMAGE_REQUEST)
         return response
 
-    def read_description(
-        self, profile: CollectionProfile, url: str, *, budget: RequestBudget
-    ) -> DocumentView:
-        # ADR-0040 §3.1: a campaign covers KM통상's product reads and images only. A description
-        # document is never part of one, so it is refused before anything is reserved or sent.
-        raise PolicyBlockedError(
-            "M3_CAMPAIGN_DESCRIPTION_READ_REFUSED", "a campaign reads no description document"
-        )
-
 
 class LedgeredConnectGateway:
     """The M1 owner's gateway, with every read reserved and every login refused."""

@@ -9,8 +9,8 @@ is no product image.
 Positive selection only: a reference earns a role because the page's own structure says so, never
 because of its host or its path. Anything no rule recognises is ``UNKNOWN`` and never fetched.
 
-The description sequence is not on this page: it is a public document the page names, read by the
-server and classified in ``description.py`` (ADR-0040 §3.1).
+The description sequence is not on this page: it is a separate document the page names, which
+this capture does not hold. 1688's detail images await an owner-approved amendment of ADR-0040.
 """
 
 from urllib.parse import urljoin, urlsplit
@@ -21,21 +21,18 @@ from integrations.suppliers.collection import ImageCandidate, ImageRole, ImageRo
 
 # These rules are part of the package's one collection identity.
 ROLE_RULES_REVISION = EXTRACTION_REVISION
-# The image hosts reconnaissance named for 1688 (ADR-0040 §1 as amended): the gallery's images and
-# the description documents' images. Nothing else is ever fetched.
-IMAGE_HOSTS = frozenset({"cbu01.alicdn.com", "img.alicdn.com"})
+# The image host reconnaissance named for 1688's gallery (ADR-0040 §1). Nothing else is fetched.
+IMAGE_HOSTS = frozenset({"cbu01.alicdn.com"})
 
 GALLERY_LIST = "od-gallery-list"
 GALLERY_IMAGE = "preview-img"
 PRIMARY_RULE = "ali1688.primary.gallery"
 THUMBNAIL_RULE = "ali1688.thumbnail.gallery"
-DETAIL_RULE = "ali1688.detail.description"
 UNKNOWN_RULE = "ali1688.unknown"
 # The rules a supplier publishes for the image auto-selection (rule name -> role).
 ROLE_TABLE: tuple[tuple[str, ImageRole], ...] = (
     (PRIMARY_RULE, ImageRole.PRIMARY),
     (THUMBNAIL_RULE, ImageRole.THUMBNAIL),
-    (DETAIL_RULE, ImageRole.DETAIL),
 )
 
 

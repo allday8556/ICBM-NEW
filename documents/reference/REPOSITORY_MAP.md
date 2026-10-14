@@ -235,12 +235,12 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 119 | adapters: suppliers and marketplaces |
+| `integrations/` | 118 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 44 |  |
-| `integrations/suppliers/` | 69 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 436 | tests |
+| `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
+| `tests/` | 431 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
-| `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
+| `tests/fixtures/` | 28 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 178 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |

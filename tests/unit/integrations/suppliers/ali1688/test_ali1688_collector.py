@@ -1,8 +1,10 @@
 """1688's collector over the five pinned captures (ADR-0040 §3, §4; slice C2).
 
 Each fixture is exactly what the extension's own ``captureInPage`` cut in the owner's signed-in
-browser on 2026-10-14 — the product-scope DOM, the projected embedded-data member — and the public
-description document the page named, as the server would read it. Nothing here reaches a network.
+browser on 2026-10-14: the product-scope DOM and the projected embedded-data member. The members
+were re-derived once, exactly, for the policy without ``description.fields.detailUrl``: that member
+was removed from each JSON (nothing else changes; JSON.stringify writes the same bytes). Nothing
+here reaches a network.
 """
 
 import copy
@@ -24,7 +26,6 @@ from app.stages.collect.facts import (
     FactsStatus,
     FieldStatus,
     ForeignPricesValue,
-    ForeignQuantityTiersValue,
     ForeignShippingValue,
     OptionsValue,
     PriceRole,
@@ -33,7 +34,6 @@ from app.stages.collect.facts import (
     TextValue,
     evaluate,
 )
-from integrations.suppliers.ali1688.collect import description as desc
 from integrations.suppliers.ali1688.collect import facts
 from integrations.suppliers.ali1688.collect.identity import (
     SourceIdentity,
@@ -42,9 +42,8 @@ from integrations.suppliers.ali1688.collect.identity import (
     resolve,
 )
 from integrations.suppliers.ali1688.collect.images import classify_images
-from integrations.suppliers.ali1688.collection import COLLECTION, DESCRIPTION_HOSTS
+from integrations.suppliers.ali1688.collection import COLLECTION
 from integrations.suppliers.collection import (
-    DescriptionRead,
     DocumentView,
     EmbeddedData,
     ImageRole,
@@ -58,38 +57,23 @@ NUMBERS = ("990041659965", "970942992948", "959613200255", "1051005117944", "106
 PINNED = {
     "990041659965.html": "895af94fb85893b9b60513a9b2fc0db0148c8810f06320f0c8a891bd21b016e0",
     "990041659965.embedded.json": (
-        "12f9683ffc272eb9ed58e5d832fe612c4e0601f9836a63e11186b1afe2e00cb6"
-    ),
-    "990041659965.description.txt": (
-        "54fa5ddf25668358720d8093085690f92a0ee608edfd40dc83a0663429ba07d1"
+        "4a2591f9431b355469085962f9c7336ac05d20c4d412a2f561921fe71a056f74"
     ),
     "970942992948.html": "a98d64304ccab16521f49ecc6f2bee08544a9ee7e3c8e4c83902241954971615",
     "970942992948.embedded.json": (
-        "1c38c6c1ce9a0ba2bc435dc05eb79211a1fc570db8271ff4b5b09e084fe063f5"
-    ),
-    "970942992948.description.txt": (
-        "b0a14d33c4d890821d9d1f5e94cea41c04c21ded6e22bc86c4823b044283459d"
+        "30c134b488b9cc043089088f7401ff9bbf2490923d6dbe6089bd67746bd4a99b"
     ),
     "959613200255.html": "f2b3f8ac6b0426f06eb60a5f82bf6851eaaf238e9a997cfb7817178bd01a9ff5",
     "959613200255.embedded.json": (
-        "d85074e500effd0549d9ddf8accc336087ce2436d8b573f57eff038fe274d8cd"
-    ),
-    "959613200255.description.txt": (
-        "bc47a2dbd43ed57c15db04bfab74fc938ef83e5a4563ff16c109f5cf7c82bd5c"
+        "6aa0350c1a7cf1d51a4cf1397d7a480099e859fc58739c5d830d48916646ba26"
     ),
     "1051005117944.html": "36e041d0577fc6a55bf6b78f971194d8641480138bc69f92c441350d1fb12f3f",
     "1051005117944.embedded.json": (
-        "2ac0c5bfc18d831a4ffa32077dd56ac362c0ae2dfc4d4c01989623150b55f84c"
-    ),
-    "1051005117944.description.txt": (
-        "0ca2639915e823b4e56c3762f5b0f5ee81b3317dc9a01658e7ea1b21ecade57c"
+        "7cb1197804c9517358a24a6aac9faa988dde4bd7bb84103145172a2ddd6a808f"
     ),
     "1066237370938.html": "3000b5ce903957ef4e2d6dd52e839d3763368d04594323a994c92b361be4e03c",
     "1066237370938.embedded.json": (
-        "e5b7b23263c017657f73865de07929bf57ee50a6267100704556ca420d234803"
-    ),
-    "1066237370938.description.txt": (
-        "a5292c225e526e63fc214a1fcdef254e895302a130307c50d9675adc18b04414"
+        "be7fa5e8aee588e01c45496c7bd5fbd658ed532d02d74cc8655427026698a088"
     ),
 }
 
@@ -107,16 +91,11 @@ def _projection(number: str) -> dict[str, Any]:
     return loaded
 
 
-def _description(number: str) -> str:
-    return (FIXTURES / f"{number}.description.txt").read_text("utf-8")
-
-
 def _document(
     number: str,
     *,
     data: dict[str, Any] | None = None,
     refusal: str | None = None,
-    read: DescriptionRead | None = None,
     html: str | None = None,
 ) -> DocumentView:
     embedded = (
@@ -132,17 +111,11 @@ def _document(
         content_type="text/html",
         body=_html(number) if html is None else html,
         embedded=embedded,
-        description=read,
     )
 
 
-def _read(number: str) -> DescriptionRead:
-    found = desc.classify(_description(number), desc.locate(_document(number)) or "")
-    return DescriptionRead(stated=True, refusal=found.refusal, images=len(found.candidates))
-
-
 def _fields(number: str, **changes: Any) -> dict[str, Any]:
-    return dict(COLLECTION.fields(_document(number, read=_read(number), **changes)))
+    return dict(COLLECTION.fields(_document(number, **changes)))
 
 
 def _sku_model(data: dict[str, Any]) -> dict[str, Any]:
@@ -246,8 +219,9 @@ def test_the_profile_reads_captured_pages_only() -> None:
     assert not profile.is_product_path("/offer/990041659965.html/")
     assert not profile.is_product_path("/page/offerlist.htm")
     assert profile.direct_url_reads is False and profile.queue_limits is None
-    assert profile.image_hosts == {"cbu01.alicdn.com", "img.alicdn.com"}
-    assert profile.description_hosts == DESCRIPTION_HOSTS == {"itemcdn.tmall.com"}
+    # The gallery's host only. The server reads no description document (ADR-0040 OC-01).
+    assert profile.image_hosts == {"cbu01.alicdn.com"}
+    assert not hasattr(profile, "description_hosts")
     assert profile.supplier.auth_required is False
 
 
@@ -267,75 +241,6 @@ def test_the_gallery_states_the_representative_and_additional_images() -> None:
     stray = '<div id="productTitle"><img src="https://img.alicdn.com/badge.png"></div>'
     (only,) = classify_images(stray, _url("990041659965"))
     assert only.role is ImageRole.UNKNOWN
-
-
-# ---------------------------------------------------------------- the description document
-
-
-@pytest.mark.parametrize(
-    ("number", "images", "hosts"),
-    [
-        ("990041659965", 9, {"img.alicdn.com"}),
-        ("970942992948", 15, {"img.alicdn.com", "cbu01.alicdn.com"}),
-        ("959613200255", 10, {"cbu01.alicdn.com"}),
-        ("1051005117944", 13, {"cbu01.alicdn.com"}),
-        ("1066237370938", 13, {"cbu01.alicdn.com"}),
-    ],
-)
-def test_the_description_document_states_the_detail_images(
-    number: str, images: int, hosts: set[str]
-) -> None:
-    url = desc.locate(_document(number))
-    assert url is not None and url.startswith("https://itemcdn.tmall.com/1688offer/icoss")
-    found = desc.classify(_description(number), url)
-    assert found.refusal is None and len(found.candidates) == images
-    assert {candidate.role for candidate in found.candidates} == {ImageRole.DETAIL}
-    assert {candidate.host for candidate in found.candidates} == hosts
-    assert [candidate.order for candidate in found.candidates] == list(range(images))
-
-
-@pytest.mark.parametrize(
-    ("body", "refusal"),
-    [
-        (
-            'offer_details={"content":"<img src=\\"https://cbu01.alicdn.com/a.jpg\\">"};',
-            "NOT_OFFER",
-        ),
-        ('var offer_details={"content":"<img>"}', "NOT_OFFER"),
-        ('var offer_details={"content":"x"};alert(1);', "NOT_JSON"),
-        ('var offer_details={"content":"x"', "NOT_OFFER"),
-        ("var offer_details={content:'x'};", "NOT_JSON"),
-        ('var offer_details={"content":NaN};', "NOT_JSON"),
-        ('var offer_details=["content"];', "NO_CONTENT"),
-        ('var offer_details={"content":7};', "NO_CONTENT"),
-        (
-            'var offer_details={"html":"<img src=\\"https://cbu01.alicdn.com/a.jpg\\">"};',
-            "NO_CONTENT",
-        ),
-        ("", "NOT_OFFER"),
-    ],
-)
-def test_a_document_that_is_not_exactly_the_statement_states_no_image(
-    body: str, refusal: str
-) -> None:
-    found = desc.classify(body, "https://itemcdn.tmall.com/1688offer/icoss1")
-    assert found.candidates == ()
-    assert found.refusal is not None and refusal in found.refusal
-
-
-def test_only_a_declared_image_host_is_a_detail_image() -> None:
-    body = (
-        'var offer_details={"content":"<img src=\\"https://cbu01.alicdn.com/a.jpg\\">'
-        '<img src=\\"//img.alicdn.com/b.jpg\\"><img src=\\"https://evil.test/c.jpg\\">'
-        '<img src=\\"data:image/png;base64,AA\\"><img src=\\"\\">"};'
-    )
-    found = desc.classify(body, "https://itemcdn.tmall.com/1688offer/icoss1")
-    assert [(c.role, c.host) for c in found.candidates] == [
-        (ImageRole.DETAIL, "cbu01.alicdn.com"),
-        (ImageRole.DETAIL, "img.alicdn.com"),
-        (ImageRole.UNKNOWN, "evil.test"),
-    ]
-    assert desc.classify(body, "http://itemcdn.tmall.com/x").refusal == "DESCRIPTION_URL_NOT_HTTPS"
 
 
 # ---------------------------------------------------------------- golden facts
@@ -368,7 +273,6 @@ GOLDEN: dict[str, dict[str, Any]] = {
         "shipping": ("FIXED", "3.00", "浙江省温州市 发货, 运费 3.00 CNY"),
         "brand": "金婷",
         "origin": "温州",
-        "detail_images": 9,
     },
     "970942992948": {
         "name": "鸡蛋收纳盒滚动冰箱侧门放鸡蛋架托厨房用保鲜自动滑梯式滚蛋神器",
@@ -376,11 +280,10 @@ GOLDEN: dict[str, dict[str, Any]] = {
         "axes": [("规格", 2)],
         "configurations": 2,
         "prices": None,
-        "tiers": [(1, "5.80", "≥1个 单价 5.80"), (90, "477.00", "≥90个 单价 5.30")],
+        "tiers": ["beginAmount 1个 price 5.80 CNY", "beginAmount 90个 price 5.30 CNY"],
         "shipping": ("FIXED", "3.00", "浙江省金华市 发货, 运费 3.00 CNY"),
         "brand": "自主",
         "origin": "浙江",
-        "detail_images": 15,
     },
     "959613200255": {
         "name": "跨境大容量一周七天30格药盒早中晚便携式密封防潮药品收纳盒",
@@ -388,11 +291,10 @@ GOLDEN: dict[str, dict[str, Any]] = {
         "axes": [("颜色", 11)],
         "configurations": 11,
         "prices": None,
-        "tiers": [(1, "14.00", "≥1个 单价 14.00"), (5000, "67500.00", "≥5000个 单价 13.50")],
+        "tiers": ["beginAmount 1个 price 14.00 CNY", "beginAmount 5000个 price 13.50 CNY"],
         "shipping": ("FIXED", "3.50", "广东省东莞市 发货, 运费 3.50 CNY"),
         "brand": "四叶草",
         "origin": None,
-        "detail_images": 10,
     },
     "1051005117944": {
         "name": "滑梯滚蛋鸡蛋收纳盒多层家用冰箱侧门厨房取蛋神器斜口自动滚蛋架",
@@ -404,7 +306,6 @@ GOLDEN: dict[str, dict[str, Any]] = {
         "shipping": ("FIXED", "3.00", "浙江省温州市 发货, 运费 3.00 CNY"),
         "brand": "其它",
         "origin": "浙江",
-        "detail_images": 13,
     },
     "1066237370938": {
         "name": "可旋转化妆品收纳盒桌面口红彩妆整理盒梳妆台护肤品化妆刷置物架",
@@ -417,7 +318,6 @@ GOLDEN: dict[str, dict[str, Any]] = {
         # The page states 品牌 无: there is no brand.
         "brand": None,
         "origin": "浙江台州",
-        "detail_images": 13,
     },
 }
 
@@ -455,8 +355,10 @@ def test_golden_facts(number: str) -> None:
     if golden["tiers"] is None:
         assert tiers.status is FieldStatus.ABSENT
     else:
-        assert isinstance(tiers.value, ForeignQuantityTiersValue)
-        assert [(t.quantity, t.total_price, t.label) for t in tiers.value.tiers] == golden["tiers"]
+        # A tier states a unit price; no total is ever made of it. Every tier is quoted verbatim.
+        assert tiers.status is FieldStatus.REVIEW_REQUIRED and tiers.value is None
+        assert [e.observed for e in tiers.evidence] == golden["tiers"]
+        assert {e.normalized for e in tiers.evidence} == {facts.TIER_UNIT_PRICE_NOT_TOTAL}
 
     shipping = fields["shipping"].value
     assert isinstance(shipping, ForeignShippingValue)
@@ -469,9 +371,10 @@ def test_golden_facts(number: str) -> None:
         else:
             assert isinstance(value, TextValue) and value.text == golden[key]
 
+    # The description is a separate document the page names, and it is not captured.
     detail = fields["detail_description"]
-    assert detail.status is FieldStatus.ABSENT
-    assert detail.evidence[0].normalized == f"description:DETAIL_IMAGES:{golden['detail_images']}"
+    assert detail.status is FieldStatus.REVIEW_REQUIRED and detail.value is None
+    assert detail.evidence[0].normalized == facts.DESCRIPTION_NOT_CAPTURED
     for key in ("minimum_sale_price", "sales_channels", "manufacturer", "notice"):
         assert fields[key].status is FieldStatus.ABSENT
     # Every embedded fact cites its JSON path.
@@ -481,11 +384,11 @@ def test_golden_facts(number: str) -> None:
 
     evaluated = _evaluated(number, fields)
     assert evaluated.source_currency == "CNY"
-    # No image was fetched here, so the core images field alone keeps the revision under review.
     statuses = {field.key: field.status for field in evaluated.fields}
     assert statuses["images"] is FieldStatus.ABSENT
     assert evaluated.facts_status is FactsStatus.REVIEW_REQUIRED
-    assert {k for k, s in statuses.items() if s is FieldStatus.REVIEW_REQUIRED} == set()
+    review = {"detail_description"} | ({"quantity_tiers"} if golden["tiers"] else set())
+    assert {k for k, s in statuses.items() if s is FieldStatus.REVIEW_REQUIRED} == review
 
 
 def test_the_receive_address_is_never_in_the_shipping_text() -> None:
@@ -546,9 +449,13 @@ def test_a_tier_page_with_an_original_price_buys_at_the_original() -> None:
         ("原价 ≥1个", "6.20", PriceRole.PURCHASE),
         ("现价 ≥1个", "5.80", None),
     ]
-    tiers = fields["quantity_tiers"].value
-    assert isinstance(tiers, ForeignQuantityTiersValue)
-    assert [(t.quantity, t.total_price) for t in tiers.tiers] == [(1, "6.20"), (90, "513.00")]
+    tiers = fields["quantity_tiers"]
+    assert tiers.status is FieldStatus.REVIEW_REQUIRED and tiers.value is None
+    assert [e.observed for e in tiers.evidence] == [
+        "beginAmount 1个 price 6.20 CNY",
+        "beginAmount 90个 price 5.70 CNY",
+    ]
+    assert all("originalPrices" in e.locator for e in tiers.evidence)
 
 
 @pytest.mark.parametrize("number", ["970942992948", "990041659965"])
@@ -567,15 +474,7 @@ def test_a_minimum_order_above_one_is_held_for_review(number: str) -> None:
 @pytest.mark.parametrize("refusal", ["EMBEDDED_NOT_JSON", "EMBEDDED_PATH_NOT_ALLOWED"])
 def test_a_refused_member_leaves_its_fields_under_review(refusal: str) -> None:
     number = "990041659965"
-    fields = dict(
-        COLLECTION.fields(
-            _document(
-                number,
-                refusal=refusal,
-                read=DescriptionRead(stated=False, refusal="DESCRIPTION_NOT_STATED"),
-            )
-        )
-    )
+    fields = dict(COLLECTION.fields(_document(number, refusal=refusal)))
     for key in ("prices", "options", "stock", "quantity_tiers", "shipping"):
         assert fields[key].status is FieldStatus.REVIEW_REQUIRED, key
         assert fields[key].value is None
@@ -627,13 +526,15 @@ def test_free_and_unstated_freight() -> None:
     assert _fields(number, data=data)["shipping"].status is FieldStatus.REVIEW_REQUIRED
 
 
-def test_an_unread_description_is_recorded_as_its_reason() -> None:
-    number = "959613200255"
-    read = DescriptionRead(stated=True, refusal="DESCRIPTION_NOT_JSON")
-    fact = COLLECTION.fields(_document(number, read=read))["detail_description"]
-    assert fact.status is FieldStatus.REVIEW_REQUIRED
-    assert fact.evidence[0].normalized == "description:DESCRIPTION_NOT_JSON"
-    assert fact.evidence[0].locator == "embedded:result.data.description.fields.detailUrl"
+def test_no_capture_carries_the_description_or_its_url() -> None:
+    # The description is a separate document; nothing in a capture names or holds it, and the
+    # policy allowlists no path to it, so the server never learns where it is.
+    policy = CapturePolicySource(REPO_ROOT / "integrations" / "suppliers").load("ali1688")
+    assert policy.embedded_data is not None
+    assert not [e.path for e in policy.embedded_data.allowlist if "description" in e.path]
+    for number in NUMBERS:
+        assert "itemcdn" not in json.dumps(_projection(number))
+        assert "detailUrl" not in json.dumps(_projection(number))
 
 
 def test_an_unknown_price_display_is_held_for_review() -> None:

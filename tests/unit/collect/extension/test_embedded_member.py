@@ -76,7 +76,10 @@ def test_only_the_1688_policy_declares_embedded_data_and_it_is_digested() -> Non
     assert policy.embedded_data.terminator == ");"
     assert policy.embedded_data.bare_integer_keys is True
     paths = {entry.path for entry in policy.embedded_data.allowlist}
-    assert "result.data.description.fields.detailUrl" in paths
+    assert "result.data.shippingServices.fields.freightInfo.totalCost" in paths
+    # ADR-0040 OC-01: the description document is not the server's to read, so its URL
+    # never leaves the browser either.
+    assert not [path for path in paths if "description" in path]
     assert "result.data.Root.fields.dataJson.skuModel.skuInfoMap.*.price" in paths
     # Nothing of the member's address, identity or account, and no hash-shaped SKU spec id.
     for path in paths:
@@ -199,8 +202,12 @@ def test_the_browsers_projection_is_exactly_allowlisted() -> None:
         ),
         (lambda d: d["mainPrice"].update(fields=["unit"]), EMBEDDED_TYPE_MISMATCH),
         (
-            lambda d: d["description"]["fields"].update(detailUrl="x" * 5000),
+            lambda d: d["mainPrice"]["fields"].update(unit="x" * 5000),
             EMBEDDED_TYPE_MISMATCH,
+        ),
+        (
+            lambda d: d.update(description={"fields": {"detailUrl": "https://x.test/a"}}),
+            EMBEDDED_PATH_NOT_ALLOWED,
         ),
     ],
 )
@@ -235,13 +242,11 @@ def test_the_gate_reads_every_string_and_quotes_only_the_allowlist_path() -> Non
     _data(projection)["shippingServices"]["fields"]["freightInfo"]["location"] = (
         "联系 010-1234-5678"
     )
-    _data(projection)["description"]["fields"]["detailUrl"] = (
-        "https://itemcdn.tmall.com/x?access_token=abcdef0123456789"
-    )
+    _data(projection)["mainPrice"]["fields"]["unit"] = "access_token=abcdef0123456789"
     gate = embedded_data_gate(strings_of(_rule(), projection))
     assert set(gate.blocking) == {
         "SECRET_VALUE@embedded:result.data.Root.fields.dataJson.skuModel.skuInfoMap.*",
-        "SECRET_VALUE@embedded:result.data.description.fields.detailUrl",
+        "SECRET_VALUE@embedded:result.data.mainPrice.fields.unit",
     }
     assert gate.notes == (
         "CONTACT@embedded:result.data.shippingServices.fields.freightInfo.location",

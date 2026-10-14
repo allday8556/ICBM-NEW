@@ -19,7 +19,6 @@ PRICE_MODEL = ("mainPrice", "fields", "priceModel")
 UNIT = ("mainPrice", "fields", "unit")
 SKU_MODEL = ("Root", "fields", "dataJson", "skuModel")
 FREIGHT = ("shippingServices", "fields", "freightInfo")
-DETAIL_URL = ("description", "fields", "detailUrl")
 OFFER_ID = ("gallery", "fields", "offerId")
 
 

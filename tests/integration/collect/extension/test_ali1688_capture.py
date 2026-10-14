@@ -3,13 +3,13 @@
 The real app serves the real 1688 collection and its reviewed capture policy; the collection
 gateway is a script that sends nothing. The capture is one of the pinned fixtures, exactly as the
 extension's ``captureInPage`` cut it in the owner's browser, with its projected embedded-data
-member; the description document is the one that page named. Nothing is contacted.
+member. Nothing is contacted.
 
 What it proves: the capture is recorded by the canonical pipeline as a CNY revision whose gallery
-and description images the server fetched from the reviewed image hosts after reading the
-description document itself; the member is never stored; a member outside the allowlist is refused
-fail-closed; a secret in it refuses the capture; and no other way in exists — no direct-URL submit,
-no list queue, no product page read by the server.
+images the server fetched from the reviewed image host; the description is not captured, so it
+waits for review and nothing else is read; the member is never stored; a member outside the
+allowlist is refused fail-closed; a secret in it refuses the capture; and no other way in exists —
+no direct-URL submit, no list queue, no product page read by the server.
 """
 
 import hashlib
@@ -41,7 +41,6 @@ NUMBER = "990041659965"
 URL = f"https://detail.1688.com/offer/{NUMBER}.html"
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "suppliers" / SUPPLIER
 POLICY_FILE = REPO_ROOT / "integrations" / "suppliers" / SUPPLIER / "browser_capture_policy.json"
-DESCRIPTION_URL = "https://itemcdn.tmall.com/1688offer/icoss5072039755d496fa52ec17612"
 SUPPLIERS_PATH = "/api/v1/collect/extension/suppliers"
 POLICY_PATH = f"/api/v1/collect/extension/capture-policies/{SUPPLIER}"
 QUEUE_POLICY_PATH = f"/api/v1/collect/extension/queue-policies/{SUPPLIER}"
@@ -80,12 +79,6 @@ def _capture(member: dict[str, Any] | None) -> dict[str, Any]:
     return body
 
 
-def _serve_description(gateway: FakeGateway) -> None:
-    gateway.descriptions[DESCRIPTION_URL] = (FIXTURES / f"{NUMBER}.description.txt").read_text(
-        "utf-8"
-    )
-
-
 def _field(config: AppConfig, key: str) -> tuple[str, str | None]:
     (found,) = rows(
         config,
@@ -100,7 +93,6 @@ def _field(config: AppConfig, key: str) -> tuple[str, str | None]:
 def test_a_captured_page_is_recorded_as_a_cny_revision(
     client: TestClient, config: AppConfig, gateway: FakeGateway
 ) -> None:
-    _serve_description(gateway)
     record = pair(_container(client))
     # ADR-0030 §6: the extension learns the reviewed host from ICBM, not from a constant.
     hosts = client.get(SUPPLIERS_PATH, headers=signed(record, method="GET", path=SUPPLIERS_PATH))
@@ -134,32 +126,30 @@ def test_a_captured_page_is_recorded_as_a_cny_revision(
     status, options = _field(config, "options")
     assert status == "CONFIRMED" and len(json.loads(options or "")["configurations"]) == 20
     assert _field(config, "shipping")[0] == "CONFIRMED"
-    # The browser read the page; the server read only the description document it named, from the
-    # description host, and then the gallery's 17 images and the description's 9.
+    # The browser read the page; the server fetched only the gallery's 17 images, from the
+    # gallery host. The description is not captured and nothing reads it (ADR-0040 OC-01).
     assert gateway.document_reads == 0
-    assert gateway.description_reads == [DESCRIPTION_URL]
-    assert len(gateway.image_reads) == 17 + 9
-    assert {url.split("/")[2] for url in gateway.image_reads} == {
-        "cbu01.alicdn.com",
-        "img.alicdn.com",
-    }
+    assert len(gateway.image_reads) == 17
+    assert {url.split("/")[2] for url in gateway.image_reads} == {"cbu01.alicdn.com"}
     assert rows(
         config,
         "SELECT role, COUNT(*) FROM product_facts_image_refs GROUP BY role ORDER BY role",
-    ) == [("DETAIL", 25), ("REPRESENTATIVE", 1)]
+    ) == [("DETAIL", 16), ("REPRESENTATIVE", 1)]
+    assert _field(config, "detail_description") == ("REVIEW_REQUIRED", None)
+    # Tier prices are never made into totals: this is a per-SKU page, so it states none.
+    assert _field(config, "quantity_tiers") == ("ABSENT", None)
     # Evidence cites the member's paths under the existing EMBEDDED_JSON kind; the member itself,
     # the SKU map and the description document are never stored.
     kinds = {kind for (kind,) in rows(config, "SELECT DISTINCT kind FROM product_facts_evidence")}
     assert "EMBEDDED_JSON" in kinds and "EMBEDDED_DATA" not in kinds
     stored = json.dumps(rows(config, "SELECT * FROM product_facts_evidence"), ensure_ascii=False)
-    for never in ('"skuInfoMap"', "offer_details", "content", "5960515164202:"):
+    for never in ('"skuInfoMap"', "itemcdn", "detailUrl", "5960515164202:"):
         assert never not in stored, never
 
 
 def test_a_member_outside_the_allowlist_is_refused_and_its_fields_wait_for_review(
     client: TestClient, config: AppConfig, gateway: FakeGateway
 ) -> None:
-    _serve_description(gateway)
     projection = _projection()
     # OC-05: a receive address that reached the server is refused with the whole member.
     freight = projection["result"]["data"]["shippingServices"]["fields"]["freightInfo"]
@@ -178,8 +168,6 @@ def test_a_member_outside_the_allowlist_is_refused_and_its_fields_wait_for_revie
     assert reasons == {"EMBEDDED_PATH_NOT_ALLOWED"}
     stored = json.dumps(rows(config, "SELECT * FROM product_facts_evidence"), ensure_ascii=False)
     assert "某省某市" not in stored
-    # No member means no description URL: nothing was read for it.
-    assert gateway.description_reads == []
 
 
 def test_a_browser_refusal_is_recorded_as_its_code(
@@ -207,26 +195,7 @@ def test_a_secret_in_the_member_refuses_the_capture(
     run = wait_for_outcome(client, response.json()["collection_run_id"])
     assert (run["outcome"], run["detail"]) == ("FAILED", "EXTENSION_FINAL_SCAN_REFUSED")
     assert rows(config, "SELECT COUNT(*) FROM product_facts_revisions") == [(0,)]
-    assert gateway.image_reads == [] and gateway.description_reads == []
-
-
-def test_an_unreadable_description_leaves_the_detail_images_out(
-    client: TestClient, config: AppConfig, gateway: FakeGateway
-) -> None:
-    gateway.descriptions[DESCRIPTION_URL] = "var offer_details=<html>;"
-    response = post_capture(
-        client, pair(_container(client)), _capture({"projection": _projection()})
-    )
-    run = wait_for_outcome(client, response.json()["collection_run_id"])
-    assert run["outcome"] == "RECORDED" and run["facts_status"] == "REVIEW_REQUIRED"
-    assert _field(config, "detail_description") == ("REVIEW_REQUIRED", None)
-    assert rows(
-        config,
-        "SELECT normalized FROM product_facts_evidence WHERE status = 'REVIEW_REQUIRED'"
-        " AND locator = 'embedded:result.data.description.fields.detailUrl'",
-    ) == [("description:DESCRIPTION_NOT_JSON",)]
-    # Only the gallery's images were fetched.
-    assert len(gateway.image_reads) == 17
+    assert gateway.image_reads == []
 
 
 def test_a_member_for_a_policy_that_declares_none_refuses_the_capture(

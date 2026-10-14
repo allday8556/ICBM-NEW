@@ -6,10 +6,7 @@ it seemed likely, and none is a wildcard:
 
 ============================  =====================================================================
 product path                  ``/offer/<number>.html``, the form of every product page
-image hosts                   ``cbu01.alicdn.com`` (the gallery and most description images) and
-                              ``img.alicdn.com`` (a description document's own images)
-description host              ``itemcdn.tmall.com``: the public description documents a page names
-                              (ADR-0040 §3.1). It serves no image and no product page
+image host                    ``cbu01.alicdn.com``: the gallery's images
 policy documents              none: no page of this site is ever read by the server
 safe query keys               none: a product URL carries no query, so every query key fails closed
 direct-URL read               none (OC-01): the server never reads a product page of this site;
@@ -20,8 +17,8 @@ list queue                    none (OC-01, ADR-0019 AC-28): a queue refuses befo
 Images are fetched by the server's policed gateway from the image hosts alone (ADR-0019 §7), under
 the owner's caps by role (ADR-0037 §1): 5 MB for a representative or additional image, 30 MB for a
 description image, 120 MB per product run. A captured page references at most a few dozen gallery
-images (20 SKU images and 5 main images on the largest observed), and a description at most a few
-dozen more.
+images (12 option images and 5 main images on the largest observed). The description is a separate
+document the page names; it is not captured, so 1688 has no description images yet.
 
 This module performs nothing. It holds no client, opens no connection, computes no checksum and
 writes no row; the run, the fetch, the asset store, the revision and the job belong to generic
@@ -35,8 +32,6 @@ from integrations.suppliers.ali1688 import PROFILE, STOREFRONT_HOST
 from integrations.suppliers.ali1688.collect import (
     IMAGE_HOSTS,
     IMAGE_ROLES,
-    classify_description,
-    locate_description,
     parse_fields,
     path_number,
     resolve,
@@ -45,7 +40,6 @@ from integrations.suppliers.ali1688.collect.identity import SourceIdentity as Pa
 from integrations.suppliers.collection import (
     CollectionLimits,
     CollectionProfile,
-    DescriptionSource,
     DocumentView,
     SourceIdentity,
     SourceIdentityResult,
@@ -54,7 +48,6 @@ from integrations.suppliers.collection import (
 )
 
 PRODUCT_PATH = r"/offer/\d{1,20}\.html"
-DESCRIPTION_HOSTS = frozenset({"itemcdn.tmall.com"})
 # ADR-0037 §1: the owner's caps by role, in decimal MB, and the per-product run total.
 MAX_IMAGE_BYTES = 5_000_000
 MAX_DETAIL_IMAGE_BYTES = 30_000_000
@@ -66,7 +59,6 @@ SAME_PRODUCT_INTERVAL_S = 60.0
 
 __all__ = [
     "COLLECTION",
-    "DESCRIPTION_HOSTS",
     "IMAGE_HOSTS",
     "PRODUCT_PATH",
     "STOREFRONT_HOST",
@@ -104,8 +96,6 @@ def build_profile(*, image_hosts: frozenset[str] = IMAGE_HOSTS) -> CollectionPro
         # OC-01: no page of this site is read by the server, and there is no list queue.
         direct_url_reads=False,
         queue_limits=None,
-        # ADR-0040 §3.1: the one public document a captured page names for its description.
-        description_hosts=DESCRIPTION_HOSTS,
     )
 
 
@@ -115,5 +105,4 @@ COLLECTION = SupplierCollection(
     identity=_identity,
     fields=_fields,
     url_product_hint=path_number,
-    description=DescriptionSource(locate=locate_description, classify=classify_description),
 )

@@ -108,11 +108,6 @@ EXPECTED = {
             "shippingServices": {
                 "fields": {"freightInfo": {"location": "浙江省金华市", "totalCost": 3}}
             },
-            "description": {
-                "fields": {
-                    "detailUrl": "https://itemcdn.tmall.com/1688offer/icoss5072039755d496fa52ec17612"
-                }
-            },
         }
     }
 }
@@ -224,6 +219,9 @@ def test_only_the_allowlisted_projection_leaves_the_page(
         "近期复购",
         "已加购",
         "video",
+        # The description document is not the server's to read: its URL stays in the page.
+        "itemcdn",
+        "detailUrl",
     ):
         assert absent not in sent, absent
     # The DOM capture is the reviewed product scope, and the server finds nothing it disallows.

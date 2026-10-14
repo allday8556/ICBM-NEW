@@ -40,9 +40,6 @@ class ReadKind(StrEnum):
     PRODUCT_READ = "PRODUCT_READ"
     IMAGE_REQUEST = "IMAGE_REQUEST"
     POLICY_READ = "POLICY_READ"
-    # ADR-0040 §3.1: one public description document a captured page names (1688's
-    # ``offer_details``), read by the server from the profile's declared description hosts only.
-    DESCRIPTION_READ = "DESCRIPTION_READ"
 
 
 class FetchIssue(StrEnum):
@@ -129,9 +126,6 @@ class CollectionProfile:
     # user captured declares False: a submit refuses before any job exists, and the policed gateway
     # refuses to read any of its documents. Its images are still the server's own fetch (§7).
     direct_url_reads: bool = True
-    # ADR-0040 §3.1: the hosts of the public description documents a captured page may name. Only
-    # these are ever read for one, in their own egress grant; none by default.
-    description_hosts: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if not self.product_path.startswith("/"):
@@ -145,7 +139,7 @@ class CollectionProfile:
         re.compile(self.product_path)
         if any(not p.startswith("/") or "?" in p or "#" in p for p in self.policy_paths):
             raise ValueError("policy documents are exact absolute paths without query")
-        hosts = set(self.image_hosts) | set(self.safe_query_keys) | set(self.description_hosts)
+        hosts = set(self.image_hosts) | set(self.safe_query_keys)
         if any(not _HOST.fullmatch(host) for host in hosts):
             raise ValueError("hosts are explicit lowercase host names, never wildcards")
         if self.transport not in (SupplierTransport.HTTP, SupplierTransport.EXTENSION):
@@ -187,26 +181,11 @@ class EmbeddedData:
 
 
 @dataclass(frozen=True)
-class DescriptionRead:
-    """ADR-0040 §3.1: what became of the public description document a captured page names.
-
-    ``stated`` says whether the page named one. ``refusal`` names why no detail image came from it,
-    from a closed vocabulary, or is ``None`` when it was read and parsed; ``images`` counts the
-    detail references it yielded. The document itself is never kept.
-    """
-
-    stated: bool
-    refusal: str | None
-    images: int = 0
-
-
-@dataclass(frozen=True)
 class DocumentView:
     """The only thing a collection parser ever sees: an immutable view of one response.
 
     ``body`` is used in memory only; it is never logged, persisted whole or returned. ``embedded``
-    and ``description`` exist only for a supplier whose capture policy declares an embedded-data
-    member (ADR-0040 §3) and whose collection reads a description document (§3.1).
+    exists only for a supplier whose capture policy declares an embedded-data member (ADR-0040 §3).
     """
 
     kind: ReadKind
@@ -216,7 +195,6 @@ class DocumentView:
     content_type: str
     body: str = field(repr=False)
     embedded: EmbeddedData | None = field(default=None, repr=False, compare=False)
-    description: DescriptionRead | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -464,37 +442,6 @@ SourceIdentityResult = SourceIdentity | UnresolvedIdentity
 
 
 @dataclass(frozen=True)
-class DescriptionImages:
-    """The image references one description document states, or why it states none.
-
-    ``candidates`` are in the document's own order, numbered from 0; generic COLLECT core places
-    them after the page's own references. ``refusal`` names a document that is not the declared
-    form, and then there is no candidate at all: nothing is guessed from a part of it.
-    """
-
-    candidates: tuple[ImageCandidate, ...] = ()
-    refusal: str | None = None
-
-    def __post_init__(self) -> None:
-        if self.refusal is not None and self.candidates:
-            raise ValueError("a refused description document states no image")
-
-
-@dataclass(frozen=True)
-class DescriptionSource:
-    """ADR-0040 §3.1: a supplier whose captured page names a public description document.
-
-    ``locate`` reads the document's URL from the captured page (``None`` when the page names
-    none), and ``classify`` reads one document's body for its image references. Both are site
-    knowledge over immutable text: the read itself is the policed transport's, under the profile's
-    ``description_hosts``.
-    """
-
-    locate: Callable[[DocumentView], str | None]
-    classify: Callable[[str, str], DescriptionImages]
-
-
-@dataclass(frozen=True)
 class SupplierCollection:
     """Everything a supplier contributes to a collection, and nothing more (ADR-0010 §3).
 
@@ -516,12 +463,6 @@ class SupplierCollection:
     # supplier served and from nothing else; this answers a much smaller question, and answering
     # it wrongly can only make a collection wait, never mislabel a revision.
     url_product_hint: Callable[[str], str | None] = lambda url: None
-    # ADR-0040 §3.1: the public description document its captured page names, if it has one.
-    description: DescriptionSource | None = None
-
-    def __post_init__(self) -> None:
-        if self.description is not None and not self.profile.description_hosts:
-            raise ValueError("a description document is read only from declared hosts")
 
     @property
     def supplier_key(self) -> str:

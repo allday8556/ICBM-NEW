@@ -70,11 +70,6 @@ class NoTraffic:
     ) -> ImageResponse:
         raise self._refuse()
 
-    def read_description(
-        self, profile: CollectionProfile, url: str, *, budget: RequestBudget
-    ) -> DocumentView:
-        raise self._refuse()
-
 
 def m1_session_problems(container: Container, supplier_key: str) -> list[str]:
     """Whether the M1 owner holds a locally usable connection and session. No request is made.

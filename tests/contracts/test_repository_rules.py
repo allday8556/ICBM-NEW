@@ -2682,9 +2682,6 @@ SITE_KNOWLEDGE_IMPORTS = {
     # tokenizer and urllib.parse is string arithmetic — urllib.request, the one that opens a
     # connection, stays a raw client below and is never allowed here.
     "html.parser",
-    # ADR-0040 §3.1: a description document is one JSON literal, read by a data parser that opens
-    # nothing and runs nothing.
-    "json",
     "urllib.parse",
     "collections.abc",
     "typing",
@@ -2889,25 +2886,6 @@ def test_the_fx_reader_is_granted_its_one_host_only() -> None:
     assert isinstance(redirects, ast.Constant) and redirects.value is False
 
 
-def test_the_description_read_is_granted_its_description_hosts_only() -> None:
-    # ADR-0040 §3.1: the COLLECT gateway opens exactly two grants — its collection profile's own
-    # hosts, and a separate one for a captured page's description document that names the
-    # profile's declared description hosts alone, never the storefront or an image host.
-    tree = _production_modules()["integrations/suppliers/transport/collection.py"]
-    grants = sorted(
-        (ast.unparse(call.args[0]), ast.unparse(call.args[1])) for call in _calls(tree, "grant")
-    )
-    assert grants == [
-        ("f'supplier:{supplier.supplier_key}:collect'", "profile.hosts"),
-        ("f'supplier:{supplier.supplier_key}:description'", "profile.description_hosts"),
-    ]
-    from integrations.suppliers.ali1688.collection import COLLECTION, DESCRIPTION_HOSTS
-
-    profile = COLLECTION.profile
-    assert profile.description_hosts == DESCRIPTION_HOSTS == {"itemcdn.tmall.com"}
-    assert not profile.description_hosts & profile.hosts
-
-
 def test_every_collection_definition_pins_its_extraction_identity() -> None:
     # ADR-0010 §12: a supplier collect package has an acyclic, complete and current pin.
     from integrations.suppliers.extraction import manifest_problems
@@ -2989,7 +2967,6 @@ def test_a_supplier_parser_owns_nothing_but_reading() -> None:
     assert "integrations/suppliers/kmretail/collect/facts.py" in package
     assert "integrations/suppliers/superdelivery/collect/facts.py" in package
     assert "integrations/suppliers/ali1688/collect/facts.py" in package
-    assert "integrations/suppliers/ali1688/collect/description.py" in package
     assert "integrations/suppliers/platforms/cafe24/collect/facts.py" in package
     assert "integrations/suppliers/platforms/godomall/collect/facts.py" in package
     assert "integrations/suppliers/kmretail/collect/identity.py" in package
@@ -3099,8 +3076,8 @@ def test_superdelivery_is_one_extraction_identity_and_a_capture_only_supplier() 
 
 
 def test_ali1688_is_one_extraction_identity_and_a_capture_only_supplier() -> None:
-    # ADR-0040 C2: 1688's identity rule, facts parser, image roles and description reading share
-    # one revision; it is collected (COLLECTIONS) and never connected (no SUPPLIERS definition,
+    # ADR-0040 C2: 1688's identity rule, facts parser and image roles share one revision;
+    # it is collected (COLLECTIONS) and never connected (no SUPPLIERS definition,
     # OC-02); its profile declares no direct-URL read and no list queue (OC-01, ADR-0019 AC-28);
     # and its key and product host are packaged, so no site or onboarded supplier can take either.
     from integrations.suppliers.ali1688 import IMAGE_ROLES
@@ -3122,7 +3099,6 @@ def test_ali1688_is_one_extraction_identity_and_a_capture_only_supplier() -> Non
     profile = COLLECTION.profile
     assert profile.direct_url_reads is False and profile.queue_limits is None
     assert profile.policy_paths == frozenset() and profile.safe_query_keys == {}
-    assert COLLECTION.description is not None
     assert "ali1688" in PACKAGED_SUPPLIERS
     assert profile.storefront_host in PACKAGED_HOSTS
     # ADR-0030 §7: RECON until its acceptance.

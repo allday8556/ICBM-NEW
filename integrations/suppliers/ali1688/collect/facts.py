@@ -16,11 +16,13 @@ prices                 CNY. ``skuPrice``: the lowest SKU original price (``skuIn
 options                ``skuProps`` (axes and values) and ``skuInfoMap`` (one configuration per
                        SKU): the SKU id, its original price and its sold-out state
 stock                  every SKU's ``canBookCount``: any above zero is ON_SALE, all zero SOLD_OUT
-quantity_tiers         ``rangePrice`` only: each tier's quantity, at its stated unit price
+quantity_tiers         ``rangePrice``: held for review, every tier quoted in its evidence (a tier
+                       states a unit price, never the total a quantity tier holds)
 shipping               ``freightInfo.totalCost`` as a ``FIXED`` CNY fee (``FREE`` at zero), from
                        the stated ship-from ``location``; never the member's receive address
 brand, origin          the attribute table's 品牌 and 产地
-detail_description     what became of the description document (§3.1); its text is not read
+detail_description     not captured: the description is a separate document the page names,
+                       and no reviewed transport reads it yet (``REVIEW_REQUIRED``)
 manufacturer, notice   not stated on 1688: ``ABSENT``
 minimum_sale_price,    not stated on 1688: ``ABSENT``
 sales_channels
@@ -49,8 +51,6 @@ from app.stages.collect.facts import (
     FieldStatus,
     ForeignPrice,
     ForeignPricesValue,
-    ForeignQuantityTier,
-    ForeignQuantityTiersValue,
     ForeignShippingValue,
     OptionAxis,
     OptionConfiguration,
@@ -62,7 +62,6 @@ from app.stages.collect.facts import (
 )
 from integrations.suppliers.ali1688.collect.dom import Node, read
 from integrations.suppliers.ali1688.collect.embedded import (
-    DETAIL_URL,
     FREIGHT,
     PRICE_MODEL,
     SKU_MODEL,
@@ -101,6 +100,11 @@ MINIMUM_ORDER_ABOVE_ONE = "MINIMUM_ORDER_ABOVE_ONE"
 SKU_KEY_UNREAD = "SKU_KEY_NOT_ITS_AXES"
 STOCK_NOT_STATED = "STOCK_NOT_STATED"
 FREIGHT_NOT_STATED = "FREIGHT_NOT_STATED"
+# A 1688 tier states a unit price from a quantity on; a quantity tier is a stated (quantity, total)
+# pair. Nothing is multiplied into a total the page never stated.
+TIER_UNIT_PRICE_NOT_TOTAL = "TIER_UNIT_PRICE_NOT_TOTAL"
+# The description is a separate document the page names; nothing captures it yet (ADR-0040 C2).
+DESCRIPTION_NOT_CAPTURED = "DESCRIPTION_NOT_CAPTURED"
 
 
 # ---------------------------------------------------------------- small readers
@@ -126,10 +130,6 @@ def _cny_number(value: object) -> str | None:
 def _fen(amount: str) -> int:
     whole, _, fraction = amount.partition(".")
     return int(whole) * 100 + int(fraction.ljust(2, "0"))
-
-
-def _from_fen(fen: int) -> str:
-    return f"{fen // 100}.{fen % 100:02d}"
 
 
 def _count(value: object) -> int | None:
@@ -520,26 +520,21 @@ def _quantity_tiers(data: Mapping[str, Any], unit: str) -> FieldFact:
     basis, name = (original, "originalPrices") if original else (current, "currentPrices")
     if not basis or len({begin for begin, _ in basis}) != len(basis):
         return _review((*PRICE_MODEL, name), PRICE_NOT_STATED)
-    # A tier states a unit price from a quantity on. The tier keeps that unit price in its label,
-    # and its total is that quantity at that unit price, in whole fen: nothing is divided.
-    tiers = tuple(
-        ForeignQuantityTier(
-            quantity=begin,
-            currency=CURRENCY,
-            total_price=_from_fen(_fen(amount) * begin),
-            label=f"≥{begin}{unit} 单价 {amount}",
-        )
-        for begin, amount in basis
-    )
+    # A tier states a unit price from a quantity on, and a quantity tier is a stated (quantity,
+    # total) pair: no total is ever computed. Every tier is kept verbatim in the evidence, and the
+    # field waits for review.
     return FieldFact(
-        FieldStatus.CONFIRMED,
-        ForeignQuantityTiersValue(tiers=tiers),
-        (
-            _evidence(
-                (*PRICE_MODEL, name),
-                FieldStatus.CONFIRMED,
-                ", ".join(f"≥{begin} {amount}" for begin, amount in basis),
-            ),
+        FieldStatus.REVIEW_REQUIRED,
+        None,
+        tuple(
+            Evidence(
+                EvidenceKind.EMBEDDED_JSON,
+                locator(*PRICE_MODEL, name),
+                FieldStatus.REVIEW_REQUIRED,
+                observed=f"beginAmount {begin}{unit} price {amount} {CURRENCY}",
+                normalized=TIER_UNIT_PRICE_NOT_TOTAL,
+            )
+            for begin, amount in basis
         ),
     )
 
@@ -569,30 +564,24 @@ def _shipping(data: Mapping[str, Any]) -> FieldFact:
     )
 
 
-def _detail_description(document: DocumentView) -> FieldFact:
-    where = locator(*DETAIL_URL)
-    read = document.description
-    if read is None or not read.stated:
-        # The page names no description document (or its member was refused, which the fields
-        # that need it already say).
-        reason = None if read is None else read.refusal
-        return _absent(EvidenceKind.EMBEDDED_JSON, where, reason and f"description:{reason}")
-    if read.refusal is not None:
-        # §3.1: the page names a description document, and no detail image came from it.
-        return FieldFact(
-            FieldStatus.REVIEW_REQUIRED,
-            None,
-            (
-                Evidence(
-                    EvidenceKind.EMBEDDED_JSON,
-                    where,
-                    FieldStatus.REVIEW_REQUIRED,
-                    normalized=f"description:{read.refusal}",
-                ),
+def _detail_description() -> FieldFact:
+    """The description is a separate document the page names, which this capture does not hold.
+
+    The page has a description; ICBM did not capture it. That is never ``ABSENT``: it waits for
+    review, and 1688's detail images wait for an owner-approved amendment of ADR-0040.
+    """
+    return FieldFact(
+        FieldStatus.REVIEW_REQUIRED,
+        None,
+        (
+            Evidence(
+                EvidenceKind.DOM_TEXT,
+                "description",
+                FieldStatus.REVIEW_REQUIRED,
+                normalized=DESCRIPTION_NOT_CAPTURED,
             ),
-        )
-    # The document was read; its images are the detail images. Its words are not read as a fact.
-    return _absent(EvidenceKind.EMBEDDED_JSON, where, f"description:DETAIL_IMAGES:{read.images}")
+        ),
+    )
 
 
 # ---------------------------------------------------------------- the whole page
@@ -608,7 +597,7 @@ def parse_fields(document: DocumentView) -> dict[str, FieldFact]:
         "origin": _attribute(rows, ORIGIN_LABELS),
         "manufacturer": _absent(EvidenceKind.DOM_TEXT, f"div#{ATTRIBUTES} 生产企业"),
         "notice": _absent(EvidenceKind.DOM_TEXT, f"div#{ATTRIBUTES}"),
-        "detail_description": _detail_description(document),
+        "detail_description": _detail_description(),
         # ADR-0040 §4: not stated on 1688.
         "minimum_sale_price": _absent(EvidenceKind.DOM_TEXT, "page"),
         "sales_channels": _absent(EvidenceKind.DOM_TEXT, "page"),

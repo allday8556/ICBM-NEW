@@ -42,7 +42,7 @@ Date: 2026-10-14
 - **Images** are fetched by the server's policed fetch from the reviewed image hosts (ADR-0019 §7):
   - 1688: `cbu01.alicdn.com` and the other `*.alicdn.com` image hosts that reconnaissance names;
   - Super Delivery: its own image host.
-  - *(Amendment, slice C2: reconnaissance named `cbu01.alicdn.com` and `img.alicdn.com` for 1688, and a description document can reference either. 1688's description images come from a public description document the server reads itself, §3.1.)*
+  - *(Amendment, slice C2: reconnaissance named `cbu01.alicdn.com` for 1688's gallery, the only image host slice C2 declares. 1688's description, and so its `DETAIL` images, is a separate document the page names; it is not captured, and those images await a separate owner-approved amendment.)*
 - **Host permissions.** The extension gains the two product hosts, `detail.1688.com` and `www.superdelivery.com`, as reviewed supplier hosts (AC-07). The optional per-origin permissions of ADR-0036 D3 are not required by this ADR.
 
 ## 2. Super Delivery reads the DOM
@@ -101,20 +101,6 @@ window.context=(function(b,d){…})(window.contextPath,{ … JSON … });
 - **Evidence.** A fact from the member carries evidence kind `EMBEDDED_DATA` with its JSON path as the locator. This is one new `EvidenceKind`, authorized here.
   - *(Amendment, slice C2: the evidence kind is the existing `EMBEDDED_JSON` (ADR-0010 §8: data embedded in the page, kept as a parsed tree and never as script text), with the locator `embedded:<JSON path>`. That kind already means exactly this. The evidence table constrains its kinds in the database, so a new kind would need a migration and would gain nothing. No `EvidenceKind` is added.)*
 
-### 3.1 Detail images: the public description document (amendment, slice C2)
-
-1688 does not put the product description in the product page. The page names a public description document, `description.fields.detailUrl` (for example `https://itemcdn.tmall.com/1688offer/icoss…`). It answers `text/plain` with exactly one statement: `var offer_details=` followed by a JSON object whose `content` is the description's HTML.
-
-- **The projection allowlists `description.fields.detailUrl`.** The browser sends only that URL.
-- **The server reads the document itself** (ADR-0019 §7, the same policed transport as for images):
-  - only from the profile's declared description hosts (`itemcdn.tmall.com`), over https on port 443, with no query and no fragment;
-  - with no cookie and no session, never following a redirect, under a byte bound;
-  - in its own egress grant for the description hosts alone, reserved in the run's budget (one read per run).
-- **Parsing is strict.** The body, trimmed, is `var offer_details=`, one JSON object and `;`. It is parsed with a JSON parser and never run. The object's `content` string is read as HTML for its `<img>` references, in document order.
-- **Detail images.** A reference on a declared image host is a `DETAIL`-role candidate (ADR-0019 §7, AC-14). The server fetches it under the role's cap, like any other image. A reference on any other host is not a candidate.
-- **Any mismatch gives no detail images.** A mismatch is a URL off the declared hosts, a refused or failed read, a status other than 200, a body that is not exactly that statement, invalid JSON, or no `content` string. The reason is recorded as `REVIEW_REQUIRED` evidence on `detail_description` (`description:<reason>`). Nothing is guessed, and the document is never stored.
-- **OC-01 still holds.** The description document is not a product page of either site, and the server never reads `detail.1688.com`.
-
 ## 4. 1688 fields
 
 The allowlisted paths are under `result.data`.
@@ -125,10 +111,10 @@ The allowlisted paths are under `result.data`.
 | `prices` | `mainPrice.fields.priceModel`, `skuInfoMap.*.price` | CNY. `skuPrice`: the lowest SKU original price is the product's labelled `PURCHASE` price, and each SKU's own price is on its option. `rangePrice`: the first tier (`beginAmount` 1) of `originalPrices`, or of `currentPrices` when no original is stated, is the purchase price |
 | `options` | `Root.fields.dataJson.skuModel.skuProps`, `skuInfoMap` | axes and values as stated. Each SKU's original `price` is its purchase price; a `discountPrice` is kept as a fact (ADR-0038 §9.3 as amended) |
 | `stock` | `skuInfoMap.*.canBookCount` | per SKU, as stated |
-| `quantity_tiers` | `priceModel.currentPrices` when `rangePrice` | each tier as stated |
+| `quantity_tiers` | `priceModel.currentPrices` when `rangePrice` | each tier as stated. *(Slice C2: a 1688 tier states a unit price, and a quantity tier is a stated (quantity, total) pair, so the field is `REVIEW_REQUIRED` with every tier quoted in its evidence; no total is computed.)* |
 | `shipping` | `shippingServices.fields.freightInfo.totalCost`, `location` | CNY freight from the stated ship-from location to the user's receive address (the 배대지). A `FIXED` fee as stated, without the address |
 | `brand`, `origin` | the product attribute table (品牌, 产地) | as stated |
-| `images` | the DOM main gallery; `DETAIL` images from the description document (§3.1) | server-fetched (§1) |
+| `images` | the DOM main gallery | server-fetched (§1) |
 | `minimum_sale_price`, `sales_channels` | not stated on 1688 | `ABSENT` |
 
 - **The original (line) price is the purchase price** (ADR-0038 §9.3 as amended, Issue #219 `6164685916`). A promotion or member price is kept beside it as a fact.
@@ -175,4 +161,5 @@ Migrations are numbered 0063 or later (0062 is Track A's).
 - **2026-10-14, the owner's price basis (Issue #219 `6164685916`).** 1688's purchase price is the SKU's **original** price: the non-discounted `price`, the line price. A promotion or member `discountPrice` is recorded only and never sets the cost. When no original is shown, the shown price is used. A `rangePrice` page uses its first tier. §4 and OC-07 read so, and so does ADR-0038 §9.3.
 - **2026-10-14, slice C2 (implementation choices, Claude Code Track B).**
   - §3 accepts bare integer object keys when the policy declares them. It records the member's facts under the existing `EMBEDDED_JSON` evidence kind: no new kind and no migration.
-  - §3.1 adds the public description document as the source of 1688's detail images, read by the server under its own egress grant. This extends §1's reviewed hosts with the description host, which serves no image.
+  - 1688's description is a separate document the page names. Slice C2 does not capture it: `detail_description` is `REVIEW_REQUIRED` (`DESCRIPTION_NOT_CAPTURED`) and there are no description images. Reading that document, and with it 1688's `DETAIL` images, awaits a separate owner-approved amendment.
+  - Quantity tiers are not written as totals (§4 note on `quantity_tiers`).
