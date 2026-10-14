@@ -8,6 +8,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import integrations.suppliers as supplier_packages
 from app.capabilities.ai import platform_category, platform_tags
@@ -101,6 +102,11 @@ from app.stages.collect.extension.policy import CapturePolicySource
 from app.stages.collect.extension.queue import ExtensionQueues
 from app.stages.collect.extension.service import ExtensionCaptureService, ReportSink
 from app.stages.collect.imagedecode import HeaderImageDecoder
+from app.stages.collect.onboarding.capture import TrialCaptureStore
+from app.stages.collect.onboarding.catalog import SupplierCatalog
+from app.stages.collect.onboarding.service import OnboardingService
+from app.stages.collect.onboarding.store import OnboardingStore
+from app.stages.collect.onboarding.trials import SiteAnalysisService, last_trial_read
 from app.stages.collect.readback import SourceTruthReadback
 from app.stages.collect.revisions import ProductFactsRevisionStore
 from app.stages.collect.runs import CollectionRunStore
@@ -108,6 +114,7 @@ from app.stages.collect.service import CollectService
 from app.stages.collect.sourceassets import SourceAssetRecorder
 from app.stages.collect.synthetic import SyntheticTestProductService
 from app.stages.connect.accounts import AccountBinding, MarketplaceAccountStore
+from app.stages.connect.coupang.service import CoupangCredentialService
 from app.stages.connect.credentials import SupplierCredentialStore
 from app.stages.connect.marketplace.attestation import ApiGroup
 from app.stages.connect.marketplace.attestation_service import PermissionAttestationService
@@ -148,6 +155,7 @@ from app.stages.products.images import ProductImageService
 from app.stages.products.materialization import Materialization, ProductMaterializer
 from app.stages.products.pricing_service import ProductPricingService
 from app.stages.products.readiness import ProductReadinessService
+from app.stages.products.sales_policy import SalesPolicyService, SalesPolicyStore
 from app.stages.products.service import ProductsService
 from app.stages.products.source_gates import SourceGates
 from app.stages.products.store import ProductFoundationStore
@@ -180,6 +188,7 @@ from app.stages.register.target_policy import (
     TargetPolicyStore,
     editable_surfaces,
 )
+from app.stages.register.upload_variants import UploadFitVariants
 from integrations.ai.sidecar import WindowsProcessProbe
 from integrations.marketplaces.identity import MARKETPLACE_IDENTITIES
 from integrations.marketplaces.smartstore import product as smartstore_product
@@ -206,7 +215,7 @@ from integrations.marketplaces.smartstore.notice_schema import SmartStoreNoticeR
 from integrations.marketplaces.smartstore.orders import SmartStoreOrderSource
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
 from integrations.marketplaces.smartstore.tags import SmartStoreTagSource
-from integrations.suppliers.base import SupplierDefinition, SupplierGateway
+from integrations.suppliers.base import PublicReader, SupplierDefinition, SupplierGateway
 from integrations.suppliers.collection import ImageRole as SupplierImageRole
 from integrations.suppliers.collection import SupplierCollection
 from integrations.suppliers.extraction import supplier_manifest
@@ -214,9 +223,12 @@ from integrations.suppliers.kmretail import PROFILE as KM_PROFILE
 from integrations.suppliers.kmretail.collect.images import OG_IMAGE_RULE as KM_OG_IMAGE_RULE
 from integrations.suppliers.kmretail.collect.images import ROLE_RULES as KM_ROLE_RULES
 from integrations.suppliers.registry import COLLECTIONS, SITE_PROBLEMS, SITES, SUPPLIERS
-from integrations.suppliers.sites import capture_policy_bytes
+from integrations.suppliers.sites import PACKAGED_HOSTS, capture_policy_bytes
 from integrations.suppliers.transport.collection import DeferredCollectionGateway
-from integrations.suppliers.transport.gateway import PolicedSupplierGateway
+from integrations.suppliers.transport.gateway import (
+    PolicedPublicReader,
+    PolicedSupplierGateway,
+)
 
 logger = logging.getLogger("icbm.container")
 
@@ -288,6 +300,8 @@ class Container:
     ai_provider: ProviderProfileService
     # ADR-0033 G2: Settings' 상세페이지 공지 — the Detail Guidance owner and its image store.
     detail_guidance: DetailGuidanceService
+    # ADR-0039 §1, §4: each supplier's sales policy, saved from the supplier card.
+    sales_policies: SalesPolicyService
     category_metadata: CategoryMetadataService
     category_catalog: CategoryCatalogService
     # Settings delivery policy: the seller's address book, read on request and never stored.
@@ -332,6 +346,7 @@ class Container:
     marketplace_capability: MarketplaceCapabilityService
     permission_attestation: PermissionAttestationService
     smartstore: SmartStoreConnectService
+    coupang_credentials: CoupangCredentialService
     # Owner decision 2026-10-07: automatic token renewal through CONNECT's own pass.
     smartstore_keeper: SmartStoreSessionKeeper
     review_items: ReviewItemStore
@@ -344,6 +359,14 @@ class Container:
     phase_c_commands: PhaseCCommandStore
     phase_c_reads: PhaseCReadAccounting
     ownership: DataDirLease
+    # ADR-0036 O1: the supplier onboarding owner and the running supplier registry that merges
+    # the repository suppliers with the onboarded sites and rebinds one at run time.
+    onboarding: OnboardingStore
+    supplier_catalog: SupplierCatalog
+    # ADR-0036 O2: 「+ 공급처 추가」 — detection, the policy reads, the DRAFT and RECON.
+    onboarding_service: OnboardingService
+    # ADR-0036 O3: 「사이트 분석」 — trial reads, local captures, re-analysis and observed hosts.
+    onboarding_analysis: SiteAnalysisService
     # Each configured supplier's display name, by key (ADR-0030 §11 S2: the screens' lists).
     supplier_names: Mapping[str, str] = field(default_factory=dict)
 
@@ -366,15 +389,19 @@ def adoption_conventions() -> dict[str, str]:
     return conventions
 
 
-def supplier_image_roles() -> dict[str, dict[str, ImageSlot]]:
-    """Each supplier's published image role rules, as the image auto-selection reads them
-    (Issue #219): rule name → slot. A layout or unrecognised role is no product image."""
-    slot_of = {
+def _image_slot(role: str) -> ImageSlot | None:
+    return {
         SupplierImageRole.PRIMARY.value: ImageSlot.REPRESENTATIVE,
         SupplierImageRole.THUMBNAIL.value: ImageSlot.ADDITIONAL,
         SupplierImageRole.DETAIL.value: ImageSlot.DETAIL,
         SupplierImageRole.PRODUCT_AUX.value: ImageSlot.AUXILIARY,
-    }.get
+    }.get(role)
+
+
+def supplier_image_roles() -> dict[str, dict[str, ImageSlot]]:
+    """Each supplier's published image role rules, as the image auto-selection reads them
+    (Issue #219): rule name → slot. A layout or unrecognised role is no product image."""
+    slot_of = _image_slot
     return {
         KM_PROFILE.supplier_key: slot_table(
             ((rule.rule_id, rule.role.value) for rule in (*KM_ROLE_RULES, KM_OG_IMAGE_RULE)),
@@ -385,6 +412,33 @@ def supplier_image_roles() -> dict[str, dict[str, ImageSlot]]:
     }
 
 
+class _CatalogImageRoles:
+    """The repository suppliers' role tables, and each bound onboarded site's template table
+    (ADR-0036 §1: an onboarded site's rule names are its template's, as a repository site's are)."""
+
+    def __init__(self, fixed: StaticSupplierImageRoles, catalog: SupplierCatalog) -> None:
+        self._fixed = fixed
+        self._catalog = catalog
+
+    def slots(self, supplier_key: str) -> Mapping[str, ImageSlot] | None:
+        fixed = self._fixed.slots(supplier_key)
+        if fixed is not None:
+            return fixed
+        entry = self._catalog.onboarded(supplier_key)
+        if entry is None or not entry.offered or entry.bound is None:
+            return None
+        return slot_table(entry.bound.template.role_table, _image_slot)
+
+
+def _repository_hosts(suppliers: Sequence[SupplierDefinition]) -> set[str]:
+    hosts = set(PACKAGED_HOSTS) | {site.config.storefront_host for site in SITES.values()}
+    for definition in suppliers:
+        host = urlsplit(definition.profile.base_url).hostname
+        if host is not None:
+            hosts.add(host)
+    return hosts
+
+
 def build_container(
     config: AppConfig,
     *,
@@ -393,6 +447,7 @@ def build_container(
     secret_store: SecretStore | None = None,
     extra_jobs: Sequence[JobDefinition] = (),
     supplier_gateway: SupplierGateway | None = None,
+    onboarding_reader: PublicReader | None = None,
     collection_gateway: CollectionGateway | None = None,
     collection_sessions: SessionProvider | None = None,
     collections: Sequence[RegisteredCollection] | None = None,
@@ -415,6 +470,27 @@ def build_container(
     clock = clock or SystemClock()
     db = Database(config.database_url)
     audit = AuditLog(db, clock)
+    registered_collections = (
+        tuple(_registered(COLLECTIONS)) if collections is None else tuple(collections)
+    )
+    # ADR-0036 O1: the onboarding owner, and the running supplier registry. The repository
+    # suppliers are bound exactly as before (OB-07); each onboarded site is bound from its records
+    # now and rebound whenever the store changes it, so every service below reads the supplier set
+    # through the catalog's live views and needs no restart.
+    onboarding = OnboardingStore(
+        db,
+        clock,
+        audit,
+        reserved_keys={d.profile.supplier_key for d in suppliers} | set(SITES),
+        reserved_hosts=_repository_hosts(suppliers),
+    )
+    supplier_catalog = SupplierCatalog(
+        definitions=suppliers,
+        collections=registered_collections,
+        capture_policies={key: capture_policy_bytes(site) for key, site in SITES.items()},
+        repository_active=lambda key: SITES[key].config.active if key in SITES else None,
+        store=onboarding,
+    )
 
     registry = JobRegistry()
     registry.register(FAILING_JOB)
@@ -441,18 +517,28 @@ def build_container(
     jobs.set_worker_notifier(worker.notify)
 
     secrets = secret_store or build_secret_store(config.secret_backend)
+    supplier_credentials = SupplierCredentialStore(secrets)
     connect = ConnectService(
         db=db,
         clock=clock,
         audit=audit,
         jobs=jobs,
-        credentials=SupplierCredentialStore(secrets),
+        credentials=supplier_credentials,
         sessions=SupplierSessionStore(config.runtime_dir / SESSIONS_DIR_NAME, secrets),
         gateway=supplier_gateway or PolicedSupplierGateway(browser_channel=config.browser_channel),
-        suppliers=suppliers,
+        suppliers=supplier_catalog.definitions,
         marketplaces=MARKETPLACE_IDENTITIES,
     )
     registry.register(connect.job_definition())
+    # ADR-0036 O2: the add flow reads the entered storefront only through the common
+    # transport's bootstrap reader; the login goes through CONNECT's credential route.
+    onboarding_service = OnboardingService(
+        store=onboarding,
+        catalog=supplier_catalog,
+        connect=connect,
+        reader=onboarding_reader or PolicedPublicReader(),
+        clock=clock,
+    )
     # Marketplace capability truth: typed evidence in, no provider access (M2 PR-B).
     marketplace_capability = MarketplaceCapabilityService(db=db, clock=clock, audit=audit)
     # SmartStore CONNECT (M2 PR-A): every provider call goes through the registry-gated caller.
@@ -473,6 +559,7 @@ def build_container(
             else None
         ),
     )
+    coupang_credentials = CoupangCredentialService(secrets, audit)
     # SMARTSTORE-A0-PERMISSION (M2 PR-C). The application identity comes from the committed
     # SmartStore credential bundle and the endpoint-mapping revision from the endpoint registry
     # (§5.1, §5.2); test fixtures may stand in for either.
@@ -544,9 +631,6 @@ def build_container(
     atomic_sku_items = AtomicSKUItemStore(db, clock)
     atomic_sku_economics = AtomicSKUEconomicsStore(db, clock)
     materializer = ProductMaterializer(db=db, store=product_store, revisions=revisions, audit=audit)
-    registered_collections = (
-        tuple(_registered(COLLECTIONS)) if collections is None else tuple(collections)
-    )
     # Adaptive Collector (ADR-0017; P2 persistence, P3 shadow foundation). A supplier is admitted
     # only with a registered CONNECT definition and a registered COLLECT access envelope. No
     # supplier has a switch entry, so every run freezes DISABLED and the shadow never runs until
@@ -577,7 +661,12 @@ def build_container(
         db, clock, supplier_gate=adaptive_gate, validation=adaptive_validation
     )
     runs = CollectionRunStore(
-        db, clock, shadow_freezer=shadow_switch.freeze, capture_freezer=capture_store.freeze
+        db,
+        clock,
+        shadow_freezer=shadow_switch.freeze,
+        capture_freezer=capture_store.freeze,
+        # ADR-0036 §5: an onboarding trial's read paces COLLECT's next read of that product.
+        other_reads=(last_trial_read,),
     )
 
     def _auto_select(materialized: Materialization) -> None:
@@ -621,6 +710,7 @@ def build_container(
     )
     # One operator-submitted product at a time, as a durable collect.* job. The transport is
     # deferred: composing the application opens no connection, and under CI it cannot.
+    collect_gateway = collection_gateway or DeferredCollectionGateway()
     collection = ProductCollectionService(
         db=db,
         clock=clock,
@@ -629,14 +719,33 @@ def build_container(
         revisions=revisions,
         recorder=source_asset_recorder,
         sessions=collection_sessions or connect,
-        gateway=collection_gateway or DeferredCollectionGateway(),
-        collections=registered_collections,
+        gateway=collect_gateway,
+        collections=supplier_catalog.collections,
+        collectable=supplier_catalog.collectable,
         after_recorded=after_recorded,
         shadow=ShadowRunner(adaptive_profiles, shadow_evidence, hook_manifests),
         capture=CaptureRunner(capture_store),
         accounting=phase_c_reads,
     )
     registry.register(collection.job_definition())
+    # ADR-0036 O3: a trial read of a RECON onboarded site goes through the same policed gateway
+    # and CONNECT session as a collection, paced on the template's defaults and on COLLECT's own
+    # last read, and is recorded only as an onboarding trial: never a ProductFactsRevision.
+    onboarding_analysis = SiteAnalysisService(
+        store=onboarding,
+        catalog=supplier_catalog,
+        jobs=jobs,
+        gateway=collect_gateway,
+        sessions=collection_sessions or connect,
+        captures=TrialCaptureStore(config.onboarding_captures_dir),
+        clock=clock,
+        collect_remaining=lambda key, interval: runs.seconds_until_readable(
+            key, interval_s=interval, collection_runs_only=True
+        ),
+        # ADR-0036 §5 step 3: the member's login ID is redacted from a capture, in memory only.
+        login_id=supplier_credentials.username,
+    )
+    registry.register(onboarding_analysis.job_definition())
 
     # ADR-0019 E1/E2: the extension capture transport. The pairing lives in the keyring only, the
     # replay cache and the capture buffer in this process only, and the capture policy is read
@@ -647,7 +756,11 @@ def build_container(
     # ADR-0019 §8.1 (E3): the list queue. Every queue read is issued here, durably, before it
     # happens; a ticketed capture claims its item in the ingest's own write unit.
     extension_queues = ExtensionQueues(
-        db=db, clock=clock, runs=runs, collections=registered_collections
+        db=db,
+        clock=clock,
+        runs=runs,
+        collections=supplier_catalog.collections,
+        collectable=supplier_catalog.collectable,
     )
     extension_capture = ExtensionCaptureService(
         db=db,
@@ -656,16 +769,17 @@ def build_container(
         runs=runs,
         policies=CapturePolicySource(
             capture_policy_root or SUPPLIER_PACKAGES,
-            sites={key: capture_policy_bytes(site) for key, site in SITES.items()},
+            sites=supplier_catalog.capture_policies,
         ),
         buffer=CaptureBuffer(),
         final_scan=_server_final_scan,
         # The buffer is a handoff inside one process (ADR-0002 Option A; ruling 5906712259 N-1).
         worker_in_process=worker.IN_PROCESS,
         recorder=collection,
-        collections=registered_collections,
+        collections=supplier_catalog.collections,
         report_sink=extension_report_sink,
         queue_tickets=extension_queues,
+        collectable=supplier_catalog.collectable,
     )
     registry.register(extension_capture.job_definition())
 
@@ -681,23 +795,43 @@ def build_container(
     )
     # M4 PR-E: derived image lineage, operator image selection and exact-binary QA. Derived
     # bytes live in their own namespace, never among the source assets.
+    derived_images = DerivedImageStore(config.derived_images_dir, db, HeaderImageDecoder())
     images = ProductImageService(
         store=product_store,
-        artifacts=DerivedImageStore(config.derived_images_dir, db, HeaderImageDecoder()),
+        artifacts=derived_images,
         audit=audit,
         clock=clock,
+    )
+    # ADR-0037 §2: the SmartStore upload-fit variant of each oversize selected image, made in the
+    # M4 lineage when a SmartStore unit is authored; the source asset is never touched.
+    upload_fit = UploadFitVariants(
+        images=images,
+        sources=source_assets,
+        derived=derived_images,
+        clock=clock,
+        audit=audit,
     )
     # Issue #219: the operator's BLOCK / KEEP decisions on supplier common images and their
     # detection over each supplier's collection history.
     common_images = SupplierCommonImageService(
         db, audit, clock, configured_suppliers=collection.supplier_keys
     )
+    # ADR-0039: whether ICBM applies each supplier's own sales policy (channel restrictions, minimum
+    # resale price). The pricing owner and the source gates read it in their own units of work; a
+    # supplier is known when CONNECT or COLLECT is configured for it (the supplier cards' keys).
+    supplier_keys = frozenset(definition.profile.supplier_key for definition in suppliers)
+    sales_policies = SalesPolicyService(
+        SalesPolicyStore(db, clock, audit),
+        lambda: supplier_keys | set(collection.supplier_keys()),
+    )
     # Issue #219: the image auto-selection rule over each supplier's own published role rules, and
     # its automatic QA. An operator's selection always supersedes it.
     auto_images = ImageAutoSelector(
         store=product_store,
         images=images,
-        roles=StaticSupplierImageRoles(supplier_image_roles()),
+        roles=_CatalogImageRoles(
+            StaticSupplierImageRoles(supplier_image_roles()), supplier_catalog
+        ),
         audit=audit,
         clock=clock,
     )
@@ -782,6 +916,10 @@ def build_container(
         frozenset(m.key for m in MARKETPLACE_IDENTITIES),
         category_catalog,
     )
+    # The source-side gates of Items (ADR-0031 §4, ADR-0030 §7) under each supplier's sales policy
+    # (ADR-0039 §2): the one seam every marketplace's REGISTER reads.
+    # ADR-0036 OB-10: an onboarded site that is not ACTIVE is gated as well.
+    source_gates = SourceGates(product_store, supplier_catalog.site_active)
     # M5 PR-C (ADR-0014 §3): the derived preflight and the Snapshot builder. No provider is behind
     # either; both sources it reads are the durable owners above.
     registration_preflight = RegistrationPreflightService(
@@ -799,11 +937,10 @@ def build_container(
         detail_profiles=authoring_revisions,
         # M6-E (ADR-0024 §5): no second listing of an adopted Item.
         adopted_items=adoptions.adopted_items,
-        # ADR-0031 §4, ADR-0030 §7: a forbidden or unread sales channel, or a RECON supplier.
-        source_gates=SourceGates(
-            product_store,
-            lambda key: SITES[key].config.active if key in SITES else None,
-        ),
+        # ADR-0031 §4, ADR-0030 §7: a forbidden or unread sales channel, or a RECON supplier;
+        # ADR-0036 OB-10: an onboarded site that is not ACTIVE as well;
+        # ADR-0039 §2: a warning instead where the supplier's channel policy is not applied.
+        source_gates=source_gates.read,
         # ADR-0033 G4: the store-wide Detail Guidance notices a product's choice resolves to.
         guidance=detail_guidance_store,
     )
@@ -876,6 +1013,8 @@ def build_container(
         enrichment=enrichment,
         # ADR-0033 G4: the owner that renders and records a product's own notice on save.
         guidance=detail_guidance_store,
+        # ADR-0037 §2: the M4 owner that makes each oversize image's upload-fit variant on save.
+        upload_fit=upload_fit,
     )
     # M5 PR-E (ADR-0014 §9-§11): the execution owner over the M0 job system. Its CREATE seam is
     # the production SmartStore one, which is unavailable while the endpoint is NOT_ADOPTED, so
@@ -1008,7 +1147,7 @@ def build_container(
         mode=execution_mode,
         connect=smartstore.connect,
         sources=source_assets,
-        derived=DerivedImageStore(config.derived_images_dir, db, HeaderImageDecoder()),
+        derived=derived_images,
         # ADR-0033 §8: the recorded Detail Guidance images, the third byte source.
         guidance=detail_guidance_store,
     )
@@ -1212,7 +1351,7 @@ def build_container(
         review=ReviewService(ReviewCounts(review_items, review_reconciler)),
         execution_mode=execution_mode,
         editable_surfaces=editable_surfaces(),
-        collection_suppliers=collection.supplier_keys(),
+        collection_suppliers=collection.supplier_keys,
     )
     return Container(
         listing_sync=listing_sync,
@@ -1271,6 +1410,7 @@ def build_container(
         ai_execution=ai_execution,
         ai_provider=ai_provider,
         detail_guidance=detail_guidance,
+        sales_policies=sales_policies,
         category_metadata=category_metadata,
         category_catalog=category_catalog,
         smartstore_addressbook=SmartStoreAddressBookSource(
@@ -1299,6 +1439,7 @@ def build_container(
         marketplace_capability=marketplace_capability,
         permission_attestation=permission_attestation,
         smartstore=smartstore,
+        coupang_credentials=coupang_credentials,
         smartstore_keeper=SmartStoreSessionKeeper(smartstore, enabled=config.smartstore_auto_renew),
         review_items=review_items,
         review_reconciler=review_reconciler,
@@ -1310,7 +1451,11 @@ def build_container(
         phase_c_commands=PhaseCCommandStore(db, clock),
         phase_c_reads=phase_c_reads,
         ownership=ownership,
-        supplier_names={d.profile.supplier_key: d.profile.display_name for d in suppliers},
+        onboarding=onboarding,
+        supplier_catalog=supplier_catalog,
+        onboarding_service=onboarding_service,
+        onboarding_analysis=onboarding_analysis,
+        supplier_names=supplier_catalog.names,
     )
 
 

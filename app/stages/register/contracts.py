@@ -97,6 +97,19 @@ class AttemptView(BaseModel):
     started_at: datetime | None
 
 
+class UploadFitView(BaseModel):
+    """ADR-0037 §3: the upload-fit variant an asset is: the selected binary it stands in for, and
+    the variant's own size and dimensions. Server facts only; the screen derives nothing."""
+
+    recipe: str
+    source_asset_kind: str
+    source_sha256: str
+    source_derivation_id: str | None = None
+    width: int
+    height: int
+    byte_size: int
+
+
 class AssetView(BaseModel):
     """One selected publication asset of an Item, by its exact local identity (§5, R1).
 
@@ -113,6 +126,8 @@ class AssetView(BaseModel):
     qa_result_id: str | None
     # Whether a provider-issued identity was frozen for it. The reference itself is never exposed.
     provider_asset_prepared: bool = False
+    # ADR-0037 §3: set when the asset is an upload-fit variant of the selected binary.
+    upload_fit: UploadFitView | None = None
 
 
 class ReasonView(BaseModel):
@@ -144,6 +159,10 @@ class ItemView(BaseModel):
     price_basis: str | None
     registration_item_key: str | None
     publication_assets: tuple[AssetView, ...] = ()
+    # ADR-0039 §3 (SP-04): whether the pinned price applied the supplier's minimum resale price,
+    # and the minimum the source stated when it did not — shown beside the price, never priced.
+    minimum_applied: bool | None = None
+    stated_minimum_sale_price_krw: int | None = None
     # The option fields this Item was frozen with, by name only (§4). Empty for a preparation:
     # nothing durable holds an option an operator has not frozen yet.
     option_keys: tuple[str, ...] = ()

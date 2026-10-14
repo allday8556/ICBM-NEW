@@ -78,6 +78,50 @@ Even current declaration evidence grants neither endpoint adoption nor egress no
 ## Provider-zero transport
 
 C-AUTH-1 ships only an in-memory `FakeTransport`. It records a prepared request and returns an
-explicitly queued fake response. The Coupang package imports no HTTP client, opens no socket and
-requests no egress grant. A real transport belongs to a later endpoint-adoption slice with its own
-official detail-page contract, retention, timeouts, redirect policy and safety review.
+explicitly queued fake response. Every provider-zero adapter continues to use that boundary.
+
+## C-LIVE-R1 bounded extension
+
+| Field | Value |
+| --- | --- |
+| Endpoint | `#25` — category auto-matching agreement |
+| Runtime surface | One exact KR `GET`; no caller-selected URL, method, query or body |
+| Calls per runner | `1` with no automatic retry |
+| Mutation authority | `NONE` |
+| Credential storage | One atomic OS-secret-store record |
+
+The extension requires an approval bound to vendor id, credential generation, market and declared
+source IP. The approval window is at most 24 hours. Immediately before use, a clock preflight must
+be at most ten minutes old with no more than five seconds observed skew. The endpoint is signed
+fresh, the HTTP client does not trust environment proxies or follow redirects, and an explicit
+egress grant covers only `api-gateway.coupang.com` for that call. CI and test processes cannot
+construct the live transport. The response is capped at 64 KiB and reduced to one boolean; raw
+provider content and provider messages are never retained in results or errors.
+
+The operator enters Access Key and Secret Key only through the no-echo
+`icbm coupang save-credentials` prompts. They are not command-line options. The bounded call is
+exposed as `icbm coupang read-canary`; its arguments bind approval, declared source IP and clock
+preflight only and cannot select another provider target.
+
+## C-LIVE-MUT-1 bounded extension
+
+| Field | Value |
+| --- | --- |
+| Products | Exact user-bound synthetic `test 1` through `test 11` only |
+| Runtime surface | Fixed create -> partial update -> read-back -> delete paths on KR |
+| Approval request | `requested=false`; sale approval is never requested |
+| Retry | None; an in-flight journal barrier requires manual recovery after ambiguity |
+| Delete authority | Only the `sellerProductId` returned by this run's successful create |
+
+The owner accepts one closed payload bundle whose SHA-256 digest is bound into a current approval,
+along with vendor id, credential generation and the declared Wing source IP. It rejects missing,
+reordered or additional products, `test 12+`, changed synthetic identities, multiple items and any
+request for sale approval. A durable journal records only state, digest and returned identities;
+it is committed before each provider call so a crash or timeout can never cause a blind retry.
+
+Each successful create is updated through the fixed partial-update path, read back and verified as
+the same saved synthetic SKU, then deleted through that exact returned identity. Existing Coupang
+products are never caller-selectable. The live client uses the same clock, redirect, proxy, response
+cap, secret-store and explicit-egress constraints as C-LIVE-R1. CI and tests can supply only an
+in-memory transport. The operator command requires the exclusive data-directory lease and takes a
+reviewed bundle path and digest, never Access Key or Secret Key command-line arguments.

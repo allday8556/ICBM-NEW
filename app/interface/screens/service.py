@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import timedelta
 
 from app import MILESTONE, __version__
@@ -74,8 +74,10 @@ class ScreenService:
         review: ReviewService,
         execution_mode: ExecutionModeService,
         editable_surfaces: Sequence[EditableSurface] = (),
-        collection_suppliers: Sequence[str] = (),
+        collection_suppliers: Sequence[str] | Callable[[], Sequence[str]] = (),
     ) -> None:
+        """``collection_suppliers`` is a fixed list, or a read of the suppliers that can be
+        collected now (ADR-0036 §4: an onboarded site joins it when it becomes ACTIVE)."""
         self._clock = clock
         self._operator_name = operator_name
         self._marketplaces = tuple(marketplaces)
@@ -87,7 +89,7 @@ class ScreenService:
         self._review = review
         self._execution_mode = execution_mode
         self._editable_surfaces = tuple(editable_surfaces)
-        self._collection_suppliers = tuple(sorted(collection_suppliers))
+        self._collection_suppliers = collection_suppliers
 
     def _meta(self, screen: ScreenKey, empty_reason: EmptyReason | None) -> ScreenMeta:
         return ScreenMeta(
@@ -154,7 +156,11 @@ class ScreenService:
             ),
             suppliers=self._connect.supplier_connections(),
             collection_jobs_total=jobs,
-            collection_supplier_keys=list(self._collection_suppliers),
+            collection_supplier_keys=sorted(
+                self._collection_suppliers()
+                if callable(self._collection_suppliers)
+                else self._collection_suppliers
+            ),
         )
 
     def product_db(self) -> ProductDbView:

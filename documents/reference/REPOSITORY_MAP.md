@@ -112,6 +112,21 @@ byte source of the upload run, migration `0059`, one unit and one integration su
 ADR-0033 G6 shows the frozen notices as image slots in the Registration Management snapshot preview
 (top notices, detail images, body, bottom notices) in the existing REGISTER and UI modules, and
 added two integration suites; no migration.
+ADR-0036 O1 added the supplier onboarding owner `app/stages/collect/onboarding/` (its models, host
+guard, append-only store, the database-built site configuration and the running supplier registry
+that merges repository and onboarded sites and rebinds one at run time), migration `0060` and one
+integration suite.
+ADR-0036 O2 added 「+ 공급처 추가」: platform detection and the policy reads
+`app/stages/collect/onboarding/detect.py`, the add flow `service.py` and its read shapes
+`contracts.py`, the routes `app/interface/api/routes/onboarding.py`, the bootstrap reader in the
+existing common transport, the templates' detection markers, the modal
+`ui/web/js/pages/collect/onboarding.js`, one test support module and two integration suites; no
+ADR-0036 O3 added 「사이트 분석」: the trial reads, offline re-analysis and observed-host
+confirmation `app/stages/collect/onboarding/trials.py`, the trial report `analysis.py`, the local
+sanitized sample captures `capture.py`, the store's trial writer, the templates' analysis hooks
+(row scanner and structure rules), the panel `ui/web/js/pages/collect/analysis.js`, one test support
+module and three integration suites; no new migration (migration `0060`'s ACTIVE gate reads a stated
+"no options" as read).
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -141,16 +156,35 @@ the mapper is provider-zero, semantic/unit-based and read-only.
 C-AUTH-1 adds the Coupang HMAC/auth and evidence-bounded error contracts, an in-memory fake
 transport, their unit/contract coverage, and the provider-zero auth contract. It adopts no endpoint,
 contains no provider transport, and grants no credentials or LIVE authority.
+C-CLAIM-1 adds one provider-zero Coupang Returns & Exchanges adapter covering eleven official
+endpoints plus unit and contract suites. It uses only the in-memory fake transport, retains provider
+response envelopes without interpreting customer data, and grants no credentials or LIVE authority.
+C-LOGISTICS-1 adds seven executable shipping/return-location contracts plus versioned courier and
+postal reference boundaries. It remains fake-only and grants no provider call or LIVE authority.
+C-CS-1/C-SETTLEMENT-1 add six customer inquiry/reply contracts and two KR-only settlement reads.
+C-PROMO-1 adds three common contract/budget reads plus fail-closed specifications for eighteen
+contract-bound cashback and coupon endpoints. All execution remains fake-only.
+C-RG-1 adds seven exact Rocket Growth endpoint specifications plus a stable operator-safe blocked
+state. Every endpoint remains account-gated until program enrollment and the precise seller/account
+contract are proven; no request can be built, signed or sent.
+C-CGF-1 adds the exact KR/TW CGF Lite order-label specification and a stable operator-safe blocked
+state. It remains account-gated until CGF Lite enrollment and the precise seller/account contract
+are proven; no request can be built, signed or sent.
+C-LIVE-R1 adds the Coupang OS-secret-store credential owner and one one-shot KR read canary for
+the category auto-matching agreement endpoint, plus their two unit suites. It adds no generic
+provider caller and no mutation surface.
+All other Coupang adapters remain fake-only, retain sensitive provider envelopes without projecting
+customer or financial data, and grant no provider call or LIVE authority.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 355 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 378 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 68 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
-| `app/interface/` | 28 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 89 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 165 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/interface/` | 30 | operator surfaces: HTTP api, screens, cli |
+| `app/platform/` | 91 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 184 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -158,27 +192,27 @@ contains no provider transport, and grants no credentials or LIVE authority.
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 189 | all canonical and historical documents |
+| `documents/` | 190 | all canonical and historical documents |
 | `documents/acceptance/` | 73 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 12 | platform and UI contracts |
-| `documents/decisions/` | 39 | ADRs and architect review records |
+| `documents/decisions/` | 40 | ADRs and architect review records |
 | `documents/evidence/` | 30 | external provider evidence catalog |
 | `documents/reference/` | 3 | this map and the path migration map |
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 84 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 34 |  |
+| `integrations/` | 94 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 44 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 350 | tests |
-| `tests/contracts/` | 14 | repository-rule and document-contract tests |
+| `tests/` | 384 | tests |
+| `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 145 | integration tests by runtime owner |
-| `tests/support/` | 14 | shared test support |
-| `tests/unit/` | 130 | unit tests by runtime owner |
-| `ui/` | 70 | operator clients: the served web client and the capture extension |
+| `tests/integration/` | 157 | integration tests by runtime owner |
+| `tests/support/` | 16 | shared test support |
+| `tests/unit/` | 143 | unit tests by runtime owner |
+| `ui/` | 73 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 61 | the served web client |
+| `ui/web/` | 64 | the served web client |

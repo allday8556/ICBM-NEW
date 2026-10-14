@@ -2119,6 +2119,11 @@ PREFLIGHT_TRUTH_WRITERS = {
     # ADR-0033 G4: the preflight resolves the Detail Guidance notices; G2's owner writes them.
     **dict.fromkeys(("DetailGuidance", "GuidanceImageArtifact", "DetailGuidanceRevision"),
                     "app/capabilities/detail_guidance/store.py"),
+    # ADR-0036 OB-10: the preflight's PT-06 gate reads an onboarded site's state, through the
+    # running registry the onboarding owner's writes rebind.
+    **dict.fromkeys(("OnboardedSupplier", "OnboardingTransition", "OnboardingHost",
+                     "OnboardingWordRevision"),
+                    "app/stages/collect/onboarding/store.py"),
 }  # fmt: skip
 
 
@@ -2186,6 +2191,120 @@ def test_the_detail_guidance_owner_is_the_one_writer_of_its_models() -> None:
                 constructed.setdefault(node.func.id, set()).add(path)
     assert constructed == {name: {DETAIL_GUIDANCE_WRITER} for name in DETAIL_GUIDANCE_MODELS}
     assert _calls(modules[DETAIL_GUIDANCE_WRITER], "append")
+
+
+# ADR-0036 §3 (O1): the onboarding owner is the one constructor of every onboarding model. O1
+# writes the identities, the state log, the hosts and the words; the policy reads, trials and
+# verifications get their writer in the same module with O2, O3 and O5, and nowhere else.
+ONBOARDING_WRITER = "app/stages/collect/onboarding/store.py"
+ONBOARDING_MODELS = (
+    "OnboardedSupplier",
+    "OnboardingTransition",
+    "OnboardingHost",
+    "OnboardingWordRevision",
+    "OnboardingPolicyRead",
+    "OnboardingTrial",
+    "OnboardingVerification",
+)
+ONBOARDING_O1_WRITES = (
+    "OnboardedSupplier",
+    "OnboardingTransition",
+    "OnboardingHost",
+    "OnboardingWordRevision",
+    # ADR-0036 O2: the policy reads the operator acknowledged at add time.
+    "OnboardingPolicyRead",
+    # ADR-0036 O3: the trial reads of 「사이트 분석」.
+    "OnboardingTrial",
+)
+
+
+def test_the_onboarding_owner_is_the_one_writer_of_its_models() -> None:
+    constructed: dict[str, set[str]] = {}
+    modules = _production_modules()
+    for path, tree in modules.items():
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in ONBOARDING_MODELS
+            ):
+                constructed.setdefault(node.func.id, set()).add(path)
+    assert all(paths == {ONBOARDING_WRITER} for paths in constructed.values()), constructed
+    assert set(ONBOARDING_O1_WRITES) <= set(constructed)
+    assert _calls(modules[ONBOARDING_WRITER], "append")
+
+
+def test_an_onboarded_site_is_bound_through_the_repository_binder() -> None:
+    # ADR-0036 §1, §4, OB-03, OB-07: an onboarded site is data bound by the same template binder
+    # as a repository site; the onboarding package imports no template package of its own and
+    # adds no supplier-specific code.
+    modules = _production_modules()
+    package = {
+        path: tree
+        for path, tree in modules.items()
+        if path.startswith("app/stages/collect/onboarding/")
+    }
+    assert "app/stages/collect/onboarding/catalog.py" in package
+    for path, tree in package.items():
+        imported = _imported_modules(tree)
+        assert not any(m.startswith("integrations.suppliers.platforms.") for m in imported), path
+        assert not any(m.startswith("integrations.suppliers.kmretail") for m in imported), path
+        assert not imported & RAW_CLIENTS, path
+    binders = {
+        path
+        for path, tree in modules.items()
+        if any(_callee(call) == "bind_site" for call in _calls(tree))
+    }
+    assert binders == {
+        "integrations/suppliers/sites.py",
+        "app/stages/collect/onboarding/catalog.py",
+    }
+
+
+def test_a_trial_read_never_writes_canonical_truth() -> None:
+    # ADR-0036 §5, OB-02: a trial reads one product page through the policed collection gateway
+    # under a budget of one product read, and records only an onboarding trial. No onboarding
+    # module appends a revision, records a collection document, opens a collection run, stores a
+    # source asset or requests an image.
+    from app.stages.collect.onboarding.trials import TrialBudget
+    from integrations.suppliers.collection import ReadKind
+
+    modules = _production_modules()
+    package = {
+        path: tree
+        for path, tree in modules.items()
+        if path.startswith("app/stages/collect/onboarding/")
+    }
+    assert "app/stages/collect/onboarding/trials.py" in package
+    forbidden_calls = {
+        "_record_document",
+        "record_captured_document",
+        "read_image",
+        "reserve_product_read",
+        "ProductFactsRevisionStore",
+        "SourceAssetStore",
+        "SourceAssetRecorder",
+        "RunBudget",
+    }
+    for path, tree in package.items():
+        called = {_callee(call) for call in _calls(tree)}
+        assert not called & forbidden_calls, (path, called & forbidden_calls)
+        imported = _imported_modules(tree)
+        assert "app.stages.collect.revisions" not in imported, path
+        assert "app.stages.collect.assets" not in imported, path
+    reads = [
+        call
+        for call in _calls(package["app/stages/collect/onboarding/trials.py"])
+        if _callee(call) == "read_document"
+    ]
+    assert len(reads) == 1
+    budget = TrialBudget()
+    for kind in (ReadKind.IMAGE_REQUEST, ReadKind.POLICY_READ):
+        with pytest.raises(Exception):  # noqa: B017 - any refusal; nothing is sent
+            budget.reserve(kind, "subject")
+    budget.reserve(ReadKind.PRODUCT_READ, "subject")
+    with pytest.raises(Exception):  # noqa: B017
+        budget.reserve(ReadKind.PRODUCT_READ, "subject")
 
 
 def test_the_drill_writes_only_into_the_fresh_root_it_validated() -> None:
@@ -2582,6 +2701,10 @@ RAW_CLIENT_OWNERS = {
     "integrations/suppliers/transport/collection.py": "the common collection gateway",
     # ENDPOINT_MATRIX §13: the one registry-gated SmartStore endpoint caller (M2 PR-A).
     "integrations/marketplaces/smartstore/caller.py": "the registry-gated SmartStore caller",
+    # C-LIVE-R1: one non-generic, one-shot KR read canary; every other Coupang path is fake-only.
+    "integrations/marketplaces/coupang/canary.py": "the bounded Coupang read canary",
+    # C-LIVE-MUT-1: exact test 1..11 create/update/read/delete, no generic caller or retry.
+    "integrations/marketplaces/coupang/live_mutations.py": "the bounded test-product owner",
     # Opens nothing: socket.gaierror is the evidence that separates a DNS failure (ERRORS §15.1).
     "integrations/marketplaces/smartstore/transmission.py": "DNS-phase evidence type (socket)",
     "app/platform/core/egress.py": "resolves the granted hosts' addresses for the guard (socket)",
@@ -2693,15 +2816,16 @@ def test_raw_network_and_browser_clients_live_only_in_the_common_transport() -> 
     assert importers == set(RAW_CLIENT_OWNERS)
 
 
-def test_only_the_common_transport_opens_egress_grants() -> None:
-    # The supplier transport for supplier profile hosts (M1) and the SmartStore caller for the
-    # SmartStore provider host (M2 PR-A). No other code can open a grant.
+def test_only_reviewed_transports_open_egress_grants() -> None:
+    # Supplier transport, COLLECT, SmartStore and the two bounded Coupang owners are reviewed.
     openers = {path for path, tree in _production_modules().items() if _calls(tree, "grant")}
     assert openers == {
         "integrations/suppliers/transport/gateway.py",
         # ADR-0010 §3: the COLLECT gateway, for exactly its collection profile's hosts.
         "integrations/suppliers/transport/collection.py",
         "integrations/marketplaces/smartstore/caller.py",
+        "integrations/marketplaces/coupang/canary.py",
+        "integrations/marketplaces/coupang/live_mutations.py",
     }
 
 
@@ -3879,6 +4003,16 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "detail_guidances",
         "guidance_image_artifacts",
         "detail_guidance_revisions",
+        # ADR-0036 O1: the supplier onboarding owner.
+        "onboarded_suppliers",
+        "onboarding_transitions",
+        "onboarding_trials",
+        "onboarding_hosts",
+        "onboarding_word_revisions",
+        "onboarding_policy_reads",
+        "onboarding_verifications",
+        # ADR-0039 §1: each supplier's sales policy, its append-only revisions.
+        "supplier_sales_policy_revisions",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

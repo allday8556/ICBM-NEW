@@ -659,6 +659,26 @@ body.has-registration-status .content {
   margin-top: 3px;
 }
 
+/* ADR-0039 §4: the supplier card's sales-policy switches. */
+.supplier-sales-policy {
+  display: grid;
+  gap: 6px;
+  padding: 9px 0;
+  border-bottom: 1px solid #edf1f4;
+}
+
+.supplier-sales-policy-body {
+  display: grid;
+  gap: 6px;
+}
+
+.supplier-sales-policy .kv {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
 .supplier-status-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -731,6 +751,140 @@ body.has-registration-status .content {
 .supplier-add-card .mini {
   max-width: 220px;
   margin: 6px auto 0;
+}
+
+/* ADR-0036 O2: an onboarded supplier's state chip beside its connection chip, and the add flow. */
+.supplier-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.onboarding-detect {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--space-4);
+}
+
+.onboarding-detect-result {
+  margin-top: var(--space-3);
+}
+
+.onboarding-detect-result .note,
+.onboarding-evidence {
+  overflow-wrap: anywhere;
+}
+
+.onboarding-policy-doc {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid #edf1f4;
+}
+
+.onboarding-policy-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.onboarding-robots {
+  max-height: 140px;
+  overflow: auto;
+  margin: var(--space-2) 0 0;
+  padding: 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-input);
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.onboarding-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: var(--space-4);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.onboarding-ack input {
+  margin-top: 2px;
+  flex: none;
+}
+
+/* ADR-0036 O3: 「사이트 분석」 — samples, their field tables, unread rows and observed hosts. */
+.analysis-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.analysis-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: var(--space-4);
+}
+
+.analysis-add input {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.analysis-sample {
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.analysis-sample-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.analysis-url,
+.analysis-value,
+.analysis-images,
+.analysis-sample .note {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.analysis-images {
+  white-space: pre-line;
+  margin-top: var(--space-2);
+}
+
+.analysis .table {
+  table-layout: fixed;
+  margin-top: var(--space-2);
+}
+
+.analysis-fields th:first-child,
+.analysis-fields td:first-child {
+  width: 30%;
+}
+
+.analysis-fields th:nth-child(2),
+.analysis-fields td:nth-child(2) {
+  width: 22%;
+}
+
+.analysis-hosts-title {
+  margin-top: var(--space-6);
 }
 
 @media (max-width: 1180px) {

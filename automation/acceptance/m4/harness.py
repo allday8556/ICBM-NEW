@@ -463,6 +463,7 @@ def manifest(o: Owners, tracked: Tracked) -> dict[str, Any]:
                         sha256=output.sha256,
                         derivation_id=output.derivation_id,
                         validated_source_revision_id=revision,
+                        role=output.role,
                     )
                     qa.append(
                         None if record is None else [record.qa_result_id, record.verdict.value]

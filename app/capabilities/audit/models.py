@@ -30,7 +30,7 @@ class AuditEventType(StrEnum):
     MARKETPLACE_CAPABILITY_CHANGED = "MARKETPLACE_CAPABILITY_CHANGED"
     # SMARTSTORE-A0-PERMISSION recorded (M2 PR-C): operator-attested, never provider-measured.
     MARKETPLACE_PERMISSION_ATTESTED = "MARKETPLACE_PERMISSION_ATTESTED"
-    # SmartStore CONNECT (M2 PR-A): generations only, never credential or account content.
+    # Marketplace CONNECT credentials: generations only, never credential or account content.
     MARKETPLACE_CREDENTIALS_UPDATED = "MARKETPLACE_CREDENTIALS_UPDATED"
     MARKETPLACE_SESSION_COMMITTED = "MARKETPLACE_SESSION_COMMITTED"
     MARKETPLACE_ACCOUNT_BOUND = "MARKETPLACE_ACCOUNT_BOUND"
@@ -157,6 +157,16 @@ class AuditEventType(StrEnum):
     # Identity, placement, kind, sequence, template, flag, period, fingerprint and image hash only;
     # never the notice text, which lives in the revision row.
     DETAIL_GUIDANCE_REVISED = "DETAIL_GUIDANCE_REVISED"
+    # ADR-0036 O1: one supplier onboarding write — an identity created, a state changed, a words
+    # revision saved, a host confirmed or disabled. Keys, states, hosts, roles, sequence numbers
+    # and fingerprints only; never a credential, a word, an operator's reason or page text.
+    SUPPLIER_ONBOARDING_RECORDED = "SUPPLIER_ONBOARDING_RECORDED"
+    # ADR-0037 §2: no upload-fit variant could be made for one oversize selected image on a
+    # preparation save. Item, role, position, input identity and a bounded failure code only.
+    REGISTER_UPLOAD_FIT_FAILED = "REGISTER_UPLOAD_FIT_FAILED"
+    # ADR-0039 §1: one supplier sales-policy revision appended. The supplier key, the revision
+    # number, both switches and the content fingerprint only.
+    SUPPLIER_SALES_POLICY_REVISED = "SUPPLIER_SALES_POLICY_REVISED"
 
 
 class AuditOutcome(StrEnum):

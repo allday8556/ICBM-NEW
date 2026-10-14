@@ -131,6 +131,7 @@ REGISTER_AREAS: Final[Mapping[str, tuple[ReasonArea, ...]]] = {
     # ADR-0033 G4: a resolved top or bottom notice the composition does not place yet.
     "PUBLICATION_GUIDANCE_UNPLACED": (_A.DETAIL,),
     "PUBLICATION_ASSET_QA_NOT_PASSED": (_A.IMAGES,),
+    "IMAGE_UPLOAD_FIT_FAILED": (_A.IMAGES,),
     "PROVIDER_ASSET_IDENTITY_MISSING": (_A.IMAGES,),
     "PREPARED_ASSET_CANDIDATE_MISMATCH": (_A.IMAGES,),
     "PREPARED_ASSET_PROFILE_MISMATCH": (_A.IMAGES,),
@@ -145,6 +146,9 @@ REGISTER_AREAS: Final[Mapping[str, tuple[ReasonArea, ...]]] = {
     "SOURCE_CHANNEL_FORBIDDEN": (_A.SOURCE,),
     "SOURCE_CHANNEL_UNRESOLVED": (_A.SOURCE,),
     "SUPPLIER_NOT_ACTIVE": (_A.SOURCE,),
+    # ADR-0039 §2: a supplier restriction the user chose not to apply (a warning).
+    "SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED": (_A.SOURCE,),
+    "SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED": (_A.SOURCE,),
     "PROVIDER_DUPLICATE_FOUND": (_A.DUPLICATE,),
     "PROVIDER_DUPLICATE_WEAK_SIGNAL": (_A.DUPLICATE,),
     "DUPLICATE_EVIDENCE_MISSING": (_A.DUPLICATE,),
@@ -188,6 +192,8 @@ M4_AREAS: Final[Mapping[str, tuple[ReasonArea, ...]]] = {
     "PRICING_MINIMUM_SALE_PRICE_UNRESOLVED": (_A.PRICE,),
     "PRICING_MINIMUM_SALE_PRICE_NOT_POSITIVE": (_A.PRICE,),
     "PRICING_MINIMUM_SALE_PRICE_NOT_OFFER_BOUND": (_A.PRICE,),
+    # ADR-0039 §3: a minimum the supplier's sales policy does not apply (a warning).
+    "PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED": (_A.PRICE,),
     "PRICING_TARGET_MARGIN_UNREACHABLE": (_A.PRICE,),
     "PRICING_QUANTITY_OFFER_UNRESOLVED": (_A.PRICE,),
     # images

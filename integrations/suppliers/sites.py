@@ -123,27 +123,41 @@ def bind_sites(
         if template is None:
             problems.append(f"{path.name}: no template for platform {site.platform!r}")
             continue
-        if found := template_problems(site, template):
+        one, found = bind_site(site, template, platforms)
+        if one is None:
             problems.extend(f"{path.name}: {problem}" for problem in found)
             continue
-        try:
-            revision, fingerprint = extraction_identity(site, template, platforms)
-            binding = template.bind(site, revision)
-        except (OSError, ValueError) as exc:
-            problems.append(f"{path.name}: {exc}")
-            continue
         hosts.add(site.storefront_host)
-        bound.append(
-            BoundSite(
-                config=site,
-                template=template,
-                definition=binding.definition,
-                collection=binding.collection,
-                extractor_revision=revision,
-                extractor_fingerprint=fingerprint,
-            )
-        )
+        bound.append(one)
     return tuple(bound), tuple(problems)
+
+
+def bind_site(
+    site: SiteConfig, template: PlatformTemplate, platforms: Path = PLATFORM_DIRECTORY
+) -> tuple[BoundSite | None, tuple[str, ...]]:
+    """One validated site bound to its template, or why it cannot be.
+
+    A repository site comes here from its file (:func:`bind_sites`); an onboarded site from its
+    database revisions (ADR-0036 §1, §4). Both take exactly the same checks and the same
+    identity rule, so the template cannot tell them apart."""
+    if found := template_problems(site, template):
+        return None, tuple(found)
+    try:
+        revision, fingerprint = extraction_identity(site, template, platforms)
+        binding = template.bind(site, revision)
+    except (OSError, ValueError) as exc:
+        return None, (str(exc),)
+    return (
+        BoundSite(
+            config=site,
+            template=template,
+            definition=binding.definition,
+            collection=binding.collection,
+            extractor_revision=revision,
+            extractor_fingerprint=fingerprint,
+        ),
+        (),
+    )
 
 
 def capture_policy_bytes(site: BoundSite, platforms: Path = PLATFORM_DIRECTORY) -> bytes:

@@ -66,6 +66,9 @@ class AtomicPricingDependencies:
     binding: AtomicSourceBindingRecord
     source_revision_id: str
     atomic_sku_set_revision_id: str
+    # ADR-0039 §3: pinned in the fingerprint only when the supplier's minimum is not applied, so
+    # every applied fingerprint is unchanged.
+    minimum_applied: bool = True
 
     def fingerprint(self, context: PricingContextInput) -> str:
         return digest(
@@ -86,6 +89,7 @@ class AtomicPricingDependencies:
                 "option_additional_price_krw": self.binding.option_additional_price_krw,
                 "purchase_cost_krw": self.binding.purchase_cost_krw,
                 "pricing_context_fingerprint": context.fingerprint,
+                **({} if self.minimum_applied else {"minimum_applied": False}),
             }
         )
 
@@ -123,6 +127,10 @@ class AtomicPricingSnapshotRecord:
     price_guard: PriceGuard
     guard_reasons: tuple[GuardReason, ...]
     created_at: datetime
+    # ADR-0039 §3 (SP-03): whether the supplier's minimum was applied, and the minimum the source
+    # stated when it was not.
+    minimum_applied: bool = True
+    stated_minimum_sale_price_krw: int | None = None
 
 
 @dataclass(frozen=True)
@@ -361,6 +369,8 @@ class AtomicSKUEconomicsUnit:
             minimum_margin_numerator=MINIMUM_NET_MARGIN.numerator,
             minimum_margin_denominator=MINIMUM_NET_MARGIN.denominator,
             created_at=self._clock.now(),
+            minimum_applied=inputs.minimum_applied,
+            stated_minimum_sale_price_krw=inputs.stated_minimum_sale_price_krw,
         )
         self.session.add(row)
         self.session.flush()
@@ -496,6 +506,8 @@ def _snapshot(row: AtomicSKUPricingSnapshot) -> AtomicPricingSnapshotRecord:
         PriceGuard(row.price_guard),
         tuple(GuardReason(reason) for reason in json.loads(row.guard_reasons_json)),
         row.created_at,
+        bool(row.minimum_applied),
+        row.stated_minimum_sale_price_krw,
     )
 
 

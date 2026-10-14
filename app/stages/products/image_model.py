@@ -26,8 +26,11 @@ DEFAULT_QA_RULE_VERSION: Final = "image-qa/v1"
 # The automatic rule QA of an auto-selected source image (Issue #219 §4, owner decision
 # 2026-10-03): file checks only — stored bytes, an image media type, a byte size and decoded
 # dimensions — never the image's content. An operator verdict under the rule in force always
-# supersedes it.
-AUTO_QA_RULE_VERSION: Final = "image-qa-auto/v1"
+# supersedes it. v2 (ADR-0037 §1, §3): the byte bound is the collection cap of the image's role,
+# and an upload-fit variant gets the same file checks under its upload threshold.
+AUTO_QA_RULE_VERSION: Final = "image-qa-auto/v2"
+# Every version of the automatic rule QA shares this prefix.
+AUTO_QA_RULE_FAMILY: Final = "image-qa-auto/"
 
 MAX_INPUTS: Final = 16
 MAX_OPERATIONS: Final = 16
@@ -352,6 +355,16 @@ class SelectedOutput:
     source_ordinal: int
 
 
+# ADR-0037 §1, §3: the role class an automatic verdict is evaluated for — the collection cap of
+# the role an image is selected for. An additional (gallery) image has the representative image's
+# cap, so the two share a class; a description image has its own.
+AUTO_QA_ROLE_CLASS: Final[Mapping[OutputRole, OutputRole]] = {
+    OutputRole.REPRESENTATIVE: OutputRole.REPRESENTATIVE,
+    OutputRole.ADDITIONAL: OutputRole.REPRESENTATIVE,
+    OutputRole.DETAIL: OutputRole.DETAIL,
+}
+
+
 def qa_input_fingerprint(
     *,
     asset_kind: ImageAssetKind,
@@ -359,18 +372,25 @@ def qa_input_fingerprint(
     derivation_id: str | None,
     validated_source_revision_id: str,
     qa_rule_version: str,
+    role_class: OutputRole | None = None,
 ) -> str:
-    """Everything a QA verdict was computed against. A change to any of it is a new input."""
-    return digest(
-        {
-            "version": QA_INPUT_VERSION,
-            "asset_kind": asset_kind.value,
-            "sha256": sha256,
-            "derivation_id": derivation_id,
-            "validated_source_revision_id": validated_source_revision_id,
-            "qa_rule_version": qa_rule_version,
-        }
-    )
+    """Everything a QA verdict was computed against. A change to any of it is a new input.
+
+    ``role_class`` binds a role-dependent verdict — the automatic rule QA, whose byte bound is the
+    cap of the role (``AUTO_QA_ROLE_CLASS``) — to the role it was evaluated for: the same binary
+    judged for another role class is another input, so a verdict for one never satisfies the
+    other. A verdict that does not depend on the role names none, and its input is unchanged."""
+    structure: dict[str, object] = {
+        "version": QA_INPUT_VERSION,
+        "asset_kind": asset_kind.value,
+        "sha256": sha256,
+        "derivation_id": derivation_id,
+        "validated_source_revision_id": validated_source_revision_id,
+        "qa_rule_version": qa_rule_version,
+    }
+    if role_class is not None:
+        structure["role_class"] = role_class.value
+    return digest(structure)
 
 
 def validate_findings(findings: Sequence[str]) -> tuple[str, ...]:

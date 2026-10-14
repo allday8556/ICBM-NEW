@@ -1229,3 +1229,37 @@ def test_a_gate_the_source_puts_on_the_marketplace_blocks_and_nothing_overrides_
     assert result.status is ReadinessStatus.BLOCKED
     covered = candidate(unit=resolved(items=COVERED, source_gates=gate))
     assert covered.status is ReadinessStatus.BLOCKED
+
+
+@pytest.mark.parametrize(
+    "code", ["SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED", "SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED"]
+)
+def test_a_restriction_the_user_chose_not_to_apply_is_a_warning_that_blocks_nothing(
+    code: str,
+) -> None:
+    # ADR-0039 §2: shown on the unit with READY status (SP-04); the unit is READY and uploadable.
+    gate = ((ITEMS[0].item_id, code),)
+    result = candidate(unit=resolved(source_gates=gate))
+    assert result.status is ReadinessStatus.READY
+    assert [(r.code, r.status, r.subject) for r in result.reasons] == [
+        (code, ReadinessStatus.READY, ITEMS[0].item_id)
+    ]
+    assert result.upload_permitted
+    assert final(unit=resolved(source_gates=gate)).status is ReadinessStatus.READY
+
+
+def test_the_sales_policy_pin_is_named_only_when_a_supplier_has_a_revision() -> None:
+    # ADR-0039 §1, SP-03: a unit on the defaults keeps its fingerprint; a revision changes it, and
+    # a later revision changes it again — the preparation is then stale.
+    plain = candidate()
+    assert "sales_policies" not in plain.dependencies
+    pinned = candidate(
+        unit=resolved(sales_policies=((ITEMS[0].item_id, "supplier-a", 1, "a" * 64),))
+    )
+    assert pinned.dependencies["sales_policies"] == [[ITEMS[0].item_id, "supplier-a", 1, "a" * 64]]
+    moved = candidate(
+        unit=resolved(sales_policies=((ITEMS[0].item_id, "supplier-a", 2, "b" * 64),))
+    )
+    assert len({plain.candidate_fingerprint, pinned.candidate_fingerprint}) == 2
+    assert moved.candidate_fingerprint != pinned.candidate_fingerprint
+    assert pinned.status is ReadinessStatus.READY
