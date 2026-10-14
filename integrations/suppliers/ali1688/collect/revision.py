@@ -12,6 +12,11 @@ ones (2 and 11 SKUs). The purchase price is the SKU's original price (the owner'
 #219 ``6164685916``); a promotion price is recorded only. A tier price states a unit price, so
 quantity tiers wait for review with every tier quoted; the description is not captured, so
 ``detail_description`` waits for review and there are no detail images.
+
+``ali1688-2`` (2026-10-15, PR #357 re-audit): every SKU's stated ``canBookCount`` is kept
+verbatim, one ``stock`` evidence entry per SKU under its own path and labelled with its SKU id and
+selections, so ADR-0040 section 4's "per SKU, as stated" survives in the revision. The stock value
+and each configuration's ``sold_out`` are derived from those counts exactly as before.
 """
 
-EXTRACTION_REVISION = "ali1688-1"
+EXTRACTION_REVISION = "ali1688-2"

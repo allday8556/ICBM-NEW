@@ -15,7 +15,8 @@ prices                 CNY. ``skuPrice``: the lowest SKU original price (``skuIn
                        ``originalPrices``, or of ``currentPrices`` when no original is stated
 options                ``skuProps`` (axes and values) and ``skuInfoMap`` (one configuration per
                        SKU): the SKU id, its original price and its sold-out state
-stock                  every SKU's ``canBookCount``: any above zero is ON_SALE, all zero SOLD_OUT
+stock                  every SKU's ``canBookCount``: any above zero is ON_SALE, all zero SOLD_OUT;
+                       each SKU's stated count is kept verbatim in its own evidence entry
 quantity_tiers         ``rangePrice``: held for review, every tier quoted in its evidence (a tier
                        states a unit price, never the total a quantity tier holds)
 shipping               ``freightInfo.totalCost`` as a ``FIXED`` CNY fee (``FREE`` at zero), from
@@ -481,9 +482,28 @@ def _options(data: Mapping[str, Any], skus: Sequence[_Sku]) -> FieldFact:
     return FieldFact(FieldStatus.CONFIRMED, value, tuple(evidence))
 
 
+def _stock_entry(sku: _Sku) -> Evidence:
+    """One SKU's stated stock, verbatim: the page's own integer, under that SKU's own path.
+
+    The canonical stock value states only whether the product can be bought; each SKU's exact
+    count (ADR-0040 section 4, "per SKU, as stated") is kept here, labelled with its SKU id and
+    its selections, so the revision holds every SKU's count as the page stated it.
+    """
+    label = f"skuId {sku.sku_id}: {sku.key.replace(SKU_KEY_SEPARATOR, ' / ')}"
+    stated = sku.stock is not None
+    return Evidence(
+        EvidenceKind.EMBEDDED_JSON,
+        locator(*SKU_MODEL, "skuInfoMap", sku.key, "canBookCount"),
+        FieldStatus.CONFIRMED if stated else FieldStatus.REVIEW_REQUIRED,
+        observed=None if sku.stock is None else str(sku.stock),
+        normalized=(label if stated else f"{STOCK_NOT_STATED} {label}")[:_QUOTE],
+    )
+
+
 def _stock(skus: Sequence[_Sku]) -> FieldFact:
     path = (*SKU_MODEL, "skuInfoMap", "*", "canBookCount")
     counts = [sku.stock for sku in skus]
+    per_sku = tuple(_stock_entry(sku) for sku in skus)
     if not skus or any(count is None for count in counts):
         return FieldFact(
             FieldStatus.REVIEW_REQUIRED,
@@ -495,6 +515,7 @@ def _stock(skus: Sequence[_Sku]) -> FieldFact:
                     FieldStatus.REVIEW_REQUIRED,
                     normalized=STOCK_NOT_STATED,
                 ),
+                *per_sku,
             ),
         )
     on_sale = sum(1 for count in counts if count)
@@ -502,7 +523,10 @@ def _stock(skus: Sequence[_Sku]) -> FieldFact:
     return FieldFact(
         FieldStatus.CONFIRMED,
         StockValue(availability=availability),
-        (_evidence(path, FieldStatus.CONFIRMED, f"{on_sale} of {len(skus)} SKU can be booked"),),
+        (
+            _evidence(path, FieldStatus.CONFIRMED, f"{on_sale} of {len(skus)} SKU can be booked"),
+            *per_sku,
+        ),
     )
 
 

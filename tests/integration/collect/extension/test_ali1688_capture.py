@@ -115,7 +115,7 @@ def test_a_captured_page_is_recorded_as_a_cny_revision(
         config,
         "SELECT source_product_id, source_currency, extractor_revision"
         " FROM product_facts_revisions",
-    ) == [(NUMBER, "CNY", "ali1688-1")]
+    ) == [(NUMBER, "CNY", "ali1688-2")]
     status, prices = _field(config, "prices")
     assert status == "CONFIRMED" and prices is not None
     assert json.loads(prices) == {
@@ -143,8 +143,31 @@ def test_a_captured_page_is_recorded_as_a_cny_revision(
     kinds = {kind for (kind,) in rows(config, "SELECT DISTINCT kind FROM product_facts_evidence")}
     assert "EMBEDDED_JSON" in kinds and "EMBEDDED_DATA" not in kinds
     stored = json.dumps(rows(config, "SELECT * FROM product_facts_evidence"), ensure_ascii=False)
-    for never in ('"skuInfoMap"', "itemcdn", "detailUrl", "5960515164202:"):
+    for never in ('"skuInfoMap"', "itemcdn", "detailUrl", "5960515164202:0."):
         assert never not in stored, never
+
+
+def test_every_skus_stated_count_is_recoverable_from_the_stored_revision(
+    client: TestClient, config: AppConfig
+) -> None:
+    response = post_capture(
+        client, pair(_container(client)), _capture({"projection": _projection()})
+    )
+    assert wait_for_outcome(client, response.json()["collection_run_id"])["outcome"] == "RECORDED"
+    prefix = "embedded:result.data.Root.fields.dataJson.skuModel.skuInfoMap."
+    stored = {
+        locator.removeprefix(prefix).removesuffix(".canBookCount"): observed
+        for locator, observed in rows(
+            config,
+            "SELECT locator, observed FROM product_facts_evidence"
+            " WHERE field_key = 'stock' AND locator LIKE ?",
+            prefix + "%.canBookCount",
+        )
+    }
+    stored.pop("*")  # the aggregate entry, derived from the counts
+    skus = _projection()["result"]["data"]["Root"]["fields"]["dataJson"]["skuModel"]["skuInfoMap"]
+    assert len(skus) == 20
+    assert stored == {key: str(entry["canBookCount"]) for key, entry in skus.items()}
 
 
 def test_a_member_outside_the_allowlist_is_refused_and_its_fields_wait_for_review(

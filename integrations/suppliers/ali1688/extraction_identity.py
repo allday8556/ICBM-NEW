@@ -3,7 +3,7 @@
 The hashed set is every module of ``collect/``; this manifest is never part of it.
 """
 
-EXTRACTOR_REVISION = "ali1688-1"
+EXTRACTOR_REVISION = "ali1688-2"
 EXTRACTOR_INPUTS = (
     "integrations/suppliers/ali1688/collect/__init__.py",
     "integrations/suppliers/ali1688/collect/dom.py",
@@ -16,4 +16,4 @@ EXTRACTOR_INPUTS = (
 # A reader cannot recompute a SHA-256; the proof is mechanical:
 # tests/contracts/test_repository_rules.py recomputes this digest from EXTRACTOR_INPUTS, and the
 # merge guard requires that test green in the FULL CI of the exact HEAD.
-EXTRACTOR_FINGERPRINT = "b09092bf40b840338190a0f7e91ce2f455db741bed75daef05b2693709cdbbee"
+EXTRACTOR_FINGERPRINT = "2405d406091e0c0629419eb7eb6d7d41aa45aa177db5980c840465cd189f6fec"

@@ -253,7 +253,7 @@ def _evaluated(number: str, fields: dict[str, Any]) -> Any:
             source_product_id=number,
             source_url=_url(number),
             captured_at=datetime(2026, 10, 14, tzinfo=UTC),
-            extractor_revision="ali1688-1",
+            extractor_revision="ali1688-2",
             extractor_fingerprint="0" * 64,
             collection_run_id="run-1",
             correlation_id="corr-1",
@@ -544,3 +544,35 @@ def test_an_unknown_price_display_is_held_for_review() -> None:
     fields = _fields(number, data=data)
     assert fields["prices"].status is FieldStatus.REVIEW_REQUIRED
     assert fields["quantity_tiers"].status is FieldStatus.REVIEW_REQUIRED
+
+
+@pytest.mark.parametrize("number", NUMBERS)
+def test_every_skus_stated_count_is_kept_verbatim(number: str) -> None:
+    # ADR-0040 section 4: stock per SKU, as stated. The value says only whether the product can be
+    # bought; each SKU's own count is one evidence entry under its own path, the page's integer.
+    fields = _fields(number)
+    skus = _sku_model(_projection(number))["skuInfoMap"]
+    prefix = "embedded:result.data.Root.fields.dataJson.skuModel.skuInfoMap."
+    kept = {
+        e.locator.removeprefix(prefix).removesuffix(".canBookCount"): e
+        for e in fields["stock"].evidence
+        if e.locator.startswith(prefix) and e.locator.endswith(".canBookCount")
+    }
+    # The aggregate entry (the map's "*") stays beside them, derived as before.
+    assert kept.pop("*").observed is not None
+    assert set(kept) == set(skus)
+    for key, entry in skus.items():
+        evidence = kept[key]
+        assert evidence.observed == str(entry["canBookCount"])
+        assert evidence.status is FieldStatus.CONFIRMED
+        assert evidence.normalized is not None
+        assert evidence.normalized.startswith(f"skuId {entry['skuId']}: ")
+    # Each configuration's sold-out state agrees with its own stated count.
+    options = fields["options"].value
+    assert isinstance(options, OptionsValue)
+    by_id = {str(entry["skuId"]): entry["canBookCount"] for entry in skus.values()}
+    for configuration in options.configurations:
+        assert configuration.supplier_sku_id is not None
+        assert configuration.sold_out is (by_id[configuration.supplier_sku_id] == 0)
+    # The whole field still evaluates, every count inside the evidence bound.
+    _evaluated(number, fields)
