@@ -131,14 +131,19 @@ ADR-0036 O4 added 「수집 규칙」: the words editor service `app/stages/coll
 (view, save through the store's words revisions, and an offline preview over the stored captures),
 the store's `check_words` and the catalog's `bind_words`, the editor `ui/web/js/pages/collect/words.js`
 and two integration suites; no new migration.
-ADR-0036 O5b (amendment `6160586049`) added retiring a sample: migration
-`0062_onboarding_sample_retirements` (the append-only retirement record and the ACTIVE gate that
-leaves a retired sample out), the store's `retire_sample` and `retirements`, the analysis service's
-`retire`, its route, `분석에서 제외` in the analysis panel and two integration suites.
 ADR-0036 O5a added the approval steps of §7: the store's `record_verification` and `verifications`,
 the analysis service's `verify` and `activate`, their routes, `값이 맞음`/`값이 틀림` and `사용 시작`
 in `ui/web/js/pages/collect/analysis.js`, `비활성화` on an onboarded card (`collect/onboarding.js`)
 and two integration suites; no new migration.
+ADR-0036 O5c added the extension's D3 permissions (§8): the manifest's `optional_host_permissions`,
+the catalog's `active_origins` and its signed extension read
+`GET /api/v1/collect/extension/onboarded-origins`, the side panel's `셀프등록 공급처 권한` section
+(one origin requested per operator click, unlisted origins removed) in the existing `ui/extension/`
+files and one integration suite; no new migration.
+ADR-0036 O5b (amendment `6160586049`) added retiring a sample: migration
+`0062_onboarding_sample_retirements` (the append-only retirement record and the ACTIVE gate that
+leaves a retired sample out), the store's `retire_sample` and `retirements`, the analysis service's
+`retire`, its route, `분석에서 제외` in the analysis panel and two integration suites.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -204,12 +209,12 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 191 | all canonical and historical documents |
+| `documents/` | 192 | all canonical and historical documents |
 | `documents/acceptance/` | 73 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 12 | platform and UI contracts |
-| `documents/decisions/` | 41 | ADRs and architect review records |
+| `documents/decisions/` | 42 | ADRs and architect review records |
 | `documents/evidence/` | 30 | external provider evidence catalog |
 | `documents/reference/` | 3 | this map and the path migration map |
 | `documents/reviews/` | 4 | Claude proposal channel |
@@ -218,11 +223,11 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `integrations/` | 94 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 44 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 390 | tests |
+| `tests/` | 391 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 163 | integration tests by runtime owner |
+| `tests/integration/` | 164 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
 | `tests/unit/` | 143 | unit tests by runtime owner |
 | `ui/` | 74 | operator clients: the served web client and the capture extension |

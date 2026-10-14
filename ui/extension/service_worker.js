@@ -16,6 +16,7 @@ import {
   IcbmRefused,
   cancelQueue,
   declareQueue,
+  fetchOnboardedOrigins,
   fetchPolicy,
   fetchQueuePolicy,
   fetchSuppliers,
@@ -56,8 +57,9 @@ async function targetTab() {
   return tab || null;
 }
 
-// Read once per worker and pairing: a new site needs the extension reloaded anyway, for its host
-// permission. A failed read is the caller's to report; nothing is recognised that was never read.
+// Read once per worker and pairing, and again when a read of the onboarded origins differs from it,
+// so a newly ACTIVE onboarded site is recognised without a reload. A failed read is the caller's
+// to report; nothing is recognised that was never read.
 async function supplierHosts(paired) {
   if (!paired) return {};
   if (!supplierHostsKnown) {
@@ -77,7 +79,12 @@ async function activeSupplierTab(hosts) {
     return null;
   }
   const supplierKey = url.protocol === "https:" ? hosts[url.hostname] : undefined;
-  return supplierKey ? { tabId: tab.id, supplierKey } : null;
+  if (!supplierKey) return null;
+  // ADR-0036 §8: a reviewed repository host is the manifest's own; an onboarded origin is acted on
+  // only once the operator granted it. Chrome names no URL of a tab whose origin this extension
+  // does not hold, so such a page already reads as no supplier page; this is the second guard.
+  const granted = await chrome.permissions.contains({ origins: [originPattern(url.origin)] });
+  return { tabId: tab.id, supplierKey, granted };
 }
 
 // One capture, from the click to the canonical run's own outcome. `progress` is told each
@@ -98,6 +105,7 @@ async function capture(progress) {
   }
   const target = await activeSupplierTab(hosts);
   if (!target) return { state: "REFUSED", code: "NOT_A_REVIEWED_SUPPLIER_PAGE" };
+  if (!target.granted) return { state: "REFUSED", code: ORIGIN_NOT_GRANTED };
   return captureTab(paired, target, null, progress);
 }
 
@@ -213,11 +221,14 @@ async function status(probe) {
     extension_id: chrome.runtime.id,
     paired: Boolean(paired),
     supplier_key: target ? target.supplierKey : null,
+    // Whether this browser holds the page's origin (ADR-0036 §8). A page it may not act on is
+    // never offered for capture.
+    origin_granted: target ? target.granted : null,
     reviewed_hosts: Object.keys(hosts),
     icbm: unread === null ? "UNKNOWN" : unread === "ICBM_DISCONNECTED" ? "DISCONNECTED" : unread,
     policy_revision: null,
   };
-  if (!probe || !paired || !target || unread !== null) return answer;
+  if (!probe || !paired || !target || !target.granted || unread !== null) return answer;
   try {
     const fetched = await fetchPolicy(paired, chrome.runtime.id, target.supplierKey);
     return { ...answer, icbm: "CONNECTED", policy_revision: fetched.revision };
@@ -236,6 +247,66 @@ async function openCollectionManagement(runId) {
   if (typeof runId === "string" && runId) query.set("run", runId);
   await chrome.tabs.create({ url: `${paired.origin}/#/collect?${query}` });
   return { ok: true };
+}
+
+// ---------------------------------------------------------------- onboarded origins (ADR-0036 §8)
+
+// The manifest holds the repository's reviewed hosts and the loopback. It also declares every https
+// origin as optional, which is never requested whole: the operator grants one onboarded origin at
+// a time, by its own click in the side panel, and only an origin ICBM lists as ACTIVE.
+const ORIGIN_NOT_GRANTED = "ORIGIN_NOT_GRANTED";
+// An origin ICBM lists is `https://` and a host name only: never a wildcard, a port or a path.
+const ORIGIN_FORM = /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+$/;
+const originPattern = (origin) => `${origin}/*`;
+// The manifest's own host permissions: never removed, and never this list's to manage.
+const REQUIRED_ORIGINS = new Set(chrome.runtime.getManifest().host_permissions || []);
+
+// The ACTIVE onboarded origins ICBM lists, each with whether this browser holds it. Every optional
+// origin held that is not listed — a supplier was disabled, or a grant was made outside this panel —
+// is removed here (ADR-0036 §8 "Disabling"). Nothing is removed when the list could not be read.
+async function onboardedOrigins() {
+  const paired = await pairing();
+  if (!paired) return { ok: false, code: "EXTENSION_NOT_PAIRED" };
+  let answer;
+  try {
+    answer = await fetchOnboardedOrigins(paired, chrome.runtime.id);
+  } catch (error) {
+    return { ok: false, code: codeOf(error, "ICBM_DISCONNECTED") };
+  }
+  const listed = (Array.isArray(answer.origins) ? answer.origins : []).filter(
+    (entry) => entry && typeof entry.origin === "string" && ORIGIN_FORM.test(entry.origin),
+  );
+  const keep = new Set(listed.map((entry) => originPattern(entry.origin)));
+  // The supplier hosts are read again on the next status when their onboarded ones differ from
+  // this list: a newly ACTIVE site is recognised, and a disabled one no longer is.
+  if (supplierHostsKnown) {
+    const onboardedKnown = Object.keys(supplierHostsKnown)
+      .map((host) => originPattern(`https://${host}`))
+      .filter((pattern) => !REQUIRED_ORIGINS.has(pattern));
+    if (onboardedKnown.length !== keep.size || !onboardedKnown.every((p) => keep.has(p))) {
+      supplierHostsKnown = null;
+    }
+  }
+  const held = (await chrome.permissions.getAll()).origins || [];
+  const removed = [];
+  for (const pattern of held) {
+    if (REQUIRED_ORIGINS.has(pattern) || keep.has(pattern)) continue;
+    try {
+      if (await chrome.permissions.remove({ origins: [pattern] })) removed.push(pattern);
+    } catch {
+      // Chrome refused to remove it; the next read tries again.
+    }
+  }
+  const origins = [];
+  for (const entry of listed) {
+    origins.push({
+      supplier_key: String(entry.supplier_key || ""),
+      display_name: String(entry.display_name || entry.supplier_key || ""),
+      origin: entry.origin,
+      granted: await chrome.permissions.contains({ origins: [originPattern(entry.origin)] }),
+    });
+  }
+  return { ok: true, origins, removed };
 }
 
 // ---------------------------------------------------------------- the list queue (E3)
@@ -266,6 +337,7 @@ async function discover() {
   }
   const target = await activeSupplierTab(hosts);
   if (!target) return { ok: false, code: "NOT_A_REVIEWED_SUPPLIER_PAGE" };
+  if (!target.granted) return { ok: false, code: ORIGIN_NOT_GRANTED };
   let policy;
   try {
     policy = await fetchQueuePolicy(paired, chrome.runtime.id, target.supplierKey);
@@ -491,6 +563,7 @@ async function resume(queueId, port, tell) {
   }
   const target = await activeSupplierTab(hosts);
   if (!target) return tell({ type: "stopped", code: "NOT_A_REVIEWED_SUPPLIER_PAGE" });
+  if (!target.granted) return tell({ type: "stopped", code: ORIGIN_NOT_GRANTED });
   drive(
     queueControl({
       port,
@@ -583,6 +656,10 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   if (message.type === "unpair") {
     supplierHostsKnown = null; // nothing derived from a pairing outlives it
     chrome.storage.local.remove(PAIRING_KEY).then(() => respond({ ok: true }));
+    return true;
+  }
+  if (message.type === "onboarded-origins") {
+    onboardedOrigins().then(respond);
     return true;
   }
   if (message.type === "open-icbm") {
