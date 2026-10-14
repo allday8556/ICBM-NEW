@@ -863,6 +863,27 @@ h1 {
   cursor: pointer;
 }
 
+/* Self-registered supplier permissions (ADR-0036 §8): one onboarded origin per row, granted or
+   not, in the list rows' own language. */
+.origins {
+  padding-bottom: 14px;
+}
+
+.origins .group-head {
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.origin-row .chip[data-state="GRANTED"] {
+  background: var(--ok-bg);
+  color: var(--ok-ink);
+}
+
+.origin-row .chip[data-state="NOT_GRANTED"] {
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+}
+
 /* Recovery after a queue ended (A-UX3 F-10): how to rediscover with recorded products skipped. */
 .recovery {
   margin-top: 10px;
