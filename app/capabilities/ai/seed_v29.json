@@ -1,5 +1,5 @@
 {
- "seed_version": "v29-ai3",
+ "seed_version": "v29-ai4",
  "source": "design/prototypes/icbm_redesign_test_v29_final.html",
  "templates": {
   "ICBM_GLOBAL_RULES_V2": {
@@ -177,6 +177,15 @@
     "prompt": "GOAL\n경쟁강도가 높은 품목을 선별하고 운영자가 확인할 지표를 요약한다.\n\nIMPORTANT\n필터 자체는 가능한 경우 LLM이 아니라 결정론적 데이터 로직으로 수행한다.\nAI는 데이터 설명과 위험 요약만 담당한다.\n\nRULES\n1. 검색량/판매자수/가격분산/광고밀도 등 확보된 지표만 사용한다.\n2. 데이터가 없으면 추정하지 않는다.",
     "variables": "competition_metrics[]\nthresholds\nplatform",
     "output": "{\"filtered_product_ids\":[],\"metric_summary\":{},\"data_gaps\":[]}"
+   }
+  },
+  "TASK_IMAGE_TEXT_TRANSLATE_V1": {
+   "layer": "TASK",
+   "content": {
+    "mode": "IMAGE_TEXT_TRANSLATE",
+    "prompt": "GOAL\n상품 이미지에서 인식한 중국어 또는 일본어 문구를 영역별로 자연스러운 한국어로 번역한다.\n\nRULES\n1. 받은 영역마다 정확히 하나의 한국어 문구를 반환하고, 받은 region_id를 그대로 한 번씩만 사용한다.\n2. 숫자, 단위, 모델명, 규격(예: 30x40cm, 350ml, AB-1234)은 원문 그대로 보존한다.\n3. 원문에 없는 브랜드, 효능, 인증, 수치를 추가하지 않는다.\n4. 이미지에 들어갈 문구이므로 원문 길이에 맞게 간결하게 쓴다.\n5. 번역할 수 없는 문구는 원문을 그대로 반환한다.\n6. 번역은 제안이며 운영자가 영역별로 확인한 뒤에만 이미지에 적용된다.",
+    "variables": "source_language\nregions[]",
+    "output": "{\"translations\":[{\"region_id\":\"\",\"text\":\"\"}]}"
    }
   }
  },
