@@ -16,6 +16,7 @@ from integrations.marketplaces.coupang.auth import (
 from integrations.marketplaces.coupang.catalog import (
     CoupangCatalogClient,
     CoupangCatalogContractError,
+    category_metadata_from_data,
     leaf_categories,
 )
 from integrations.marketplaces.coupang.fake_transport import FakeResponse, FakeTransport
@@ -177,6 +178,22 @@ def test_category_metadata_retains_notices_attributes_documents_and_certificatio
     assert metadata.notices[0].details[0].name == "용량"
     assert metadata.required_documents[0].template_name == "신고서"
     assert metadata.certifications[0].data_type == "CODE"
+    assert metadata.allowed_offer_conditions == ("NEW",)
+
+
+def test_category_metadata_parser_is_reused_by_bounded_live_preflight() -> None:
+    metadata = category_metadata_from_data(
+        {
+            "isAllowSingleItem": False,
+            "attributes": [],
+            "noticeCategories": [],
+            "requiredDocumentNames": [],
+            "certifications": [],
+            "allowedOfferConditions": ["NEW"],
+        }
+    )
+
+    assert metadata.allows_single_item is False
     assert metadata.allowed_offer_conditions == ("NEW",)
 
 

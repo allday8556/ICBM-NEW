@@ -17,7 +17,6 @@
 
 import { ApiError, getJson, sendForBlob, sendJson } from '../core/api.js';
 import { h } from '../core/dom.js';
-import { markInert } from '../core/inert.js';
 import { openModal } from '../core/modal.js';
 import { toast } from '../core/toast.js';
 
@@ -26,11 +25,6 @@ const OPERATOR = 'operator';
 const LABEL = '이미지 자동번역';
 const POLL_MS = 500;
 const POLL_LIMIT = 240; // two minutes
-const MISSING_COPY = {
-  ocr: 'OCR 엔진이 설치되지 않았습니다',
-  'translation task': '번역 작업이 등록되지 않았습니다',
-  'ai provider': 'AI 번역 연결(프로필 · 데이터 전송 승인)이 없습니다',
-};
 const LANGUAGE_COPY = { zh: '중국어', ja: '일본어' };
 const ROLE_COPY = { REPRESENTATIVE: '원본 대표', DETAIL: '원본 상세' };
 const OUTPUT_COPY = { REPRESENTATIVE: '대표', ADDITIONAL: '추가', DETAIL: '상세' };
@@ -72,32 +66,35 @@ function errorText(error) {
   return String(error?.message ?? error);
 }
 
-function missingText(missing) {
-  return missing.length ? missing.map((key) => MISSING_COPY[key] ?? key).join(' · ') : '이미지 번역 상태를 확인하지 못했습니다';
-}
-
 // 「이미지 자동번역」 in ② (scope 'selected': the images the operator ticks) or ⑤ (scope 'detail':
-// the product's detail images ticked in advance). Inert with 준비 중 until the capability is READY.
+// the product's detail images ticked in advance). The slot stays empty until the capability is
+// READY and the unit editable: a control that cannot work is omitted, never shown inert.
 export function translateButton(unit, { scope, editable }) {
-  const button = h('button', { type: 'button', class: 'btn ai', 'data-ai-placeholder': LABEL, 'data-studio-scope': scope, 'data-ready': 'pending' }, `✨ ${LABEL}`);
-  markInert(button, `${LABEL} · 준비 중`);
+  const slot = h('span', { class: 'studio-slot', 'data-role': 'studio-slot', 'data-studio-slot': scope, 'data-ready': 'pending' });
   capability().then((read) => {
     if (read.status !== 'READY' || !editable || !unit.items.length) {
-      const why = !editable && read.status === 'READY' ? '등록 요청이나 스냅샷이 있어 이미지는 보기만 합니다' : missingText(read.missing ?? []);
-      button.dataset.ready = 'false';
-      button.dataset.inert = `${LABEL} · 준비 중 · ${why}`;
-      button.title = `준비 중 · ${why}`;
+      slot.dataset.ready = 'false';
       return;
     }
-    button.dataset.ready = 'true';
-    button.removeAttribute('data-inert');
-    button.removeAttribute('data-ai-placeholder');
-    button.removeAttribute('aria-disabled');
-    button.dataset.action = 'image-translate';
-    button.title = scope === 'detail' ? '상세 이미지 속 글자를 한국어로 번역합니다' : '고른 이미지 속 글자를 한국어로 번역합니다';
-    button.addEventListener('click', () => openStudio(unit, { scope, languages: read.languages ?? ['zh', 'ja'], max: read.max_images_per_run ?? 30 }));
+    slot.dataset.ready = 'true';
+    const title = scope === 'detail' ? '상세 이미지 속 글자를 한국어로 번역합니다' : '고른 이미지 속 글자를 한국어로 번역합니다';
+    slot.append(
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'btn ai',
+          'data-studio-scope': scope,
+          'data-ready': 'true',
+          'data-action': 'image-translate',
+          title,
+          onclick: () => openStudio(unit, { scope, languages: read.languages ?? ['zh', 'ja'], max: read.max_images_per_run ?? 30 }),
+        },
+        `✨ ${LABEL}`,
+      ),
+    );
   });
-  return button;
+  return slot;
 }
 
 function imageUrl(itemId, sha) {
