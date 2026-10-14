@@ -195,6 +195,108 @@ def _brand(value: object, name: str = "data") -> Brand:
     )
 
 
+def category_metadata_from_data(data: object) -> CategoryMetadata:
+    """Parse one official category-metadata data object for fake or bounded live callers."""
+    if not isinstance(data, dict) or not isinstance(data.get("isAllowSingleItem"), bool):
+        raise CoupangCatalogContractError("category metadata data is invalid")
+    attributes_list: list[CategoryAttribute] = []
+    for item in _objects(data.get("attributes", []), "attributes"):
+        basic_unit = item.get("basicUnit")
+        attributes_list.append(
+            CategoryAttribute(
+                _text(item.get("attributeTypeName"), "attributeTypeName"),
+                _text(item.get("dataType"), "dataType"),
+                basic_unit if isinstance(basic_unit, str) else None,
+                _strings(item.get("usableUnits", []), "usableUnits"),
+                _text(item.get("required"), "required"),
+                _text(item.get("groupNumber"), "groupNumber"),
+                _text(item.get("exposed"), "exposed"),
+            )
+        )
+    notices = tuple(
+        NoticeCategory(
+            _text(item.get("noticeCategoryName"), "noticeCategoryName"),
+            tuple(
+                NoticeDetail(
+                    _text(detail.get("noticeCategoryDetailName"), "noticeCategoryDetailName"),
+                    _text(detail.get("required"), "required"),
+                )
+                for detail in _objects(
+                    item.get("noticeCategoryDetailNames", []), "noticeCategoryDetailNames"
+                )
+            ),
+        )
+        for item in _objects(data.get("noticeCategories", []), "noticeCategories")
+    )
+    documents = tuple(
+        RequiredDocument(
+            _text(item.get("templateName"), "templateName"),
+            _text(item.get("required"), "required"),
+        )
+        for item in _objects(data.get("requiredDocumentNames", []), "requiredDocumentNames")
+    )
+    certifications = tuple(
+        Certification(
+            _text(item.get("certificationType"), "certificationType"),
+            _text(item.get("name"), "name"),
+            _text(item.get("dataType"), "dataType"),
+            _text(item.get("required"), "required"),
+        )
+        for item in _objects(data.get("certifications", []), "certifications")
+    )
+    conditions = _strings(data.get("allowedOfferConditions", []), "allowedOfferConditions")
+    return CategoryMetadata(
+        data["isAllowSingleItem"],
+        tuple(attributes_list),
+        notices,
+        documents,
+        certifications,
+        conditions,
+    )
+
+
+def category_metadata_to_mapping(metadata: CategoryMetadata) -> dict[str, object]:
+    """Closed JSON shape stored in the OS secret store, never a raw provider response."""
+    return {
+        "allows_single_item": metadata.allows_single_item,
+        "attributes": [
+            {
+                "name": item.name,
+                "data_type": item.data_type,
+                "basic_unit": item.basic_unit,
+                "usable_units": list(item.usable_units),
+                "required": item.required,
+                "group_number": item.group_number,
+                "exposed": item.exposed,
+            }
+            for item in metadata.attributes
+        ],
+        "notices": [
+            {
+                "name": notice.name,
+                "details": [
+                    {"name": detail.name, "required": detail.required} for detail in notice.details
+                ],
+            }
+            for notice in metadata.notices
+        ],
+        "required_documents": [
+            {"template_name": item.template_name, "required": item.required}
+            for item in metadata.required_documents
+        ],
+        "certifications": [
+            {
+                "certification_type": item.certification_type,
+                "name": item.name,
+                "data_type": item.data_type,
+                "required": item.required,
+            }
+            for item in metadata.certifications
+        ],
+        "allowed_offer_conditions": list(metadata.allowed_offer_conditions),
+    }
+
+
 class CoupangCatalogClient:
     """Signed category/brand calls over the provider-zero fake transport only."""
 
@@ -304,63 +406,7 @@ class CoupangCatalogClient:
             Method.GET,
             f"{_SELLER_API}/meta/category-related-metas/display-category-codes/{code}",
         )
-        if not isinstance(data, dict) or not isinstance(data.get("isAllowSingleItem"), bool):
-            raise CoupangCatalogContractError("category metadata data is invalid")
-        attributes_list: list[CategoryAttribute] = []
-        for item in _objects(data.get("attributes", []), "attributes"):
-            basic_unit = item.get("basicUnit")
-            attributes_list.append(
-                CategoryAttribute(
-                    _text(item.get("attributeTypeName"), "attributeTypeName"),
-                    _text(item.get("dataType"), "dataType"),
-                    basic_unit if isinstance(basic_unit, str) else None,
-                    _strings(item.get("usableUnits", []), "usableUnits"),
-                    _text(item.get("required"), "required"),
-                    _text(item.get("groupNumber"), "groupNumber"),
-                    _text(item.get("exposed"), "exposed"),
-                )
-            )
-        attributes = tuple(attributes_list)
-        notices = tuple(
-            NoticeCategory(
-                _text(item.get("noticeCategoryName"), "noticeCategoryName"),
-                tuple(
-                    NoticeDetail(
-                        _text(detail.get("noticeCategoryDetailName"), "noticeCategoryDetailName"),
-                        _text(detail.get("required"), "required"),
-                    )
-                    for detail in _objects(
-                        item.get("noticeCategoryDetailNames", []), "noticeCategoryDetailNames"
-                    )
-                ),
-            )
-            for item in _objects(data.get("noticeCategories", []), "noticeCategories")
-        )
-        documents = tuple(
-            RequiredDocument(
-                _text(item.get("templateName"), "templateName"),
-                _text(item.get("required"), "required"),
-            )
-            for item in _objects(data.get("requiredDocumentNames", []), "requiredDocumentNames")
-        )
-        certifications = tuple(
-            Certification(
-                _text(item.get("certificationType"), "certificationType"),
-                _text(item.get("name"), "name"),
-                _text(item.get("dataType"), "dataType"),
-                _text(item.get("required"), "required"),
-            )
-            for item in _objects(data.get("certifications", []), "certifications")
-        )
-        conditions = _strings(data.get("allowedOfferConditions", []), "allowedOfferConditions")
-        return CategoryMetadata(
-            data["isAllowSingleItem"],
-            attributes,
-            notices,
-            documents,
-            certifications,
-            conditions,
-        )
+        return category_metadata_from_data(data)
 
     def search_brands(
         self, brand_name: str, *, page: int = 1, count_per_page: int = 10
@@ -424,5 +470,7 @@ __all__ = [
     "NoticeCategory",
     "NoticeDetail",
     "RequiredDocument",
+    "category_metadata_from_data",
+    "category_metadata_to_mapping",
     "leaf_categories",
 ]

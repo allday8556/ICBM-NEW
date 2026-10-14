@@ -24,6 +24,8 @@ itself — the stack still refuses under ``M0_DRY_RUN_ONLY``.
 
 ``icbm coupang save-credentials`` is the no-echo local input path into the OS credential store.
 ``icbm coupang read-canary`` composes the one C-LIVE-R1 identity-bound KR read and
+``icbm coupang read-category-metadata`` reads and immediately stores the exact recommended
+category contracts without exposing provider bodies or account values.
 ``icbm coupang mutate-test-products`` composes the C-LIVE-MUT-1 exact test 1..11 workflow.
 ``icbm coupang recover-test-product-create`` performs only the positive-only identity lookup for
 one ambiguous C-LIVE-MUT-1 CREATE and never treats an empty answer as absence.
@@ -107,7 +109,9 @@ LIVE_OPERATOR_COMMANDS: tuple[str, ...] = (
 COUPANG_OPERATOR_COMMANDS: tuple[str, ...] = (
     "save-credentials",
     "read-canary",
+    "read-category-metadata",
     "mutate-test-products",
+    "complete-rejected-test-products",
     "recover-test-product-create",
 )
 for _name in LIVE_OPERATOR_COMMANDS:
@@ -169,6 +173,14 @@ def build_parser() -> argparse.ArgumentParser:
     canary.add_argument("--scope-id", required=True, help="the bounded owner-approval reference")
     canary.add_argument("--approved-at", required=True, help="approval time with explicit offset")
     canary.add_argument("--expires-at", required=True, help="expiry time with explicit offset")
+    metadata = coupang_commands.add_parser(
+        "read-category-metadata",
+        help="read each recommended category contract once and save each safe result immediately",
+    )
+    metadata.add_argument("--source-ip", required=True, help="the outbound IP registered in Wing")
+    metadata.add_argument(
+        "--clock-skew-seconds", required=True, type=float, help="observed absolute clock offset"
+    )
     mutations = coupang_commands.add_parser(
         "mutate-test-products",
         help="run the approved C-LIVE-MUT-1 test 1..11 create/update/read/delete workflow",
@@ -188,6 +200,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--approved-at", required=True, help="approval time with explicit offset"
     )
     mutations.add_argument("--expires-at", required=True, help="expiry time with explicit offset")
+    corrected = coupang_commands.add_parser(
+        "complete-rejected-test-products",
+        help="rebuild corrected test 1..11 payloads in memory and complete rejected tests 2..11",
+    )
+    corrected.add_argument("--source-ip", required=True, help="the outbound IP registered in Wing")
+    corrected.add_argument(
+        "--clock-skew-seconds", required=True, type=float, help="observed absolute clock offset"
+    )
+    corrected.add_argument("--scope-id", required=True, help="must be C-LIVE-MUT-1")
+    corrected.add_argument(
+        "--payload-digest", required=True, help="reviewed lowercase SHA-256 payload digest"
+    )
+    corrected.add_argument(
+        "--approved-at", required=True, help="approval time with explicit offset"
+    )
+    corrected.add_argument("--expires-at", required=True, help="expiry time with explicit offset")
     recovery = coupang_commands.add_parser(
         "recover-test-product-create",
         help="recover one ambiguous C-LIVE-MUT-1 CREATE by positive provider evidence only",
@@ -621,6 +649,74 @@ def _coupang_mutate_test_products(
     return 0
 
 
+def _coupang_read_category_metadata(
+    config: AppConfig, lease: DataDirLease, args: argparse.Namespace
+) -> int:
+    """Read exact recommended category contracts once; persist each parsed attempt immediately."""
+    from app.platform.core.ownership import require_ownership
+    from app.platform.core.secrets import build_secret_store
+    from app.stages.connect.coupang.credentials import CoupangCredentialStore
+    from app.stages.connect.coupang.live_preflight import CoupangLivePreflightStore
+    from integrations.marketplaces.coupang.auth import (
+        AuthContext,
+        IpAllowlistDeclaration,
+        Market,
+        SystemUtcClock,
+    )
+    from integrations.marketplaces.coupang.canary import ClockPreflight
+    from integrations.marketplaces.coupang.live_category_metadata import (
+        CoupangCategoryMetadataPreflight,
+        LiveCategoryMetadataTransportRefused,
+    )
+
+    require_ownership(lease, config.data_dir)
+    secrets = build_secret_store(config.secret_backend)
+    status = secrets.status()
+    if not status.available or status.backend == "memory":
+        print("COUPANG_OS_SECRET_STORE_UNAVAILABLE", file=sys.stderr)
+        return 1
+    try:
+        credentials = CoupangCredentialStore(secrets).load()
+    except OSError:
+        credentials = None
+    if credentials is None:
+        print("COUPANG_CREDENTIALS_NOT_CONFIGURED", file=sys.stderr)
+        return 1
+    store = CoupangLivePreflightStore(secrets)
+    try:
+        recommendations = store.category_recommendations()
+        clock = SystemUtcClock()
+        now = clock.now()
+        declaration = IpAllowlistDeclaration.create(
+            args.source_ip,
+            credential_generation=credentials.credential_generation,
+            recorded_at=now,
+        )
+        owner = CoupangCategoryMetadataPreflight(
+            context=AuthContext(credentials, Market.KR, declaration),
+            category_codes=recommendations.unique_category_codes,
+            clock=clock,
+            clock_preflight=ClockPreflight.create(args.clock_skew_seconds, checked_at=now),
+        )
+        result = owner.run(
+            on_attempt=lambda attempt: store.save_category_metadata_attempt(
+                attempt, generation=credentials.credential_generation
+            )
+        )
+    except (LiveCategoryMetadataTransportRefused, OSError, ValueError):
+        print("COUPANG_CATEGORY_METADATA_LOCAL_REFUSAL", file=sys.stderr)
+        return 1
+    failed = [attempt for attempt in result.attempts if not attempt.succeeded]
+    summary = {
+        "attempted": len(result.attempts),
+        "failed": len(failed),
+        "failure_codes": [attempt.error_code for attempt in failed],
+        "succeeded": len(result.attempts) - len(failed),
+    }
+    print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+    return 1 if failed else 0
+
+
 def _coupang_recover_test_product_create(
     config: AppConfig, lease: DataDirLease, args: argparse.Namespace
 ) -> int:
@@ -682,6 +778,119 @@ def _coupang_recover_test_product_create(
         print(code, file=sys.stderr)
         return 1
     print(json.dumps(asdict(result), ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+def _coupang_complete_rejected_test_products(
+    config: AppConfig, lease: DataDirLease, args: argparse.Namespace
+) -> int:
+    """Build corrected payloads only in memory and run tests 2..11 once."""
+    from app.container import build_container
+    from app.platform.core.errors import AppError
+    from app.stages.connect.coupang.credentials import CoupangCredentialStore
+    from app.stages.connect.coupang.live_bundle import (
+        PRIOR_REJECTED_PAYLOAD_DIGEST,
+        build_live_test_product_bundle,
+    )
+    from app.stages.connect.coupang.live_preflight import CoupangLivePreflightStore
+    from integrations.marketplaces.coupang.auth import (
+        AuthContext,
+        IpAllowlistDeclaration,
+        Market,
+        SystemUtcClock,
+    )
+    from integrations.marketplaces.coupang.canary import ClockPreflight
+    from integrations.marketplaces.coupang.live_mutations import (
+        CoupangCorrectedAmbiguousCreateCompletion,
+        CoupangCorrectedRejectedTestProductMutationRun,
+        LiveMutationTransportRefused,
+        MutationJournal,
+        TestProductMutationApproval,
+    )
+
+    container = build_container(config, ownership=lease)
+    try:
+        status = container.secrets.status()
+        if not status.available or status.backend == "memory":
+            print("COUPANG_OS_SECRET_STORE_UNAVAILABLE", file=sys.stderr)
+            return 1
+        credentials = CoupangCredentialStore(container.secrets).load()
+        if credentials is None:
+            print("COUPANG_CREDENTIALS_NOT_CONFIGURED", file=sys.stderr)
+            return 1
+        preflight = CoupangLivePreflightStore(container.secrets)
+        recommendations = preflight.category_recommendations()
+        metadata = preflight.require_category_metadata(
+            recommendations.unique_category_codes,
+            generation=credentials.credential_generation,
+        )
+        bundle = build_live_test_product_bundle(
+            credentials=credentials,
+            vendor_user_id=preflight.vendor_user_id(credentials=credentials),
+            logistics=preflight.logistics(credentials=credentials),
+            category_codes_by_test=recommendations.category_codes_by_test,
+            category_metadata=metadata,
+            revision_of=container.revisions.latest,
+            asset_of=container.source_assets.get,
+        )
+        if args.scope_id != "C-LIVE-MUT-1":
+            raise ValueError("scope id must be C-LIVE-MUT-1")
+        if bundle.payload_digest != args.payload_digest:
+            raise ValueError("payload digest does not match the reviewed bundle")
+        clock = SystemUtcClock()
+        now = clock.now()
+        declaration = IpAllowlistDeclaration.create(
+            args.source_ip,
+            credential_generation=credentials.credential_generation,
+            recorded_at=now,
+        )
+        approval = TestProductMutationApproval.create(
+            scope_id=args.scope_id,
+            vendor_id=credentials.vendor_id,
+            credential_generation=credentials.credential_generation,
+            source_ip=args.source_ip,
+            payload_digest=bundle.payload_digest,
+            approved_at=_instant(args.approved_at, "--approved-at"),
+            expires_at=_instant(args.expires_at, "--expires-at"),
+        )
+        corrected = CoupangCorrectedRejectedTestProductMutationRun(
+            context=AuthContext(credentials, Market.KR, declaration),
+            approval=approval,
+            bundle=bundle,
+            clock=clock,
+            clock_preflight=ClockPreflight.create(args.clock_skew_seconds, checked_at=now),
+            journal=MutationJournal(config.runtime_dir / "coupang-live-mutations.json"),
+            prior_payload_digest=PRIOR_REJECTED_PAYLOAD_DIGEST,
+        ).run()
+        if corrected.completed != 10:
+            result: object = corrected
+        else:
+            recovered = CoupangCorrectedAmbiguousCreateCompletion(
+                context=AuthContext(credentials, Market.KR, declaration),
+                approval=approval,
+                bundle=bundle,
+                clock=clock,
+                clock_preflight=ClockPreflight.create(args.clock_skew_seconds, checked_at=now),
+                journal=MutationJournal(config.runtime_dir / "coupang-live-mutations.json"),
+                prior_payload_digest=PRIOR_REJECTED_PAYLOAD_DIGEST,
+            ).run()
+            result = {
+                "attempted": corrected.attempted,
+                "completed": corrected.completed + recovered.completed,
+                "payload_digest": bundle.payload_digest,
+                "scope_id": corrected.scope_id,
+                "total": 11,
+            }
+    except (AppError, LiveMutationTransportRefused, OSError, ValueError) as exc:
+        code = exc.code if isinstance(exc, AppError) else "COUPANG_CORRECTED_MUTATION_LOCAL_REFUSAL"
+        print(code, file=sys.stderr)
+        return 1
+    finally:
+        container.db.dispose()
+    safe_result = (
+        asdict(result) if is_dataclass(result) and not isinstance(result, type) else result
+    )
+    print(json.dumps(safe_result, ensure_ascii=False, sort_keys=True))
     return 0
 
 
@@ -948,7 +1157,12 @@ OWNING_COMMANDS: dict[Command, Callable[[AppConfig, DataDirLease, argparse.Names
     ("extension", "revoke"): _extension_pairing,
     ("coupang", "save-credentials"): _coupang_credentials,
     ("coupang", "read-canary"): _coupang_read_canary,
+    ("coupang", "read-category-metadata"): _coupang_read_category_metadata,
     ("coupang", "mutate-test-products"): _coupang_mutate_test_products,
+    (
+        "coupang",
+        "complete-rejected-test-products",
+    ): _coupang_complete_rejected_test_products,
     ("coupang", "recover-test-product-create"): _coupang_recover_test_product_create,
 }
 # The only commands allowed to run without the data-directory lock (ADR-0006).

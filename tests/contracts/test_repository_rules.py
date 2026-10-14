@@ -2733,6 +2733,10 @@ RAW_CLIENT_OWNERS = {
     "integrations/marketplaces/smartstore/caller.py": "the registry-gated SmartStore caller",
     # C-LIVE-R1: one non-generic, one-shot KR read canary; every other Coupang path is fake-only.
     "integrations/marketplaces/coupang/canary.py": "the bounded Coupang read canary",
+    # Exact recommended categories, one GET each, parsed and stored without raw provider bodies.
+    "integrations/marketplaces/coupang/live_category_metadata.py": (
+        "the bounded category metadata preflight"
+    ),
     # C-LIVE-MUT-1: exact test 1..11 create/update/read/delete, no generic caller or retry.
     "integrations/marketplaces/coupang/live_mutations.py": "the bounded test-product owner",
     # Opens nothing: socket.gaierror is the evidence that separates a DNS failure (ERRORS §15.1).
@@ -2852,7 +2856,7 @@ def test_raw_network_and_browser_clients_live_only_in_the_common_transport() -> 
 
 
 def test_only_reviewed_transports_open_egress_grants() -> None:
-    # Supplier transport, COLLECT, SmartStore and the two bounded Coupang owners are reviewed.
+    # Supplier transport, COLLECT, SmartStore and the bounded Coupang owners are reviewed.
     openers = {path for path, tree in _production_modules().items() if _calls(tree, "grant")}
     assert openers == {
         "integrations/suppliers/transport/gateway.py",
@@ -2860,6 +2864,7 @@ def test_only_reviewed_transports_open_egress_grants() -> None:
         "integrations/suppliers/transport/collection.py",
         "integrations/marketplaces/smartstore/caller.py",
         "integrations/marketplaces/coupang/canary.py",
+        "integrations/marketplaces/coupang/live_category_metadata.py",
         "integrations/marketplaces/coupang/live_mutations.py",
         # ADR-0038 §3: the FX rate reader, for exactly the Korea Eximbank API host.
         "integrations/fx/koreaexim.py",
