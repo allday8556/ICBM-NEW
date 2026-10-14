@@ -3,7 +3,7 @@
 The hashed set is every module of ``collect/``; this manifest is never part of it.
 """
 
-EXTRACTOR_REVISION = "superdelivery-2"
+EXTRACTOR_REVISION = "superdelivery-3"
 EXTRACTOR_INPUTS = (
     "integrations/suppliers/superdelivery/collect/__init__.py",
     "integrations/suppliers/superdelivery/collect/dom.py",
@@ -16,4 +16,4 @@ EXTRACTOR_INPUTS = (
 # A reader cannot recompute a SHA-256; the proof is mechanical:
 # tests/contracts/test_repository_rules.py recomputes this digest from EXTRACTOR_INPUTS, and the
 # merge guard requires that test green in the FULL CI of the exact HEAD.
-EXTRACTOR_FINGERPRINT = "fba71bbdccbef6a01fe4600fd5af812f909740f8aa8a2f2c91508999db43c5e9"
+EXTRACTOR_FINGERPRINT = "30f7ffb746d93caf793d8127ba54fe05798fbd62fdf94018ad5825c6e508237b"

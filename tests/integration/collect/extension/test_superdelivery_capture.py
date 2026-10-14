@@ -97,7 +97,7 @@ def test_a_captured_page_is_recorded_as_a_jpy_revision(
         config,
         "SELECT source_product_id, source_currency, extractor_revision"
         " FROM product_facts_revisions",
-    ) == [(NUMBER, "JPY", "superdelivery-2")]
+    ) == [(NUMBER, "JPY", "superdelivery-3")]
     assert rows(
         config,
         "SELECT status FROM product_facts_fields f JOIN product_facts_revisions r"

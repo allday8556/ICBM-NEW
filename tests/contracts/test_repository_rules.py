@@ -3012,7 +3012,7 @@ def test_superdelivery_is_one_extraction_identity_and_a_capture_only_supplier() 
 
     package = REPO_ROOT / "integrations" / "suppliers" / "superdelivery"
     manifest = read_manifest(package / "extraction_identity.py")
-    assert EXTRACTION_REVISION == manifest.revision == IMAGE_ROLES.identity == "superdelivery-2"
+    assert EXTRACTION_REVISION == manifest.revision == IMAGE_ROLES.identity == "superdelivery-3"
     modules = {
         path.relative_to(REPO_ROOT).as_posix() for path in (package / "collect").rglob("*.py")
     }

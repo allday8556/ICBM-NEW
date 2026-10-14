@@ -325,9 +325,18 @@ def test_a_disclosed_page_is_priced_at_its_regular_price_with_consumption_tax() 
     assert found["brand"].value.text == "ハマダコンフェクト株式会社"  # type: ignore[union-attr]
     assert found["manufacturer"].value.text == "ハマダコンフェクト株式会社"  # type: ignore[union-attr]
     assert found["manufacturer"].evidence[0].observed == "発売元：ハマダコンフェクト株式会社"
+    # The whole description, longer than the 200 characters its evidence quotes: a value is never
+    # a cut of the statement (the cafe24 and godomall rule).
     description = found["detail_description"].value.text  # type: ignore[union-attr]
     assert description.startswith("注意）商品名先頭に【※】マークは軽減税率対象品目です。")
-    assert "一覧はこちら" not in description and len(description) == 200
+    assert description.endswith(
+        "栄養素等表示基準値(18歳以上、基準熱量2200kcaL)に占める割合：カルシウム33％、鉄33％"
+    )
+    assert "一覧はこちら" not in description and len(description) > 200
+    evidence = found["detail_description"].evidence
+    assert [(e.status, e.observed) for e in evidence] == [
+        (FieldStatus.CONFIRMED, description[:200])
+    ]
     # OC-08: the company's terms are kept as its words, and are no gate.
     terms = found["sales_channels"]
     assert terms.value is None and {e.status for e in terms.evidence} == {FieldStatus.ABSENT}
@@ -510,13 +519,47 @@ def test_each_set_carries_its_own_regular_price_with_tax() -> None:
         ("11728767S1", "105", "JPY"),
         ("11728767S2", "315", "JPY"),
     ]
-    # A campaign set of three whose cell shows the campaign price alone states no regular price:
-    # no set carries a price, and the first set's purchase price is unchanged.
+
+
+def test_a_later_campaign_set_without_its_regular_price_holds_the_options() -> None:
+    # Set 2 is three units under the campaign, its own cell showing the campaign price alone: it
+    # states no regular price. Every set is checked, not only the first: the options are held for
+    # review naming set 2, and no configuration is recorded without its price.
     alone = '<span class="cmp-price"><span class="price-unit">¥</span>276</span>'
     found = fields("11728767", _second_set(body("11728767"), alone))
-    configurations = found["options"].value.configurations  # type: ignore[union-attr]
-    assert [(c.unit_price, c.currency) for c in configurations] == [(None, None), (None, None)]
+    options = found["options"]
+    assert options.status is FieldStatus.REVIEW_REQUIRED and options.value is None
+    assert [(e.locator, e.status.value, e.normalized) for e in options.evidence][-1] == (
+        "table.set-list S2 td.maker-wholesale-set-price",
+        "REVIEW_REQUIRED",
+        REGULAR_PRICE_NOT_STATED,
+    )
+    # The purchase price derives from set 1, whose regular price is stated: it is unchanged.
+    assert found["prices"].status is FieldStatus.CONFIRMED
     assert found["prices"].value.purchase().amount == "105"  # type: ignore[union-attr]
+    # With set 1 as the campaign set of three without its regular price, both are held.
+    first = _second_set(body("11728767"), alone).replace("（1点）", "（3点）")
+    both = fields("11728767", first)
+    assert both["prices"].status is FieldStatus.REVIEW_REQUIRED
+    assert both["prices"].evidence[-1].normalized == REGULAR_PRICE_NOT_STATED
+    assert both["options"].status is FieldStatus.REVIEW_REQUIRED
+
+
+def test_a_description_is_whole_or_held() -> None:
+    # A description far longer than the evidence quote stays whole; one carrying URL material is
+    # held by its locator alone and never persisted.
+    html = body("12064384")
+    long_words = "長い説明文です。" * 60
+    longer = html.replace("関連ワード： ティッシュ", f"関連ワード： ティッシュ{long_words}")
+    found = fields("12064384", longer)["detail_description"]
+    assert found.status is FieldStatus.CONFIRMED
+    assert found.value.text.endswith(long_words)  # type: ignore[union-attr]
+    assert len(found.value.text) > 500  # type: ignore[union-attr]
+    assert len(found.evidence[0].observed or "") == 200
+    url = html.replace("関連ワード： ティッシュ", "関連ワード： https://example.test/x?id=1")
+    held = fields("12064384", url)["detail_description"]
+    assert held.status is FieldStatus.REVIEW_REQUIRED and held.value is None
+    assert held.evidence[0].observed is None
 
 
 def test_a_campaign_set_without_its_regular_price_is_held() -> None:
@@ -609,9 +652,9 @@ def test_the_images_take_the_roles_the_product_block_gives_them() -> None:
 # ---------------------------------------------------------------- the revision and pricing
 
 # ADR-0040 §6: a fresh run over the same capture yields zero diffs. These are the revisions' source
-# fingerprints (ADR-0010 §6) for the captures with no image observed, under superdelivery-2.
+# fingerprints (ADR-0010 §6) for the captures with no image observed, under superdelivery-3.
 SOURCE_FINGERPRINTS = {
-    "11728767": "df48c6eef5e55fa2c5c444057f26c3fa9b54aab65763fbdcc516832ab8c38d43",
+    "11728767": "5bc7cef6a9467f30f034f30e969d4c02c99bddf76b31c9e0820c7c957dca829d",
     "12064384": "210afb21cf1fdc06dc7cb79f28f2b3b855ce08b46f77faae0b5792c2b321104c",
     "6554423": "3a78480dd16143e434713b2fac1a055933105b16d9eebf573d4560a680cafefa",
 }

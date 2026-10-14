@@ -23,7 +23,8 @@ shipping             the company's 送料 table and words (``#dealer-carriage``)
 brand                the ブランド名 entry of the product block
 manufacturer         a 販売元 / 発売元 / 製造元 line of the detail information
 origin               a 生産地 / 原産国 / 原産地 line of the detail information
-detail_description   the 商品説明 block (``#product_comment``), its first words
+detail_description   the 商品説明 block (``#product_comment``), whole; its evidence quotes the
+                     first words
 sales_channels       ``ABSENT``: the company's terms name no marketplace (ADR-0040 §2, ADR-0031)
 minimum_sale_price,  ``ABSENT``: the site states neither
 notice,
@@ -55,7 +56,9 @@ one price column whose header names the tax basis, ``価格（税抜）`` or ``�
 **Options** (ADR-0040 §2, ADR-0013 ruling B). A page with one set states no option: ``ABSENT``. A
 page with several sets states one axis, the table's 内訳 column, whose values are each set's 内訳
 words, and one configuration per set whose supplier SKU is its SD item number (``12064384S2``). A
-configuration carries its set's purchase price (as for ``prices``) when every set has one.
+configuration carries its set's purchase price (as for ``prices``) when every set has one. Every
+set is checked: one under a campaign whose own regular price the page does not state holds the
+options for review (``REGULAR_PRICE_NOT_STATED``), whichever set it is.
 
 **Stock.** 「在庫有り」 is on sale. A company that keeps no stock count writes no 在庫状況 column;
 its page is on sale while the reader is shown the purchase control 「カートに入れる」, and is
@@ -148,10 +151,13 @@ FREE_WORD = "無料"
 NATIONWIDE = re.compile(r"送料全国一律\s*(\d{1,3}(?:,\d{3})+|\d+)円")
 TRADE_TABLE = ".dl-trade-tbl"
 TERMS_BLOCK = "#dealing_consideration_box"
+# URL material in a text (the templates' detector): such a text is never persisted as a value.
+URL_MATERIAL = re.compile(r"(?i)(?:[a-z][a-z0-9+.-]*:)?//\S*")
+# What evidence quotes of a longer text. A value is never cut: a CONFIRMED text is the whole
+# statement, and only its evidence quotes the first words (ADR-0010 §8).
 _EVIDENCE_LIMIT = 200
 # ADR-0010 §8 bounds a stored observed value at 4096 bytes; the terms are quoted up to this many.
 _TERMS_BYTES = 4000
-_POLICY_LIMIT = 1000
 
 
 def _quote(text: str, limit: int = _EVIDENCE_LIMIT) -> str:
@@ -581,6 +587,23 @@ def _options(
             *evidence,
             _evidence("table.set-list", FieldStatus.REVIEW_REQUIRED, " / ".join(details)),
         )
+    # Every set is checked, not only the first: a set under a campaign whose own regular price
+    # the page does not state has no purchase price, and its configuration is never recorded
+    # without one beside sets that have theirs.
+    unstated = [row for row in sets if row.campaign and row.regular() is None]
+    if unstated:
+        return _review(
+            *evidence,
+            *(
+                _evidence(
+                    f"table.set-list {row.number} td.maker-wholesale-set-price",
+                    FieldStatus.REVIEW_REQUIRED,
+                    None,
+                    REGULAR_PRICE_NOT_STATED,
+                )
+                for row in unstated
+            ),
+        )
     axis = next(
         (words.split("（", 1)[0].strip() for words in header if words.startswith(DETAIL_HEADER)),
         DETAIL_HEADER,
@@ -758,7 +781,8 @@ def _shipping(nodes: Sequence[Node]) -> FieldFact:
     parts.extend(deviating)
     value = ForeignShippingValue(
         kind=ShippingKind.CONDITIONAL,
-        policy_text=_quote(" / ".join(parts), _POLICY_LIMIT),
+        # Whole, never cut: the page's words for the policy the value states.
+        policy_text=" / ".join(parts),
         currency=CURRENCY,
         fee=str(flat),
         free_over=str(threshold),
@@ -819,15 +843,19 @@ def _detail_description(nodes: Sequence[Node]) -> FieldFact:
         return _absent(DETAIL_BLOCK)
     # The company's own link to its product list is navigation, not description.
     text = block.text_outside("a", "label")
-    if not text:
+    if not text or URL_MATERIAL.search(text) is not None:
+        # No words of its own (a description of images), or words carrying URL material, which
+        # are never persisted: held by the locator alone (the cafe24 and godomall rule).
         return _review(
             _evidence(
                 DETAIL_BLOCK, FieldStatus.REVIEW_REQUIRED, kind=EvidenceKind.PRODUCT_HTML_FRAGMENT
             )
         )
+    # The value is the whole description, never a cut of it (the cafe24 and godomall rule); only
+    # its evidence quotes the first words (ADR-0010 §8).
     return FieldFact(
         FieldStatus.CONFIRMED,
-        TextValue(text=_quote(text)),
+        TextValue(text=text),
         (
             _evidence(
                 DETAIL_BLOCK,

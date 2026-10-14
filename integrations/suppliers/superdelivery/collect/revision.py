@@ -16,6 +16,12 @@ is recorded only — 税抜 plus the Japanese consumption tax (8 % for a product
 軽減税率対象, else 10 %; ``tax.py``, ``jp-consumption-tax-1``), rounded up to the whole yen; each
 set's configuration carries its own. Shipping amounts stay as stated, and their policy text
 says 税抜.
+
+``superdelivery-3`` (2026-10-14, the PR #351 audit): a text value is never a cut of the statement.
+The description is stored whole (its evidence still quotes the first 200 characters), or held for
+review when it carries URL material; the shipping policy text is whole. Every set is checked for
+its regular price: a campaign set of several units without its own holds the options for review
+(``REGULAR_PRICE_NOT_STATED``), whichever set it is.
 """
 
-EXTRACTION_REVISION = "superdelivery-2"
+EXTRACTION_REVISION = "superdelivery-3"
