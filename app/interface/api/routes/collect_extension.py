@@ -20,6 +20,14 @@ The list-queue routes (ADR-0019 §8.1, E3):
 - ``POST /api/v1/collect/extension/queues/{queue_id}/release`` — give back an issued read the
   extension could not capture, so the queue goes on at once.
 
+The supplier reads:
+
+- ``GET  /api/v1/collect/extension/suppliers`` — each supplier's storefront host and key
+  (ADR-0030 §6).
+- ``GET  /api/v1/collect/extension/onboarded-origins`` — the exact storefront origin of each
+  ``ACTIVE`` onboarded supplier: the only origins the extension may ask Chrome for, one per
+  operator click, and the list it withdraws every other optional origin against (ADR-0036 §8).
+
 Every route requires everything together: the loopback host (``TrustedHostMiddleware``), the
 ``X-ICBM-Client`` header, the pinned extension origin when an ``Origin`` is present, and the
 pairing signature. Pairing replaces none of the others. A request is authenticated from its
@@ -83,6 +91,8 @@ QUEUE_CANCEL_PATH = "/api/v1/collect/extension/queues/{queue_id}/cancel"
 QUEUE_RELEASE_PATH = "/api/v1/collect/extension/queues/{queue_id}/release"
 # ADR-0030 §6: the reviewed supplier hosts, read by the extension instead of a constant of its own.
 SUPPLIERS_PATH = "/api/v1/collect/extension/suppliers"
+# ADR-0036 §8 (D3): the ACTIVE onboarded origins the extension may hold an optional permission for.
+ONBOARDED_ORIGINS_PATH = "/api/v1/collect/extension/onboarded-origins"
 POLICY_REVISION_HEADER = "X-ICBM-Capture-Policy-Revision"
 POLICY_DIGEST_HEADER = "X-ICBM-Capture-Policy-Digest"
 # The whole request: the capture, JSON-escaped at worst, and its small envelope. It bounds what is
@@ -288,6 +298,22 @@ def supplier_hosts(request: Request, container: ContainerDep) -> Response:
     return _json(request, sender, {"suppliers": container.extension_queues.supplier_hosts()})
 
 
+@router.get(ONBOARDED_ORIGINS_PATH)
+def onboarded_origins(request: Request, container: ContainerDep) -> Response:
+    """Each ACTIVE onboarded supplier's exact storefront origin, key and name (ADR-0036 §8).
+
+    The extension asks Chrome for one of these on the operator's click and removes every optional
+    origin it holds that is not listed here. A repository supplier is never listed: its host is
+    the manifest's own."""
+    sender = _authenticate(request, container.extension_pairing)
+    _empty(sender)
+    origins = [
+        {"supplier_key": o.supplier_key, "display_name": o.display_name, "origin": o.origin}
+        for o in container.supplier_catalog.active_origins()
+    ]
+    return _json(request, sender, {"origins": origins})
+
+
 @router.get(QUEUE_POLICY_PATH)
 def queue_policy(supplier_key: str, request: Request, container: ContainerDep) -> Response:
     """The supplier's reviewed product path form, its declared queue limits and its queue
@@ -421,6 +447,11 @@ def queue_policy_preflight(
 
 @router.options(SUPPLIERS_PATH)
 def supplier_hosts_preflight(request: Request, container: ContainerDep) -> Response:
+    return _preflight(request, container, "GET")
+
+
+@router.options(ONBOARDED_ORIGINS_PATH)
+def onboarded_origins_preflight(request: Request, container: ContainerDep) -> Response:
     return _preflight(request, container, "GET")
 
 

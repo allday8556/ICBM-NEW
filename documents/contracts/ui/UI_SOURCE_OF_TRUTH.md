@@ -578,6 +578,19 @@ v29's `수집 규칙` button on a supplier card is live only on an onboarded sup
 - **Server-owned.** Every word rule, preview result, revision and refusal is the server's. The page
   keeps nothing in browser storage.
 
+## Extension — 셀프등록 공급처 권한 (ADR-0036 O5c, owner decision D3)
+
+A small addition below the approved Collector boards, in the list rows' own language. While the
+extension is paired, a `셀프등록 공급처 권한 · n곳` section lists each `사용 중` (ACTIVE) onboarded
+supplier ICBM names (`GET /api/v1/collect/extension/onboarded-origins`): its name, its exact
+storefront origin and key, and a chip `허용됨` or `권한 없음`.
+
+- `권한 요청` asks Chrome for that one origin on the operator's click, and Chrome asks again in its
+  own prompt. Nothing is requested in bulk or without the click. `권한 제거` gives a held origin back.
+- Until its origin is granted, a supplier's page is neither recognised nor captured.
+- When the panel opens, after pairing and on `목록 새로고침`, the extension removes every optional
+  origin it holds that ICBM no longer lists, such as a disabled supplier's.
+
 ## Collection intake (A-UX2, owner decisions 2026-10-04 D1 and D2)
 
 - Collection Management's URL box follows v29's `상품 URL을 입력하세요. 여러 개는 줄바꿈`: one URL per
