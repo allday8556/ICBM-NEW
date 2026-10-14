@@ -27,7 +27,7 @@ from dataclasses import asdict, dataclass
 from enum import StrEnum
 from typing import Any, Final
 
-from sqlalchemy import select
+from sqlalchemy import literal_column, select
 from sqlalchemy.orm import Session
 
 from app.capabilities.ai.provider import AIExecutionProvenance, RequestedIdentity
@@ -286,9 +286,11 @@ class ImageStudioStore:
             rows = session.scalars(
                 select(ImageTranslationCandidate)
                 .where(ImageTranslationCandidate.observation_id == observation_id)
+                # Newest first; among equal timestamps the later insertion (SQLite's rowid), never
+                # the random candidate id, so "newest" is one fixed candidate.
                 .order_by(
                     ImageTranslationCandidate.created_at.desc(),
-                    ImageTranslationCandidate.candidate_id,
+                    literal_column("rowid").desc(),
                 )
             ).all()
             return tuple(_candidate(row) for row in rows)
