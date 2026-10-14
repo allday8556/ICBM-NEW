@@ -149,6 +149,11 @@ and fingerprint contract with the minimal OCR and composition seams, the models,
 store of OCR observations, translation candidates and edit revisions with their forward-only
 pointer, and the provider-zero `image.translate` job), migration `0065_image_studio_translation`
 and one integration suite; production binds no OCR engine and no translation task.
+ADR-0041 I3 added to it the deterministic renderer `image-translate-renderer/v1`: `style.py`
+reads a region's background (erase only where clean) and the source text's colour, weight
+and size, and `renderer.py` draws the Korean text with the bundled Noto Sans KR
+(shrink-to-fit, `LAYOUT_OVERFLOW`, a label box on a complex background, the completeness
+verdict). One integration suite; no migration.
 ADR-0041 I4 registered `TASK_IMAGE_TEXT_TRANSLATE_V1` (the ADR-0026 §3.1 amendment, seed
 `v29-ai4`) and added `image_studio/task.py` (the text-only composer over the prompt registry and
 the strict answer parser) and `image_studio/checks.py` (the deterministic low-confidence,
@@ -207,8 +212,8 @@ customer or financial data, and grant no provider call or LIVE authority.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 396 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 80 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
+| `app/` | 398 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 82 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
 | `app/interface/` | 31 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 95 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 185 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
@@ -233,11 +238,11 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `integrations/` | 96 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 44 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 407 | tests |
+| `tests/` | 408 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 173 | integration tests by runtime owner |
+| `tests/integration/` | 174 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
 | `tests/unit/` | 150 | unit tests by runtime owner |
 | `ui/` | 75 | operator clients: the served web client and the capture extension |
