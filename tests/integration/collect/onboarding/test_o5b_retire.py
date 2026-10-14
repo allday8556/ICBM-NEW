@@ -140,6 +140,10 @@ def test_a_retired_sample_never_proves_is_never_verified_or_read_again(
             actor=OPERATOR,
         ),
     )
+    # Under new words, before re-analysis, the stale sample still carries its reason.
+    app.onboarding.save_words(key, {"brand": ["상표"]}, expected_seq=0, actor=OPERATOR)
+    (stale,) = [s for s in app.onboarding_analysis.view(key).stale if s.sample_url == samples[0]]
+    assert stale.retired_reason == "대표 상품이 아님"
     clock.advance(600)
     refused(
         ONBOARDING_SAMPLE_ALREADY_READ,

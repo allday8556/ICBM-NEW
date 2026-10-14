@@ -441,6 +441,7 @@ class SiteAnalysisService:
                         sample_url=trial.sample_url_key,
                         words_seq=trial.words_seq,
                         template_revision=trial.template_revision,
+                        retired_reason=retired.get(trial.sample_url_key),
                     )
                 )
         proof = self._store.activation(key)

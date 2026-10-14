@@ -194,6 +194,8 @@ class StaleSampleView(BaseModel):
     sample_url: str
     words_seq: int
     template_revision: str
+    # A retirement outlives the words it was made under (amendment 6160586049).
+    retired_reason: str | None = None
 
 
 class AnalysisView(BaseModel):

@@ -392,9 +392,10 @@ export async function openSiteAnalysis(record, { waitForJob, errorMessage, onCha
       ...view.stale.map((s) =>
         h(
           'div',
-          { class: 'analysis-sample', 'data-sample': s.sample_url, 'data-stale': 'true' },
+          { class: s.retired_reason ? 'analysis-sample retired' : 'analysis-sample', 'data-sample': s.sample_url, 'data-stale': 'true' },
           h('b', { class: 'analysis-url' }, s.sample_url),
           h('div', { class: 'note' }, `이전 수집 규칙(w${s.words_seq})의 결과입니다. 「다시 분석」으로 저장된 캡처를 다시 읽습니다.`),
+          s.retired_reason ? retirementLine({ retired_reason: s.retired_reason }, null) : null,
         ),
       ),
     );
