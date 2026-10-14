@@ -38,19 +38,32 @@ import re
 import threading
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
+from datetime import date, datetime, timedelta
 from enum import StrEnum
 from typing import Final, Protocol
 
 from pydantic import BaseModel, ConfigDict, SecretStr
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from app.capabilities.audit.models import AuditEventType, AuditOutcome
 from app.capabilities.audit.service import AuditEntry, AuditLog
 from app.capabilities.overseas.fx_models import FxRateSnapshot
+
+# The pure reads and rules, in their own module so a pricing owner reads a rate without loading
+# the publication adapter (ADR-0038 O2); re-exported here as this owner's own names.
+from app.capabilities.overseas.fx_rules import CURRENCIES as CURRENCIES
+from app.capabilities.overseas.fx_rules import KST as KST
+from app.capabilities.overseas.fx_rules import PRICING_FX_STALE as PRICING_FX_STALE
+from app.capabilities.overseas.fx_rules import PRICING_FX_UNAVAILABLE as PRICING_FX_UNAVAILABLE
+from app.capabilities.overseas.fx_rules import (
+    STALE_AFTER_BUSINESS_DAYS as STALE_AFTER_BUSINESS_DAYS,
+)
+from app.capabilities.overseas.fx_rules import FxSnapshot as FxSnapshot
+from app.capabilities.overseas.fx_rules import business_days_after as business_days_after
+from app.capabilities.overseas.fx_rules import fx_reason as fx_reason
+from app.capabilities.overseas.fx_rules import kst_day as kst_day
+from app.capabilities.overseas.fx_rules import newest_snapshot as newest_snapshot
+from app.capabilities.overseas.fx_rules import snapshot_of as _snapshot
 from app.platform.core.clock import Clock
 from app.platform.core.errors import (
     AppError,
@@ -71,20 +84,14 @@ from integrations.fx.koreaexim import (
 
 logger = logging.getLogger("icbm.overseas.fx")
 
-CURRENCIES: Final = ("CNY", "JPY", "USD")
 RATE_TYPE: Final = "TTS"
-KST: Final = timezone(timedelta(hours=9))
 # Korea Eximbank publishes the day's first rates at about 11:00 KST.
 PUBLICATION_HOUR_KST: Final = 11
-# FX-03: a snapshot more than this many business days old is stale.
-STALE_AFTER_BUSINESS_DAYS: Final = 3
 # The OS secret-store name of the operator's Korea Eximbank API key (ADR-0007 §3).
 FX_API_KEY_REF: Final = "fx.koreaexim.authkey"
 _API_KEY: Final = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 SCHEDULER_ACTOR: Final = "system:fx-refresh"
 
-PRICING_FX_STALE: Final = "PRICING_FX_STALE"
-PRICING_FX_UNAVAILABLE: Final = "PRICING_FX_UNAVAILABLE"
 FX_API_KEY_MISSING: Final = "FX_API_KEY_MISSING"
 FX_API_KEY_INVALID: Final = "FX_API_KEY_INVALID"
 FX_CURRENCY_UNKNOWN: Final = "FX_CURRENCY_UNKNOWN"
@@ -108,97 +115,10 @@ class RefreshOutcome(StrEnum):
     FAILED = "FAILED"
 
 
-@dataclass(frozen=True)
-class FxSnapshot:
-    """One recorded rate. ``tts`` is per ``unit`` of the currency (1, or 100 for JPY)."""
-
-    snapshot_id: str
-    publication_date: date
-    currency: str
-    rate_type: str
-    source_code: str
-    unit: int
-    tts: str
-    deal_bas_r: str
-    source: str
-    fetched_at: datetime
-
-    def tts_per_unit(self) -> Decimal:
-        """The won price of one unit of the currency, exact (the unit is 1 or 100)."""
-        return Decimal(self.tts) / self.unit
-
-
 class FxSource(Protocol):
     """The publication source port: one read of one day with the operator's key."""
 
     def fetch(self, authkey: str, day: date) -> Ap01Result: ...
-
-
-# ------------------------------------------------------------------ pure rules
-
-
-def kst_day(moment: datetime) -> date:
-    """The KST calendar day of an aware moment."""
-    return moment.astimezone(KST).date()
-
-
-def business_days_after(start: date, end: date) -> int:
-    """How many Monday-to-Friday days ``d`` lie in ``start < d <= end`` (0 when ``end <= start``).
-    No holiday calendar (module docstring)."""
-    if end <= start:
-        return 0
-    weeks, rest = divmod((end - start).days, 7)
-    return weeks * 5 + sum(
-        1 for offset in range(1, rest + 1) if (start + timedelta(days=offset)).weekday() < 5
-    )
-
-
-def fx_reason(snapshot: FxSnapshot | None, today: date) -> str | None:
-    """FX-03 for one currency on ``today`` (KST): ``PRICING_FX_UNAVAILABLE`` with no snapshot (or
-    one published after ``today``, which no rate known on ``today`` can be),
-    ``PRICING_FX_STALE`` when more than three business days have passed since its publication,
-    else ``None``."""
-    if snapshot is None or snapshot.publication_date > today:
-        return PRICING_FX_UNAVAILABLE
-    if business_days_after(snapshot.publication_date, today) > STALE_AFTER_BUSINESS_DAYS:
-        return PRICING_FX_STALE
-    return None
-
-
-def _require_currency(currency: str) -> str:
-    if currency not in CURRENCIES:
-        raise ValueError(f"no FX snapshot is kept for {currency!r}")
-    return currency
-
-
-def _snapshot(row: FxRateSnapshot) -> FxSnapshot:
-    return FxSnapshot(
-        snapshot_id=row.snapshot_id,
-        publication_date=date.fromisoformat(row.publication_date),
-        currency=row.currency,
-        rate_type=row.rate_type,
-        source_code=row.source_code,
-        unit=row.unit,
-        tts=row.tts,
-        deal_bas_r=row.deal_bas_r,
-        source=row.source,
-        fetched_at=row.fetched_at,
-    )
-
-
-def newest_snapshot(session: Session, currency: str, as_of: date) -> FxSnapshot | None:
-    """The newest snapshot of ``currency`` published on or before ``as_of``, read inside a
-    caller's unit of work: the one read a price will pin (FX-02, O2)."""
-    row = session.scalars(
-        select(FxRateSnapshot)
-        .where(
-            FxRateSnapshot.currency == _require_currency(currency),
-            FxRateSnapshot.publication_date <= as_of.isoformat(),
-        )
-        .order_by(FxRateSnapshot.publication_date.desc())
-        .limit(1)
-    ).first()
-    return None if row is None else _snapshot(row)
 
 
 # ------------------------------------------------------------------ the store

@@ -4131,6 +4131,8 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "image_translation_candidates",
         "image_edit_revisions",
         "image_edit_current",
+        # ADR-0038 §4, §8: each overseas source product's landed-cost inputs, append-only.
+        "overseas_cost_override_revisions",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

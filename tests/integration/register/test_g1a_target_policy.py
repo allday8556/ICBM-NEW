@@ -610,6 +610,8 @@ def test_0019_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "image_translation_candidates",
         "image_edit_revisions",
         "image_edit_current",
+        # ADR-0038 §4, §8 (0066): each overseas source product's landed-cost inputs.
+        "overseas_cost_override_revisions",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before

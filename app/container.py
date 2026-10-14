@@ -166,6 +166,7 @@ from app.stages.products.enrichment import EnrichmentService
 from app.stages.products.image_store import DerivedImageStore
 from app.stages.products.images import ProductImageService
 from app.stages.products.materialization import Materialization, ProductMaterializer
+from app.stages.products.overseas_costs import OverseasCostOverrideStore, OverseasCostsService
 from app.stages.products.pricing_service import ProductPricingService
 from app.stages.products.readiness import ProductReadinessService
 from app.stages.products.sales_policy import SalesPolicyService, SalesPolicyStore
@@ -330,6 +331,8 @@ class Container:
     # ADR-0038 §3, §5: Settings' 해외 구매대행 — the settings card, the FX snapshots, the Korea
     # Eximbank key and the periodic refresh.
     overseas_settings: OverseasSettingsService
+    # ADR-0038 §4, §8: each overseas source product's own overseas shipping and duty rate.
+    overseas_costs: OverseasCostsService
     fx: FxService
     fx_refresh_scheduler: FxRefreshScheduler
     category_metadata: CategoryMetadataService
@@ -871,6 +874,9 @@ def build_container(
     # ADR-0038 §3, §5: the 해외 구매대행 settings and the FX snapshot owner. The Korea Eximbank key
     # lives only in the OS secret store; the adapter is the only caller of its one host.
     overseas_settings = OverseasSettingsService(OverseasSettingsStore(db, clock, audit))
+    # ADR-0038 §4, §8 phase 1: a source product's own landed-cost inputs, over the settings'
+    # defaults. The pricing owner reads them in its own unit of work.
+    overseas_costs = OverseasCostsService(OverseasCostOverrideStore(db, clock, audit))
     fx = FxService(
         FxSnapshotStore(db, clock, audit),
         FxApiKey(secrets, audit),
@@ -1488,6 +1494,7 @@ def build_container(
         image_translation=image_translation,
         sales_policies=sales_policies,
         overseas_settings=overseas_settings,
+        overseas_costs=overseas_costs,
         fx=fx,
         fx_refresh_scheduler=FxRefreshScheduler(fx),
         category_metadata=category_metadata,

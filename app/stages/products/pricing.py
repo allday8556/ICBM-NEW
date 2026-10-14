@@ -45,9 +45,17 @@ and the snapshot records ``minimum_applied=False``; a statement it could not rea
 ``minimum_unresolved``. Either is the warning ``PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED`` (SP-04).
 The applied path, and every fingerprint it produces, is unchanged.
 
-**A source currency is not priced yet** (ADR-0038 §1, slice O1a). A revision that states its prices
-in CNY or JPY is ``PRICING_SOURCE_CURRENCY_UNSUPPORTED`` on every path — base, offer and AtomicSKU —
-before any amount is read (:func:`source_currency_reasons`). The landed cost and its FX pins are O2.
+**A source currency is priced at its landed cost** (ADR-0038 §4, slice O2). A revision that states
+its prices in CNY or JPY is read by :func:`foreign_source_inputs` — its PURCHASE price (or, for an
+AtomicSKU Item, its configuration's own unit price), its stated local delivery and its minimum, as
+decimal text in its currency — and the landed cost (``app.stages.products.landed_cost``) becomes the
+pricing inputs (:func:`landed_source_inputs`): the supplier cost and any included duties are the
+purchase cost, the overseas shipping is the supplier shipping, and the calculation below is
+unchanged. The dependency fingerprint then names the landed cost's every input
+(``PricingDependencies.landed_cost``); a KRW price names none, so every KRW fingerprint is
+byte-identical. A ``SOURCE_OFFER`` (quantity offer) of such a revision is still
+``PRICING_SOURCE_CURRENCY_UNSUPPORTED`` (:func:`source_currency_reasons`): no foreign offer is ever
+materialized, and none is priced.
 """
 
 import hashlib
@@ -61,11 +69,21 @@ from typing import Final
 
 from app.stages.collect.facts import (
     FieldStatus,
+    ForeignMoneyValue,
+    ForeignPricesValue,
+    ForeignShippingValue,
     MoneyValue,
     PricesValue,
     ShippingKind,
     ShippingValue,
 )
+
+# ADR-0038 §3, §4 (O2): the landed cost's own reasons are pricing's as well — no rate that may
+# price (the FX owner's FX-03 codes) and no overseas shipping at all. Each is REVIEW_REQUIRED.
+from app.stages.products.landed_cost import FX_STALE as FX_STALE
+from app.stages.products.landed_cost import FX_UNAVAILABLE as FX_UNAVAILABLE
+from app.stages.products.landed_cost import OVERSEAS_SHIPPING_UNSET as OVERSEAS_SHIPPING_UNSET
+from app.stages.products.landed_cost import ForeignSourceInputs, LandedCost
 from app.stages.products.model import ReadinessStatus, Reason
 from app.stages.products.quantity import (
     OfferField,
@@ -251,9 +269,9 @@ MINIMUM_SALE_PRICE_NOT_OFFER_BOUND = "PRICING_MINIMUM_SALE_PRICE_NOT_OFFER_BOUND
 # ADR-0039 §3: a minimum the source states (or could not be read) that the supplier's sales policy
 # does not apply. A non-blocking warning, never a reason not to price.
 MINIMUM_SALE_PRICE_NOT_APPLIED = "PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED"
-# ADR-0038 §1, O1a: a revision whose prices are stated in a source currency (CNY, JPY). Nothing
-# here converts one into won; until the landed-cost inputs and their FX pins (O2) exist, such a
-# revision is not priced at all.
+# ADR-0038 §1, O1a: a quantity offer of a revision whose prices are stated in a source currency
+# (CNY, JPY). Such an offer is never materialized, and the offer path never prices one (O2 prices
+# the base and AtomicSKU paths at their landed cost).
 SOURCE_CURRENCY_UNSUPPORTED = "PRICING_SOURCE_CURRENCY_UNSUPPORTED"
 
 SourceField = OfferField
@@ -274,6 +292,9 @@ class SourceInputs:
     minimum_applied: bool = True
     stated_minimum_sale_price_krw: int | None = None
     minimum_unresolved: bool = False
+    # ADR-0038 §4 (O2): the landed cost these inputs were made from, for a source-currency price;
+    # None for a KRW price. The snapshot records its pins, and only then.
+    landed_cost: LandedCost | None = None
 
     @property
     def minimum_waived(self) -> bool:
@@ -288,9 +309,9 @@ def _review(code: str, subject: str) -> Reason:
 
 
 def source_currency_reasons(source_currency: str | None) -> tuple[Reason, ...]:
-    """ADR-0038 §1: the reason a revision stated in a source currency is not priced, or none for
-    a KRW revision. Every pricing path asks this first, before it reads a single amount, so no
-    CNY or JPY amount is ever read as won (fail closed until O2)."""
+    """ADR-0038 §1: the reason a quantity offer (SOURCE_OFFER) of a revision stated in a source
+    currency is not priced, or none for a KRW revision. The offer path asks this first, before it
+    reads a single amount, so no CNY or JPY offer total is ever read as won."""
     if source_currency is None:
         return ()
     return (_review(SOURCE_CURRENCY_UNSUPPORTED, "prices"),)
@@ -428,6 +449,137 @@ def offer_source_inputs(
     return SourceInputs(offer.total_price_krw, shipping_fee, None)
 
 
+# ---------------------------------------------------------------- source currency (ADR-0038 §4)
+
+
+def _local_delivery(
+    fields: Mapping[str, SourceField], currency: str, reasons: list[Reason]
+) -> str | None:
+    """The supplier's local delivery a source-currency revision states unambiguously, as decimal
+    text in its currency (``"0"`` when free), or ``None`` with its reason. The same rules as a KRW
+    shipping fee: a free-over policy is read at its base fee (ADR-0034 §2), any other condition and
+    an unknown policy are not read. It enters the declared value only, never the cost."""
+    shipping = fields.get("shipping")
+    if (
+        shipping is None
+        or shipping.status is not FieldStatus.CONFIRMED
+        or not isinstance(shipping.value, ForeignShippingValue)
+        or shipping.value.currency != currency
+    ):
+        reasons.append(_review(SHIPPING_UNRESOLVED, "shipping"))
+    elif shipping.value.kind is ShippingKind.FREE:
+        return "0"
+    elif shipping.value.fee is not None and (
+        shipping.value.kind is ShippingKind.FIXED
+        or (
+            shipping.value.kind is ShippingKind.CONDITIONAL and shipping.value.free_over is not None
+        )
+    ):
+        return shipping.value.fee
+    elif shipping.value.kind is ShippingKind.CONDITIONAL:
+        reasons.append(_review(SHIPPING_CONDITIONAL, "shipping"))
+    else:
+        reasons.append(_review(SHIPPING_UNKNOWN, "shipping"))
+    return None
+
+
+def _positive(amount: str) -> bool:
+    """Whether decimal text states more than zero."""
+    return any(digit not in "0." for digit in amount)
+
+
+def _stated_foreign_minimum(
+    fields: Mapping[str, SourceField], currency: str
+) -> tuple[str | None, bool]:
+    """ADR-0039 §3 for a source currency: the positive minimum a source states, and whether a
+    statement exists that could not be read, for a policy that does not apply it."""
+    stated = fields.get("minimum_sale_price")
+    if stated is not None and stated.status is FieldStatus.ABSENT:
+        return None, False
+    if (
+        stated is not None
+        and stated.status is FieldStatus.CONFIRMED
+        and isinstance(stated.value, ForeignMoneyValue)
+        and stated.value.currency == currency
+        and _positive(stated.value.amount)
+    ):
+        return stated.value.amount, False
+    return None, True
+
+
+def foreign_source_inputs(
+    fields: Mapping[str, SourceField],
+    currency: str,
+    *,
+    apply_minimum: bool = True,
+    unit_price: str | None = None,
+) -> ForeignSourceInputs | tuple[Reason, ...]:
+    """The inputs of a source-currency revision (ADR-0038 §4), as stated in ``currency``, or every
+    reason they cannot be read unambiguously. Nothing is converted here.
+
+    The source price is the one PURCHASE-role foreign price (ADR-0032 §3: never chosen by label,
+    name or order; a LIST price never is), or ``unit_price`` — an AtomicSKU configuration's own
+    price — when one is given, and then the generic prices are not read. A value in another
+    currency, or in won, is never read as this one. The minimum follows ADR-0039 §3 exactly as
+    :func:`source_inputs` does."""
+    reasons: list[Reason] = []
+    price = unit_price
+    if price is None:
+        prices = fields.get("prices")
+        if prices is None or prices.status is not FieldStatus.CONFIRMED:
+            reasons.append(_review(PURCHASE_PRICE_UNRESOLVED, "prices"))
+        elif (
+            not isinstance(prices.value, ForeignPricesValue)
+            or prices.value.currency != currency
+            or prices.value.purchase() is None
+        ):
+            reasons.append(_review(PURCHASE_PRICE_AMBIGUOUS, "prices"))
+        else:
+            chosen = prices.value.purchase()
+            assert chosen is not None
+            price = chosen.amount
+
+    local_delivery = _local_delivery(fields, currency, reasons)
+
+    if not apply_minimum:
+        if reasons or price is None or local_delivery is None:
+            return tuple(reasons)
+        amount, unresolved = _stated_foreign_minimum(fields, currency)
+        return ForeignSourceInputs(currency, price, local_delivery, None, False, amount, unresolved)
+
+    minimum = None
+    stated = fields.get("minimum_sale_price")
+    if stated is not None and stated.status is FieldStatus.CONFIRMED:
+        if not isinstance(stated.value, ForeignMoneyValue) or stated.value.currency != currency:
+            reasons.append(_review(MINIMUM_SALE_PRICE_UNRESOLVED, "minimum_sale_price"))
+        elif not _positive(stated.value.amount):
+            reasons.append(_review(MINIMUM_SALE_PRICE_NOT_POSITIVE, "minimum_sale_price"))
+        else:
+            minimum = stated.value.amount
+    elif stated is None or stated.status is not FieldStatus.ABSENT:
+        reasons.append(_review(MINIMUM_SALE_PRICE_UNRESOLVED, "minimum_sale_price"))
+
+    if reasons or price is None or local_delivery is None:
+        return tuple(reasons)
+    return ForeignSourceInputs(currency, price, local_delivery, minimum)
+
+
+def landed_source_inputs(landed: LandedCost) -> SourceInputs:
+    """The pricing inputs of a landed cost: the supplier cost and any included duties are the
+    purchase cost, the overseas shipping is the supplier shipping, and a stated minimum is the one
+    the landed cost converted (or kept beside, ADR-0039 §3)."""
+    inputs = landed.inputs
+    return SourceInputs(
+        purchase_cost_krw=landed.purchase_cost_krw,
+        supplier_shipping_krw=landed.overseas_shipping_krw,
+        minimum_sale_price_krw=landed.minimum_sale_price_krw,
+        minimum_applied=inputs.minimum_applied,
+        stated_minimum_sale_price_krw=landed.stated_minimum_sale_price_krw,
+        minimum_unresolved=inputs.minimum_unresolved,
+        landed_cost=landed,
+    )
+
+
 # ---------------------------------------------------------------- the calculation
 
 
@@ -550,6 +702,9 @@ class PricingDependencies:
     source_revision_id: str
     # ADR-0039 §3 (SP-03): whether the supplier's sales policy applies the minimum sale price.
     minimum_applied: bool = True
+    # ADR-0038 §4 (FX-02): every input of a source-currency price's landed cost
+    # (``LandedCost.dependency``); None for a KRW price.
+    landed_cost: tuple[tuple[str, object], ...] | None = None
 
     def fingerprint(self, context: PricingContextInput) -> str:
         return digest(
@@ -557,6 +712,9 @@ class PricingDependencies:
                 # Named only when the minimum is not applied, so every snapshot priced under the
                 # default policy keeps its fingerprint, and a policy change reprices the Item.
                 **({} if self.minimum_applied else {"minimum_applied": False}),
+                # Named only for a source-currency price, so every KRW fingerprint is unchanged,
+                # and a new rate, setting or product input reprices a foreign one.
+                **({} if self.landed_cost is None else {"landed_cost": dict(self.landed_cost)}),
                 "version": DEPENDENCY_VERSION,
                 "pricing_rule_version": PRICING_RULE_VERSION,
                 "item_id": self.item_id,

@@ -140,9 +140,16 @@ export const REASON_COPY = {
     '공급사 판매채널 문구를 확인할 수 없지만, 판매채널 제한을 적용하지 않도록 설정한 공급처입니다 (사용자 책임)',
   'M4_PRICING.PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED':
     '공급사 최저판매가가 있지만, 최저판매가를 적용하지 않도록 설정한 공급처입니다 (사용자 책임)',
-  // ADR-0038 §1 (O1a): a CNY or JPY source is not priced until the FX and landed-cost slice.
+  // ADR-0038 §1 (O1a): a quantity offer of a CNY or JPY source is never priced.
   'M4_PRICING.PRICING_SOURCE_CURRENCY_UNSUPPORTED':
-    '해외 통화(CNY·JPY) 가격의 상품은 아직 가격을 정할 수 없습니다 (환율 적용 준비 중)',
+    '해외 통화(CNY·JPY) 수량별 가격은 가격을 정할 수 없습니다',
+  // ADR-0038 §3, §4 (O2): the landed cost of a 구매대행 product, failing closed.
+  'M4_PRICING.PRICING_FX_UNAVAILABLE':
+    '환율(송금 보낼때 TTS)이 아직 없어 가격을 정할 수 없습니다. 설정 › 해외구매대행에서 환율을 갱신하세요.',
+  'M4_PRICING.PRICING_FX_STALE':
+    '환율이 영업일 3일보다 오래되어 가격을 정할 수 없습니다. 설정 › 해외구매대행에서 환율을 갱신하세요.',
+  'M4_PRICING.PRICING_OVERSEAS_SHIPPING_UNSET':
+    '해외 배송비가 없어 가격을 정할 수 없습니다. 상품의 해외 배송비를 입력하거나 설정 › 해외구매대행에서 기본값을 정하세요.',
   // B-PRICE1: the repin command's refusals.
   REGISTER_DRAFT_REVISION_MOVED: '초안이 바뀌었습니다. 화면을 새로 고친 뒤 다시 시도하세요.',
   REGISTER_REPIN_INTENT_OPEN: '이 초안의 등록 요청이 아직 진행 중이라 가격을 다시 고정할 수 없습니다.',
@@ -400,6 +407,13 @@ function readinessPanel(readiness) {
   );
 }
 
+// A source-currency amount is the page's own decimal text, shown in its currency, never converted.
+const SOURCE_CURRENCY_FORMAT = { CNY: (amount) => `¥${amount}`, JPY: (amount) => `${amount}円` };
+
+function sourcePrice(currency, amount) {
+  return SOURCE_CURRENCY_FORMAT[currency]?.(amount) ?? `${amount} ${currency}`;
+}
+
 export function itemRow(item) {
   const assets = item.publication_assets ?? [];
   return h(
@@ -423,6 +437,14 @@ export function itemRow(item) {
             item.stated_minimum_sale_price_krw === null || item.stated_minimum_sale_price_krw === undefined
               ? ' · 최저판매가 미적용 (사용자 설정)'
               : ` · 최저판매가 ${won(item.stated_minimum_sale_price_krw)} 미적용 (사용자 설정)`,
+          )
+        : null,
+      // ADR-0038 §4: a source-currency price shows what it was made from, as the server recorded it.
+      item.source_currency
+        ? h(
+            'span',
+            { class: 'mini', 'data-price-basis': item.source_currency },
+            ` · 원가 ${sourcePrice(item.source_currency, item.source_price)} · 환율(TTS) ${item.fx_publication_date ?? '—'} 기준`,
           )
         : null,
     ),
