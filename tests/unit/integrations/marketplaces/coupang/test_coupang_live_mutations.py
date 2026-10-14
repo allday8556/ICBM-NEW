@@ -154,6 +154,30 @@ def _owner(tmp_path: Path, transport: httpx.BaseTransport) -> CoupangTestProduct
     )
 
 
+def _seed_resumed_journal(tmp_path: Path, *, phase: str, seller_product_id: int) -> None:
+    bundle = ProductBundle.from_mapping(_bundle_mapping())
+    records = {
+        binding.synthetic_id: {
+            "state": "deleted",
+            "seller_product_id": 2000 + index,
+        }
+        for index, binding in enumerate(TEST_PRODUCT_BINDINGS, start=1)
+    }
+    records[TEST_PRODUCT_BINDINGS[0].synthetic_id] = {
+        "state": phase,
+        "seller_product_id": seller_product_id,
+    }
+    MutationJournal(tmp_path / "coupang-live-mutations.json").commit(
+        {
+            "version": 1,
+            "scope_id": SCOPE_ID,
+            "payload_digest": bundle.payload_digest,
+            "credential_generation": 1,
+            "records": records,
+        }
+    )
+
+
 def test_exact_eleven_create_update_readback_delete_once_each(tmp_path: Path) -> None:
     requests: list[httpx.Request] = []
     created: dict[int, tuple[str, str, str]] = {}
@@ -311,6 +335,137 @@ def test_duplicate_create_identity_holds_before_second_product_mutation(tmp_path
         _owner(tmp_path, httpx.MockTransport(handler)).run()
     assert refused.value.code == "COUPANG_MUTATION_DUPLICATE_CREATE_IDENTITY"
     assert calls == ["POST", "PUT", "GET", "DELETE", "POST"]
+
+
+def test_resumed_created_identity_is_reverified_before_update(tmp_path: Path) -> None:
+    seller_product_id = 1001
+    source_product_id = TEST_PRODUCT_BINDINGS[0].source_product_id
+    methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "code": "SUCCESS",
+                    "data": {
+                        "sellerProductId": seller_product_id,
+                        "sellerProductName": "ICBM TEST 1",
+                        "extraInfoMessage": "ICBM TEST 1 UPDATED",
+                        "status": "SAVED",
+                        "items": [{"externalVendorSku": source_product_id}],
+                    },
+                },
+            )
+        return httpx.Response(200, json={"code": "SUCCESS", "data": None})
+
+    _seed_resumed_journal(
+        tmp_path,
+        phase="created",
+        seller_product_id=seller_product_id,
+    )
+    result = _owner(tmp_path, httpx.MockTransport(handler)).run()
+
+    assert result.completed == 11
+    assert methods == ["GET", "PUT", "GET", "DELETE"]
+
+
+def test_resumed_created_scope_mismatch_holds_before_update(tmp_path: Path) -> None:
+    seller_product_id = 1001
+    methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        return httpx.Response(
+            200,
+            json={
+                "code": "SUCCESS",
+                "data": {
+                    "sellerProductId": seller_product_id,
+                    "sellerProductName": "AN EXISTING COUPANG PRODUCT",
+                    "status": "SAVED",
+                    "items": [{"externalVendorSku": "existing-product"}],
+                },
+            },
+        )
+
+    _seed_resumed_journal(
+        tmp_path,
+        phase="created",
+        seller_product_id=seller_product_id,
+    )
+    with pytest.raises(CoupangLiveMutationError) as refused:
+        _owner(tmp_path, httpx.MockTransport(handler)).run()
+
+    assert refused.value.code == "COUPANG_MUTATION_READBACK_NAME_MISMATCH"
+    assert methods == ["GET"]
+
+
+def test_resumed_verified_scope_mismatch_holds_before_delete(tmp_path: Path) -> None:
+    seller_product_id = 1001
+    methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        return httpx.Response(
+            200,
+            json={
+                "code": "SUCCESS",
+                "data": {
+                    "sellerProductId": seller_product_id,
+                    "sellerProductName": "ICBM TEST 1",
+                    "extraInfoMessage": "ICBM TEST 1 UPDATED",
+                    "status": "SAVED",
+                    "items": [{"externalVendorSku": "existing-product"}],
+                },
+            },
+        )
+
+    _seed_resumed_journal(
+        tmp_path,
+        phase="verified",
+        seller_product_id=seller_product_id,
+    )
+    with pytest.raises(CoupangLiveMutationError) as refused:
+        _owner(tmp_path, httpx.MockTransport(handler)).run()
+
+    assert refused.value.code == "COUPANG_MUTATION_READBACK_SCOPE_MISMATCH"
+    assert methods == ["GET"]
+
+
+def test_resumed_verified_identity_is_reverified_before_delete(tmp_path: Path) -> None:
+    seller_product_id = 1001
+    source_product_id = TEST_PRODUCT_BINDINGS[0].source_product_id
+    methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "code": "SUCCESS",
+                    "data": {
+                        "sellerProductId": seller_product_id,
+                        "sellerProductName": "ICBM TEST 1",
+                        "extraInfoMessage": "ICBM TEST 1 UPDATED",
+                        "status": "SAVED",
+                        "items": [{"externalVendorSku": source_product_id}],
+                    },
+                },
+            )
+        return httpx.Response(200, json={"code": "SUCCESS", "data": None})
+
+    _seed_resumed_journal(
+        tmp_path,
+        phase="verified",
+        seller_product_id=seller_product_id,
+    )
+    result = _owner(tmp_path, httpx.MockTransport(handler)).run()
+
+    assert result.completed == 11
+    assert methods == ["GET", "DELETE"]
 
 
 def test_real_transport_never_exists_under_tests(tmp_path: Path) -> None:
