@@ -72,6 +72,7 @@ from app.stages.register.contracts import (
     GuidanceResolutionView,
     IntentView,
     ItemView,
+    OverseasProjectionView,
     PreflightView,
     PreparationRevisionView,
     PreparationState,
@@ -1570,6 +1571,25 @@ class RegisterService:
         return intent
 
 
+def _overseas_view(result: Any) -> OverseasProjectionView | None:
+    """ADR-0038 §6 (O3): the cross-border inputs the owner read for a foreign unit, as read."""
+    assessment = getattr(result, "overseas", None)
+    summary = None if assessment is None else assessment.summary
+    if summary is None:
+        return None
+    return OverseasProjectionView(
+        source_currencies=summary.source_currencies,
+        source_countries=summary.source_countries,
+        duty_decisions=summary.duty_decisions,
+        duties_included=summary.duties_included,
+        shipping_address_id=summary.shipping_address_id,
+        importer=summary.importer,
+        delivery_days_min=summary.delivery_days_min,
+        delivery_days_max=summary.delivery_days_max,
+        settings_revision_no=summary.settings_revision_no,
+    )
+
+
 def _preflight_view(result: Any, *, source: str, matches: bool | None) -> PreflightView:
     """The owner's verdict, rendered. Every reason code it returned is carried."""
     return PreflightView(
@@ -1581,6 +1601,7 @@ def _preflight_view(result: Any, *, source: str, matches: bool | None) -> Prefli
         rule_version=result.rule_version,
         dependency_fingerprint=result.dependency_fingerprint,
         fingerprint_matches_snapshot=matches,
+        overseas=_overseas_view(result),
     )
 
 

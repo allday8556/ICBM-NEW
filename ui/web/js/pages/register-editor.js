@@ -546,6 +546,34 @@ function pane(index, title, copy, ...children) {
   );
 }
 
+// ADR-0038 §6 (O3): a 구매대행 unit's SmartStore cross-border inputs, as the server read them.
+// Shown only for a foreign unit; what keeps it from being projected is among the preflight reasons,
+// and what is not sent yet is listed as a blank in the snapshot preview.
+const DUTY_LABEL = { NOT_OVER_150: '150달러 이하(면세)', INCLUDED: '판매가에 포함', EXCLUDED: '구매자 부담' };
+
+function overseasBlock(unit, ctx) {
+  const overseas = unit.preflight?.overseas;
+  if (!overseas) return null;
+  const list = (values) => (values.length ? values.join(', ') : null);
+  const duties = overseas.duties_included === null ? null : overseas.duties_included ? '판매가에 포함 (관부가세 포함)' : '구매자 부담 (관부가세 별도)';
+  const days =
+    overseas.delivery_days_min === null ? null : `${overseas.delivery_days_min}~${overseas.delivery_days_max}일 (설정값, 마켓에는 보내지 않음)`;
+  return h(
+    'div',
+    { class: 'register-overseas', 'data-role': 'overseas-projection' },
+    h('div', { class: 'supplier-head-row' }, h('b', {}, '해외 구매대행'), chip('스마트스토어 해외상품', 'info')),
+    kv('원가 통화', list(overseas.source_currencies)),
+    kv('원산지 국가(공급처)', list(overseas.source_countries)),
+    kv('관부가세 기준', list(overseas.duty_decisions.map((d) => DUTY_LABEL[d] ?? d))),
+    kv('상품 표시(관부가세)', duties),
+    kv('해외 출고지 번호', overseas.shipping_address_id),
+    kv('수입자', overseas.importer),
+    kv('배송 소요일', days),
+    h('div', { class: 'mini' }, '원산지(수입)·KC 면제·통관 항목은 아직 보내지 않습니다. 스냅샷 미리보기의 빈 칸에서 확인하세요.'),
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => ctx.navigate('settings') }, '설정 › 해외구매대행 열기')),
+  );
+}
+
 function previewModal(unit) {
   const block = previewBlock(unit);
   if (!block) {
@@ -646,6 +674,7 @@ function editor(unit, ctx, labels, mode, step) {
       '배송·반품·A/S는 등록 정책에서 정합니다',
       h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => ctx.navigate('settings') }, '설정 › 등록 정책 열기')),
       preflightBlock(unit, labels),
+      overseasBlock(unit, ctx),
       unit.intent && unit.intent.attempts.length ? table(['시도', '결과', '오류 분류', '오류 코드', '시작'], unit.intent.attempts.map(attemptRow)) : null,
       scopeBlock(unit.scope),
       h('div', { class: 'supplier-actions', 'data-role': 'editor-actions' }, ...unit.actions.map((action) => actionCell(unit, action, reload))),

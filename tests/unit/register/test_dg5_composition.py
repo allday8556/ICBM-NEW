@@ -385,6 +385,6 @@ def test_a_guidance_image_without_a_safe_provider_reference_is_not_encodable() -
 
 def test_the_wire_encoding_is_v10() -> None:
     frozen = build_payload(ready(v3_req(), v3_unit())).payload
-    assert product.project(frozen).encoding_version == "smartstore-register-wire/v10"
-    assert product.WIRE_ENCODING_VERSION == "smartstore-register-wire/v10"
+    assert product.project(frozen).encoding_version == "smartstore-register-wire/v11"
+    assert product.WIRE_ENCODING_VERSION == "smartstore-register-wire/v11"
     assert OutputRole.DETAIL in {image.role for image in DETAILS}

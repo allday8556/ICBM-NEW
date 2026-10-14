@@ -117,6 +117,26 @@ class SourceGates:
         """``(item_id, code)`` for every gate the Items' sources put on ``marketplace_key``."""
         return self.read(marketplace_key, item_ids).gates
 
+    def suppliers(self, item_ids: Sequence[str]) -> tuple[tuple[str, str | None], ...]:
+        """``(item_id, supplier_key)`` of each Item's current source, in the given order; the key
+        is ``None`` for an Item with no current source member (ADR-0038 §6: the supplier whose
+        declared country is a purchase-agency listing's origin)."""
+        found: list[tuple[str, str | None]] = []
+        with self._store.reading() as unit:
+            for item_id in item_ids:
+                member = current_procurement(unit, item_id).member
+                key = (
+                    None
+                    if member is None
+                    else unit.session.execute(
+                        select(SourceProduct.supplier_key).where(
+                            SourceProduct.source_product_uid == member.source_product_uid
+                        )
+                    ).scalar_one_or_none()
+                )
+                found.append((item_id, key))
+        return tuple(found)
+
     def read(self, marketplace_key: str, item_ids: Sequence[str]) -> SourceReading:
         """The gates and the sales-policy pins, from one unit of work (SP-03): each supplier's
         policy is read once, and the same revision decides its gates and names its pin."""

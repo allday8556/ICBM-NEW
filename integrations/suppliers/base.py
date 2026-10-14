@@ -16,6 +16,8 @@ from enum import StrEnum
 from typing import Protocol
 
 SUPPLIER_KEY = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+# An ISO 3166-1 alpha-2 country code (``CN``, ``JP``).
+COUNTRY_CODE = re.compile(r"^[A-Z]{2}$")
 
 
 class SupplierTransport(StrEnum):
@@ -57,6 +59,10 @@ class SupplierProfile:
     # Every external host the supplier's pages may reach, over HTTP or in the browser.
     egress_hosts: frozenset[str]
     request_policy: RequestPolicy = field(default_factory=RequestPolicy)
+    # ADR-0038 §6 (O3): the country the supplier sells from, as an ISO 3166-1 alpha-2 code — a
+    # declared property of the supplier, never read from a page or derived from a currency. Only
+    # an overseas (구매대행) supplier declares one; ``None`` states nothing.
+    country: str | None = None
 
     def __post_init__(self) -> None:
         if not SUPPLIER_KEY.fullmatch(self.supplier_key):
@@ -65,6 +71,8 @@ class SupplierProfile:
             raise ValueError("supplier base_url must be https:// without a trailing slash")
         if not self.egress_hosts:
             raise ValueError("a supplier profile must declare its egress hosts")
+        if self.country is not None and not COUNTRY_CODE.fullmatch(self.country):
+            raise ValueError(f"invalid supplier country: {self.country!r}")
 
 
 @dataclass(frozen=True)

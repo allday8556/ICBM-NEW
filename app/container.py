@@ -193,6 +193,7 @@ from app.stages.register.execution import (
     create_job_definition,
 )
 from app.stages.register.model import RegistrationLifecycle
+from app.stages.register.overseas import OverseasListingReader
 from app.stages.register.preflight import RegistrationPreflightService
 from app.stages.register.service import RegisterService
 from app.stages.register.store import RegistrationStore
@@ -243,6 +244,7 @@ from integrations.suppliers.registry import (
     SITES,
     SUPPLIERS,
     repository_active,
+    source_country,
 )
 from integrations.suppliers.sites import PACKAGED_HOSTS, PACKAGED_SUPPLIERS, capture_policy_bytes
 from integrations.suppliers.superdelivery import PROFILE as SD_PROFILE
@@ -873,7 +875,8 @@ def build_container(
     )
     # ADR-0038 §3, §5: the 해외 구매대행 settings and the FX snapshot owner. The Korea Eximbank key
     # lives only in the OS secret store; the adapter is the only caller of its one host.
-    overseas_settings = OverseasSettingsService(OverseasSettingsStore(db, clock, audit))
+    overseas_settings_store = OverseasSettingsStore(db, clock, audit)
+    overseas_settings = OverseasSettingsService(overseas_settings_store)
     # ADR-0038 §4, §8 phase 1: a source product's own landed-cost inputs, over the settings'
     # defaults. The pricing owner reads them in its own unit of work.
     overseas_costs = OverseasCostsService(OverseasCostOverrideStore(db, clock, audit))
@@ -1003,6 +1006,13 @@ def build_container(
         source_gates=source_gates.read,
         # ADR-0033 G4: the store-wide Detail Guidance notices a product's choice resolves to.
         guidance=detail_guidance_store,
+        # ADR-0038 §6 (O3): a foreign unit's overseas settings and each Item's declared source
+        # country (the supplier definition's, never the currency).
+        overseas=OverseasListingReader(
+            settings=overseas_settings_store.current,
+            suppliers=source_gates.suppliers,
+            country_of=source_country,
+        ),
     )
     # Gate 1 G1-D (ADR-0015 §5): a Draft from the operator's Product DB selection. It composes the
     # owners above — the revalidated selection, the bound account, the current target policy, M4

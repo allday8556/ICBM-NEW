@@ -131,7 +131,12 @@ from integrations.marketplaces.smartstore.notice_schema import (
 # ``detail-renderer/v2``: its top and bottom Detail Guidance images around the detail images and the
 # body, each from the same Snapshot's ``guidance_assets``, which must equal the plan's notices
 # exactly (``WIRE_GUIDANCE_PLAN_MISMATCH``). A v1 or v2 Snapshot projects exactly as under v9.
-WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v10"
+# v11: ADR-0038 §6 (O3) — a foreign (구매대행) Snapshot's frozen ``overseas`` section: the overseas
+# 출고지 is ``claimDeliveryInfo.shippingAddressId`` and ``customsTaxType`` states the pinned duty
+# term (INCLUDED, or EXCLUDED when the user excluded the duties; FX-04). What the captured evidence
+# does not carry — the imported origin's code, the KC exemption and the business customs-clearance
+# flag — stays a named gap. A Snapshot without the section projects exactly as under v10.
+WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v11"
 
 # Architect ruling R1: the provider projection of the internal listing identity.
 SELLER_MANAGEMENT_CODE_PROJECTION: Final = "smartstore-seller-management-code/v1"
@@ -219,6 +224,27 @@ REGISTRATION_STOCK_QUANTITY: Final = 1
 REGISTRATION_MINOR_PURCHASABLE: Final = True
 ORIGIN_AREA_DETAIL_CODE: Final = "03"
 REGISTRATION_CUSTOMS_TAX_TYPE: Final = "NOT_APPLICABLE"
+# ADR-0038 §6 (O3), FX-04: a 구매대행 listing states what its pinned cost assumed — the duties are
+# included in the price (included above USD 150, or none owed at or under it), or the buyer pays
+# them because the user excluded them. The field and NOT_APPLICABLE are the canary's (wire v9); the
+# two 구매대행 values are ADR-0038 §6's.
+CUSTOMS_TAX_TYPE_INCLUDED: Final = "INCLUDED"
+CUSTOMS_TAX_TYPE_EXCLUDED: Final = "EXCLUDED"
+CUSTOMS_TAX_TYPE_VALUES: Final = (
+    REGISTRATION_CUSTOMS_TAX_TYPE,
+    CUSTOMS_TAX_TYPE_INCLUDED,
+    CUSTOMS_TAX_TYPE_EXCLUDED,
+)
+# The pinned duty decision (``app.stages.products.landed_cost.DutyDecision``) → the listing's term.
+CUSTOMS_TAX_TYPE_OF_DUTY: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "NOT_OVER_150": CUSTOMS_TAX_TYPE_INCLUDED,
+        "INCLUDED": CUSTOMS_TAX_TYPE_INCLUDED,
+        "EXCLUDED": CUSTOMS_TAX_TYPE_EXCLUDED,
+    }
+)
+# The frozen section a foreign Snapshot carries (``app.stages.register.overseas``).
+OVERSEAS_SECTION_VERSION: Final = "overseas-listing/v1"
 AFTER_SERVICE_GUIDE_CONTENT: Final = "상품 문의 및 A/S는 고객센터로 연락해 주세요."
 
 # The numbered option-name keys of the combination form.
@@ -231,6 +257,28 @@ GAP_NOTICE_TYPE_CHILD: Final = (
     f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DETAIL_ATTRIBUTE}.{FIELD_NOTICE}: required on registration, but"
     " the reviewed notice type has no documented request child in the provider notice schema, so"
     " no notice is emitted and none is ever guessed or taken from another type"
+)
+# ADR-0038 §6 (O3): the cross-border members the captured evidence does not carry. Each blocks a
+# foreign Snapshot only; none is filled from ADR-0038's prose, a default or a guess.
+GAP_OVERSEAS_ORIGIN_IMPORT: Final = (
+    f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DETAIL_ATTRIBUTE}.{FIELD_ORIGIN_AREA_INFO}: an imported"
+    " origin needs the import originAreaCode (02 group) of the source country and the importer;"
+    " the captured evidence names importer but no import code value, so the origin of a"
+    " 구매대행 listing is not projected"
+)
+GAP_OVERSEAS_KC_EXEMPTION: Final = (
+    f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DETAIL_ATTRIBUTE} KC certification exemption"
+    " (kcCertifiedProductExclusionYn = KC_EXEMPTION_OBJECT, kcExemptionType = OVERSEAS): the"
+    " enclosing structure and its values are not captured, so no KC exemption is projected"
+)
+GAP_OVERSEAS_CUSTOMS_CLEARANCE: Final = (
+    f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DELIVERY_INFO}.businessCustomsClearanceSaleYn: the field and"
+    " its default are not captured, so the 구매대행 (not business-cleared) term is not projected"
+)
+OVERSEAS_GAPS: Final = (
+    GAP_OVERSEAS_ORIGIN_IMPORT,
+    GAP_OVERSEAS_KC_EXEMPTION,
+    GAP_OVERSEAS_CUSTOMS_CLEARANCE,
 )
 GAP_OPTION_PRICE_SEMANTICS: Final = (
     f"{FIELD_OPTION_COMBINATIONS}[].price: whether an option combination price is absolute or a"
@@ -698,10 +746,11 @@ def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
             "WIRE_DOCUMENT_VALUE_INVALID",
             f"{attribute_path}.{FIELD_MINOR_PURCHASABLE} is not true",
         )
-    if attribute[FIELD_CUSTOMS_TAX_TYPE] != REGISTRATION_CUSTOMS_TAX_TYPE:
+    if attribute[FIELD_CUSTOMS_TAX_TYPE] not in CUSTOMS_TAX_TYPE_VALUES:
+        # NOT_APPLICABLE for a domestic listing; INCLUDED or EXCLUDED for a 구매대행 one (O3).
         raise WireContractError(
             "WIRE_DOCUMENT_VALUE_INVALID",
-            f"{attribute_path}.{FIELD_CUSTOMS_TAX_TYPE} is not {REGISTRATION_CUSTOMS_TAX_TYPE}",
+            f"{attribute_path}.{FIELD_CUSTOMS_TAX_TYPE} is not one of {CUSTOMS_TAX_TYPE_VALUES}",
         )
     if FIELD_OPTION_INFO in attribute:
         _validate_option_info(attribute[FIELD_OPTION_INFO], f"{attribute_path}.{FIELD_OPTION_INFO}")
@@ -1303,6 +1352,62 @@ def _delivery_info(payload: Mapping[str, Any]) -> dict[str, Any] | None:
     }
 
 
+_OVERSEAS_KEYS: Final = frozenset(
+    {
+        "version",
+        "source_currency",
+        "source_country",
+        "duty_decisions",
+        "shipping_address_id",
+        "importer",
+        "settings_revision_no",
+        "settings_fingerprint",
+    }
+)
+
+
+def _overseas(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """ADR-0038 §6 (O3): the frozen cross-border section of a foreign Snapshot, exactly, or
+    ``None`` for a Snapshot without one. A section that is not exactly one is refused."""
+    section = payload.get("overseas")
+    if section is None:
+        return None
+    if not isinstance(section, Mapping) or set(section) != _OVERSEAS_KEYS:
+        raise WireContractError("WIRE_OVERSEAS_MALFORMED", "overseas is not the frozen section")
+    if section["version"] != OVERSEAS_SECTION_VERSION:
+        raise WireContractError("WIRE_OVERSEAS_MALFORMED", f"overseas {section['version']!r}")
+    address = section["shipping_address_id"]
+    if (
+        isinstance(address, bool)
+        or not isinstance(address, int)
+        or not 0 < address <= MAX_PROVIDER_ADDRESS_ID
+    ):
+        raise WireContractError("WIRE_OVERSEAS_MALFORMED", "the overseas 출고지 is no address id")
+    importer, currency = section["importer"], section["source_currency"]
+    if not isinstance(importer, str) or not importer.strip():
+        raise WireContractError("WIRE_OVERSEAS_MALFORMED", "the importer is empty")
+    if not isinstance(currency, str) or not currency.strip():
+        raise WireContractError("WIRE_OVERSEAS_MALFORMED", "the source currency is empty")
+    decisions = section["duty_decisions"]
+    if (
+        not isinstance(decisions, list)
+        or not decisions
+        or not all(isinstance(d, str) and d in CUSTOMS_TAX_TYPE_OF_DUTY for d in decisions)
+    ):
+        raise WireContractError("WIRE_OVERSEAS_MALFORMED", "the duty decisions are not pinned")
+    return section
+
+
+def _customs_tax_type(section: Mapping[str, Any]) -> str:
+    """FX-04: the one term every Item's pinned duty decision states — never recomputed."""
+    terms = {CUSTOMS_TAX_TYPE_OF_DUTY[decision] for decision in section["duty_decisions"]}
+    if len(terms) != 1:
+        raise WireContractError(
+            "WIRE_OVERSEAS_DUTIES_INCONSISTENT", "the Items' pinned duty terms disagree"
+        )
+    return terms.pop()
+
+
 def project(payload: Mapping[str, Any]) -> WireProjection:
     """Project one frozen Snapshot payload onto the adopted SmartStore CREATE request.
 
@@ -1321,6 +1426,7 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
     plan = _detail_plan(payload)
     references = _image_references(items, detail_placed=plan is not None and plan.places_images)
     notice_type, notice_fields = _notice(payload)
+    overseas = _overseas(payload)
     gaps: list[str] = []
 
     detail_attribute: dict[str, Any] = {
@@ -1328,7 +1434,10 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
         FIELD_AFTER_SERVICE_INFO: _after_service_info(notice_fields, _policy_phone(payload)),
         FIELD_ORIGIN_AREA_INFO: {FIELD_ORIGIN_AREA_CODE: ORIGIN_AREA_DETAIL_CODE},
         FIELD_MINOR_PURCHASABLE: REGISTRATION_MINOR_PURCHASABLE,
-        FIELD_CUSTOMS_TAX_TYPE: REGISTRATION_CUSTOMS_TAX_TYPE,
+        # O3: a 구매대행 listing states its pinned duty term; every other one stays as under v9.
+        FIELD_CUSTOMS_TAX_TYPE: (
+            REGISTRATION_CUSTOMS_TAX_TYPE if overseas is None else _customs_tax_type(overseas)
+        ),
     }
     # D2.3: the child of the reviewed notice type, or a named gap — never another type's child.
     notice = _notice_document(notice_type, notice_fields)
@@ -1353,6 +1462,18 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
         FIELD_DETAIL_ATTRIBUTE: detail_attribute,
     }
     delivery_info = _delivery_info(payload)
+    if overseas is not None:
+        # ADR-0038 §6 (O3): a 구매대행 listing ships from the overseas 출고지. The rest of the
+        # account's delivery policy — its fees and its return address — is unchanged.
+        if delivery_info is None:
+            raise WireContractError(
+                "WIRE_OVERSEAS_DELIVERY_MISSING",
+                "a 구매대행 listing carries its overseas 출고지 in the delivery policy",
+            )
+        delivery_info[FIELD_CLAIM_DELIVERY_INFO][FIELD_SHIPPING_ADDRESS_ID] = overseas[
+            "shipping_address_id"
+        ]
+        gaps.extend(OVERSEAS_GAPS)
     if delivery_info is not None:
         origin_product[FIELD_DELIVERY_INFO] = delivery_info
     # smartstoreChannelProduct: both required members carry the value ICBM owns (5915900049 D1,

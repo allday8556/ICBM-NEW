@@ -85,6 +85,15 @@ from app.stages.register.model import (
     canonical_json,
     valid_listing_identity,
 )
+from app.stages.register.overseas import (
+    NOT_FOREIGN,
+    OVERSEAS_REASON_CODES,
+    ForeignPin,
+    OverseasAssessment,
+    OverseasReading,
+    assess,
+    is_foreign,
+)
 from app.stages.register.policy import (
     SATISFYING,
     STRONG_KEYS,
@@ -311,6 +320,8 @@ REASON_CODES: Final = frozenset(
         sanitize.SECRET_MATERIAL,
         sanitize.EXTERNAL_URL,
     }
+    # ADR-0038 §6 (O3): a 구매대행 unit whose cross-border inputs are missing or disagree.
+    | OVERSEAS_REASON_CODES
 )
 
 
@@ -587,6 +598,11 @@ class PinnedPrice:
     final_sale_price_krw: int
     price_basis: PriceBasis
     price_guard: PriceGuard
+    # ADR-0038 §4, §6 (O3): what a landed-cost price pinned about its source currency and its
+    # duties (FX-02, FX-04); both ``None`` for a KRW price. The snapshot id the fingerprint names
+    # already identifies them, so they add nothing to ``canonical``.
+    source_currency: str | None = None
+    duty_decision: str | None = None
 
     def canonical(self) -> dict[str, object]:
         return {
@@ -798,6 +814,9 @@ class ResolvedUnit:
     # ADR-0039 §1 (SP-03): ``(item_id, supplier_key, revision_no, fingerprint)`` of the sales-policy
     # revision each Item's supplier has; a supplier on the defaults names nothing.
     sales_policies: tuple[tuple[str, str, int, str], ...] = ()
+    # ADR-0038 §6 (O3): the overseas settings and the Items' declared source countries, read only
+    # for a foreign unit (an Item's pin is a landed-cost price); ``None`` for every other unit.
+    overseas: OverseasReading | None = None
 
 
 # ---------------------------------------------------------------- the result
@@ -820,6 +839,8 @@ class PreflightResult:
     resolved: ResolvedUnit
     prepared_assets: tuple[PreparedAsset, ...] = ()
     advisories: tuple[ResaleAdvisory, ...] = ()
+    # ADR-0038 §6 (O3): the cross-border assessment; nothing at all for a KRW unit.
+    overseas: OverseasAssessment = NOT_FOREIGN
 
     @property
     def codes(self) -> tuple[str, ...]:
@@ -1253,6 +1274,27 @@ def _after_service_reasons(request: PreflightRequest, target: TargetPolicy) -> l
     return [Reason(POLICY_AFTER_SERVICE_PHONE_MISSING, _R, "policy:after_service_telephone")]
 
 
+def foreign_pins(unit: ResolvedUnit) -> tuple[ForeignPin, ...]:
+    """ADR-0038 §6: what each pinned Item's price states about its currency and duties. An Item
+    without a pin is left out: ``DRAFT_PRICE_PIN_MISSING`` already holds the unit back."""
+    return tuple(
+        ForeignPin(item.item_id, item.pin.source_currency, item.pin.duty_decision)
+        for item in unit.items
+        if item.pin is not None
+    )
+
+
+def overseas_assessment(unit: ResolvedUnit) -> OverseasAssessment:
+    """ADR-0038 §6 (O3): the cross-border assessment of the unit — ``NOT_FOREIGN`` for a KRW one,
+    which therefore reads, states and freezes nothing new."""
+    return assess(
+        unit.marketplace_key,
+        foreign_pins(unit),
+        unit.overseas,
+        delivery_policy=unit.target.delivery_policy is not None,
+    )
+
+
 def detail_plan(request: PreflightRequest, unit: ResolvedUnit) -> DetailPlan | None:
     """The unit's URL-free detail plan (B-DETAIL), or ``None`` when there is none to compose.
 
@@ -1518,6 +1560,12 @@ def _sanitation_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[R
         },
         # ADR-0033 §5: a product's own notice text, named only when it chose something.
         **({} if request.guidance.is_default else {"guidance": request.guidance.encode()}),
+        # ADR-0038 §6 (O3): the importer label a foreign unit freezes, named only for one.
+        **(
+            {}
+            if (summary := overseas_assessment(unit).summary) is None
+            else {"overseas_importer": summary.importer}
+        ),
     }
     return [Reason(code, _B, where) for code, where in sanitize.problems(values, path="outbound")]
 
@@ -1728,6 +1776,13 @@ def candidate_dependencies(request: PreflightRequest, unit: ResolvedUnit) -> dic
         # one notice is resolved, so a unit with none keeps its earlier fingerprint. A new
         # revision, a period that starts or ends, or a changed product choice changes it.
         **({} if unit.guidance.empty else {"guidance": unit.guidance.canonical()}),
+        # ADR-0038 §6 (O3): the cross-border inputs, named only for a foreign unit, so a KRW unit
+        # keeps its earlier fingerprint. A settings change or another declared country changes it.
+        **(
+            {"overseas": unit.overseas.canonical()}
+            if unit.overseas is not None and is_foreign(foreign_pins(unit))
+            else {}
+        ),
         "conflicts": sorted([c.intent_id, c.state] for c in unit.conflicts),
     }
 
@@ -1743,6 +1798,7 @@ def evaluate(
         raise ValueError("a candidate is evaluated without any provider asset identity")
     metadata = unit.metadata
     plan = detail_plan(request, unit)
+    overseas = overseas_assessment(unit)
     reasons: list[Reason] = [
         *_account_reasons(unit, unit.target),
         *_unit_reasons(request, unit),
@@ -1761,6 +1817,7 @@ def evaluate(
         *_conflict_reasons(unit),
         *_duplicate_reasons(request, unit),
         *_sanitation_reasons(request, unit),
+        *overseas.reasons,
     ]
     dependencies = candidate_dependencies(request, unit)
     candidate = fingerprint(dependencies)
@@ -1796,4 +1853,5 @@ def evaluate(
         resolved=unit,
         prepared_assets=prepared_assets,
         advisories=request.advisories,
+        overseas=overseas,
     )

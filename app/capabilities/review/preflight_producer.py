@@ -93,6 +93,7 @@ from app.stages.products.source_gates import (
 )
 from app.stages.register import preparation as p
 from app.stages.register.authoring import RegistrationPreparationService
+from app.stages.register.overseas import OVERSEAS_REASON_CODES
 from app.stages.register.preflight import RegistrationPreflightService
 from app.stages.register.store import PreparationRecord, RegistrationStore
 
@@ -147,6 +148,8 @@ REVIEWED: Final = frozenset(
         p.PREPARED_ASSET_DUPLICATED,
         p.PROVIDER_ASSET_IDENTITY_MISSING,
     }
+    # ADR-0038 §6 (O3): a 구매대행 unit's missing or contradictory cross-border inputs.
+    | OVERSEAS_REASON_CODES
 )
 # M4 pricing readiness under this target's context: indexed here, and nowhere else.
 M4_PRICING_REVIEWED: Final = frozenset(
