@@ -370,7 +370,7 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
      - `AI 추천 적용` applies the exact result revision shown to the name as `AI_SUGGESTION`, against the Preparation revision read (ADR-0026 §7).
      - It is enabled only for a fresh OK result, on a saved Preparation whose name holds no confirmed value. A confirmed name is never overwritten.
      - `AI 추천 적용됨 · 저장하면 확인됩니다` marks an applied name. The operator's own save makes it `OPERATOR_CONFIRMED`.
-  2. `대표이미지`: the Item image editor. The bulk `배경 이미지 제거 / 리사이즈 / 이미지 편집` are inert. The bulk `이미지 자동번역` follows the Image Studio capability (below). `자동 선택 다시 실행` is the image owner's own.
+  2. `대표이미지`: the Item image editor. `이미지 자동번역` follows the Image Studio capability (below). `자동 선택 다시 실행` is the image owner's own.
   3. `옵션·가격`: the repin and the Items table. The price facts no read states read `데이터 없음`, and the option tools are inert.
   4. `상품정보고시`: the category requirements and their fields.
   5. `상세페이지`: the image-editor mode. `HTML 방식` is inert. The body is the authoring form's. `이미지 자동번역` follows the Image Studio capability (below). `미리보기` opens the snapshot preview, frozen notices included (G6). The top and bottom notices (ADR-0033 §5, G4):
@@ -387,14 +387,19 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
   - red: a BLOCKED or DUPLICATE reason;
   - grey: no preflight yet.
   - Hovering a step lists its reasons; clicking it moves to that step.
-- **AI controls are inert placeholders.** This covers `배경 이미지 제거` in 대표이미지, under owner decision 2026-10-08 (Issue #219 comment `6054956408`; ROADMAP, Issue #127). It keeps its approved position, disabled and marked 준비 중, and sends nothing. It becomes active only with its server owner. The two `이미지 자동번역` buttons have theirs since ADR-0041 I5, and stay such placeholders while it reads `NOT_CONFIGURED` (below).
+- **A control that cannot work is omitted.** Since #352 the editor draws no inert placeholder. `배경 이미지 제거`, `리사이즈` and `이미지 편집` are not shown until a server owner exists. Owner decision 2026-10-08 (Issue #219 comment `6054956408`) allowed such placeholders; it did not require them. The two `이미지 자동번역` buttons have their owner since ADR-0041 I5. They appear only while it reads READY (below).
 - **Edit mode is read-only.** No contract yet edits a registered listing on the marketplace. `상품수정` shows the registered unit's contents and says so. A unit with a Snapshot or an Intent is never authored in the editor.
 - **The register page is unchanged.** Every section the Gate 3 surface reads stays on `#/register`.
 
 ### 상품 편집기 › 이미지 자동번역 (ADR-0041 I5, I6)
 
-- **Two buttons, one panel.** `✨ 이미지 자동번역` sits in ② 대표이미지's bulk bar (the images the operator ticks in the panel, any role, D3) and in ⑤ 상세페이지 (the panel opens with the Item's detail images ticked). Both open the same Image Studio panel (`components/image-studio.js`) for the unit's Items.
-- **Live only when READY.** The buttons read `GET /api/v1/image-studio/capability`. While it reads `NOT_CONFIGURED` they keep their place as inert 준비 중 placeholders (`data-ai-placeholder`), send nothing, and their tooltip names what is missing: no OCR engine (`NoOcrProvider`, until I7), no translation task, or no AI provider (an approved CLIProxyAPI profile with its data-transfer approval). Production reads `NOT_CONFIGURED`. On a unit with a Snapshot or an Intent they stay inert too.
+- **Two buttons, one panel.** `✨ 이미지 자동번역` sits in ② 대표이미지 (the images the operator ticks in the panel, any role, D3) and in ⑤ 상세페이지 (the panel opens with the Item's detail images ticked). Both open the same Image Studio panel (`components/image-studio.js`) for the unit's Items.
+- **Shown only when READY.** The buttons read `GET /api/v1/image-studio/capability`. Each sits in an empty slot (`data-role="studio-slot"`). The button is drawn only when it reads READY and the unit is editable. Otherwise nothing is drawn and nothing is sent. The capability reads `NOT_CONFIGURED` when any of these is missing:
+  - an OCR engine (`NoOcrProvider`, until I7);
+  - the translation task;
+  - the AI provider (an approved CLIProxyAPI profile with its data-transfer approval).
+
+  Production reads `NOT_CONFIGURED`. On a unit with a Snapshot or an Intent the buttons are not drawn either.
 - **The run.** The panel shows every CONFIRMED source image of the chosen Item with what its selection does now (`원본 사용 · 대표/상세`, `번역본 사용 중`, `사용 안 함`, `쓰임 미정`) and whether its text was read. The operator ticks images (at most 30), picks `중국어 → 한국어` or `일본어 → 한국어` and presses `번역 시작`: one `image.translate` job, read until it ends. Only text is sent; the copy says so.
 - **One image's review.** `검토` opens it:
   - the original and the live preview side by side (a stateless `POST …/preview` PNG; nothing is stored), with `미리보기 · 완전함` or what overflowed;

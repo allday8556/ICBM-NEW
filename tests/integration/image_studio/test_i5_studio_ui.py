@@ -2,9 +2,9 @@
 
 The page runs in the installed browser; every request it makes is answered in-process by the
 application under test. Under the production binding (``NoOcrProvider``, no approved AI profile)
-both buttons stay inert 준비 중 placeholders naming what is missing, and pressing one sends
-nothing. With the fakes READY (the fake OCR engine and the application's own profiled provider
-answered by the AIS-1 fakes) the operator runs a translation from ⑤, reviews the regions — a
+neither button is drawn (a control that cannot work is omitted, #352), and nothing is sent.
+With the fakes READY (the fake OCR engine and the application's own profiled provider answered
+by the AIS-1 fakes) the operator runs a translation from ⑤, reviews the regions — a
 contact detail kept by default, a flagged region left out by 「모두 적용」 until it is confirmed —
 edits a Korean text, previews, 「적용」, 「확인 완료」 and 「되돌리기」. The selection moves to
 USE_DERIVED and back to USE_SOURCE through the M4 image owner, the source asset stays
@@ -127,7 +127,7 @@ def _region(page: Page, rid: str) -> Locator:
     return page.locator(f"{MODAL} [data-region='{rid}']")
 
 
-def test_both_buttons_stay_inert_and_name_what_is_missing_under_the_production_binding(
+def test_neither_button_is_drawn_under_the_production_binding(
     browser: Browser,  # noqa: F811
     client: TestClient,  # noqa: F811
     container: Container,  # noqa: F811
@@ -140,25 +140,21 @@ def test_both_buttons_stay_inert_and_name_what_is_missing_under_the_production_b
     with _page(browser, client, writes) as page:
         _open_editor(page, client, draft_id)
         page.wait_for_function(
-            "() => [...document.querySelectorAll('[data-studio-scope]')]"
-            ".every((b) => b.dataset.ready === 'false')"
+            "() => { const s = [...document.querySelectorAll('[data-role=studio-slot]')];"
+            " return s.length === 2 && s.every((x) => x.dataset.ready === 'false'); }"
         )
-        buttons = page.locator("[data-studio-scope]")
-        assert sorted(b.get_attribute("data-studio-scope") or "" for b in buttons.all()) == [
+        slots = page.locator("[data-role='studio-slot']")
+        assert sorted(s.get_attribute("data-studio-slot") or "" for s in slots.all()) == [
             "detail",
             "selected",
         ]
-        for button in buttons.all():
-            assert button.get_attribute("aria-disabled") == "true"
-            assert button.get_attribute("data-ai-placeholder") == "이미지 자동번역"
-            inert = button.get_attribute("data-inert") or ""
-            assert "준비 중" in inert and "OCR 엔진이 설치되지 않았습니다" in inert
-            assert "AI 번역 연결" in inert
-            assert "준비 중" in (button.get_attribute("title") or "")
+        # Nothing is drawn: no button, no placeholder, no bulk bar.
+        assert page.locator("[data-studio-scope]").count() == 0
+        assert page.locator("[data-ai-placeholder]").count() == 0
+        assert page.locator("[data-role='image-bulk']").count() == 0
+        assert all(s.inner_html() == "" for s in slots.all())
         page.locator(".stepper .step[data-step='images']").click()
-        page.locator("[data-studio-scope='selected']").click(force=True)
         page.locator(".stepper .step[data-step='detail']").click()
-        page.locator("[data-studio-scope='detail']").click(force=True)
         assert page.locator(MODAL).count() == 0
         _no_horizontal_scroll(page)
     assert writes == []

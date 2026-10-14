@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -21,6 +22,8 @@ from integrations.marketplaces.coupang.live_mutations import (
     SCOPE_ID,
     TEST_PRODUCT_BINDINGS,
     CoupangAmbiguousCreateRecovery,
+    CoupangCorrectedAmbiguousCreateCompletion,
+    CoupangCorrectedRejectedTestProductMutationRun,
     CoupangLiveMutationError,
     CoupangRemainingTestProductMutationRun,
     CoupangTestProductMutationRun,
@@ -92,7 +95,7 @@ def _create(index: int, source_product_id: str) -> dict[str, object]:
                     {
                         "imageOrder": 0,
                         "imageType": "REPRESENTATION",
-                        "cdnPath": "vendor-item-cdn.invalid/icbm-test.jpg",
+                        "vendorPath": "https://images.example.com/icbm-test.jpg",
                     }
                 ],
                 "attributes": [{"attributeTypeName": "수량", "attributeValueName": "1개"}],
@@ -121,6 +124,40 @@ def _bundle_mapping() -> dict[str, object]:
             for index, binding in enumerate(TEST_PRODUCT_BINDINGS, start=1)
         ]
     }
+
+
+@pytest.mark.parametrize(
+    ("location", "message"),
+    [
+        (
+            {"cdnPath": "vendor-item-cdn.invalid/icbm-test.jpg"},
+            "existing Coupang CDN path",
+        ),
+        ({"vendorPath": "http://images.example.com/test.jpg"}, "public HTTPS"),
+        ({"vendorPath": "https://localhost/test.jpg"}, "public HTTPS"),
+        (
+            {
+                "vendorPath": "https://images.example.com/test.jpg",
+                "cdnPath": "vendor-item-cdn.coupangcdn.com/test.jpg",
+            },
+            "exactly one",
+        ),
+    ],
+)
+def test_bundle_rejects_unsafe_live_image_location(location: dict[str, str], message: str) -> None:
+    bundle = deepcopy(_bundle_mapping())
+    products = bundle["products"]
+    assert isinstance(products, list)
+    create = products[0]["create"]
+    assert isinstance(create, dict)
+    items = create["items"]
+    assert isinstance(items, list)
+    item = items[0]
+    assert isinstance(item, dict)
+    item["images"] = [{"imageOrder": 0, "imageType": "REPRESENTATION", **location}]
+
+    with pytest.raises(ValueError, match=message):
+        ProductBundle.from_mapping(bundle)
 
 
 def _owner(tmp_path: Path, transport: httpx.BaseTransport) -> CoupangTestProductMutationRun:
@@ -213,6 +250,103 @@ def _continuation_owner(
         journal=MutationJournal(tmp_path / "coupang-live-mutations.json"),
         transport=transport,
         environ={},
+    )
+
+
+def _corrected_owner(
+    tmp_path: Path, transport: httpx.BaseTransport, prior_digest: str
+) -> CoupangCorrectedRejectedTestProductMutationRun:
+    bundle = ProductBundle.from_mapping(_bundle_mapping())
+    credentials = Credentials("access", "secret", "A0001", 1)
+    context = AuthContext(
+        credentials,
+        Market.KR,
+        IpAllowlistDeclaration.create(
+            SOURCE_IP,
+            credential_generation=1,
+            recorded_at=NOW,
+        ),
+    )
+    approval = MutationApproval.create(
+        scope_id=SCOPE_ID,
+        vendor_id="A0001",
+        credential_generation=1,
+        source_ip=SOURCE_IP,
+        payload_digest=bundle.payload_digest,
+        approved_at=NOW - timedelta(minutes=1),
+        expires_at=NOW + timedelta(hours=1),
+    )
+    return CoupangCorrectedRejectedTestProductMutationRun(
+        context=context,
+        approval=approval,
+        bundle=bundle,
+        clock=Clock(NOW),
+        clock_preflight=ClockPreflight.create(0.5, checked_at=NOW),
+        journal=MutationJournal(tmp_path / "coupang-live-mutations.json"),
+        transport=transport,
+        environ={},
+        prior_payload_digest=prior_digest,
+    )
+
+
+def _corrected_recovery_owner(
+    tmp_path: Path, transport: httpx.BaseTransport, prior_digest: str
+) -> CoupangCorrectedAmbiguousCreateCompletion:
+    bundle = ProductBundle.from_mapping(_bundle_mapping())
+    credentials = Credentials("access", "secret", "A0001", 1)
+    context = AuthContext(
+        credentials,
+        Market.KR,
+        IpAllowlistDeclaration.create(
+            SOURCE_IP,
+            credential_generation=1,
+            recorded_at=NOW,
+        ),
+    )
+    approval = MutationApproval.create(
+        scope_id=SCOPE_ID,
+        vendor_id="A0001",
+        credential_generation=1,
+        source_ip=SOURCE_IP,
+        payload_digest=bundle.payload_digest,
+        approved_at=NOW - timedelta(minutes=1),
+        expires_at=NOW + timedelta(hours=1),
+    )
+    return CoupangCorrectedAmbiguousCreateCompletion(
+        context=context,
+        approval=approval,
+        bundle=bundle,
+        clock=Clock(NOW),
+        clock_preflight=ClockPreflight.create(0.5, checked_at=NOW),
+        journal=MutationJournal(tmp_path / "coupang-live-mutations.json"),
+        transport=transport,
+        environ={},
+        prior_payload_digest=prior_digest,
+    )
+
+
+def _seed_corrected_completed_journal(tmp_path: Path, prior_digest: str) -> None:
+    bundle = ProductBundle.from_mapping(_bundle_mapping())
+    records = {
+        binding.synthetic_id: {
+            "state": "deleted",
+            "seller_product_id": 2000 + index,
+        }
+        for index, binding in enumerate(TEST_PRODUCT_BINDINGS, start=1)
+    }
+    records[TEST_PRODUCT_BINDINGS[0].synthetic_id] = {
+        "state": "create_inflight",
+        "payload_digest": prior_digest,
+    }
+    MutationJournal(tmp_path / "coupang-live-mutations.json").commit(
+        {
+            "version": 2,
+            "scope_id": SCOPE_ID,
+            "payload_digest": bundle.payload_digest,
+            "prior_payload_digest": prior_digest,
+            "credential_generation": 1,
+            "records": records,
+        }
     )
 
 
@@ -569,6 +703,171 @@ def test_continuation_requires_exact_test_one_barrier_and_ten_pending_records(
     assert calls == 0
 
 
+def _seed_prior_rejections(tmp_path: Path, prior_digest: str) -> None:
+    MutationJournal(tmp_path / "coupang-live-mutations.json").commit(
+        {
+            "version": 1,
+            "scope_id": SCOPE_ID,
+            "payload_digest": prior_digest,
+            "credential_generation": 1,
+            "records": {
+                TEST_PRODUCT_BINDINGS[0].synthetic_id: {"state": "create_inflight"},
+                **{
+                    binding.synthetic_id: {"state": "create_rejected"}
+                    for binding in TEST_PRODUCT_BINDINGS[1:]
+                },
+            },
+        }
+    )
+
+
+def test_corrected_payload_retries_only_explicit_old_rejections_once(tmp_path: Path) -> None:
+    prior_digest = "a" * 64
+    _seed_prior_rejections(tmp_path, prior_digest)
+    requests: list[httpx.Request] = []
+
+    def rejected(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "code": "ERROR",
+                "errorCode": "IMAGE_INVALID",
+                "message": "new payload remains invalid",
+            },
+        )
+
+    result = _corrected_owner(tmp_path, httpx.MockTransport(rejected), prior_digest).run()
+
+    assert (result.completed, result.attempted) == (0, 10)
+    assert len(requests) == 10
+    assert all(request.method == "POST" for request in requests)
+    persisted = json.loads((tmp_path / "coupang-live-mutations.json").read_text())
+    assert persisted["version"] == 2
+    assert persisted["prior_payload_digest"] == prior_digest
+    assert persisted["payload_digest"] == result.payload_digest
+    assert persisted["records"][TEST_PRODUCT_BINDINGS[0].synthetic_id] == {
+        "state": "create_inflight",
+        "payload_digest": prior_digest,
+    }
+    assert all(
+        persisted["records"][binding.synthetic_id]["state"] == "create_rejected"
+        for binding in TEST_PRODUCT_BINDINGS[1:]
+    )
+
+
+def test_corrected_payload_refuses_any_old_state_that_was_not_explicit_rejection(
+    tmp_path: Path,
+) -> None:
+    prior_digest = "b" * 64
+    _seed_prior_rejections(tmp_path, prior_digest)
+    path = tmp_path / "coupang-live-mutations.json"
+    state = json.loads(path.read_text())
+    state["records"][TEST_PRODUCT_BINDINGS[1].synthetic_id] = {"state": "pending"}
+    MutationJournal(path).commit(state)
+    calls = 0
+
+    def forbidden(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(500)
+
+    with pytest.raises(CoupangLiveMutationError) as refused:
+        _corrected_owner(tmp_path, httpx.MockTransport(forbidden), prior_digest).run()
+
+    assert refused.value.code == "COUPANG_CORRECTED_JOURNAL_SCOPE_INVALID"
+    assert calls == 0
+
+
+def test_corrected_recovery_never_recreates_and_completes_test_one(tmp_path: Path) -> None:
+    prior_digest = "c" * 64
+    _seed_corrected_completed_journal(tmp_path, prior_digest)
+    requests: list[httpx.Request] = []
+    updated = False
+    first = TEST_PRODUCT_BINDINGS[0]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal updated
+        requests.append(request)
+        if "external-vendor-sku-codes" in request.url.path:
+            return httpx.Response(
+                200,
+                json={
+                    "code": "SUCCESS",
+                    "data": [
+                        {
+                            "vendorId": "A0001",
+                            "sellerProductName": "ICBM TEST 1",
+                            "sellerProductId": 1001,
+                        }
+                    ],
+                },
+            )
+        if request.method == "PUT":
+            document = json.loads(request.content)
+            assert document["sellerProductId"] == 1001
+            assert document["sellerProductName"] == "ICBM TEST 1 UPDATED"
+            assert document["items"][0]["externalVendorSku"] == first.source_product_id
+            updated = True
+            return httpx.Response(200, json={"code": "SUCCESS", "data": 1001})
+        if request.method == "DELETE":
+            return httpx.Response(200, json={"code": "SUCCESS", "data": None})
+        assert request.method == "GET"
+        return httpx.Response(
+            200,
+            json={
+                "code": "SUCCESS",
+                "data": {
+                    "sellerProductId": 1001,
+                    "sellerProductName": "ICBM TEST 1 UPDATED" if updated else "ICBM TEST 1",
+                    "vendorId": "A0001",
+                    "status": "SAVED",
+                    "items": [
+                        {
+                            "externalVendorSku": first.source_product_id,
+                            "sellerProductItemId": 3001,
+                            "vendorItemId": None,
+                        }
+                    ],
+                },
+            },
+        )
+
+    result = _corrected_recovery_owner(tmp_path, httpx.MockTransport(handler), prior_digest).run()
+
+    assert (result.completed, result.total) == (1, 1)
+    assert [request.method for request in requests] == ["GET", "GET", "PUT", "GET", "DELETE"]
+    assert "POST" not in {request.method for request in requests}
+    state = json.loads((tmp_path / "coupang-live-mutations.json").read_text())
+    assert state["records"][first.synthetic_id] == {
+        "state": "deleted",
+        "seller_product_id": 1001,
+    }
+
+
+def test_corrected_recovery_zero_match_preserves_ambiguity_and_never_creates(
+    tmp_path: Path,
+) -> None:
+    prior_digest = "d" * 64
+    _seed_corrected_completed_journal(tmp_path, prior_digest)
+    requests: list[httpx.Request] = []
+
+    def empty(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"code": "SUCCESS", "data": []})
+
+    with pytest.raises(CoupangLiveMutationError) as refused:
+        _corrected_recovery_owner(tmp_path, httpx.MockTransport(empty), prior_digest).run()
+
+    assert refused.value.code == "COUPANG_MUTATION_RECOVERY_NO_POSITIVE_MATCH"
+    assert [request.method for request in requests] == ["GET"]
+    state = json.loads((tmp_path / "coupang-live-mutations.json").read_text())
+    assert state["records"][TEST_PRODUCT_BINDINGS[0].synthetic_id] == {
+        "state": "create_inflight",
+        "payload_digest": prior_digest,
+    }
+
+
 def test_documented_create_rejection_is_not_recorded_as_ambiguous(tmp_path: Path) -> None:
     calls = 0
 
@@ -585,9 +884,77 @@ def test_documented_create_rejection_is_not_recorded_as_ambiguous(tmp_path: Path
 
     assert refused.value.error_class.value == "VALIDATION"
     assert refused.value.code == "COUPANG_MUTATION_PROVIDER_REJECTED"
+    assert refused.value.provider_message == "validation failed"
     assert calls == 1
     persisted = json.loads((tmp_path / "coupang-live-mutations.json").read_text())
     first = persisted["records"][TEST_PRODUCT_BINDINGS[0].synthetic_id]
+    assert first == {"state": "create_rejected", "provider_message": "validation failed"}
+
+
+def test_provider_rejection_keeps_only_bounded_redacted_diagnostics(tmp_path: Path) -> None:
+    submitted_name = "ICBM TEST 1"
+    submitted_sku = TEST_PRODUCT_BINDINGS[0].source_product_id
+
+    def rejected(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "code": "ERROR",
+                "data": {
+                    "code": "ERROR",
+                    "errorCode": "PRODUCT_VALIDATION_42",
+                    "message": f"{submitted_name} has an invalid image for {submitted_sku}",
+                    "invalidInputs": [
+                        {
+                            "name": "items[0].images[0].cdnPath",
+                            "type": "INVALID",
+                            "message": f"value from {submitted_sku} is not accepted",
+                        }
+                    ],
+                },
+            },
+        )
+
+    with pytest.raises(CoupangLiveMutationError) as refused:
+        _owner(tmp_path, httpx.MockTransport(rejected)).run()
+
+    assert refused.value.provider_code == "PRODUCT_VALIDATION_42"
+    assert refused.value.provider_message == ("[redacted] has an invalid image for [redacted]")
+    assert refused.value.provider_invalid_input == (
+        "items[0].images[0].cdnPath: INVALID: value from [redacted] is not accepted"
+    )
+    persisted_text = (tmp_path / "coupang-live-mutations.json").read_text()
+    assert submitted_name not in persisted_text
+    assert submitted_sku not in persisted_text
+    first = json.loads(persisted_text)["records"][TEST_PRODUCT_BINDINGS[0].synthetic_id]
+    assert first == {
+        "state": "create_rejected",
+        "provider_code": "PRODUCT_VALIDATION_42",
+        "provider_message": "[redacted] has an invalid image for [redacted]",
+        "provider_invalid_input": (
+            "items[0].images[0].cdnPath: INVALID: value from [redacted] is not accepted"
+        ),
+    }
+
+
+def test_provider_diagnostic_drops_authorization_shaped_messages(tmp_path: Path) -> None:
+    def rejected(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "code": "ERROR",
+                "message": "Authorization Bearer should never survive",
+                "data": None,
+            },
+        )
+
+    with pytest.raises(CoupangLiveMutationError) as refused:
+        _owner(tmp_path, httpx.MockTransport(rejected)).run()
+
+    assert refused.value.provider_message is None
+    first = json.loads((tmp_path / "coupang-live-mutations.json").read_text())["records"][
+        TEST_PRODUCT_BINDINGS[0].synthetic_id
+    ]
     assert first == {"state": "create_rejected"}
 
 

@@ -4,13 +4,10 @@
 // 대표이미지, 옵션·가격, 상품정보고시, 상세페이지, 기타 등록정보. Phase 1 places the REGISTER owner's
 // existing pieces by step and adds no contract: the unit read (GET /api/v1/register/units/{draft}),
 // the authoring form and its save, the category requirements, the image editor, the repin, the
-// preflight with its area-classified reasons, the snapshot preview and the unit's own actions. A v29
-// slot no owner fills yet keeps its place and reads 데이터 없음 or 준비 중 (owner decision 가); a
-// control without a contract is markInert. The bottom 등록 준비 strip colours each step from the
-// server's preflight reasons only: nothing here judges readiness. An AI control (background
-// removal, image translation) keeps its approved place as an inert 준비 중 placeholder that sends
-// nothing until its server owner exists (owner decision 2026-10-08, Issue #219 comment 6054956408;
-// ROADMAP, Issue #127). 상품수정 is read-only in phase 1: no contract edits a registered listing yet,
+// preflight with its area-classified reasons, the snapshot preview and the unit's own actions. A
+// control without a real owner is omitted from the operator surface. The bottom 등록 준비 strip
+// colours each step from the server's preflight reasons only: nothing here judges readiness.
+// 상품수정 is read-only in phase 1: no contract edits a registered listing yet,
 // and a unit with a Snapshot or an Intent is never authored here.
 //
 // ADR-0033 G4: the 상세페이지 step's 상단 공지 and 하단 공지 show the notices the server resolves for
@@ -27,7 +24,6 @@
 
 import { ApiError, getJson, sendJson } from '../core/api.js';
 import { fragment, h } from '../core/dom.js';
-import { markInert } from '../core/inert.js';
 import { closeModal, openModal } from '../core/modal.js';
 import { platformTag } from '../core/platform.js';
 import { toast } from '../core/toast.js';
@@ -86,15 +82,6 @@ function noData(label) {
   return h('div', { class: 'kv', 'data-no-data': label }, h('span', {}, label), h('b', { class: 'no-data' }, NO_DATA));
 }
 
-function pending(label, copy) {
-  return markInert(h('button', { type: 'button', class: 'btn' }, label), copy ?? label);
-}
-
-// An AI control ahead of its server owner: its place only, inert, sending nothing.
-function aiPending(label) {
-  return markInert(h('button', { type: 'button', class: 'btn ai', 'data-ai-placeholder': label }, `✨ ${label}`), `${label} · 준비 중`);
-}
-
 // The server's preflight reasons, grouped by step. Without a preflight the step is not judged.
 function stepStates(unit) {
   const reasons = unit.preflight?.reasons ?? [];
@@ -114,11 +101,11 @@ function readyStrip(unit, states, go) {
       const { state, reasons } = states[index];
       const lines =
         state === 'none'
-          ? [h('li', {}, REASON_COPY[unit.preflight_unavailable_reason] ?? 'Preflight 평가 전입니다. 기타 등록정보의 Preflight 평가로 판정합니다.')]
+          ? [h('li', {}, REASON_COPY[unit.preflight_unavailable_reason] ?? '아직 등록 준비를 확인하지 않았습니다.')]
           : state === 'good'
             ? [h('li', {}, '이 단계의 사전 점검 사유가 없습니다.')]
             : reasons.map((item) =>
-                h('li', { 'data-reason': item.code }, REASON_COPY[item.code] ?? item.code, item.subject ? h('span', { class: 'tip-sub' }, ` · ${item.subject}`) : null),
+                h('li', { 'data-reason': item.code }, REASON_COPY[item.code] ?? '확인이 필요한 항목입니다.'),
               );
       return h(
         'button',
@@ -149,11 +136,12 @@ function platformTabs(unit) {
   return h(
     'div',
     { class: 'pf-tabs', 'data-role': 'platform-tabs' },
-    h('button', { type: 'button', class: 'on', 'aria-pressed': 'true' }, platformTag(unit.marketplace_key, { name: true })),
-    ...['coupang', 'st11']
-      .filter((key) => key !== unit.marketplace_key)
-      .map((key) => markInert(h('button', { type: 'button', 'aria-pressed': 'false' }, platformTag(key, { name: true })), '플랫폼별 값은 준비 중')),
+    h('span', { class: 'on', 'aria-label': '등록할 판매 채널' }, platformTag(unit.marketplace_key, { name: true })),
   );
+}
+
+function editorDisplayName(unit) {
+  return unit.authored?.inputs?.name?.value?.trim() || '상품 등록';
 }
 
 function readOnlyInputs(unit) {
@@ -326,7 +314,6 @@ function tagsBlock(unit, reload) {
     'div',
     { class: 'tags' },
     ...(tags.length ? tags.map((tag) => h('span', { class: 'tag' }, `#${tag}`)) : [h('span', { class: 'no-data' }, NO_DATA)]),
-    pending('태그 편집', '태그 편집은 준비 중'),
   );
   const productGroupId = unit.items[0]?.product_group_id;
   if (unit.marketplace_key !== 'smartstore' || !productGroupId) {
@@ -555,10 +542,10 @@ function pane(index, title, copy, ...children) {
 function previewModal(unit) {
   const block = previewBlock(unit);
   if (!block) {
-    openModal({ eyebrow: '미리보기', title: unit.unit_ref, body: h('div', { class: 'note' }, '스냅샷을 고정한 뒤 마켓 미리보기를 볼 수 있습니다.') });
+    openModal({ eyebrow: '미리보기', title: '등록 미리보기', body: h('div', { class: 'note' }, '등록 내용을 확정한 뒤 마켓 미리보기를 볼 수 있습니다.') });
     return;
   }
-  openModal({ eyebrow: '미리보기', title: unit.unit_ref, help: '고정한 스냅샷이 마켓에 보낼 내용을 서버가 그대로 보여 줍니다.', body: block });
+  openModal({ eyebrow: '미리보기', title: '등록 미리보기', help: '확정한 등록 내용을 마켓 전송 전 그대로 보여 줍니다.', body: block });
   block.querySelector('[data-action="PREVIEW_SNAPSHOT"]')?.click();
 }
 
@@ -594,8 +581,8 @@ function editor(unit, ctx, labels, mode, step) {
     pane(
       1,
       '① 상품 기본정보',
-      '플랫폼마다 다른 값은 준비 중 · 지금은 대상 플랫폼 하나',
-      h('div', { class: 'hero' }, mainImage(unit), h('div', { class: 'stack' }, h('div', { class: 'row' }, pending('수집 이미지에서 선택'), pending('업로드'), pending('이미지 편집')), h('span', { class: 'mini' }, '메인 이미지는 대표이미지 단계의 대표 이미지입니다.'))),
+      '판매 채널에 표시할 기본 정보를 확인합니다',
+      h('div', { class: 'hero' }, mainImage(unit), h('div', { class: 'stack' }, h('span', { class: 'mini' }, '대표 이미지와 상품 기본정보를 확인해 주세요.'))),
       platformTabs(unit),
       ...(parts ? [parts.head, parts.category, aiCategoryBlock(unit, reload), parts.name, aiNameBlock(unit, reload)] : readOnlyInputs(unit)),
       tagsBlock(unit, reload),
@@ -604,15 +591,7 @@ function editor(unit, ctx, labels, mode, step) {
       2,
       '② 상품 대표이미지',
       '대표 · 추가 · 상세 · 사용 안 함을 이미지마다 정합니다',
-      h(
-        'div',
-        { class: 'bulk', 'data-role': 'image-bulk' },
-        h('span', { class: 'count' }, '선택한 이미지에'),
-        aiPending('배경 이미지 제거'),
-        pending('리사이즈', '리사이즈는 준비 중'),
-        pending('이미지 편집', '이미지 편집은 준비 중'),
-        translateButton(unit, { scope: 'selected', editable }),
-      ),
+      translateButton(unit, { scope: 'selected', editable }),
       editable ? null : h('div', { class: 'note' }, '등록 요청이나 스냅샷이 있어 이미지는 보기만 합니다.'),
       ...unit.items.map((item) =>
         h('div', { class: 'register-item-images', 'data-item': item.item_id }, h('b', {}, `품목 ${item.ordinal}`), itemImagesEditor(item.item_id, { editable, onChanged: reload })),
@@ -621,13 +600,11 @@ function editor(unit, ctx, labels, mode, step) {
     pane(
       3,
       '③ 옵션 · 가격',
-      '판매가는 M4가 매긴 고정 가격입니다',
-      h('div', { class: 'calc' }, ...['도매가', '공급처 배송비', '환율', '원가 합계', '최저판매가', '가격 기준', '상품에 포함할 배송비'].map((label) => h('div', { class: 'box', 'data-no-data': label }, h('span', { class: 'mini' }, label), h('b', { class: 'no-data' }, NO_DATA)))),
+      '확정된 판매가와 옵션을 확인합니다',
       repinBlock(unit, reload),
       unit.item_facts_unavailable_reason ? reason(unit.item_facts_unavailable_reason) : null,
-      table(['품목', '고정 판매가', '가격 근거', '현재 M4 판매가', '기본 준비', '가격 준비', '등록 품목 키', '이미지'], unit.items.map(itemRow)),
+      table(['품목', '판매가', '현재 판매가', '기본정보', '가격', '이미지'], unit.items.map(itemRow)),
       parts ? parts.options : null,
-      h('div', { class: 'row' }, pending('＋ 옵션 축 추가', '옵션 편집은 준비 중'), pending('옵션별 이미지', '옵션별 이미지는 준비 중'), pending('일괄 가격 변경', '일괄 가격 변경은 준비 중')),
     ),
     pane(
       4,
@@ -640,10 +617,10 @@ function editor(unit, ctx, labels, mode, step) {
       5,
       '⑤ 상세페이지',
       '상단 공지 → 상세 이미지 → 본문 → 하단 공지',
-      h('div', { class: 'mode-switch' }, h('button', { type: 'button', class: 'mode-card on' }, h('b', {}, '이미지 에디터 방식'), h('span', { class: 'mini' }, '상세 이미지는 대표이미지 단계에서 「상세」로 고릅니다')), markInert(h('button', { type: 'button', class: 'mode-card' }, h('b', {}, 'HTML 방식'), h('span', { class: 'mini' }, '준비 중')), 'HTML 방식은 준비 중')),
+      h('div', { class: 'note' }, '상세 이미지는 대표이미지 단계에서 「상세」로 지정할 수 있습니다.'),
       guidance.TOP,
       parts ? parts.detail : h('div', { class: 'kv' }, h('span', {}, '상세 본문'), h('b', {}, unit.authored?.inputs?.detail_body ?? '—')),
-      h('div', { class: 'row' }, pending('이미지 편집', '상세 이미지 편집은 준비 중'), translateButton(unit, { scope: 'detail', editable }), h('button', { type: 'button', class: 'btn', 'data-action': 'open-preview', onclick: () => previewModal(unit) }, '미리보기')),
+      h('div', { class: 'row' }, translateButton(unit, { scope: 'detail', editable }), h('button', { type: 'button', class: 'btn', 'data-action': 'open-preview', onclick: () => previewModal(unit) }, '미리보기')),
       guidance.BOTTOM,
     ),
     pane(
@@ -652,14 +629,18 @@ function editor(unit, ctx, labels, mode, step) {
       '배송·반품·A/S는 등록 정책에서 정합니다',
       h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => ctx.navigate('settings') }, '설정 › 등록 정책 열기')),
       preflightBlock(unit, labels),
-      unit.intent && unit.intent.attempts.length ? table(['시도', '결과', '오류 분류', '오류 코드', '시작'], unit.intent.attempts.map(attemptRow)) : null,
+      unit.intent && unit.intent.attempts.length ? table(['시도', '결과', '확인 내용', '시작'], unit.intent.attempts.map(attemptRow)) : null,
       scopeBlock(unit.scope),
       h('div', { class: 'supplier-actions', 'data-role': 'editor-actions' }, ...unit.actions.map((action) => actionCell(unit, action, reload))),
     ),
   ];
-  const main = h('main', { class: 'editor-main' }, form, ...panes, h('div', { class: 'row editor-nav' }, h('button', { type: 'button', class: 'btn', onclick: () => go(current - 1) }, '← 이전'), h('span', { class: 'spacer' }), h('button', { type: 'button', class: 'btn blue', onclick: () => go(current + 1) }, '다음 →')));
+  const previous = h('button', { type: 'button', class: 'btn', onclick: () => go(current - 1) }, '← 이전');
+  const next = h('button', { type: 'button', class: 'btn blue', onclick: () => go(current + 1) }, '다음 →');
+  const main = h('main', { class: 'editor-main' }, form, ...panes, h('div', { class: 'row editor-nav' }, previous, h('span', { class: 'spacer' }), next));
 
   function renderStepper() {
+    previous.disabled = current === 1;
+    next.disabled = current === STEPS.length;
     stepper.replaceChildren(
       ...STEPS.map(([key, label, copy], index) =>
         h(
@@ -685,9 +666,8 @@ function editor(unit, ctx, labels, mode, step) {
   const top = h(
     'header',
     { class: 'editor-top' },
-    h('span', { class: 'title' }, '상품 편집기'),
+    h('span', { class: 'title' }, editorDisplayName(unit)),
     h('span', { class: `chip ${mode === 'edit' ? 'good' : 'info'}`, 'data-role': 'editor-mode' }, mode === 'edit' ? '상품수정' : '상품등록'),
-    h('b', { class: 'editor-unit' }, unit.unit_ref),
     platformTag(unit.marketplace_key),
     chip(PREPARATION_LABEL[unit.preparation] ?? unit.preparation),
     unit.intent ? readStateChip(unit.intent.read_state, unit.intent.read_state_problem) : null,
@@ -753,7 +733,7 @@ export default {
       return emptyState({ title: '이 등록 단위를 찾을 수 없습니다', copy: '등록관리에서 다시 열어 주세요.', action: { label: '등록관리', onSelect: () => ctx.navigate('register') } });
     }
     const labels = Object.fromEntries((readiness?.areas ?? []).map((area) => [area.area, area.label]));
-    document.title = `${mode === 'edit' ? '상품수정' : '상품등록'} · ${unit.unit_ref} · ICBM`;
+    document.title = `${mode === 'edit' ? '상품수정' : '상품등록'} · ICBM`;
     closeModal();
     return fragment(editor(unit, ctx, labels, mode, ctx.params.get('step')));
   },

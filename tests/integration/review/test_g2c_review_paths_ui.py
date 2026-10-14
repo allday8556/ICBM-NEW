@@ -102,7 +102,8 @@ def test_an_account_shows_its_register_review_items_on_registration_management(
             assert writes == [("POST", f"/api/v1/review/items/{item_id}/resolve")]
             assert container.review_items.item(item_id).producer == PREFLIGHT_PRODUCER
             scope = page.locator(f"[data-review-item='{item_id}'] [data-role='review-scope']")
-            assert made["preparation_id"][:8] in scope.inner_text()
+            assert scope.inner_text() == "등록 준비"
+            assert made["preparation_id"][:8] not in scope.inner_text()
         # A resolution changed no REGISTER fact: the candidate still states the condition.
         still = container.registration_preparations.evaluate(made["preparation_id"])
         assert "AUTHORING_REVISIONS_UNOWNED" in {r.code for r in still.reasons}

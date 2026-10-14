@@ -136,9 +136,9 @@ The derived artifact itself is recorded by the M4 image owner (`ProductImageServ
 
 The registration editor's inert 「이미지 자동번역」 placeholders (`6054956408`) become live in slice I5:
 - ⑤ 상세페이지: translates the product's detail images;
-- ② the selected-image bulk action: translates the selected images.
+- ② 대표이미지: translates the images the operator ticks in the panel.
 
-Both stay inert, with 준비 중, while the capability reads `NOT_CONFIGURED`: no OCR engine installed, or no translation profile configured.
+Both are drawn only while the capability reads READY. While it reads `NOT_CONFIGURED` (no OCR engine installed, or no translation profile configured) they are omitted and send nothing. Since #352 the registration editor draws no inert placeholder (amended 2026-10-15).
 
 ## 8. Safety
 
