@@ -209,8 +209,10 @@ CANONICAL_TABLES = (
     "onboarding_verifications",
     # ADR-0039 §1: each supplier's sales policy, its append-only revisions.
     "supplier_sales_policy_revisions",
+    # ADR-0036 O5b (amendment 6160586049): the samples retired from an onboarding analysis.
+    "onboarding_sample_retirements",
 )
-HEAD = "0061_supplier_sales_policy"
+HEAD = "0062_onboarding_sample_retirements"
 
 
 def _url(path: Path) -> str:

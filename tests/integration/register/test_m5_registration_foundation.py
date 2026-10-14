@@ -563,6 +563,8 @@ ADAPTIVE_TABLES = (
     "onboarding_verifications",
     # ADR-0039 §1 (0061): the supplier sales-policy revisions.
     "supplier_sales_policy_revisions",
+    # ADR-0036 O5b (0062): the samples retired from an onboarding analysis.
+    "onboarding_sample_retirements",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

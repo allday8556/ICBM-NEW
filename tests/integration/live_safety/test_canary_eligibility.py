@@ -996,6 +996,8 @@ def test_0033_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "onboarding_verifications",
         # ADR-0039 §1 (0061): the supplier sales-policy revisions.
         "supplier_sales_policy_revisions",
+        # ADR-0036 O5b (0062): the samples retired from an onboarding analysis.
+        "onboarding_sample_retirements",
     }
     command.upgrade(alembic_config(url), "head")
     assert tables() == before

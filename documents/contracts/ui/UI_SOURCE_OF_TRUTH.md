@@ -537,6 +537,11 @@ existing modal language:
   `값 틀림` (it never proves the site, and a `틀림` stands over any `맞음`). The server refuses a
   `맞음` on a sample that is not verifiable, a verdict on facts other than those shown, and any
   verdict on a trial under older words.
+- **분석에서 제외 (O5b, amendment `6160586049`).** A sample that is not confirmed offers
+  `분석에서 제외`: it asks for the operator's reason (`window.prompt`, 1–200 characters), then
+  `POST …/samples/retire` retires it. The sample stays shown, muted, as `제외됨` with the reason, its
+  structural flags and its values; it neither proves nor blocks `사용 시작`, takes no verdict, is not
+  read again and still counts toward the 5. A retirement is never undone.
 - **사용 시작 (O5).** Enabled only when the server says the site can start (3 distinct samples
   confirmed under the current words and template revision, every core field read, no structural
   problem): it asks once (`window.confirm`), then `POST …/activate` moves the supplier to `사용 중`

@@ -121,6 +121,14 @@ class VerificationRequest(BaseModel):
     shown_fingerprint: str = Field(max_length=64)
 
 
+class RetirementRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    # The sample exactly as the report names it (``sample_url``), and the operator's reason.
+    sample_url: str = Field(max_length=512)
+    reason: str = Field(max_length=200)
+
+
 class WordsPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
@@ -223,4 +231,14 @@ def activate(supplier_key: str, container: ContainerDep) -> AnalysisView:
     """「사용 시작」: RECON → ACTIVE, only when the store's gate is proven (§7, D2)."""
     return container.onboarding_analysis.activate(
         supplier_key, actor=container.config.operator_actor
+    )
+
+
+@router.post(f"{BASE}/suppliers/{{supplier_key}}/samples/retire")
+def retire_sample(
+    supplier_key: str, body: RetirementRequest, container: ContainerDep
+) -> AnalysisView:
+    """「분석에서 제외」: retire one sample with the operator's reason (ADR-0036 §7, 6160586049)."""
+    return container.onboarding_analysis.retire(
+        supplier_key, body.sample_url, body.reason, actor=container.config.operator_actor
     )
