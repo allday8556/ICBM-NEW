@@ -510,14 +510,13 @@ class CoupangTestProductMutationRun:
         return data
 
     @staticmethod
-    def _verify_readback(
+    def _verify_identity_scope(
         response: Mapping[str, object],
         *,
         seller_product_id: int,
         source_product_id: str,
         seller_product_name: str,
-        update_message: str,
-    ) -> None:
+    ) -> Mapping[str, object]:
         data = response.get("data")
         if not isinstance(data, dict) or data.get("sellerProductId") != seller_product_id:
             raise CoupangLiveMutationError(
@@ -531,10 +530,6 @@ class CoupangTestProductMutationRun:
             raise CoupangLiveMutationError(
                 ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_READBACK_NAME_MISMATCH"
             )
-        if data.get("extraInfoMessage") != update_message:
-            raise CoupangLiveMutationError(
-                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_READBACK_UPDATE_MISMATCH"
-            )
         items = data.get("items")
         if not isinstance(items, list) or not any(
             isinstance(item, dict) and item.get("externalVendorSku") == source_product_id
@@ -542,6 +537,28 @@ class CoupangTestProductMutationRun:
         ):
             raise CoupangLiveMutationError(
                 ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_READBACK_SCOPE_MISMATCH"
+            )
+        return data
+
+    @classmethod
+    def _verify_readback(
+        cls,
+        response: Mapping[str, object],
+        *,
+        seller_product_id: int,
+        source_product_id: str,
+        seller_product_name: str,
+        update_message: str,
+    ) -> None:
+        data = cls._verify_identity_scope(
+            response,
+            seller_product_id=seller_product_id,
+            source_product_id=source_product_id,
+            seller_product_name=seller_product_name,
+        )
+        if data.get("extraInfoMessage") != update_message:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_READBACK_UPDATE_MISMATCH"
             )
 
     @staticmethod
@@ -624,6 +641,8 @@ class CoupangTestProductMutationRun:
         assert isinstance(records, dict)
         completed = 0
         for plan in self._bundle.plans:
+            created_in_this_run = False
+            verified_in_this_run = False
             synthetic_id = plan.binding.synthetic_id
             record = records[synthetic_id]
             assert isinstance(record, dict)
@@ -637,6 +656,7 @@ class CoupangTestProductMutationRun:
                     state, synthetic_id, "created", seller_product_id=seller_product_id
                 )
                 phase = "created"
+                created_in_this_run = True
             if not isinstance(seller_product_id, int) or seller_product_id < 1:
                 raise CoupangLiveMutationError(
                     ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_JOURNAL_IDENTITY_MISSING"
@@ -647,6 +667,14 @@ class CoupangTestProductMutationRun:
                 seller_product_id=seller_product_id,
             )
             if phase == "created":
+                if not created_in_this_run:
+                    resumed = self._request(Method.GET, f"{_API}/{seller_product_id}")
+                    self._verify_identity_scope(
+                        resumed,
+                        seller_product_id=seller_product_id,
+                        source_product_id=plan.binding.source_product_id,
+                        seller_product_name=str(plan.create_document.value()["sellerProductName"]),
+                    )
                 update = FrozenDocument.from_mapping(
                     {
                         "sellerProductId": seller_product_id,
@@ -681,7 +709,17 @@ class CoupangTestProductMutationRun:
                     state, synthetic_id, "verified", seller_product_id=seller_product_id
                 )
                 phase = "verified"
+                verified_in_this_run = True
             if phase == "verified":
+                if not verified_in_this_run:
+                    resumed = self._request(Method.GET, f"{_API}/{seller_product_id}")
+                    self._verify_readback(
+                        resumed,
+                        seller_product_id=seller_product_id,
+                        source_product_id=plan.binding.source_product_id,
+                        seller_product_name=str(plan.create_document.value()["sellerProductName"]),
+                        update_message=plan.update_message,
+                    )
                 self._transition(
                     state, synthetic_id, "delete_inflight", seller_product_id=seller_product_id
                 )
