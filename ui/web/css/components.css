@@ -887,6 +887,34 @@ body.has-registration-status .content {
   margin-top: var(--space-6);
 }
 
+/* ADR-0036 O4: 「수집 규칙」 — each slot's template words beside the supplier's own words. */
+.words-table th:first-child,
+.words-table td:first-child {
+  width: 24%;
+  overflow-wrap: anywhere;
+}
+
+.words-table td {
+  vertical-align: top;
+}
+
+.words-table td .chip {
+  margin: 0 4px 4px 0;
+}
+
+.words-table input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.analysis-sample [data-role='newly-read'],
+.analysis-sample [data-role='newly-unread'],
+.analysis-sample [data-change] {
+  margin-top: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1180px) {
   .supplier-grid {
     grid-template-columns: 1fr 1fr;

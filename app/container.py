@@ -107,6 +107,7 @@ from app.stages.collect.onboarding.catalog import SupplierCatalog
 from app.stages.collect.onboarding.service import OnboardingService
 from app.stages.collect.onboarding.store import OnboardingStore
 from app.stages.collect.onboarding.trials import SiteAnalysisService, last_trial_read
+from app.stages.collect.onboarding.words import CollectionWordsService
 from app.stages.collect.readback import SourceTruthReadback
 from app.stages.collect.revisions import ProductFactsRevisionStore
 from app.stages.collect.runs import CollectionRunStore
@@ -367,6 +368,8 @@ class Container:
     onboarding_service: OnboardingService
     # ADR-0036 O3: 「사이트 분석」 — trial reads, local captures, re-analysis and observed hosts.
     onboarding_analysis: SiteAnalysisService
+    # ADR-0036 O4: 「수집 규칙」 — the words editor, its revisions and its offline preview.
+    onboarding_words: CollectionWordsService
     # Each configured supplier's display name, by key (ADR-0030 §11 S2: the screens' lists).
     supplier_names: Mapping[str, str] = field(default_factory=dict)
 
@@ -731,13 +734,14 @@ def build_container(
     # ADR-0036 O3: a trial read of a RECON onboarded site goes through the same policed gateway
     # and CONNECT session as a collection, paced on the template's defaults and on COLLECT's own
     # last read, and is recorded only as an onboarding trial: never a ProductFactsRevision.
+    trial_captures = TrialCaptureStore(config.onboarding_captures_dir)
     onboarding_analysis = SiteAnalysisService(
         store=onboarding,
         catalog=supplier_catalog,
         jobs=jobs,
         gateway=collect_gateway,
         sessions=collection_sessions or connect,
-        captures=TrialCaptureStore(config.onboarding_captures_dir),
+        captures=trial_captures,
         clock=clock,
         collect_remaining=lambda key, interval: runs.seconds_until_readable(
             key, interval_s=interval, collection_runs_only=True
@@ -746,6 +750,11 @@ def build_container(
         login_id=supplier_credentials.username,
     )
     registry.register(onboarding_analysis.job_definition())
+    # ADR-0036 O4: the words of an onboarded site, saved as revisions through the store and
+    # previewed offline on the stored captures; it reads nothing from a supplier.
+    onboarding_words = CollectionWordsService(
+        store=onboarding, catalog=supplier_catalog, captures=trial_captures
+    )
 
     # ADR-0019 E1/E2: the extension capture transport. The pairing lives in the keyring only, the
     # replay cache and the capture buffer in this process only, and the capture policy is read
@@ -1455,6 +1464,7 @@ def build_container(
         supplier_catalog=supplier_catalog,
         onboarding_service=onboarding_service,
         onboarding_analysis=onboarding_analysis,
+        onboarding_words=onboarding_words,
         supplier_names=supplier_catalog.names,
     )
 

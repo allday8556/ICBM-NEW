@@ -36,8 +36,8 @@ _RECORD = re.compile(r"^documents/acceptance/suppliers/[a-z0-9_-]+\.md$")
 _DECISION = re.compile(r"^Issue #\d{1,6} \d{6,12}$")
 # A seller-code convention in ADR-0024 §2's code form: letters, then the source product id.
 _CONVENTION = re.compile(r"^[A-Za-z]{2,8}\{source_product_id\}$")
-_WORD_LIMIT = 40
-_WORDS_PER_SLOT = 12
+WORD_LIMIT = 40
+WORDS_PER_SLOT = 12
 
 _REQUIRED = frozenset(
     {
@@ -157,7 +157,7 @@ def _word(value: Any, what: str) -> str:
         not isinstance(value, str)
         or not value
         or value != value.strip()
-        or len(value) > _WORD_LIMIT
+        or len(value) > WORD_LIMIT
         or any(ch in value for ch in "<>{}[]\\|*+?^$")
     ):
         raise _fail(f"{what} holds a plain word only")
@@ -170,8 +170,8 @@ def _labels(value: Any) -> Mapping[str, tuple[str, ...]]:
     labels: dict[str, tuple[str, ...]] = {}
     for slot, words in value.items():
         _text(slot, _SLOT, "a label slot")
-        if not isinstance(words, list) or not 1 <= len(words) <= _WORDS_PER_SLOT:
-            raise _fail(f"label slot {slot} lists 1 to {_WORDS_PER_SLOT} words")
+        if not isinstance(words, list) or not 1 <= len(words) <= WORDS_PER_SLOT:
+            raise _fail(f"label slot {slot} lists 1 to {WORDS_PER_SLOT} words")
         labels[slot] = tuple(_word(word, f"label slot {slot}") for word in words)
     return MappingProxyType(labels)
 

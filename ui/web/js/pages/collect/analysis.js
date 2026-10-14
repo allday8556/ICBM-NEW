@@ -1,8 +1,9 @@
 // 수집관리 › 공급처 관리 › 「사이트 분석」 (ADR-0036 §5, slice O3).
 //
 // Live on an onboarded supplier's card while it is 분석 중 (RECON). The operator gives up to 5
-// sample product URLs of the supplier's own storefront; the server reads each once, as one paced
-// trial (60 s for the same sample, 10 s between reads), keeps the page as a local capture and
+// sample product URLs of the supplier's own storefront; the server reads each once, ever, as one
+// paced trial (10 s between reads, and COLLECT's 60 s for the same product), keeps the page as a
+// local capture and
 // reports, per sample:
 //   - each field: 읽음 / 없음 / 못 읽음, with the values the operator will verify;
 //   - the unread rows and phrases, each with the slot a rule proposes (never AI);
@@ -10,7 +11,8 @@
 // The observed hosts are listed once with 「확인」 for an image or login host. 「다시 분석」 re-reads
 // the stored captures under the current words; it reads nothing from the supplier.
 // The page decides nothing: every status, count and refusal is the server's. Verification and
-// approval are the next step (O5); 「수집 규칙」 stays inert until O4. No credential is ever shown.
+// approval are the next step (O5); the words are edited in 「수집 규칙」 (O4, collect/words.js).
+// No credential is ever shown.
 
 import { getJson, sendJson } from '../../core/api.js';
 import { h } from '../../core/dom.js';
@@ -18,7 +20,7 @@ import { openModal } from '../../core/modal.js';
 import { toast } from '../../core/toast.js';
 import { ONBOARDING } from './onboarding.js';
 
-const FIELD_LABEL = {
+export const FIELD_LABEL = {
   original_name: '상품명',
   prices: '가격',
   options: '옵션',
@@ -35,13 +37,13 @@ const FIELD_LABEL = {
   sales_channels: '판매채널',
 };
 
-const STATUS = {
+export const STATUS = {
   CONFIRMED: ['읽음', 'good'],
   ABSENT: ['없음', null],
   REVIEW_REQUIRED: ['못 읽음', 'warn'],
 };
 
-const SLOT_LABEL = {
+export const SLOT_LABEL = {
   name: '상품명',
   price: '가격',
   purchase_price: '매입가',
@@ -58,6 +60,10 @@ const SLOT_LABEL = {
   channel_closed_only: '판매채널: 폐쇄몰 전용',
   channel_forbid_coupang: '판매채널: 쿠팡 금지',
   channel_forbid_smartstore: '판매채널: 스마트스토어 금지',
+  minimum_price_phrase: '최저판매가 문구',
+  sold_out: '품절 표시',
+  purchase_controls: '구매 버튼',
+  title_suffix: '상품명 꼬리말',
 };
 
 const RULE_LABEL = {
@@ -94,7 +100,7 @@ const ERROR_COPY = {
   ONBOARDING_WORDS_MOVED: '분석 중에 수집 규칙이 바뀌었습니다. 다시 분석하세요.',
 };
 
-function message(error, fallback) {
+export function message(error, fallback) {
   const code = error?.error?.code;
   return ERROR_COPY[code] ?? fallback?.(error) ?? error?.error?.message ?? String(error?.message ?? error);
 }
@@ -387,7 +393,7 @@ export async function openSiteAnalysis(record, { waitForJob, errorMessage }) {
   openModal({
     eyebrow: 'COLLECT · Site Analysis',
     title: `사이트 분석 · ${record.display_name}`,
-    help: '샘플 상품 페이지를 한 번씩 읽어 각 필드를 읽었는지 보여 줍니다. 같은 샘플은 60초, 다른 샘플은 10초 간격으로 읽고, 이미지는 내려받지 않습니다.',
+    help: '샘플 상품 페이지를 한 번만 읽어 각 필드를 읽었는지 보여 줍니다. 읽기 사이에는 10초를 두고, 같은 상품은 일반 수집과 합쳐 60초 안에 다시 읽지 않으며, 이미지는 내려받지 않습니다.',
     body: h(
       'div',
       { class: 'analysis', 'data-role': 'site-analysis' },

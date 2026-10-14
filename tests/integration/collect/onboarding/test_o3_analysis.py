@@ -74,6 +74,7 @@ from tests.support.onboarding_trial_support import (
     godomall_url,
     recon_site,
     row,
+    run_trial,
     script_rendered_page,
     trial_container,
     upick_page,
@@ -109,15 +110,6 @@ def count(config: AppConfig, table: str) -> int:
         return int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
     finally:
         connection.close()
-
-
-def run_trial(app: Container, key: str, url: str) -> str:
-    """Submit one sample and run its job; the job's id."""
-    submitted = app.onboarding_analysis.submit(key, url, actor=OPERATOR)
-    app.runner.run_next()
-    job = app.jobs.get(submitted.job_id)
-    assert job.state == "SUCCEEDED", (job.last_error_code, job.last_error_message)
-    return submitted.job_id
 
 
 def refused(code: str, call: object) -> AppError:

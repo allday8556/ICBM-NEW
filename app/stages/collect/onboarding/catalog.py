@@ -200,6 +200,17 @@ class SupplierCatalog:
     def onboarded(self, supplier_key: str) -> OnboardedEntry | None:
         return self._view.onboarded.get(supplier_key)
 
+    def bind_words(
+        self, record: OnboardingRecord, words: Mapping[str, tuple[str, ...]]
+    ) -> tuple[BoundSite | None, tuple[str, ...]]:
+        """``record``'s site as it would bind under ``words``, with the same checks and identity
+        rule as a real binding, and nothing registered: what the words editor previews (§6)."""
+        template = self._templates.get(record.template)
+        if template is None:
+            return None, (f"no template {record.template!r}",)
+        site = onboarded_site(record, template, words=words, require_storefront=False)
+        return bind_site(site, template, self._platforms)
+
     def problems(self) -> Mapping[str, tuple[str, ...]]:
         return {key: e.problems for key, e in self._view.onboarded.items() if e.problems}
 

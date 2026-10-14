@@ -358,7 +358,7 @@ class SiteAnalysisService:
     def reanalyse(self, key: str, *, actor: str) -> ReanalysisView:
         """Re-run the current words over the stored captures; no supplier read (§5 step 6)."""
         site = self._site(key)
-        newest = _newest(self._store.trials(key))
+        newest = newest_by_sample(self._store.trials(key))
         analysed = current = missing = 0
         for trial in newest.values():
             if self._current(site, trial):
@@ -411,7 +411,7 @@ class SiteAnalysisService:
         record = self._store.current(key)
         template = self._store.template(record.template)
         trials = self._store.trials(key)
-        newest = _newest(trials)
+        newest = newest_by_sample(trials)
         site = self._bound(record)
         samples: list[TrialView] = []
         stale: list[StaleSampleView] = []
@@ -716,7 +716,7 @@ def _cookie_values(session: bytes) -> list[str]:
     return [cookie.get("value", "") for cookie in cookies if cookie.get("value")]
 
 
-def _newest(trials: Iterable[StoredTrial]) -> dict[str, StoredTrial]:
+def newest_by_sample(trials: Iterable[StoredTrial]) -> dict[str, StoredTrial]:
     """The newest trial of each sample, in the order the samples were first read."""
     newest: dict[str, StoredTrial] = {}
     for trial in sorted(trials, key=lambda t: (t.created_at, t.words_seq, t.trial_id)):

@@ -501,7 +501,7 @@ v29's `+ 공급처 추가` and its `새 공급처 추가` card open v29's `suppl
 - **The card.** An onboarded supplier's card carries its onboarding chip beside the connection chip:
   `초안` (DRAFT), `분석 중` (RECON), `사용 중` (ACTIVE), `비활성` (DISABLED). A disabled supplier,
   which CONNECT no longer lists, keeps a card with its chip and no action. `사이트 분석` turns live
-  on a `분석 중` card with O3 (below); `수집 규칙` stays inert until O4.
+  on a `분석 중` card with O3, and `수집 규칙` on a `분석 중` or `사용 중` card with O4 (below).
 - **Server-owned.** Detection, the warnings, the conditions for `RECON` and every state belong to the
   onboarding owner. The page decides none of them and keeps nothing in browser storage.
 
@@ -536,7 +536,32 @@ existing modal language:
   image host joins the supplier's collection egress at once.
 - **Server-owned.** Every status, value, candidate slot, structural problem, count and refusal is the
   server's. The page keeps nothing in browser storage and never shows a credential, a session or
-  page text beyond the bounded values above. `수집 규칙` stays inert until O4.
+  page text beyond the bounded values above. The words are edited in `수집 규칙` (O4, below).
+
+## Collection Management — 공급처 관리 › 「수집 규칙」 (ADR-0036 O4)
+
+v29's `수집 규칙` button on a supplier card is live only on an onboarded supplier in `분석 중`
+(RECON) or `사용 중` (ACTIVE); on every other card it stays inert. It opens a
+`수집 규칙 · <공급처명>` editor in the existing modal language:
+
+- **Slots.** One table `슬롯 | 템플릿 기본 단어 | 이 공급처 단어` (`GET
+  /api/v1/onboarding/suppliers/{key}/words`): every slot of the supplier's template, named in
+  Korean with its kind (`행 이름`, `문구`, `표시`), the template's own words as read-only chips, and
+  one field for the supplier's words, comma or line separated. Only words pass: the server refuses
+  pattern characters (`< > { } [ ] \ | * + ? ^ $`), more than 12 words in a slot, a word longer
+  than 40 characters and a slot the template does not have, and says why.
+- **미리보기.** `POST …/words/preview` re-analyses each sample's stored capture under the current and
+  the typed words, and shows per sample the unread rows and phrases the new words read
+  (`새로 읽음`), those they no longer read, the fields whose status they change (`가격: 못 읽음 → 읽음`)
+  and `읽지 못한 행/문구 n개 → m개`; a sample whose capture reads differently from its page is
+  marked as never usable for approval. A preview reads nothing from the supplier and saves nothing.
+- **저장.** `PUT …/words` with the words and the revision they were edited from (`expected_seq`)
+  appends the next words revision; words that moved since are refused (reload and edit again), and
+  identical words are refused. On a `사용 중` supplier the editor warns first: a save returns it to
+  `분석 중`, to be approved again. After a save, `다시 분석` (`POST …/reanalyse`) re-reads the stored
+  captures under the saved words, again without a supplier read.
+- **Server-owned.** Every word rule, preview result, revision and refusal is the server's. The page
+  keeps nothing in browser storage.
 
 ## Collection intake (A-UX2, owner decisions 2026-10-04 D1 and D2)
 
