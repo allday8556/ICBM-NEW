@@ -275,7 +275,10 @@ SUPPLIER_SALES_POLICY = "0061_supplier_sales_policy"
 # ADR-0038 O1a: the source currency of a product facts revision. Source truth, never registration
 # state.
 SOURCE_CURRENCY = "0063_source_currency"
-SCHEMA_HEAD = SOURCE_CURRENCY
+# ADR-0038 O1b: the FX snapshots and the overseas settings. Supporting-capability state, never
+# registration state.
+FX_SNAPSHOTS = "0064_fx_snapshots"
+SCHEMA_HEAD = FX_SNAPSHOTS
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -319,6 +322,7 @@ AFTER_M5 = (
     SUPPLIER_ONBOARDING,
     SUPPLIER_SALES_POLICY,
     SOURCE_CURRENCY,
+    FX_SNAPSHOTS,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

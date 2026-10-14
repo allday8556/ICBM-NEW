@@ -2711,6 +2711,8 @@ RAW_CLIENT_OWNERS = {
     "app/platform/core/ownership.py": "hostname for the diagnostic owner metadata (socket)",
     # ADR-0027 §4: the one AI adapter, a loopback call to the operator's approved sidecar.
     "integrations/ai/cliproxyapi.py": "the CLIProxyAPI sidecar adapter (loopback only)",
+    # ADR-0038 §3: one Korea Eximbank AP01 read, granted for oapi.koreaexim.go.kr alone.
+    "integrations/fx/koreaexim.py": "the Korea Eximbank AP01 rate reader",
 }
 _COMMON_SUPPLIER_MODULES = {
     "integrations/suppliers/__init__.py",
@@ -2826,7 +2828,26 @@ def test_only_reviewed_transports_open_egress_grants() -> None:
         "integrations/marketplaces/smartstore/caller.py",
         "integrations/marketplaces/coupang/canary.py",
         "integrations/marketplaces/coupang/live_mutations.py",
+        # ADR-0038 §3: the FX rate reader, for exactly the Korea Eximbank API host.
+        "integrations/fx/koreaexim.py",
     }
+
+
+def test_the_fx_reader_is_granted_its_one_host_only() -> None:
+    # ADR-0038 §3: the one grant the FX reader opens names its owner and the Eximbank host alone,
+    # both as module constants (never a caller's value), and the reader never follows a redirect.
+    tree = _production_modules()["integrations/fx/koreaexim.py"]
+    (grant,) = _calls(tree, "grant")
+    owner, hosts = grant.args
+    assert isinstance(owner, ast.Name) and owner.id == "EGRESS_OWNER"
+    assert isinstance(hosts, ast.Set) and [ast.unparse(h) for h in hosts.elts] == ["HOST"]
+    from integrations.fx import koreaexim
+
+    assert koreaexim.HOST == "oapi.koreaexim.go.kr"
+    assert koreaexim.EXIM_BASE_URL == "https://oapi.koreaexim.go.kr"
+    (client,) = _calls(tree, "Client")
+    redirects = _keyword(client, "follow_redirects")
+    assert isinstance(redirects, ast.Constant) and redirects.value is False
 
 
 def test_every_collection_definition_pins_its_extraction_identity() -> None:
@@ -4013,6 +4034,9 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "onboarding_verifications",
         # ADR-0039 §1: each supplier's sales policy, its append-only revisions.
         "supplier_sales_policy_revisions",
+        # ADR-0038 §3, §5: the immutable FX snapshots and the overseas settings revisions.
+        "fx_snapshots",
+        "overseas_settings_revisions",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

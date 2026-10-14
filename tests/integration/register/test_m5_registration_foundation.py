@@ -563,6 +563,9 @@ ADAPTIVE_TABLES = (
     "onboarding_verifications",
     # ADR-0039 §1 (0061): the supplier sales-policy revisions.
     "supplier_sales_policy_revisions",
+    # ADR-0038 §3, §5 (0064): the FX snapshots and the overseas settings.
+    "fx_snapshots",
+    "overseas_settings_revisions",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

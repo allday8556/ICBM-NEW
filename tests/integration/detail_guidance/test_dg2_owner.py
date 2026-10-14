@@ -74,6 +74,9 @@ LATER_TABLES = frozenset(
         "onboarding_verifications",
         # ADR-0039 §1 (0061): the supplier sales-policy revisions.
         "supplier_sales_policy_revisions",
+        # ADR-0038 §3, §5 (0064): the FX snapshots and the overseas settings.
+        "fx_snapshots",
+        "overseas_settings_revisions",
     }
 )
 TOP: dict[str, Any] = {"blocks": [{"heading": "당일발송", "lines": ["12시 이전 주문시 당일발송"]}]}

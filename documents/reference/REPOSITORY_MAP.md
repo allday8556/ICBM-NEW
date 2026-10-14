@@ -131,6 +131,11 @@ ADR-0036 O4 added 「수집 규칙」: the words editor service `app/stages/coll
 (view, save through the store's words revisions, and an offline preview over the stored captures),
 the store's `check_words` and the catalog's `bind_words`, the editor `ui/web/js/pages/collect/words.js`
 and two integration suites; no new migration.
+ADR-0038 O1b added the overseas capability `app/capabilities/overseas/` (the FX snapshot owner
+`fx.py` with its scheduler and the Korea Eximbank key, the 해외 구매대행 settings `settings.py`,
+and their models), the Korea Eximbank AP01 reader `integrations/fx/`, the routes
+`app/interface/api/routes/overseas.py`, migration `0064`, the settings panels
+`ui/web/js/pages/settings/overseas.js`, two unit and three integration suites.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -184,10 +189,10 @@ customer or financial data, and grant no provider call or LIVE authority.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 380 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 68 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
-| `app/interface/` | 30 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 92 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/` | 387 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 73 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, overseas |
+| `app/interface/` | 31 | operator surfaces: HTTP api, screens, cli |
+| `app/platform/` | 93 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 185 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
@@ -207,16 +212,16 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 94 | adapters: suppliers and marketplaces |
+| `integrations/` | 96 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 44 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 389 | tests |
+| `tests/` | 397 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 161 | integration tests by runtime owner |
+| `tests/integration/` | 165 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
-| `tests/unit/` | 144 | unit tests by runtime owner |
-| `ui/` | 74 | operator clients: the served web client and the capture extension |
+| `tests/unit/` | 148 | unit tests by runtime owner |
+| `ui/` | 75 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 65 | the served web client |
+| `ui/web/` | 66 | the served web client |

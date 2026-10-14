@@ -48,6 +48,7 @@ from sqlalchemy.orm import Session
 
 from app.capabilities.audit.models import AuditEventType, AuditOutcome
 from app.capabilities.audit.service import AuditEntry, AuditLog
+from app.capabilities.overseas.settings import OVERSEAS_SETTINGS_SURFACE
 from app.platform.core.clock import Clock
 from app.platform.core.errors import InputValidationError, NotFoundError
 from app.platform.db.database import Database
@@ -99,6 +100,9 @@ class EditableSurface(StrEnum):
     # ADR-0039 §4: each supplier's sales policy, saved from the supplier card (수집관리 › 공급처
     # 관리) through its own contract (``app.stages.products.sales_policy``).
     SUPPLIER_SALES_POLICY = SALES_POLICY_SURFACE
+    # ADR-0038 §5: the 해외 구매대행 settings (설정 › 공통 › 해외구매대행), saved through its own
+    # contract (``app.capabilities.overseas.settings``).
+    OVERSEAS_SETTINGS = OVERSEAS_SETTINGS_SURFACE
 
 
 # ------------------------------------------------------------------ the application contract
@@ -758,11 +762,12 @@ def _revision_view(record: PolicyRevisionRecord, *, current: bool) -> TargetPoli
 
 def editable_surfaces() -> Sequence[EditableSurface]:
     """The Settings surfaces this application accepts a save for (ADR-0015 §2, §3; ADR-0026 §8;
-    ADR-0033 §4; ADR-0039 §4)."""
+    ADR-0033 §4; ADR-0039 §4; ADR-0038 §5)."""
     return (
         EditableSurface.REGISTRATION_TARGET_POLICY,
         EditableSurface.REGISTRATION_CATEGORY_METADATA,
         EditableSurface.AI_PROMPT_REGISTRY,
         EditableSurface.DETAIL_GUIDANCE,
         EditableSurface.SUPPLIER_SALES_POLICY,
+        EditableSurface.OVERSEAS_SETTINGS,
     )

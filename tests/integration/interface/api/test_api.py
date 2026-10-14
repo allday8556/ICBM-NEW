@@ -119,14 +119,15 @@ def test_settings_contract_has_no_connections_and_is_read_only(client: TestClien
     body = client.get("/api/v1/screens/settings").json()
     assert body["execution_mode"] == "DRY_RUN"
     assert body["editable"] is False
-    # Gate 1 (ADR-0015 §2, §3), ADR-0026 AIF-1, ADR-0033 G3 and ADR-0039 §4: the only surfaces
-    # with a save contract, named by the server.
+    # Gate 1 (ADR-0015 §2, §3), ADR-0026 AIF-1, ADR-0033 G3, ADR-0039 §4 and ADR-0038 §5: the
+    # only surfaces with a save contract, named by the server.
     assert body["editable_surfaces"] == [
         "REGISTRATION_TARGET_POLICY",
         "REGISTRATION_CATEGORY_METADATA",
         "AI_PROMPT_REGISTRY",
         "DETAIL_GUIDANCE",
         "SUPPLIER_SALES_POLICY",
+        "OVERSEAS_SETTINGS",
     ]
     # The registered suppliers, KM통상 and each configured site (ADR-0030), appear unconfigured,
     # by supplier key: no credentials, no session, not connected.

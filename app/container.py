@@ -49,6 +49,14 @@ from app.capabilities.live_safety.status import LiveStatusService
 from app.capabilities.live_safety.store import LiveAuthorityStore
 from app.capabilities.live_safety.upload_run import AssetUploadRun
 from app.capabilities.live_safety.visual import VisualAcceptanceService
+from app.capabilities.overseas.fx import (
+    FxApiKey,
+    FxRefreshScheduler,
+    FxService,
+    FxSnapshotStore,
+    FxSource,
+)
+from app.capabilities.overseas.settings import OverseasSettingsService, OverseasSettingsStore
 from app.capabilities.review.collect_producer import COLLECT_PRODUCER, CollectReviewProducer
 from app.capabilities.review.counts import ReviewCounts
 from app.capabilities.review.coverage import ReviewCoverageStore
@@ -191,6 +199,7 @@ from app.stages.register.target_policy import (
 )
 from app.stages.register.upload_variants import UploadFitVariants
 from integrations.ai.sidecar import WindowsProcessProbe
+from integrations.fx.koreaexim import KoreaEximAp01
 from integrations.marketplaces.identity import MARKETPLACE_IDENTITIES
 from integrations.marketplaces.smartstore import product as smartstore_product
 from integrations.marketplaces.smartstore import readback as smartstore_readback
@@ -303,6 +312,11 @@ class Container:
     detail_guidance: DetailGuidanceService
     # ADR-0039 §1, §4: each supplier's sales policy, saved from the supplier card.
     sales_policies: SalesPolicyService
+    # ADR-0038 §3, §5: Settings' 해외 구매대행 — the settings card, the FX snapshots, the Korea
+    # Eximbank key and the periodic refresh.
+    overseas_settings: OverseasSettingsService
+    fx: FxService
+    fx_refresh_scheduler: FxRefreshScheduler
     category_metadata: CategoryMetadataService
     category_catalog: CategoryCatalogService
     # Settings delivery policy: the seller's address book, read on request and never stored.
@@ -462,6 +476,7 @@ def build_container(
     adaptive_hook_manifests: Mapping[str, HookManifest] | None = None,
     capture_policy_root: Path | None = None,
     extension_report_sink: ReportSink | None = None,
+    fx_source: FxSource | None = None,
 ) -> Container:
     """Compose the application for one data directory.
 
@@ -832,6 +847,16 @@ def build_container(
     sales_policies = SalesPolicyService(
         SalesPolicyStore(db, clock, audit),
         lambda: supplier_keys | set(collection.supplier_keys()),
+    )
+    # ADR-0038 §3, §5: the 해외 구매대행 settings and the FX snapshot owner. The Korea Eximbank key
+    # lives only in the OS secret store; the adapter is the only caller of its one host.
+    overseas_settings = OverseasSettingsService(OverseasSettingsStore(db, clock, audit))
+    fx = FxService(
+        FxSnapshotStore(db, clock, audit),
+        FxApiKey(secrets, audit),
+        fx_source or KoreaEximAp01(),
+        clock,
+        interval_s=config.fx_refresh_interval_s,
     )
     # Issue #219: the image auto-selection rule over each supplier's own published role rules, and
     # its automatic QA. An operator's selection always supersedes it.
@@ -1420,6 +1445,9 @@ def build_container(
         ai_provider=ai_provider,
         detail_guidance=detail_guidance,
         sales_policies=sales_policies,
+        overseas_settings=overseas_settings,
+        fx=fx,
+        fx_refresh_scheduler=FxRefreshScheduler(fx),
         category_metadata=category_metadata,
         category_catalog=category_catalog,
         smartstore_addressbook=SmartStoreAddressBookSource(

@@ -209,8 +209,11 @@ CANONICAL_TABLES = (
     "onboarding_verifications",
     # ADR-0039 §1: each supplier's sales policy, its append-only revisions.
     "supplier_sales_policy_revisions",
+    # ADR-0038 §3, §5: the immutable FX snapshots and the overseas settings revisions.
+    "fx_snapshots",
+    "overseas_settings_revisions",
 )
-HEAD = "0063_source_currency"
+HEAD = "0064_fx_snapshots"
 
 
 def _url(path: Path) -> str:
