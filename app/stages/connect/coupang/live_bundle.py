@@ -10,7 +10,7 @@ from collections.abc import Callable, Mapping
 from typing import Final
 
 from app.stages.collect.assets import StoredAsset
-from app.stages.collect.facts import FieldStatus
+from app.stages.collect.facts import FieldStatus, NoticeValue, OptionsValue, TextValue
 from app.stages.collect.models import SYNTHETIC_SUPPLIER_KEY
 from app.stages.collect.revisions import StoredRevision
 from integrations.marketplaces.coupang.auth import Credentials
@@ -31,20 +31,77 @@ def _required(value: object) -> bool:
     return isinstance(value, str) and value.upper() in {"MANDATORY", "REQUIRED"}
 
 
-def _attribute_value(attribute: Mapping[str, object]) -> str:
+_TEXT_FIELD_BY_COUPANG_LABEL: Final = {
+    "브랜드": "brand",
+    "제조사": "manufacturer",
+    "제조자": "manufacturer",
+    "원산지": "origin",
+    "제조국": "origin",
+    "상품명": "original_name",
+    "제품명": "original_name",
+    "품명": "original_name",
+    "품명 및 모델명": "original_name",
+}
+
+
+def _confirmed_source_values(revision: StoredRevision, label: str) -> tuple[str, ...]:
+    """Return only unambiguous, confirmed source facts that state ``label`` exactly."""
+    values: list[str] = []
+    notice = revision.fields.get("notice")
+    if (
+        notice is not None
+        and notice.status is FieldStatus.CONFIRMED
+        and isinstance(notice.value, NoticeValue)
+    ):
+        values.extend(item.text for item in notice.value.items if item.label == label)
+
+    field_key = _TEXT_FIELD_BY_COUPANG_LABEL.get(label)
+    field = None if field_key is None else revision.fields.get(field_key)
+    if (
+        field is not None
+        and field.status is FieldStatus.CONFIRMED
+        and isinstance(field.value, TextValue)
+    ):
+        values.append(field.value.text)
+
+    options = revision.fields.get("options")
+    if (
+        options is not None
+        and options.status is FieldStatus.CONFIRMED
+        and isinstance(options.value, OptionsValue)
+    ):
+        for axis in options.value.axes:
+            if axis.name == label and len(axis.values) == 1:
+                values.append(axis.values[0])
+
+    unique = tuple(dict.fromkeys(value.strip() for value in values if value.strip()))
+    if len(unique) > 1:
+        raise ValueError("COUPANG_SOURCE_VALUE_AMBIGUOUS")
+    return unique
+
+
+def _source_value(revision: StoredRevision, label: str, *, missing_error: str) -> str:
+    values = _confirmed_source_values(revision, label)
+    if not values:
+        raise ValueError(missing_error)
+    return values[0]
+
+
+def _attribute_value(attribute: Mapping[str, object], revision: StoredRevision) -> str:
     name = attribute.get("name")
     data_type = attribute.get("data_type")
-    basic_unit = attribute.get("basic_unit")
     if not isinstance(name, str) or not name:
         raise ValueError("COUPANG_CATEGORY_METADATA_INVALID")
-    if data_type == "NUMBER":
-        return f"1{basic_unit}" if isinstance(basic_unit, str) and basic_unit else "1"
-    if data_type in {"STRING", "TEXT"}:
-        return "상세페이지 참조"
-    raise ValueError("COUPANG_REQUIRED_ATTRIBUTE_NEEDS_OPERATOR_VALUE")
+    if data_type not in {"NUMBER", "STRING", "TEXT"}:
+        raise ValueError("COUPANG_REQUIRED_ATTRIBUTE_TYPE_UNSUPPORTED")
+    return _source_value(
+        revision,
+        name,
+        missing_error="COUPANG_REQUIRED_ATTRIBUTE_NEEDS_SOURCE_VALUE",
+    )
 
 
-def _attributes(metadata: Mapping[str, object]) -> list[dict[str, str]]:
+def _attributes(metadata: Mapping[str, object], revision: StoredRevision) -> list[dict[str, str]]:
     rows = metadata.get("attributes")
     if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
         raise ValueError("COUPANG_CATEGORY_METADATA_INVALID")
@@ -55,11 +112,16 @@ def _attributes(metadata: Mapping[str, object]) -> list[dict[str, str]]:
             continue
         name = row.get("name")
         assert isinstance(name, str)
-        result.append({"attributeTypeName": name, "attributeValueName": _attribute_value(row)})
+        result.append(
+            {
+                "attributeTypeName": name,
+                "attributeValueName": _attribute_value(row, revision),
+            }
+        )
     return result
 
 
-def _notices(metadata: Mapping[str, object]) -> list[dict[str, str]]:
+def _notices(metadata: Mapping[str, object], revision: StoredRevision) -> list[dict[str, str]]:
     categories = metadata.get("notices")
     if not isinstance(categories, list) or not all(isinstance(row, dict) for row in categories):
         raise ValueError("COUPANG_CATEGORY_METADATA_INVALID")
@@ -86,7 +148,11 @@ def _notices(metadata: Mapping[str, object]) -> list[dict[str, str]]:
             {
                 "noticeCategoryName": category_name,
                 "noticeCategoryDetailName": name,
-                "content": "상품 상세페이지 참조",
+                "content": _source_value(
+                    revision,
+                    name,
+                    missing_error="COUPANG_NOTICE_DETAIL_NEEDS_SOURCE_VALUE",
+                ),
             }
         )
     return result
@@ -192,8 +258,8 @@ def build_live_test_product_bundle(
             "emptyBarcode": True,
             "emptyBarcodeReason": "테스트 상품으로 바코드 없음",
             "images": [{"imageType": "REPRESENTATION", "vendorPath": image_url}],
-            "attributes": _attributes(metadata),
-            "notices": _notices(metadata),
+            "attributes": _attributes(metadata, revision),
+            "notices": _notices(metadata, revision),
             "contents": [
                 {
                     "contentsType": "TEXT",

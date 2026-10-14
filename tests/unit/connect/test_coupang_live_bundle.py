@@ -1,13 +1,23 @@
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from app.stages.collect.assets import StoredAsset
-from app.stages.collect.facts import FieldStatus, ImageReference, ImageRole
+from app.stages.collect.facts import (
+    FieldStatus,
+    ImageReference,
+    ImageRole,
+    NoticeItem,
+    NoticeValue,
+    TextValue,
+)
 from app.stages.connect.coupang.live_bundle import build_live_test_product_bundle
 from integrations.marketplaces.coupang.auth import Credentials
 from integrations.marketplaces.coupang.live_mutations import TEST_PRODUCT_BINDINGS
+from integrations.marketplaces.coupang.live_mutations import (
+    TestProductBundle as LiveTestProductBundle,
+)
 
 
 def _metadata(*, document_required: bool = False) -> dict[str, object]:
@@ -39,11 +49,30 @@ def _metadata(*, document_required: bool = False) -> dict[str, object]:
 
 
 def _revision(
-    source_product_id: str, *, locator: str = "https://img.example.com/square.jpg"
+    source_product_id: str,
+    *,
+    locator: str = "https://img.example.com/square.jpg",
+    fields: dict[str, object] | None = None,
 ) -> Any:
+    source_fields = (
+        {
+            "notice": SimpleNamespace(
+                status=FieldStatus.CONFIRMED,
+                value=NoticeValue(
+                    items=(
+                        NoticeItem(label="수량", text="1개"),
+                        NoticeItem(label="품명 및 모델명", text="수집된 테스트 상품"),
+                    )
+                ),
+            )
+        }
+        if fields is None
+        else fields
+    )
     return SimpleNamespace(
         supplier_key="icbm-synthetic",
         source_product_id=source_product_id,
+        fields=source_fields,
         images=(
             ImageReference(
                 role=ImageRole.REPRESENTATIVE,
@@ -59,7 +88,9 @@ def _revision(
     )
 
 
-def _bundle(*, metadata: dict[str, object] | None = None, asset: StoredAsset | None = None):
+def _bundle(
+    *, metadata: dict[str, object] | None = None, asset: StoredAsset | None = None
+) -> LiveTestProductBundle:
     revisions = {
         binding.source_product_id: _revision(binding.source_product_id)
         for binding in TEST_PRODUCT_BINDINGS
@@ -95,7 +126,7 @@ def test_builds_exact_closed_bundle_with_external_images_and_no_repr_secrets() -
         create = plan.create_document.value()
         assert create["requested"] is False
         assert create["sellerProductName"] == f"ICBM TEST {index}"
-        item = create["items"][0]
+        item = cast(list[dict[str, object]], create["items"])[0]
         assert item["externalVendorSku"] == TEST_PRODUCT_BINDINGS[index - 1].source_product_id
         assert item["images"] == [
             {
@@ -134,3 +165,79 @@ def test_rejects_images_outside_coupang_representative_contract(asset: StoredAss
 def test_required_account_document_holds_before_any_provider_call() -> None:
     with pytest.raises(ValueError, match="REQUIRES_ACCOUNT_DOCUMENT"):
         _bundle(metadata=_metadata(document_required=True))
+
+
+def test_required_attribute_without_confirmed_source_value_fails_closed() -> None:
+    revisions = {
+        binding.source_product_id: _revision(binding.source_product_id, fields={})
+        for binding in TEST_PRODUCT_BINDINGS
+    }
+    codes = tuple(str(100 + index) for index in range(8))
+
+    with pytest.raises(ValueError, match="ATTRIBUTE_NEEDS_SOURCE_VALUE"):
+        build_live_test_product_bundle(
+            credentials=Credentials("access", "secret", "vendor-1", 1),
+            vendor_user_id="wing-user",
+            logistics={
+                "companyContactNumber": "01000000000",
+                "deliveryCompanyCode": "CJGLS",
+                "outboundShippingPlaceCode": "1",
+                "returnAddress": "부산광역시",
+                "returnAddressDetail": "테스트",
+                "returnCenterCode": "2",
+                "returnChargeName": "테스트 반품지",
+                "returnZipCode": "00000",
+            },
+            category_codes_by_test=codes,
+            category_metadata={code: _metadata() for code in codes},
+            revision_of=lambda supplier, source: revisions.get(source),
+            asset_of=lambda sha256: StoredAsset(sha256, "image/jpeg", 100_000, 1000, 1000),
+        )
+
+
+def test_notice_detail_uses_confirmed_semantic_source_field() -> None:
+    revisions = {
+        binding.source_product_id: _revision(
+            binding.source_product_id,
+            fields={
+                "notice": SimpleNamespace(
+                    status=FieldStatus.CONFIRMED,
+                    value=NoticeValue(items=(NoticeItem(label="수량", text="1개"),)),
+                ),
+                "original_name": SimpleNamespace(
+                    status=FieldStatus.CONFIRMED,
+                    value=TextValue(text="근거 있는 상품명"),
+                ),
+            },
+        )
+        for binding in TEST_PRODUCT_BINDINGS
+    }
+    codes = tuple(str(100 + index) for index in range(8))
+    bundle = build_live_test_product_bundle(
+        credentials=Credentials("access", "secret", "vendor-1", 1),
+        vendor_user_id="wing-user",
+        logistics={
+            "companyContactNumber": "01000000000",
+            "deliveryCompanyCode": "CJGLS",
+            "outboundShippingPlaceCode": "1",
+            "returnAddress": "부산광역시",
+            "returnAddressDetail": "테스트",
+            "returnCenterCode": "2",
+            "returnChargeName": "테스트 반품지",
+            "returnZipCode": "00000",
+        },
+        category_codes_by_test=codes,
+        category_metadata={code: _metadata() for code in codes},
+        revision_of=lambda supplier, source: revisions.get(source),
+        asset_of=lambda sha256: StoredAsset(sha256, "image/jpeg", 100_000, 1000, 1000),
+    )
+
+    create = bundle.plans[0].create_document.value()
+    item = cast(list[dict[str, object]], create["items"])[0]
+    assert item["notices"] == [
+        {
+            "noticeCategoryName": "기타 재화",
+            "noticeCategoryDetailName": "품명 및 모델명",
+            "content": "근거 있는 상품명",
+        }
+    ]
