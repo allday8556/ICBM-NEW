@@ -407,6 +407,7 @@ class ImageStudioReviewService:
         source = self._sources.read(sha256)
         styles = _matched_styles(source, observation)
         drafts = _covering(observation, items)
+        _check_erase(source, observation, drafts)
         edits = {
             rid: EditItem(rid, True, d.text, ItemOrigin.OPERATOR_CONFIRMED, d.erase, styles[rid])
             if d.include
@@ -457,8 +458,10 @@ class ImageStudioReviewService:
         observation = self._observation(context, observation_id)
         view = self._translation.current_candidate(observation, source_language)
         suggested = _suggestions(view)
-        styles = _matched_styles(self._sources.read(sha256), observation)
+        source = self._sources.read(sha256)
+        styles = _matched_styles(source, observation)
         drafts = _covering(observation, items)
+        _check_erase(source, observation, drafts)
         edits = []
         for region in observation.regions:
             draft = drafts[region.region_id]
@@ -905,6 +908,35 @@ def _covering(observation: ObservationRecord, items: Sequence[DraftItem]) -> dic
             IMAGE_STUDIO_DRAFT_INVALID, "a draft names every region of the reading once"
         )
     return drafts
+
+
+def _check_erase(
+    source: bytes, observation: ObservationRecord, drafts: Mapping[str, DraftItem]
+) -> None:
+    """ERASE is asked only where the erase is clean (IT-04): a complex background is never
+    repainted, so such a request is refused here as well as never honoured by the renderer."""
+    asked = [
+        region
+        for region in observation.regions
+        if drafts[region.region_id].include
+        and drafts[region.region_id].erase is EraseDecision.ERASE
+    ]
+    if not asked:
+        return
+    image: Image.Image = decode_source(source)
+    for region in asked:
+        box = _box(region)
+        if (
+            box.width <= 0
+            or box.height <= 0
+            or not box.inside(image.width, image.height)
+            or not matched.read_background(image, box).clean
+        ):
+            raise InputValidationError(
+                IMAGE_STUDIO_DRAFT_INVALID,
+                "ERASE is only for a region whose background erases cleanly",
+                details={"region_id": region.region_id, "code": COMPLEX_BACKGROUND},
+            )
 
 
 def _matched_styles(source: bytes, observation: ObservationRecord) -> dict[str, RegionStyle]:

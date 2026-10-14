@@ -430,6 +430,55 @@ def test_the_callers_language_never_narrows_the_checks_on_apply(
     assert applied.status_code == 200, applied.json()
 
 
+def test_erase_is_refused_on_a_complex_background(
+    client: TestClient,
+    container: Container,
+    config: AppConfig,
+    item: StudioProduct,
+    tmp_path: Path,
+) -> None:
+    """IT-04: a complex background is never repainted. ERASE on r4 (the noisy patch) is refused
+    by preview and save, and nothing is written."""
+    make_ready(container, tmp_path)
+    _run(client, container, item)
+    state = _state(client, item)
+    draft = _draft(state, r0=None, r4=None)
+    for entry in draft:
+        if entry["region_id"] == "r4":
+            entry["erase"] = "ERASE"
+    before = {t: count(config, t) for t in (*STUDIO_TABLES, *IMAGE_TABLES, "audit_events")}
+    common = {"observation_id": state["observation_id"], "source_language": "zh", "items": draft}
+    preview = client.post(_image(item, "/preview"), json=common, headers=HEADERS)
+    saved = client.post(
+        _image(item, "/revisions"),
+        json={**common, "expected_seq": state["expected_seq"], "actor": OPERATOR},
+        headers=HEADERS,
+    )
+    for refused in (preview, saved):
+        assert refused.status_code == 422
+        error = refused.json()["error"]
+        assert error["code"] == "IMAGE_STUDIO_DRAFT_INVALID"
+        assert error["details"] == {"region_id": "r4", "code": "COMPLEX_BACKGROUND"}
+    assert {t: count(config, t) for t in before} == before
+    # ERASE where the background is clean is accepted.
+    clean = _draft(state, r0=None)
+    for entry in clean:
+        if entry["region_id"] == "r0":
+            assert entry["erase"] == "ERASE"
+    ok = client.post(
+        _image(item, "/revisions"),
+        json={
+            "observation_id": state["observation_id"],
+            "source_language": "zh",
+            "items": clean,
+            "expected_seq": state["expected_seq"],
+            "actor": OPERATOR,
+        },
+        headers=HEADERS,
+    )
+    assert ok.status_code == 200, ok.json()
+
+
 def test_a_stale_candidate_is_never_offered_as_a_suggestion(
     client: TestClient, container: Container, item: StudioProduct, tmp_path: Path
 ) -> None:
