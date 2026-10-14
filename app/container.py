@@ -26,6 +26,7 @@ from app.capabilities.detail_guidance.image_store import GuidanceImageStore
 from app.capabilities.detail_guidance.service import DetailGuidanceService
 from app.capabilities.detail_guidance.store import DetailGuidanceStore
 from app.capabilities.image_studio.contracts import NoOcrProvider
+from app.capabilities.image_studio.ocr import ocr_capability
 from app.capabilities.image_studio.store import ImageStudioStore
 from app.capabilities.image_studio.task import RegistryTranslationComposer
 from app.capabilities.image_studio.translation import ImageTranslationService
@@ -642,6 +643,9 @@ def build_container(
     detail_guidance = DetailGuidanceService(detail_guidance_store)
     # ADR-0028 §3: the SearchSignal port, provider-zero until a source has its own owner decision.
     search_signal = NoSearchSignal()
+    # ADR-0041 D2, I2: the local OCR port. No engine is installed until I7 (NoOcrProvider), so
+    # the image_ocr capability reads NOT_CONFIGURED; it never fails core readiness.
+    ocr_provider = NoOcrProvider()
     readiness = ReadinessService(
         db=db,
         worker=worker,
@@ -655,6 +659,7 @@ def build_container(
             *connect.capabilities(),
             ai_execution.capability(),
             search_signal.capability(),
+            ocr_capability(ocr_provider),
         ],
     )
 
@@ -1077,7 +1082,7 @@ def build_container(
         jobs=jobs,
         products=product_store,
         sources=source_assets,
-        ocr=NoOcrProvider(),
+        ocr=ocr_provider,
         composer=RegistryTranslationComposer(ai_composer),
         execution=ai_execution,
     )
