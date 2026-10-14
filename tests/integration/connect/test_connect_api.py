@@ -84,7 +84,8 @@ def test_an_unconfigured_supplier_degrades_a_capability_never_core_readiness(
     body = response.json()
     assert (body["status"], body["overall"]) == ("PASS", "READY")
     # ADR-0012 §9, ADR-0026 AIF-2: with no AI provider the ai capability is NOT_CONFIGURED too;
-    # ADR-0028 §3: so is the provider-zero search_signal port. None ever fails core readiness.
+    # ADR-0028 §3: so is the provider-zero search_signal port, and ADR-0041 D2 the image_ocr port
+    # with no OCR engine installed. None ever fails core readiness.
     assert body["capabilities"] == [
         *(
             {"key": key, "status": "NOT_CONFIGURED", "detail": "state=DISCONNECTED"}
@@ -96,11 +97,17 @@ def test_an_unconfigured_supplier_degrades_a_capability_never_core_readiness(
             "status": "NOT_CONFIGURED",
             "detail": "no search-signal source is configured (ADR-0028 §3)",
         },
+        {
+            "key": "image_ocr",
+            "status": "NOT_CONFIGURED",
+            "detail": "no OCR engine is installed (ADR-0041 D2)",
+        },
     ]
     assert body["degraded_capabilities"] == [
         *SUPPLIER_CAPABILITIES,
         "ai",
         "search_signal",
+        "image_ocr",
     ]
 
 
@@ -120,8 +127,14 @@ def test_a_connection_test_proves_the_protected_read_and_makes_the_capability_re
     ready = api.get("/api/ready").json()
     statuses = {c["key"]: c["status"] for c in ready["capabilities"]}
     assert statuses["supplier:kmretail"] == "READY"
-    # Only the ai capability stays degraded: no AI provider is configured (ADR-0026 AIF-2).
-    assert ready["degraded_capabilities"] == [*sorted(SITE_CAPABILITIES), "ai", "search_signal"]
+    # Only the provider-zero ports stay degraded: no AI provider (ADR-0026 AIF-2), no search
+    # signal (ADR-0028 §3) and no OCR engine (ADR-0041 D2).
+    assert ready["degraded_capabilities"] == [
+        *sorted(SITE_CAPABILITIES),
+        "ai",
+        "search_signal",
+        "image_ocr",
+    ]
     assert gateway.logins == 1
     assert gateway.requests == [RequestKind.CONTROL_READ, RequestKind.PROTECTED_READ]
 
@@ -179,6 +192,7 @@ def test_repeated_rejections_pause_until_the_operator_resumes(
         *SUPPLIER_CAPABILITIES,
         "ai",
         "search_signal",
+        "image_ocr",
     ]
 
     refused = api.post(f"{BASE}/test", headers=CLIENT)
