@@ -145,6 +145,16 @@ def _atomic_procurement_state(procurement: AtomicProcurement) -> dict[str, objec
         "purchase_cost_krw": None
         if procurement.binding is None
         else procurement.binding.purchase_cost_krw,
+        # ADR-0038 §4: a source-currency binding's own unit price, named only for one, so every
+        # KRW readiness fingerprint is unchanged.
+        **(
+            {}
+            if procurement.binding is None or procurement.binding.source_currency is None
+            else {
+                "source_currency": procurement.binding.source_currency,
+                "source_unit_price": procurement.binding.source_unit_price,
+            }
+        ),
     }
 
 

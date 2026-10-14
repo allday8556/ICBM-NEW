@@ -4,6 +4,10 @@ It writes and reads pricing snapshots and their current-snapshot pointer history
 unit of work, and decides nothing: the pricing service calculates and chooses; migration 0013
 refuses any snapshot that does not price the current state it names, and any pointer move out of
 order.
+
+A source-currency price records its landed-cost pins (ADR-0038 §4, FX-02; migration 0066) through
+``landed_cost.pin_columns``, the store-level rule that they describe the amounts the row records;
+a KRW price records none of them.
 """
 
 import json
@@ -16,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.platform.core.clock import Clock
+from app.stages.products.landed_cost import LandedCostPin, pin_columns, pin_of
 from app.stages.products.models import CurrentPricingSnapshotMove, PricingSnapshot
 from app.stages.products.pricing import (
     MINIMUM_NET_MARGIN,
@@ -68,6 +73,8 @@ class PricingSnapshotRecord:
     # stated when it was not.
     minimum_applied: bool = True
     stated_minimum_sale_price_krw: int | None = None
+    # ADR-0038 §4 (FX-02): the landed-cost pins of a source-currency price; None for KRW.
+    landed_cost: LandedCostPin | None = None
 
 
 @dataclass(frozen=True)
@@ -157,6 +164,11 @@ class PricingUnit:
             created_at=self._clock.now(),
             minimum_applied=inputs.minimum_applied,
             stated_minimum_sale_price_krw=inputs.stated_minimum_sale_price_krw,
+            **pin_columns(
+                None if inputs.landed_cost is None else inputs.landed_cost.pin(),
+                purchase_cost_krw=inputs.purchase_cost_krw,
+                supplier_shipping_krw=inputs.supplier_shipping_krw,
+            ),
         )
         self.session.add(row)
         self.session.flush()
@@ -223,6 +235,7 @@ def _snapshot(row: PricingSnapshot) -> PricingSnapshotRecord:
         created_at=row.created_at,
         minimum_applied=bool(row.minimum_applied),
         stated_minimum_sale_price_krw=row.stated_minimum_sale_price_krw,
+        landed_cost=pin_of(row),
     )
 
 

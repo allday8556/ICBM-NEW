@@ -422,6 +422,8 @@ PRICING_MODULES = (
     "app/stages/products/pricing_service.py",
     "app/stages/products/pricing_store.py",
     "app/stages/products/readiness.py",
+    # ADR-0038 O2: the landed cost converts a source price exactly, and manufactures nothing.
+    "app/stages/products/landed_cost.py",
     # PR-Q: where offers are read, stored and materialized, no price is manufactured either.
     "app/stages/products/quantity.py",
     "app/stages/products/materialization.py",
