@@ -1,0 +1,151 @@
+# ADR-0040 — Overseas capture collectors: 1688 and Super Delivery, one page the user captures, and 1688's embedded product data
+
+Status: **PROPOSED** 2026-10-14.
+
+Decision owners:
+- **Product direction:** the owner, in Issue #219:
+  - `6158621894`: collect by product page; read exactly what the page states; the purchase cost is the price actually paid;
+  - `6158624981`: the user captures one page with the extension; no list or whole-site crawling;
+  - `6158718055`: for 1688, read the page's embedded product data, never executed, and only the paths this ADR names.
+- **Already decided by canon:**
+  - ADR-0019: the extension transport, `BrowserCapturePolicy`, the capture order, server-fetched images;
+  - ADR-0010: facts are quoted, never guessed;
+  - ADR-0030 §7: a supplier is `RECON` until its acceptance, then `ACTIVE`;
+  - ADR-0038: source currency, FX snapshot, landed cost, and the 2026-10-14 reconnaissance (§9).
+- **Implementation choices:** the implementation agent, under ADR-0022 and rule 14.
+
+What it authorizes:
+- two packaged suppliers, `ali1688` and `superdelivery`, each with its own collector package;
+- an `EXTENSION` capture of one product page per click, for each;
+- for `ali1688` only, one **embedded product data** member of the capture (§3), which amends ADR-0019 for that supplier;
+- a currency other than KRW on their revisions, through ADR-0038 slice O1.
+
+What it does not authorize:
+- a `DIRECT_URL` read, a list queue, or any crawl of these sites;
+- a credential for either site held by ICBM;
+- a browser byte relay;
+- executing anything the page contains;
+- any LIVE write.
+
+Recorded by: Claude Code (Track B).
+
+Date: 2026-10-14
+
+---
+
+## 1. One page, captured by the user
+
+- **The only transport** for both suppliers is `EXTENSION`, started by the user on an open product page (ADR-0019 §1, §3).
+  - The user's own signed-in browser session decides what the page shows: a Super Delivery wholesale price appears only for an approved company.
+  - ICBM stores no credential for either site, and never reads one.
+- **No other transport.** Their `CollectionProfile` declares no `DIRECT_URL` transport and no queue limits. A list queue therefore refuses before any read (ADR-0019 AC-28), and the server never fetches a product page of either site.
+- **Images** are fetched by the server's policed fetch from the reviewed image hosts (ADR-0019 §7):
+  - 1688: `cbu01.alicdn.com` and the other `*.alicdn.com` image hosts that reconnaissance names;
+  - Super Delivery: its own image host.
+- **Host permissions.** The extension gains the two product hosts, `detail.1688.com` and `www.superdelivery.com`, as reviewed supplier hosts (AC-07). The optional per-origin permissions of ADR-0036 D3 are not required by this ADR.
+
+## 2. Super Delivery reads the DOM
+
+- Its `BrowserCapturePolicy` takes the product block, the price block, the description and specification blocks, and the company's terms and shipping block.
+  - It excludes the header, the member menu, the coupon and point widgets, reviews, and recommendations.
+  - It keeps ADR-0019's no-script rule unchanged.
+- **Fields** (ADR-0038 §9.3):
+  - `prices`: JPY. The purchase price is the **税込** price of one set. The 税抜 price, the maker's suggested retail price (メーカー希望小売価格) and the stated wholesale ratio are kept as stated.
+  - **Undisclosed price.** A page whose price is undisclosed ("卸価格を見る（申請）") has `prices` `REVIEW_REQUIRED` with the reason `PRICE_NOT_DISCLOSED`. Nothing is guessed.
+  - `options`: each SD item number of the page (`…S1`, `…S2`, such as a ×18 set) with its own price.
+  - `stock`: as stated ("在庫有り" or sold out). A company that keeps no stock count reads as stated.
+  - `shipping`:
+    - a single nationwide flat fee with a free-over threshold reads as a `CONDITIONAL` fee in JPY;
+    - regional surcharges are kept as words (as ADR-0035 RS-01 does for KRW);
+    - anything else is `REVIEW_REQUIRED`.
+  - `brand`, `manufacturer`, `origin`, the JAN and the description: as stated.
+- **Company terms.** Text such as "日本国内の小売店様向け" or "ドロップシッピング不可" is recorded as the company's quoted words (ADR-0038 §9.2).
+  - It names no marketplace, so it is not a sales-channel restriction (ADR-0031).
+  - It is not a gate. It is shown with the product.
+
+## 3. 1688 reads its embedded product data
+
+**Why.** The rendered page shows the price and stock of the selected option only. The page carries every option's price, stock and freight in one inline script whose single argument is a JSON object:
+
+```text
+window.context=(function(b,d){…})(window.contextPath,{ … JSON … });
+```
+
+**What is captured** (amends ADR-0019 §6 and AC-12 for `ali1688` only):
+- **The DOM capture is unchanged.** It is the product root and regions under `BrowserCapturePolicy`, with `script` excluded.
+- **One embedded-data member** is added beside it. The policy declares an `embedded_data` entry:
+  - the inline script's required **prefix** (`window.contextPath = "/default";` followed by `window.context=(`);
+  - the **argument marker** (`})(window.contextPath,`);
+  - the **terminator** (`);` at the end of the script);
+  - a **byte bound**.
+- **What the extension sends.** It finds **exactly one** inline script, with no `src`, that matches the prefix. It sends the script's text, and nothing else of any script.
+  - Zero or more than one match: nothing is sent for the member, and the capture says so.
+  - It never runs the text and never reads a JS global.
+
+**What the server does:**
+- It cuts the argument between the marker and the terminator, and parses it with a **strict JSON parser** under the byte bound and a depth bound. It never evaluates it.
+- Any mismatch refuses the member, fail-closed, so the fields it would have supplied are `REVIEW_REQUIRED`:
+  - the prefix;
+  - the marker;
+  - a trailing byte;
+  - an invalid or oversized JSON document.
+- The security gate (ADR-0019 §6.1) runs over the parsed strings as it does over DOM text.
+  - A secret or the member's own identity refuses the capture.
+  - **The receive address** (`freightInfo.recieveAddress`, `receiveAddressId`, and the area codes) is the member's own and is dropped before extraction. It is never stored.
+- The extractor reads **only the allowlisted paths** of §4. The parsed document and its text are dropped once the facts are written. Only canonical facts and their evidence are stored (§6.1).
+- **Evidence.** A fact from the member carries evidence kind `EMBEDDED_DATA` with its JSON path as the locator. This is one new `EvidenceKind`, authorized here.
+
+## 4. 1688 fields
+
+The allowlisted paths are under `result.data`.
+
+| field | read from | rule |
+| --- | --- | --- |
+| `original_name` | the page title in the DOM | as stated (Chinese) |
+| `prices` | `mainPrice.fields.priceModel` | CNY. `priceDisplayType` `skuPrice`: per-SKU prices. `rangePrice`: the first tier (`beginAmount` 1) is the purchase price |
+| `options` | `Root.fields.dataJson.skuModel.skuProps`, `skuInfoMap` | axes and values as stated. Each SKU's own `discountPrice` (or `price` when none) is its purchase price (ADR-0038 §9.3) |
+| `stock` | `skuInfoMap.*.canBookCount` | per SKU, as stated |
+| `quantity_tiers` | `priceModel.currentPrices` when `rangePrice` | each tier as stated |
+| `shipping` | `shippingServices.fields.freightInfo.totalCost`, `location` | CNY freight from the stated ship-from location to the user's receive address (the 배대지). A `FIXED` fee as stated, without the address |
+| `brand`, `origin` | the product attribute table (品牌, 产地) | as stated |
+| `images` | the DOM main gallery | server-fetched (§1) |
+| `minimum_sale_price`, `sales_channels` | not stated on 1688 | `ABSENT` |
+
+- **A promotion price is the price actually paid now** (ADR-0038 §9.3). The line price is kept beside it as a fact.
+- **Units.** The unit (套, 件, 个) and the minimum order (`beginAmount`) are kept as stated. A minimum order above one is `REVIEW_REQUIRED`: 구매대행 sells one unit.
+
+## 5. Currency
+
+- Both suppliers' revisions state one currency: CNY or JPY (ADR-0038 §1).
+- This needs ADR-0038 slice **O1**, currency on facts and money values. The collectors come after O1.
+- Until slice O2, a non-KRW Item is not priced: pricing returns `REVIEW_REQUIRED`, never a guessed KRW amount.
+
+## 6. Acceptance
+
+- Each supplier starts `RECON` (ADR-0030 §7).
+- **The acceptance:** the user captures five product pages per supplier, chosen with the owner as for U-PICK and 건강산. A fresh run over the same captures yields zero diffs.
+  - 1688: both price modes, at least one product with more than ten SKUs, and a promotion price.
+  - Super Delivery: one undisclosed price, one set option, and one company with terms text.
+- The supplier becomes `ACTIVE` when its acceptance document says PASS.
+
+## Invariants
+
+- **OC-01** Neither supplier is read except by a page the user captured. There is no direct read, list queue or crawl.
+- **OC-02** ICBM holds no credential for either site.
+- **OC-03** The only script content any capture carries is 1688's one declared embedded-data member. It is parsed as strict JSON and never executed.
+- **OC-04** A mismatch in the embedded data refuses that member fail-closed. Its fields are `REVIEW_REQUIRED`, never inferred from the DOM's selected option.
+- **OC-05** The member's receive address and identity are never stored.
+- **OC-06** Only allowlisted paths are read, and only canonical facts and evidence are stored.
+- **OC-07** A price the page does not disclose is `REVIEW_REQUIRED`. The purchase price is the price actually paid for one unit, in the source currency.
+- **OC-08** A company's terms are kept as its words. They are not a gate.
+
+## Slices
+
+| # | slice |
+| --- | --- |
+| C0 | this ADR |
+| C1 | `superdelivery` collector (DOM), after ADR-0038 O1 |
+| C2 | `ali1688` collector, with the embedded-data member: extension, policy, gate and extractor |
+| C3 | the two acceptances, then `ACTIVE` |
+
+Migrations are numbered 0063 or later (0062 is Track A's).
