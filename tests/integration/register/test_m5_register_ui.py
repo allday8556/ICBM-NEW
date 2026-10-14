@@ -127,10 +127,11 @@ def test_the_screen_renders_server_state_and_the_servers_verdicts(
     ready = prepare(container, sources, container.registrations, account, prep)
     writes: list[tuple[str, str]] = []
     with _page(browser, client, writes) as page:
-        # The unit, its account and its frozen identity come from the server.
+        # The unit and account binding come from the server, while internal ids stay off-screen.
         unit = page.locator(f".register-unit[data-draft='{ready.draft_id}']")
         assert unit.count() == 1
-        assert account in unit.inner_text()
+        assert unit.get_attribute("data-account") == account
+        assert account not in unit.inner_text()
         # Every action the server disabled is disabled here, with the server's reason rendered.
         assert _action(page, "CREATE_ENQUEUE")["disabled"] is True
         assert _action(page, "RECONCILE")["disabled"] is True
@@ -258,7 +259,7 @@ def test_each_unit_of_a_draft_is_its_own_panel_with_the_servers_facts(
         assert first.locator("td[data-assets='1'] span[data-qa='PASS']").count() == 1
         preflight = first.locator(".register-preflight").first
         assert preflight.get_attribute("data-preflight") == "UNAVAILABLE"
-        assert "Preflight 입력" in preflight.inner_text()
+        assert "저장된 등록 준비 정보" in preflight.inner_text()
         assert writes == []
 
 
