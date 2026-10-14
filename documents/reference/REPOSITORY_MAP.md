@@ -149,7 +149,8 @@ and fingerprint contract with the minimal OCR and composition seams, the models,
 store of OCR observations, translation candidates and edit revisions with their forward-only
 pointer, and the provider-zero `image.translate` job), migration `0065_image_studio_translation`
 and one integration suite; production binds no OCR engine and no translation task.
-ADR-0041 I3 added to it the deterministic renderer `image-translate-renderer/v1`: `style.py` reads a region's background
+ADR-0041 I3 added to it the deterministic renderer `image-translate-renderer/v1`: `style.py`
+reads a region's background
 (erase only where clean) and the source text's colour, weight and size, and `renderer.py` draws
 the Korean text with the bundled Noto Sans KR (shrink-to-fit, `LAYOUT_OVERFLOW`, a label box on a
 complex background, the completeness verdict). One integration suite; no migration.
