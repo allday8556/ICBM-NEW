@@ -25,6 +25,8 @@ itself — the stack still refuses under ``M0_DRY_RUN_ONLY``.
 ``icbm coupang save-credentials`` is the no-echo local input path into the OS credential store.
 ``icbm coupang read-canary`` composes the one C-LIVE-R1 identity-bound KR read and
 ``icbm coupang mutate-test-products`` composes the C-LIVE-MUT-1 exact test 1..11 workflow.
+``icbm coupang recover-test-product-create`` performs only the positive-only identity lookup for
+one ambiguous C-LIVE-MUT-1 CREATE and never treats an empty answer as absence.
 None of these commands accepts Access Key or Secret Key as an argument, so secret material does
 not enter a process list.
 
@@ -106,6 +108,7 @@ COUPANG_OPERATOR_COMMANDS: tuple[str, ...] = (
     "save-credentials",
     "read-canary",
     "mutate-test-products",
+    "recover-test-product-create",
 )
 for _name in LIVE_OPERATOR_COMMANDS:
     _IN_USE_HINTS[("live", _name)] = (
@@ -185,6 +188,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--approved-at", required=True, help="approval time with explicit offset"
     )
     mutations.add_argument("--expires-at", required=True, help="expiry time with explicit offset")
+    recovery = coupang_commands.add_parser(
+        "recover-test-product-create",
+        help="recover one ambiguous C-LIVE-MUT-1 CREATE by positive provider evidence only",
+    )
+    recovery.add_argument(
+        "--bundle", required=True, type=Path, help="closed test 1..11 payload bundle JSON"
+    )
+    recovery.add_argument("--source-ip", required=True, help="the outbound IP registered in Wing")
+    recovery.add_argument(
+        "--clock-skew-seconds", required=True, type=float, help="observed absolute clock offset"
+    )
+    recovery.add_argument(
+        "--payload-digest", required=True, help="reviewed lowercase SHA-256 payload digest"
+    )
     return parser
 
 
@@ -604,6 +621,70 @@ def _coupang_mutate_test_products(
     return 0
 
 
+def _coupang_recover_test_product_create(
+    config: AppConfig, lease: DataDirLease, args: argparse.Namespace
+) -> int:
+    """Recover one ambiguous CREATE identity; zero or multiple matches remain unresolved."""
+    from app.platform.core.errors import AppError
+    from app.platform.core.ownership import require_ownership
+    from app.platform.core.secrets import build_secret_store
+    from app.stages.connect.coupang.credentials import CoupangCredentialStore
+    from integrations.marketplaces.coupang.auth import (
+        AuthContext,
+        IpAllowlistDeclaration,
+        Market,
+        SystemUtcClock,
+    )
+    from integrations.marketplaces.coupang.canary import ClockPreflight
+    from integrations.marketplaces.coupang.live_mutations import (
+        CoupangAmbiguousCreateRecovery,
+        LiveMutationTransportRefused,
+        MutationJournal,
+        TestProductBundle,
+    )
+
+    require_ownership(lease, config.data_dir)
+    secrets = build_secret_store(config.secret_backend)
+    status = secrets.status()
+    if not status.available or status.backend == "memory":
+        print("COUPANG_OS_SECRET_STORE_UNAVAILABLE", file=sys.stderr)
+        return 1
+    try:
+        credentials = CoupangCredentialStore(secrets).load()
+    except OSError:
+        credentials = None
+    if credentials is None:
+        print("COUPANG_CREDENTIALS_NOT_CONFIGURED", file=sys.stderr)
+        return 1
+    try:
+        raw = json.loads(args.bundle.read_text("utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("bundle must be an object")
+        bundle = TestProductBundle.from_mapping(raw)
+        if bundle.payload_digest != args.payload_digest:
+            raise ValueError("payload digest does not match the reviewed bundle")
+        clock = SystemUtcClock()
+        now = clock.now()
+        declaration = IpAllowlistDeclaration.create(
+            args.source_ip,
+            credential_generation=credentials.credential_generation,
+            recorded_at=now,
+        )
+        result = CoupangAmbiguousCreateRecovery(
+            context=AuthContext(credentials, Market.KR, declaration),
+            bundle=bundle,
+            clock=clock,
+            clock_preflight=ClockPreflight.create(args.clock_skew_seconds, checked_at=now),
+            journal=MutationJournal(config.runtime_dir / "coupang-live-mutations.json"),
+        ).recover()
+    except (AppError, LiveMutationTransportRefused, OSError, ValueError) as exc:
+        code = exc.code if isinstance(exc, AppError) else "COUPANG_MUTATION_RECOVERY_LOCAL_REFUSAL"
+        print(code, file=sys.stderr)
+        return 1
+    print(json.dumps(asdict(result), ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 class _OperatorInputError(ValueError):
     """An operator input that is not even well-formed: refused before any owner is asked."""
 
@@ -868,6 +949,7 @@ OWNING_COMMANDS: dict[Command, Callable[[AppConfig, DataDirLease, argparse.Names
     ("coupang", "save-credentials"): _coupang_credentials,
     ("coupang", "read-canary"): _coupang_read_canary,
     ("coupang", "mutate-test-products"): _coupang_mutate_test_products,
+    ("coupang", "recover-test-product-create"): _coupang_recover_test_product_create,
 }
 # The only commands allowed to run without the data-directory lock (ADR-0006).
 READ_ONLY_COMMANDS: dict[Command, Callable[[AppConfig], int]] = {
