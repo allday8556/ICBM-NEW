@@ -34,6 +34,7 @@ from app.stages.collect.onboarding.store import (
 )
 from tests.conftest import LOCAL
 from tests.support.jobs_support import FakeClock
+from tests.support.onboarding_support import wait_until
 from tests.support.onboarding_trial_support import (
     CAFE24_ORIGIN,
     OPERATOR,
@@ -70,11 +71,18 @@ def refused(code: str, call: object) -> AppError:
     return caught.value
 
 
-def _analysed(app: Container, shop: TrialShop) -> str:
+def _analysed(app: Container, shop: TrialShop, *, worker: bool = False) -> str:
+    """A RECON site with U-PICK 4954 read once. With the application's own job worker running
+    (``worker``), the trial job is left to it and awaited, never run beside it."""
     key = recon_site(app, CAFE24_ORIGIN, "cafe24")
     url = cafe24_url(4954)
     shop.serve(url, upick_page("4954"))
-    run_trial(app, key, url)
+    if not worker:
+        run_trial(app, key, url)
+        return key
+    submitted = app.onboarding_analysis.submit(key, url, actor=OPERATOR)
+    wait_until(lambda: app.jobs.get(submitted.job_id).state in ("SUCCEEDED", "DEAD"))
+    assert app.jobs.get(submitted.job_id).state == "SUCCEEDED"
     return key
 
 
@@ -185,7 +193,7 @@ def test_the_api_reads_previews_and_saves_words_with_the_client_header(
     api: TestClient, shop: TrialShop
 ) -> None:
     container = api.app.state.container  # type: ignore[attr-defined]
-    key = _analysed(container, shop)
+    key = _analysed(container, shop, worker=True)
     base = f"/api/v1/onboarding/suppliers/{key}/words"
     view = api.get(base)
     assert view.status_code == 200 and view.json()["words_seq"] == 0
