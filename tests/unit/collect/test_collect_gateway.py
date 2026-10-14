@@ -452,6 +452,39 @@ def test_the_extension_envelope_is_a_profile_the_gateway_never_sends_for() -> No
     assert site.requests == [] and budget.reserved == []
 
 
+def test_a_capture_only_profile_has_no_document_the_gateway_reads() -> None:
+    # ADR-0040 §1 (OC-01): a supplier read only from pages the user captured declares no
+    # direct-URL read. The gateway reads none of its documents — no product page and no policy
+    # document — before a target is judged or a request reserved; its images are still fetched.
+    captured_only = _profile(direct_url_reads=False)
+    site = Site(httpx.Response(200, content=PNG, headers={"content-type": "image/png"}))
+    budget = Budget()
+    gateway = _gateway(site)
+    for read in (
+        lambda: gateway.read_document(
+            captured_only, PRODUCT, kind=ReadKind.PRODUCT_READ, budget=budget
+        ),
+        lambda: gateway.read_document(
+            captured_only,
+            "https://supplier.test/robots.txt",
+            kind=ReadKind.POLICY_READ,
+            budget=budget,
+        ),
+        lambda: gateway.read_discovered_policy(
+            captured_only, "https://supplier.test/policy.html", budget=budget
+        ),
+    ):
+        with pytest.raises(PolicyBlockedError) as refused:
+            read()
+        assert refused.value.code == "COLLECT_DIRECT_URL_NOT_DECLARED"
+    assert site.requests == [] and budget.reserved == []
+    image = gateway.read_image(captured_only, "https://img.supplier.test/a.png", budget=budget)
+    assert image.status == 200 and image.content == PNG
+    assert budget.reserved == [(ReadKind.IMAGE_REQUEST, "img.supplier.test")]
+    # Every profile that does not say otherwise keeps its direct-URL read.
+    assert _profile().direct_url_reads is True
+
+
 # ---------------------------------------------------------------- an image host's own robots
 # Issue #52 ruling 5699776908 §3: an image host is a distinct origin, so its own rules are read
 # before anything is requested from it — and that one document is all it ever answers for.
@@ -482,3 +515,93 @@ def test_nothing_else_on_an_image_host_is_a_policy_document(url: str) -> None:
 def test_a_host_that_is_not_an_approved_image_host_is_still_refused() -> None:
     with pytest.raises(CollectionTargetRefused, match="storefront host"):
         check_target(_profile(), "https://other.test/robots.txt", ReadKind.POLICY_READ)
+
+
+# ---------------------------------------------------------------- a description document
+# ADR-0040 §3.1: one public document a captured page names, read only from the profile's declared
+# description hosts, with no session, no query and no redirect, in a grant for those hosts alone.
+
+DESCRIPTION = "https://desc.supplier.test/offer/icoss0123"
+
+
+def test_a_description_document_is_read_from_a_declared_host_only() -> None:
+    described = _profile(
+        direct_url_reads=False, description_hosts=frozenset({"desc.supplier.test"})
+    )
+    site = Site(httpx.Response(200, text='var offer_details={"content":""};'))
+    budget = Budget()
+    document = _gateway(site).read_description(described, DESCRIPTION, budget=budget)
+    assert document.status == 200 and document.kind is ReadKind.DESCRIPTION_READ
+    assert document.body.startswith("var offer_details=")
+    # Reserved once, under the host alone; no cookie and no redirect is followed.
+    assert budget.reserved == [(ReadKind.DESCRIPTION_READ, "desc.supplier.test")]
+    (request,) = site.requests
+    assert "cookie" not in request.headers
+    # A capture-only profile still reads it: it is not a document of the supplier's own site.
+    assert described.direct_url_reads is False
+
+
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [
+        ("https://supplier.test/offer/icoss0123", "HOST_NOT_ALLOWLISTED"),  # the storefront
+        ("https://img.supplier.test/offer/icoss0123", "HOST_NOT_ALLOWLISTED"),  # an image host
+        (f"{DESCRIPTION}?token=1", "QUERY_NOT_ALLOWED"),
+        ("http://desc.supplier.test/offer/icoss0123", "NON_HTTPS"),
+        (f"{DESCRIPTION}#top", "FRAGMENT"),
+        ("https://desc.supplier.test:8443/offer/icoss0123", "NON_STANDARD_PORT"),
+    ],
+)
+def test_any_other_description_target_is_refused_before_anything_is_sent(
+    url: str, reason: str
+) -> None:
+    described = _profile(description_hosts=frozenset({"desc.supplier.test"}))
+    site = Site()
+    budget = Budget()
+    with pytest.raises(CollectionTargetRefused) as refused:
+        _gateway(site).read_description(described, url, budget=budget)
+    assert refused.value.reason.value == reason
+    assert site.requests == [] and budget.reserved == []
+
+
+def test_a_profile_without_description_hosts_reads_no_description() -> None:
+    site = Site()
+    with pytest.raises(CollectionTargetRefused):
+        _gateway(site).read_description(_profile(), DESCRIPTION, budget=Budget())
+    assert site.requests == []
+    # A description is never read through the document read either.
+    with pytest.raises(ValueError, match="their own reads"):
+        _gateway(site).read_document(
+            _profile(), DESCRIPTION, kind=ReadKind.DESCRIPTION_READ, budget=Budget()
+        )
+
+
+def test_a_description_over_its_bound_is_refused_whole(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(transport, "MAX_DESCRIPTION_BYTES", 16)
+    described = _profile(description_hosts=frozenset({"desc.supplier.test"}))
+    site = Site(httpx.Response(200, text="x" * 64))
+    with pytest.raises(PolicyBlockedError) as refused:
+        _gateway(site).read_description(described, DESCRIPTION, budget=Budget())
+    assert refused.value.code == "COLLECT_DESCRIPTION_TOO_LARGE"
+
+
+def test_a_description_read_runs_in_a_grant_for_the_description_hosts_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    granted: list[tuple[str, frozenset[str]]] = []
+    real = transport.EGRESS.grant
+
+    def spy(owner: str, hosts: object) -> object:
+        granted.append((owner, frozenset(hosts)))  # type: ignore[arg-type]
+        return real(owner, hosts)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(transport.EGRESS, "grant", spy)
+    described = _profile(description_hosts=frozenset({"desc.supplier.test"}))
+    site = Site(httpx.Response(200, text="var offer_details={};"))
+    _gateway(site).read_description(described, DESCRIPTION, budget=Budget())
+    assert granted == [
+        (
+            f"supplier:{described.supplier.supplier_key}:description",
+            frozenset({"desc.supplier.test"}),
+        )
+    ]

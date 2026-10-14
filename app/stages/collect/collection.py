@@ -30,7 +30,7 @@ classes the shared job policy already approves are ever retried.
 
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Protocol
@@ -86,6 +86,7 @@ from app.stages.collect.sourceassets import (
 from app.stages.collect.urls import UrlPolicy
 from integrations.suppliers.collection import (
     CollectionProfile,
+    DescriptionRead,
     DocumentView,
     ImageCandidate,
     ImageResponse,
@@ -123,6 +124,8 @@ COLLECT_POLICY = RetryPolicy(max_attempts=3, base_delay_s=90.0, factor=2.0, max_
 # How many recent runs the COLLECT screen may ask for at once (Gate 1 G1-E).
 RECENT_RUNS_DEFAULT = 10
 RECENT_RUNS_MAX = 50
+# ADR-0040 §1 (OC-01): a supplier read only from pages the user captured has no direct-URL run.
+DIRECT_URL_NOT_DECLARED = "COLLECT_DIRECT_URL_NOT_DECLARED"
 
 # What a supplier's own page role means in the revision's canonical vocabulary. A page's primary
 # image is the product's representative one; everything else the role rules recognise as product
@@ -167,6 +170,19 @@ class CollectionGateway(Protocol):
         last_modified: str | None = None,
         max_bytes: int | None = None,
     ) -> ImageResponse: ...
+
+    def read_description(
+        self, profile: CollectionProfile, url: str, *, budget: RequestBudget
+    ) -> DocumentView: ...
+
+
+# ADR-0040 §3.1: why a captured page's description document gave no detail image. A closed
+# vocabulary; the parser's own refusals (the document's form) are added to it by the supplier.
+DESCRIPTION_NOT_STATED = "DESCRIPTION_NOT_STATED"
+DESCRIPTION_TARGET_REFUSED = "DESCRIPTION_TARGET_REFUSED"
+DESCRIPTION_BUDGET_REFUSED = "DESCRIPTION_BUDGET_REFUSED"
+DESCRIPTION_READ_FAILED = "DESCRIPTION_READ_FAILED"
+DESCRIPTION_STATUS = "DESCRIPTION_STATUS"
 
 
 @dataclass(frozen=True)
@@ -243,6 +259,8 @@ class RunBudget:
 
     max_product_reads: int
     max_image_requests: int
+    # ADR-0040 §3.1: one description document, for a collection that reads one.
+    max_description_reads: int = 0
     spent: dict[ReadKind, int] = field(default_factory=dict)
 
     def caps(self) -> Mapping[ReadKind, int]:
@@ -250,6 +268,7 @@ class RunBudget:
             ReadKind.PRODUCT_READ: self.max_product_reads,
             ReadKind.IMAGE_REQUEST: self.max_image_requests,
             ReadKind.POLICY_READ: 0,
+            ReadKind.DESCRIPTION_READ: self.max_description_reads,
         }
 
     def reserve(self, kind: ReadKind, subject: str) -> None:
@@ -368,14 +387,26 @@ class ProductCollectionService:
             key for key in self._collections if self._collectable is None or self._collectable(key)
         )
 
+    def submittable_supplier_keys(self) -> list[str]:
+        """The suppliers a product URL may be submitted for now: those that can be collected and
+        whose profile declares a direct-URL read (ADR-0040 §1). A supplier read only from captured
+        pages is collected through the extension alone."""
+        return [
+            key
+            for key in self.supplier_keys()
+            if self._collections[key].collection.profile.direct_url_reads
+        ]
+
     def submit(self, supplier_key: str, product_url: str) -> SubmittedCollection:
         """Accept exactly one product URL and return the run's durable identity.
 
         The URL is checked against the supplier's own profile here, so an unacceptable target is
-        refused before a job exists rather than becoming a failed run.
+        refused before a job exists rather than becoming a failed run. A supplier read only from
+        pages the user captured (ADR-0040 §1, OC-01) is refused here too, before anything else.
         """
         registered = self._registered(supplier_key)
         profile = registered.collection.profile
+        _require_direct_url(profile)
         try:
             # The same rule the transport applies, so a URL the profile already knows is
             # unacceptable — a foreign host, a listing path, a query key that is not explicitly
@@ -572,6 +603,7 @@ class ProductCollectionService:
         registered = self._registered(supplier_key)
         collection = registered.collection
         profile = collection.profile
+        _require_direct_url(profile)
         budget = RunBudget(
             max_product_reads=1, max_image_requests=profile.limits.max_image_requests_per_run
         )
@@ -652,6 +684,7 @@ class ProductCollectionService:
         budget = RunBudget(
             max_product_reads=0,
             max_image_requests=registered.collection.profile.limits.max_image_requests_per_run,
+            max_description_reads=0 if registered.collection.description is None else 1,
         )
         frozen = self._runs.freeze_captured_run(record.collection_run_id)
         return self._record_document(
@@ -709,6 +742,13 @@ class ProductCollectionService:
         # from here: another accepted form of this product's URL buys no second read.
         self._runs.note_identity(run_id, source_product_id=identity.source_product_id)
         candidates = tuple(collection.roles.classify(document.body, product_url))
+        if collection.description is not None:
+            # ADR-0040 §3.1: the page's own references first, then the description document's
+            # detail images in that document's own order. What became of the document is handed
+            # to the field parser, which records it as evidence.
+            read, described = self._description(registered, document, budget, after=candidates)
+            candidates = (*candidates, *described)
+            document = replace(document, description=read)
         images = self._images(
             profile,
             candidates,
@@ -833,6 +873,49 @@ class ProductCollectionService:
             )
         except Exception:
             logger.exception("collect.shadow_escaped", extra={"collection_run_id": run_id})
+
+    # ------------------------------------------------------------------ description
+
+    def _description(
+        self,
+        registered: RegisteredCollection,
+        document: DocumentView,
+        budget: RunBudget,
+        *,
+        after: Sequence[ImageCandidate],
+    ) -> tuple[DescriptionRead, tuple[ImageCandidate, ...]]:
+        """Read the description document the captured page names, and its image references.
+
+        One read, through the policed transport, under the profile's description hosts. Any
+        failure is an answer, not an error: no detail image, and the reason recorded. Nothing is
+        retried, and the document is never kept.
+        """
+        source = registered.collection.description
+        assert source is not None
+        url = source.locate(document)
+        if url is None:
+            return DescriptionRead(stated=False, refusal=DESCRIPTION_NOT_STATED), ()
+        profile = registered.collection.profile
+        try:
+            read = self._gateway.read_description(profile, url, budget=budget)
+        except CollectionTargetRefused:
+            return DescriptionRead(stated=True, refusal=DESCRIPTION_TARGET_REFUSED), ()
+        except CollectionBudgetRefused:
+            return DescriptionRead(stated=True, refusal=DESCRIPTION_BUDGET_REFUSED), ()
+        except AppError:
+            return DescriptionRead(stated=True, refusal=DESCRIPTION_READ_FAILED), ()
+        if read.status != 200:
+            return DescriptionRead(stated=True, refusal=DESCRIPTION_STATUS), ()
+        found = source.classify(read.body, url)
+        if found.refusal is not None:
+            return DescriptionRead(stated=True, refusal=found.refusal), ()
+        start = max((candidate.order for candidate in after), default=-1) + 1
+        placed = tuple(
+            replace(candidate, order=start + index)
+            for index, candidate in enumerate(found.candidates)
+        )
+        detail = sum(1 for candidate in placed if candidate.role is SourceRole.DETAIL)
+        return DescriptionRead(stated=True, refusal=None, images=detail), placed
 
     # ------------------------------------------------------------------ images
 
@@ -1010,6 +1093,17 @@ def require_collectable(collectable: Callable[[str], bool] | None, supplier_key:
             SUPPLIER_NOT_ACTIVE,
             "this supplier is not ACTIVE: only its trial reads run until it is approved",
             details={"supplier_key": supplier_key},
+        )
+
+
+def _require_direct_url(profile: CollectionProfile) -> None:
+    """ADR-0040 §1 (OC-01): a supplier read only from pages the user captured has no direct-URL
+    run. It is refused before a job, a reservation or a read exists."""
+    if not profile.direct_url_reads:
+        raise PolicyBlockedError(
+            DIRECT_URL_NOT_DECLARED,
+            "this supplier is read only from pages the user captured with the extension",
+            details={"supplier_key": profile.supplier.supplier_key},
         )
 
 

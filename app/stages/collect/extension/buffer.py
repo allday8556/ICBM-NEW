@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 from app.platform.core.errors import RateLimitedError
 from app.stages.collect.extension.capture import TransportEvidence
+from app.stages.collect.extension.embedded import EmbeddedDataMember
 
 # One capture is accepted per pairing at a time (ruling 5906290729 B-4), so one entry is the normal
 # case. The small margin covers a run that settled through the terminal hook before its job ran.
@@ -34,6 +35,8 @@ class BufferedCapture:
 
     html: str = field(repr=False)
     evidence: TransportEvidence
+    # ADR-0040 §3: the embedded-data member, held exactly as long as the capture itself.
+    embedded: EmbeddedDataMember | None = field(default=None, repr=False)
 
 
 class CaptureBuffer:

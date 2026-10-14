@@ -365,6 +365,9 @@ class FakeGateway:
     document_reads: int = 0
     image_reads: list[str] = field(default_factory=list)
     sessions: list[bytes | None] = field(default_factory=list)
+    # ADR-0040 §3.1: a description document's body by URL, or what reading it raises.
+    descriptions: dict[str, object] = field(default_factory=dict)
+    description_reads: list[str] = field(default_factory=list)
 
     def read_document(
         self,
@@ -404,6 +407,25 @@ class FakeGateway:
             # the bytes never reach the caller and never reach the store.
             raise ImageFetchRefused(FetchIssue.OVERSIZE, "body over the size bound")
         return ImageResponse(200, "image/png", f'"etag-{len(content)}"', None, content)
+
+    def read_description(
+        self, profile: CollectionProfile, url: str, *, budget: RequestBudget
+    ) -> DocumentView:
+        budget.reserve(ReadKind.DESCRIPTION_READ, url)
+        self.description_reads.append(url)
+        answer = self.descriptions.get(url)
+        if isinstance(answer, BaseException):
+            raise answer
+        if isinstance(answer, DocumentView):
+            return answer
+        return DocumentView(
+            kind=ReadKind.DESCRIPTION_READ,
+            status=200 if isinstance(answer, str) else 404,
+            path="/",
+            location=None,
+            content_type="text/plain; charset=UTF-8",
+            body=answer if isinstance(answer, str) else "",
+        )
 
 
 def refusal(issue: FetchIssue = FetchIssue.BAD_CONTENT_TYPE) -> ImageFetchRefused:

@@ -16,6 +16,10 @@ This is the only code that performs a supplier collection request. For every req
 * it is attributed with one ``supplier.collect_request`` log line of allowlisted fields. The
   target is the path of a document and only the host of an image, never a query.
 
+A description read (ADR-0040 §3.1) is one public document a captured page names, read only
+from the profile's declared ``description_hosts``: no session, no query, no redirect, at most once
+per run, under a byte bound and in an egress grant for those hosts alone.
+
 A discovered policy read is a separate, bounded concept, not a widening of the profile's fixed
 ``policy_paths``. It is one public document linked from a product page, read from the
 storefront host only, with no session, no query, never a product path, and never followed
@@ -71,6 +75,9 @@ from integrations.suppliers.transport.session_payload import decode_session
 logger = logging.getLogger("icbm.collect.transport")
 
 MAX_DOCUMENT_BYTES = 5 * 1024 * 1024
+# ADR-0040 §3.1: a description document is a short text statement around the description's HTML.
+# The largest observed was about 24 KB; anything over this bound is refused whole.
+MAX_DESCRIPTION_BYTES = 2 * 1024 * 1024
 # Environment markers of CI and test runs: the live transport never exists under them.
 CI_MARKERS = ("CI", "GITHUB_ACTIONS", "PYTEST_CURRENT_TEST")
 _REDIRECTS = frozenset({301, 302, 303, 307, 308})
@@ -167,6 +174,17 @@ def _require_http(profile: CollectionProfile) -> None:
         )
 
 
+def _require_direct_url(profile: CollectionProfile) -> None:
+    """A supplier read only from pages the user captured (ADR-0040 §1, OC-01) has no document the
+    server may read: neither its product page nor a policy document linked from one. It is refused
+    before a target is judged, a request reserved or a byte sent. Its images are not documents."""
+    if not profile.direct_url_reads:
+        raise PolicyBlockedError(
+            "COLLECT_DIRECT_URL_NOT_DECLARED",
+            "this supplier is read only from pages the user captured",
+        )
+
+
 def _https(url: str) -> SplitResult:
     """The parts of an https URL without credentials, another port, a fragment or whitespace.
 
@@ -232,10 +250,29 @@ def image_fetch_target(profile: CollectionProfile, url: str) -> ImageFetchTarget
     )
 
 
+def description_target(profile: CollectionProfile, url: str) -> str:
+    """The host of an allowed description document (ADR-0040 §3.1), or its refusal.
+
+    Only a declared description host, over https on port 443, with no query and no fragment. The
+    host is the budget subject and the whole of what is logged.
+    """
+    parts = _https(url)
+    host = parts.hostname or ""
+    if host not in profile.description_hosts:
+        raise _refused(
+            FetchTargetRefusal.HOST_NOT_ALLOWLISTED, "the description host is not declared"
+        )
+    if parts.query:
+        raise _refused(FetchTargetRefusal.QUERY_NOT_ALLOWED, "a description document has no query")
+    return host
+
+
 def check_target(profile: CollectionProfile, url: str, kind: ReadKind) -> str:
     """Refuse a URL outside the profile; return the budget subject of an allowed one."""
     if kind is ReadKind.IMAGE_REQUEST:
         return image_fetch_target(profile, url).host
+    if kind is ReadKind.DESCRIPTION_READ:
+        return description_target(profile, url)
     parts = _https(url)
     host, path = parts.hostname or "", parts.path or "/"
     if (
@@ -334,9 +371,10 @@ class PolicedCollectionGateway:
         budget: RequestBudget,
         session: bytes | None = None,
     ) -> DocumentView:
-        if kind is ReadKind.IMAGE_REQUEST:
-            raise ValueError("images are read with read_image")
+        if kind in (ReadKind.IMAGE_REQUEST, ReadKind.DESCRIPTION_READ):
+            raise ValueError("images and description documents have their own reads")
         _require_http(profile)
+        _require_direct_url(profile)
         subject = check_target(profile, url, kind)
         budget.reserve(kind, subject)
         cookies: list[dict[str, str]] = []
@@ -351,9 +389,56 @@ class PolicedCollectionGateway:
         """One public document linked from a product page: same storefront, no session (there is
         no session parameter), no query, and at most once per budget."""
         _require_http(profile)
+        _require_direct_url(profile)
         path = check_discovered_policy(profile, url)
         budget.reserve(ReadKind.POLICY_READ, f"{DISCOVERED_POLICY_PREFIX}{path}")
         return self._document(profile, url, ReadKind.POLICY_READ, [], DEFAULT_USER_AGENT)
+
+    def read_description(
+        self, profile: CollectionProfile, url: str, *, budget: RequestBudget
+    ) -> DocumentView:
+        """One public description document a captured page names (ADR-0040 §3.1).
+
+        It is not a document of the supplier's own site, so a profile that reads none of those
+        (``direct_url_reads`` false) still reads this one. It goes only to a declared description
+        host, with no session (there is no session parameter), never follows a redirect, is
+        reserved once per run and runs in an egress grant for the description hosts alone.
+        """
+        _require_http(profile)
+        host = check_target(profile, url, ReadKind.DESCRIPTION_READ)
+        budget.reserve(ReadKind.DESCRIPTION_READ, host)
+        path = urlsplit(url).path or "/"
+        supplier = profile.supplier
+        with (
+            self._exchange(profile, ReadKind.DESCRIPTION_READ, target=host) as observe,
+            self._pacer.slot(supplier),
+            EGRESS.grant(
+                f"supplier:{supplier.supplier_key}:description", profile.description_hosts
+            ),
+            httpx.Client(
+                timeout=supplier.request_policy.request_timeout_s,
+                follow_redirects=False,
+                trust_env=False,
+                transport=self._http_transport,
+                headers={"User-Agent": DEFAULT_USER_AGENT},
+            ) as client,
+            client.stream("GET", url) as response,
+        ):
+            observe(response.status_code)
+            self._raise_for_status(response.status_code)
+            data = _bounded(response, MAX_DESCRIPTION_BYTES)
+            if data is None:
+                raise PolicyBlockedError(
+                    "COLLECT_DESCRIPTION_TOO_LARGE", "the description document exceeds its bound"
+                )
+            return DocumentView(
+                kind=ReadKind.DESCRIPTION_READ,
+                status=response.status_code,
+                path=path,
+                location=None,
+                content_type=response.headers.get("content-type", ""),
+                body=data.decode(response.encoding or "utf-8", errors="replace"),
+            )
 
     def _document(
         self,
@@ -559,6 +644,11 @@ class DeferredCollectionGateway:
         session: bytes | None = None,
     ) -> DocumentView:
         return self._ready().read_document(profile, url, kind=kind, budget=budget, session=session)
+
+    def read_description(
+        self, profile: CollectionProfile, url: str, *, budget: RequestBudget
+    ) -> DocumentView:
+        return self._ready().read_description(profile, url, budget=budget)
 
     def read_image(
         self,

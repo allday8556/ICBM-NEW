@@ -482,6 +482,8 @@ const JOB_STATE_LABEL = {
 const COLLECT_COPY = {
   COLLECT_URL_REFUSED: '이 공급처의 상품 상세 페이지 URL이 아닙니다.',
   COLLECT_SUPPLIER_UNKNOWN: '수집 정의가 없는 공급처입니다.',
+  // ADR-0040 §1: a supplier read only from pages the user captured with the extension.
+  COLLECT_DIRECT_URL_NOT_DECLARED: '이 공급처는 URL로 수집하지 않습니다. 확장 프로그램에서 상품 페이지를 열고 수집해 주세요.',
   COLLECT_SAME_PRODUCT_TOO_SOON: '같은 상품을 너무 최근에 읽어 지금은 요청할 수 없습니다.',
   COLLECT_RUN_UNKNOWN: '해당 수집 기록을 찾을 수 없습니다.',
   COLLECT_RUN_NOT_RECORDED: '기록된 수집만 통합DB 상품과 연결됩니다.',
