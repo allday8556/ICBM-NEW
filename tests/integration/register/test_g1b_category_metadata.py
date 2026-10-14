@@ -623,7 +623,12 @@ def test_0020_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         # ADR-0038 §3, §5 (0064): the FX snapshots and the overseas settings.
         "fx_snapshots",
         "overseas_settings_revisions",
-        # ADR-0038 §4, §8 (0065): each overseas source product's landed-cost inputs.
+        # ADR-0041 I1 (0065): the Image Studio translation owner.
+        "image_ocr_observations",
+        "image_translation_candidates",
+        "image_edit_revisions",
+        "image_edit_current",
+        # ADR-0038 §4, §8 (0066): each overseas source product's landed-cost inputs.
         "overseas_cost_override_revisions",
     }
     command.upgrade(alembic_config(url), "head")

@@ -4,6 +4,7 @@ from app.capabilities.ai import profile_models as _ai_profile_models  # noqa: F4
 from app.capabilities.ai import prompt_models as _ai_prompt_models  # noqa: F401
 from app.capabilities.audit import models as _audit_models  # noqa: F401
 from app.capabilities.detail_guidance import models as _detail_guidance_models  # noqa: F401
+from app.capabilities.image_studio import models as _image_studio_models  # noqa: F401
 from app.capabilities.jobs import models as _job_models  # noqa: F401
 from app.capabilities.live_safety import models as _live_models  # noqa: F401
 from app.capabilities.overseas import fx_models as _fx_models  # noqa: F401

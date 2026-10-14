@@ -176,6 +176,11 @@ class AuditEventType(StrEnum):
     FX_API_KEY_CHANGED = "FX_API_KEY_CHANGED"
     # ADR-0038 §5: one 해외 구매대행 settings revision appended. Its number, values and fingerprint.
     OVERSEAS_SETTINGS_REVISED = "OVERSEAS_SETTINGS_REVISED"
+    # ADR-0041 §3, §8: one Image Studio translation write — an OCR observation, a translation
+    # candidate or an edit revision recorded, or a translation item that failed and recorded
+    # nothing. Ids, hashes, versions, counts and codes only; never OCR text, a translation or
+    # image bytes.
+    IMAGE_STUDIO_RECORDED = "IMAGE_STUDIO_RECORDED"
     # ADR-0038 §4, §8: one overseas source product's landed-cost inputs revised — its overseas
     # shipping and duty rate. The source product, the revision number, both values and the
     # fingerprint only.
