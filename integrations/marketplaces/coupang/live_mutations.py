@@ -314,6 +314,19 @@ class AmbiguousCreateRecoveryResult:
     credential_generation: int
 
 
+@dataclass(frozen=True)
+class RemainingTestProductIssue:
+    test_name: str
+    journal_state: str
+    code: str
+
+
+@dataclass(frozen=True)
+class RemainingTestProductMutationResult(TestProductMutationResult):
+    attempted: int
+    quarantined: tuple[RemainingTestProductIssue, ...]
+
+
 class MutationJournal:
     """Atomic ambiguity barrier; it stores identities and states, never request payloads."""
 
@@ -694,6 +707,91 @@ class CoupangTestProductMutationRun:
         records[synthetic_id] = record
         self._journal.commit(state)
 
+    def _run_plan(
+        self,
+        state: dict[str, object],
+        records: dict[str, object],
+        plan: TestProductPlan,
+    ) -> None:
+        verified_in_this_run = False
+        synthetic_id = plan.binding.synthetic_id
+        record = records[synthetic_id]
+        assert isinstance(record, dict)
+        phase = record["state"]
+        seller_product_id = record.get("seller_product_id")
+        if phase == "pending":
+            self._transition(state, synthetic_id, "create_inflight")
+            try:
+                created = self._request(Method.POST, _API, document=plan.create_document)
+                seller_product_id = self._created_identity(created)
+            except CoupangLiveMutationError as exc:
+                if exc.code == "COUPANG_MUTATION_PROVIDER_REJECTED":
+                    self._transition(state, synthetic_id, "create_rejected")
+                raise
+            self._transition(state, synthetic_id, "created", seller_product_id=seller_product_id)
+            phase = "created"
+        if not isinstance(seller_product_id, int) or seller_product_id < 1:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_JOURNAL_IDENTITY_MISSING"
+            )
+        self._assert_unique_identity(
+            records,
+            synthetic_id=synthetic_id,
+            seller_product_id=seller_product_id,
+        )
+        if phase == "created":
+            resumed = self._request(Method.GET, f"{_API}/{seller_product_id}")
+            remote = self._verify_identity_scope(
+                resumed,
+                seller_product_id=seller_product_id,
+                source_product_id=plan.binding.source_product_id,
+                seller_product_name=str(plan.create_document.value()["sellerProductName"]),
+            )
+            update = self._full_update_document(
+                plan,
+                seller_product_id=seller_product_id,
+                readback=remote,
+            )
+            self._transition(
+                state, synthetic_id, "update_inflight", seller_product_id=seller_product_id
+            )
+            self._request(Method.PUT, _API, document=update)
+            self._transition(state, synthetic_id, "updated", seller_product_id=seller_product_id)
+            phase = "updated"
+        if phase == "updated":
+            self._transition(
+                state, synthetic_id, "readback_inflight", seller_product_id=seller_product_id
+            )
+            readback = self._request(Method.GET, f"{_API}/{seller_product_id}")
+            self._verify_readback(
+                readback,
+                seller_product_id=seller_product_id,
+                source_product_id=plan.binding.source_product_id,
+                seller_product_name=plan.update_message,
+            )
+            self._transition(state, synthetic_id, "verified", seller_product_id=seller_product_id)
+            phase = "verified"
+            verified_in_this_run = True
+        if phase == "verified":
+            if not verified_in_this_run:
+                resumed = self._request(Method.GET, f"{_API}/{seller_product_id}")
+                self._verify_readback(
+                    resumed,
+                    seller_product_id=seller_product_id,
+                    source_product_id=plan.binding.source_product_id,
+                    seller_product_name=plan.update_message,
+                )
+            self._transition(
+                state, synthetic_id, "delete_inflight", seller_product_id=seller_product_id
+            )
+            self._request(Method.DELETE, f"{_API}/{seller_product_id}")
+            self._transition(state, synthetic_id, "deleted", seller_product_id=seller_product_id)
+            phase = "deleted"
+        if phase != "deleted":
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_JOURNAL_STATE_INVALID"
+            )
+
     def run(self) -> TestProductMutationResult:
         if self._used:
             raise CoupangLiveMutationError(
@@ -707,96 +805,7 @@ class CoupangTestProductMutationRun:
         assert isinstance(records, dict)
         completed = 0
         for plan in self._bundle.plans:
-            verified_in_this_run = False
-            synthetic_id = plan.binding.synthetic_id
-            record = records[synthetic_id]
-            assert isinstance(record, dict)
-            phase = record["state"]
-            seller_product_id = record.get("seller_product_id")
-            if phase == "pending":
-                self._transition(state, synthetic_id, "create_inflight")
-                try:
-                    created = self._request(Method.POST, _API, document=plan.create_document)
-                    seller_product_id = self._created_identity(created)
-                except CoupangLiveMutationError as exc:
-                    if exc.code == "COUPANG_MUTATION_PROVIDER_REJECTED":
-                        self._transition(state, synthetic_id, "create_rejected")
-                    raise
-                self._transition(
-                    state, synthetic_id, "created", seller_product_id=seller_product_id
-                )
-                phase = "created"
-            if not isinstance(seller_product_id, int) or seller_product_id < 1:
-                raise CoupangLiveMutationError(
-                    ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_JOURNAL_IDENTITY_MISSING"
-                )
-            self._assert_unique_identity(
-                records,
-                synthetic_id=synthetic_id,
-                seller_product_id=seller_product_id,
-            )
-            if phase == "created":
-                resumed = self._request(Method.GET, f"{_API}/{seller_product_id}")
-                remote = self._verify_identity_scope(
-                    resumed,
-                    seller_product_id=seller_product_id,
-                    source_product_id=plan.binding.source_product_id,
-                    seller_product_name=str(plan.create_document.value()["sellerProductName"]),
-                )
-                update = self._full_update_document(
-                    plan,
-                    seller_product_id=seller_product_id,
-                    readback=remote,
-                )
-                self._transition(
-                    state, synthetic_id, "update_inflight", seller_product_id=seller_product_id
-                )
-                self._request(
-                    Method.PUT,
-                    _API,
-                    document=update,
-                )
-                self._transition(
-                    state, synthetic_id, "updated", seller_product_id=seller_product_id
-                )
-                phase = "updated"
-            if phase == "updated":
-                self._transition(
-                    state, synthetic_id, "readback_inflight", seller_product_id=seller_product_id
-                )
-                readback = self._request(Method.GET, f"{_API}/{seller_product_id}")
-                self._verify_readback(
-                    readback,
-                    seller_product_id=seller_product_id,
-                    source_product_id=plan.binding.source_product_id,
-                    seller_product_name=plan.update_message,
-                )
-                self._transition(
-                    state, synthetic_id, "verified", seller_product_id=seller_product_id
-                )
-                phase = "verified"
-                verified_in_this_run = True
-            if phase == "verified":
-                if not verified_in_this_run:
-                    resumed = self._request(Method.GET, f"{_API}/{seller_product_id}")
-                    self._verify_readback(
-                        resumed,
-                        seller_product_id=seller_product_id,
-                        source_product_id=plan.binding.source_product_id,
-                        seller_product_name=plan.update_message,
-                    )
-                self._transition(
-                    state, synthetic_id, "delete_inflight", seller_product_id=seller_product_id
-                )
-                self._request(Method.DELETE, f"{_API}/{seller_product_id}")
-                self._transition(
-                    state, synthetic_id, "deleted", seller_product_id=seller_product_id
-                )
-                phase = "deleted"
-            if phase != "deleted":
-                raise CoupangLiveMutationError(
-                    ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_JOURNAL_STATE_INVALID"
-                )
+            self._run_plan(state, records, plan)
             completed += 1
         return TestProductMutationResult(
             self._approval.scope_id,
@@ -804,6 +813,98 @@ class CoupangTestProductMutationRun:
             completed,
             len(self._bundle.plans),
             self._approval.credential_generation,
+        )
+
+
+class CoupangRemainingTestProductMutationRun(CoupangTestProductMutationRun):
+    """Quarantine test 1's ambiguous create and finish each still-pending test once.
+
+    The owner is intentionally one-shot and accepts only the exact durable state produced by
+    the original test-1 ambiguity: test 1 is ``create_inflight`` and tests 2..11 are ``pending``.
+    A failed request is never retried in this run. Its journal state is retained and the next
+    independent pending test is attempted.
+    """
+
+    def _load_continuation_journal(self) -> dict[str, object]:
+        state = self._journal.load()
+        if state is None:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_CONTINUATION_JOURNAL_MISSING"
+            )
+        if (
+            state.get("version") != 1
+            or state.get("scope_id") != self._approval.scope_id
+            or state.get("payload_digest") != self._bundle.payload_digest
+            or state.get("credential_generation") != self._approval.credential_generation
+            or not isinstance(state.get("records"), dict)
+        ):
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_JOURNAL_BINDING_MISMATCH"
+            )
+        records = state["records"]
+        assert isinstance(records, dict)
+        if set(records) != {plan.binding.synthetic_id for plan in self._bundle.plans}:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_JOURNAL_SCOPE_MISMATCH"
+            )
+        expected = {
+            self._bundle.plans[0].binding.synthetic_id: "create_inflight",
+            **{plan.binding.synthetic_id: "pending" for plan in self._bundle.plans[1:]},
+        }
+        if any(
+            not isinstance(records.get(synthetic_id), dict)
+            or records[synthetic_id].get("state") != phase
+            or set(records[synthetic_id]) != {"state"}
+            for synthetic_id, phase in expected.items()
+        ):
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_CONTINUATION_SCOPE_INVALID"
+            )
+        return state
+
+    def run(self) -> RemainingTestProductMutationResult:
+        if self._used:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_RUN_ALREADY_USED"
+            )
+        self._used = True
+        self._preflight(_aware_utc(self._clock.now(), "clock.now"))
+        state = self._load_continuation_journal()
+        records = state["records"]
+        assert isinstance(records, dict)
+        issues = [
+            RemainingTestProductIssue(
+                self._bundle.plans[0].binding.test_name,
+                "create_inflight",
+                "COUPANG_MUTATION_AMBIGUOUS_CREATE_QUARANTINED",
+            )
+        ]
+        completed = 0
+        attempted = 0
+        for plan in self._bundle.plans[1:]:
+            attempted += 1
+            try:
+                self._run_plan(state, records, plan)
+            except CoupangLiveMutationError as exc:
+                record = records[plan.binding.synthetic_id]
+                assert isinstance(record, dict)
+                issues.append(
+                    RemainingTestProductIssue(
+                        plan.binding.test_name,
+                        str(record.get("state", "unknown")),
+                        exc.code,
+                    )
+                )
+                continue
+            completed += 1
+        return RemainingTestProductMutationResult(
+            scope_id=self._approval.scope_id,
+            payload_digest=self._bundle.payload_digest,
+            completed=completed,
+            total=len(self._bundle.plans) - 1,
+            credential_generation=self._approval.credential_generation,
+            attempted=attempted,
+            quarantined=tuple(issues),
         )
 
 

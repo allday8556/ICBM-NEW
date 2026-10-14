@@ -22,6 +22,7 @@ from integrations.marketplaces.coupang.live_mutations import (
     TEST_PRODUCT_BINDINGS,
     CoupangAmbiguousCreateRecovery,
     CoupangLiveMutationError,
+    CoupangRemainingTestProductMutationRun,
     CoupangTestProductMutationRun,
     LiveMutationTransportRefused,
     MutationJournal,
@@ -171,6 +172,41 @@ def _recovery_owner(
     )
     return CoupangAmbiguousCreateRecovery(
         context=context,
+        bundle=bundle,
+        clock=Clock(NOW),
+        clock_preflight=ClockPreflight.create(0.5, checked_at=NOW),
+        journal=MutationJournal(tmp_path / "coupang-live-mutations.json"),
+        transport=transport,
+        environ={},
+    )
+
+
+def _continuation_owner(
+    tmp_path: Path, transport: httpx.BaseTransport
+) -> CoupangRemainingTestProductMutationRun:
+    bundle = ProductBundle.from_mapping(_bundle_mapping())
+    credentials = Credentials("access", "secret", "A0001", 1)
+    context = AuthContext(
+        credentials,
+        Market.KR,
+        IpAllowlistDeclaration.create(
+            SOURCE_IP,
+            credential_generation=1,
+            recorded_at=NOW,
+        ),
+    )
+    approval = MutationApproval.create(
+        scope_id=SCOPE_ID,
+        vendor_id="A0001",
+        credential_generation=1,
+        source_ip=SOURCE_IP,
+        payload_digest=bundle.payload_digest,
+        approved_at=NOW - timedelta(minutes=1),
+        expires_at=NOW + timedelta(hours=1),
+    )
+    return CoupangRemainingTestProductMutationRun(
+        context=context,
+        approval=approval,
         bundle=bundle,
         clock=Clock(NOW),
         clock_preflight=ClockPreflight.create(0.5, checked_at=NOW),
@@ -361,6 +397,176 @@ def test_ambiguous_dispatch_persists_barrier_and_never_blindly_retries(
         _owner(tmp_path, httpx.MockTransport(timeout)).run()
     assert resumed.value.code == "COUPANG_MUTATION_RECOVERY_REQUIRED"
     assert calls == 1
+
+
+def test_continuation_quarantines_test_one_and_finishes_tests_two_through_eleven(
+    tmp_path: Path,
+) -> None:
+    def ambiguous(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("ambiguous", request=request)
+
+    with pytest.raises(CoupangLiveMutationError):
+        _owner(tmp_path, httpx.MockTransport(ambiguous)).run()
+
+    requests: list[httpx.Request] = []
+    created: dict[int, tuple[str, str]] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "POST":
+            document = json.loads(request.content)
+            index = int(document["sellerProductName"].removeprefix("ICBM TEST "))
+            identity = 1000 + index
+            created[identity] = (
+                document["items"][0]["externalVendorSku"],
+                document["sellerProductName"],
+            )
+            return httpx.Response(200, json={"code": "SUCCESS", "data": identity})
+        if request.method == "PUT":
+            document = json.loads(request.content)
+            identity = document["sellerProductId"]
+            source_product_id, _ = created[identity]
+            created[identity] = (source_product_id, document["sellerProductName"])
+            return httpx.Response(200, json={"code": "SUCCESS", "data": identity})
+        identity = int(request.url.path.rsplit("/", 1)[-1])
+        if request.method == "GET":
+            source_product_id, seller_product_name = created[identity]
+            return httpx.Response(
+                200,
+                json={
+                    "code": "SUCCESS",
+                    "data": {
+                        "sellerProductId": identity,
+                        "sellerProductName": seller_product_name,
+                        "extraInfoMessage": seller_product_name,
+                        "vendorId": "A0001",
+                        "status": "SAVED",
+                        "items": [
+                            {
+                                "externalVendorSku": source_product_id,
+                                "sellerProductItemId": 3000 + identity,
+                                "vendorItemId": None,
+                            }
+                        ],
+                    },
+                },
+            )
+        assert request.method == "DELETE"
+        return httpx.Response(200, json={"code": "SUCCESS", "data": None})
+
+    result = _continuation_owner(tmp_path, httpx.MockTransport(handler)).run()
+
+    assert (result.completed, result.attempted) == (10, 10)
+    assert [(issue.test_name, issue.journal_state) for issue in result.quarantined] == [
+        ("test 1", "create_inflight")
+    ]
+    assert len(requests) == 50
+    persisted = json.loads((tmp_path / "coupang-live-mutations.json").read_text())
+    assert persisted["records"][TEST_PRODUCT_BINDINGS[0].synthetic_id] == {
+        "state": "create_inflight"
+    }
+    assert all(
+        persisted["records"][binding.synthetic_id]["state"] == "deleted"
+        for binding in TEST_PRODUCT_BINDINGS[1:]
+    )
+
+
+def test_continuation_does_not_retry_failed_item_and_keeps_going(tmp_path: Path) -> None:
+    def ambiguous(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("ambiguous", request=request)
+
+    with pytest.raises(CoupangLiveMutationError):
+        _owner(tmp_path, httpx.MockTransport(ambiguous)).run()
+
+    requests: list[httpx.Request] = []
+    created: dict[int, tuple[str, str]] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "POST":
+            document = json.loads(request.content)
+            index = int(document["sellerProductName"].removeprefix("ICBM TEST "))
+            if index == 2:
+                return httpx.Response(200, json={"code": "SUCCESS", "data": None})
+            identity = 1000 + index
+            created[identity] = (
+                document["items"][0]["externalVendorSku"],
+                document["sellerProductName"],
+            )
+            return httpx.Response(200, json={"code": "SUCCESS", "data": identity})
+        if request.method == "PUT":
+            document = json.loads(request.content)
+            identity = document["sellerProductId"]
+            source_product_id, _ = created[identity]
+            created[identity] = (source_product_id, document["sellerProductName"])
+            return httpx.Response(200, json={"code": "SUCCESS", "data": identity})
+        identity = int(request.url.path.rsplit("/", 1)[-1])
+        if request.method == "GET":
+            source_product_id, seller_product_name = created[identity]
+            return httpx.Response(
+                200,
+                json={
+                    "code": "SUCCESS",
+                    "data": {
+                        "sellerProductId": identity,
+                        "sellerProductName": seller_product_name,
+                        "vendorId": "A0001",
+                        "status": "SAVED",
+                        "items": [
+                            {
+                                "externalVendorSku": source_product_id,
+                                "sellerProductItemId": 3000 + identity,
+                                "vendorItemId": None,
+                            }
+                        ],
+                    },
+                },
+            )
+        return httpx.Response(200, json={"code": "SUCCESS", "data": None})
+
+    result = _continuation_owner(tmp_path, httpx.MockTransport(handler)).run()
+
+    assert (result.completed, result.attempted) == (9, 10)
+    assert [(issue.test_name, issue.journal_state, issue.code) for issue in result.quarantined] == [
+        ("test 1", "create_inflight", "COUPANG_MUTATION_AMBIGUOUS_CREATE_QUARANTINED"),
+        ("test 2", "create_inflight", "COUPANG_MUTATION_CREATE_IDENTITY_MISSING"),
+    ]
+    assert len(requests) == 46
+    persisted = json.loads((tmp_path / "coupang-live-mutations.json").read_text())
+    assert persisted["records"][TEST_PRODUCT_BINDINGS[1].synthetic_id] == {
+        "state": "create_inflight"
+    }
+    assert persisted["records"][TEST_PRODUCT_BINDINGS[2].synthetic_id]["state"] == "deleted"
+
+
+def test_continuation_requires_exact_test_one_barrier_and_ten_pending_records(
+    tmp_path: Path,
+) -> None:
+    def ambiguous(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("ambiguous", request=request)
+
+    with pytest.raises(CoupangLiveMutationError):
+        _owner(tmp_path, httpx.MockTransport(ambiguous)).run()
+
+    journal_path = tmp_path / "coupang-live-mutations.json"
+    state = json.loads(journal_path.read_text())
+    state["records"][TEST_PRODUCT_BINDINGS[1].synthetic_id] = {
+        "state": "deleted",
+        "seller_product_id": 9999,
+    }
+    MutationJournal(journal_path).commit(state)
+    calls = 0
+
+    def forbidden(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(500)
+
+    with pytest.raises(CoupangLiveMutationError) as refused:
+        _continuation_owner(tmp_path, httpx.MockTransport(forbidden)).run()
+
+    assert refused.value.code == "COUPANG_MUTATION_CONTINUATION_SCOPE_INVALID"
+    assert calls == 0
 
 
 def test_documented_create_rejection_is_not_recorded_as_ambiguous(tmp_path: Path) -> None:
