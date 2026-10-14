@@ -197,10 +197,10 @@ customer or financial data, and grant no provider call or LIVE authority.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 380 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 68 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
-| `app/interface/` | 30 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 92 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/` | 388 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 73 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance |
+| `app/interface/` | 31 | operator surfaces: HTTP api, screens, cli |
+| `app/platform/` | 94 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 185 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
@@ -220,16 +220,16 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 94 | adapters: suppliers and marketplaces |
+| `integrations/` | 96 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 44 |  |
 | `integrations/suppliers/` | 46 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 391 | tests |
+| `tests/` | 402 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 15 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 164 | integration tests by runtime owner |
+| `tests/integration/` | 170 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
-| `tests/unit/` | 143 | unit tests by runtime owner |
-| `ui/` | 74 | operator clients: the served web client and the capture extension |
+| `tests/unit/` | 148 | unit tests by runtime owner |
+| `ui/` | 75 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 65 | the served web client |
+| `ui/web/` | 66 | the served web client |

@@ -211,8 +211,11 @@ CANONICAL_TABLES = (
     "supplier_sales_policy_revisions",
     # ADR-0036 O5b (amendment 6160586049): the samples retired from an onboarding analysis.
     "onboarding_sample_retirements",
+    # ADR-0038 §3, §5: the immutable FX snapshots and the overseas settings revisions.
+    "fx_snapshots",
+    "overseas_settings_revisions",
 )
-HEAD = "0062_onboarding_sample_retirements"
+HEAD = "0064_fx_snapshots"
 
 
 def _url(path: Path) -> str:

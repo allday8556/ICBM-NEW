@@ -100,6 +100,15 @@ function won(amount) {
   return `${Number(amount).toLocaleString('ko-KR')}원`;
 }
 
+// ADR-0038 §1: a source-currency amount is the page's own decimal text, shown in its currency and
+// never converted or reparsed (CNY ¥9.50, JPY 92円).
+const CURRENCY_FORMAT = { CNY: (amount) => `¥${amount}`, JPY: (amount) => `${amount}円` };
+
+function money(currency, amount, amountKrw) {
+  if (!currency) return won(amountKrw);
+  return CURRENCY_FORMAT[currency]?.(amount) ?? `${amount} ${currency}`;
+}
+
 function bytes(size) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
@@ -123,10 +132,11 @@ function valueText(valueJson) {
   if (value === null) return '—';
   if (typeof value !== 'object') return clip(String(value));
   if (typeof value.text === 'string') return clip(value.text);
-  if (Array.isArray(value.prices)) return clip(value.prices.map((p) => `${p.label} ${won(p.amount_krw)}`).join(' · '));
+  if (Array.isArray(value.prices)) return clip(value.prices.map((p) => `${p.label} ${money(p.currency, p.amount, p.amount_krw)}`).join(' · '));
   if (typeof value.amount_krw === 'number') return `${value.label ?? ''} ${won(value.amount_krw)}`.trim();
+  if (typeof value.amount === 'string' && value.currency) return `${value.label ?? ''} ${money(value.currency, value.amount)}`.trim();
   // A tier is the source's own (quantity, total price) pair; it is never divided into a unit price.
-  if (Array.isArray(value.tiers)) return clip(value.tiers.map((t) => `${t.quantity}개 ${won(t.total_price_krw)}`).join(' · '));
+  if (Array.isArray(value.tiers)) return clip(value.tiers.map((t) => `${t.quantity}개 ${money(t.currency, t.total_price, t.total_price_krw)}`).join(' · '));
   if (typeof value.scope === 'string') {
     const reading =
       value.scope === 'LISTED'

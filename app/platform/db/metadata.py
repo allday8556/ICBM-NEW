@@ -6,6 +6,8 @@ from app.capabilities.audit import models as _audit_models  # noqa: F401
 from app.capabilities.detail_guidance import models as _detail_guidance_models  # noqa: F401
 from app.capabilities.jobs import models as _job_models  # noqa: F401
 from app.capabilities.live_safety import models as _live_models  # noqa: F401
+from app.capabilities.overseas import fx_models as _fx_models  # noqa: F401
+from app.capabilities.overseas import settings_models as _overseas_settings_models  # noqa: F401
 from app.capabilities.review import models as _review_models  # noqa: F401
 from app.platform.db.base import Base
 from app.stages.collect import models as _collect_models  # noqa: F401

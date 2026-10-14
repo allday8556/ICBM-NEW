@@ -5,13 +5,25 @@ import json
 import sqlite3
 import uuid
 from collections.abc import Sequence
+from dataclasses import replace
 
 import pytest
 
 from app.config import AppConfig, database_path
 from app.container import Container
 from app.platform.core.errors import InputValidationError
-from app.stages.collect.facts import FieldFact, OptionAxis, OptionConfiguration, OptionsValue
+from app.stages.collect.facts import (
+    FieldFact,
+    ForeignPrice,
+    ForeignPricesValue,
+    ForeignShippingValue,
+    OptionAxis,
+    OptionConfiguration,
+    OptionsValue,
+    ShippingKind,
+)
+from app.stages.collect.revisions import ProductFactsRevisionStore, StoredRevision
+from app.stages.products import pricing_service
 from app.stages.products.atomic_sku import (
     AtomicSKUConfigurationSpec,
     AtomicSKUSelectionSpec,
@@ -25,8 +37,12 @@ from app.stages.products.common_options import (
     CommonSalesOptionAxisSpec,
     CommonSalesOptionValueSpec,
 )
-from app.stages.products.model import CompositionSpec, MoveReason, ReadinessStatus
-from app.stages.products.pricing import MINIMUM_SALE_PRICE_NOT_APPLIED, PriceBasis
+from app.stages.products.model import CompositionSpec, MoveReason, ReadinessStatus, Reason
+from app.stages.products.pricing import (
+    MINIMUM_SALE_PRICE_NOT_APPLIED,
+    SOURCE_CURRENCY_UNSUPPORTED,
+    PriceBasis,
+)
 from app.stages.products.pricing_service import PricingOutcome
 from app.stages.products.sales_policy import SaveSalesPolicyRequest
 from tests.support.collect_support import collected, confirmed
@@ -41,6 +57,7 @@ def _build(
     *,
     composition: CompositionSpec | None = None,
     minimum_sale_price: FieldFact | None = None,
+    **overrides: FieldFact,
 ):  # type: ignore[no-untyped-def]
     fields = product(
         price=10_000,
@@ -52,6 +69,7 @@ def _build(
             ),
             ".options",
         ),
+        **overrides,
     )
     revision = container.revisions.append(collected(fields=fields, images=()))
     source = container.product_store.source_product("kmretail", "1234")
@@ -427,3 +445,73 @@ def test_raw_database_cannot_rewrite_binding_or_pricing_history(
                 " WHERE pricing_snapshot_id = ?",
                 (result.snapshot.pricing_snapshot_id,),
             )
+
+
+# ---------------------------------------------------------------- ADR-0038 O1a: source currency
+
+
+def _cny_overrides() -> dict[str, FieldFact]:
+    return {
+        "prices": confirmed(
+            ForeignPricesValue(prices=(ForeignPrice(label="p", currency="CNY", amount="9.50"),)),
+            ".price",
+        ),
+        "shipping": confirmed(
+            ForeignShippingValue(kind=ShippingKind.FREE, policy_text="free", currency="CNY"),
+            ".delivery",
+        ),
+    }
+
+
+def test_a_source_currency_revision_is_never_bound_in_won(
+    container: Container, config: AppConfig
+) -> None:
+    _group, revision, _source, (item,) = _build(
+        container,
+        (
+            OptionConfiguration(
+                selections=("300mg",), supplier_sku_id="sku-a", unit_price="9.50", currency="CNY"
+            ),
+        ),
+        **_cny_overrides(),
+    )
+    assert revision.source_currency == "CNY"
+    with pytest.raises(InputValidationError) as caught:
+        container.atomic_sku_economics.bind_source_configuration(
+            item.atomic_sku_item_id, decided_by="owner", correlation_id="bind"
+        )
+    assert caught.value.code == "PRODUCTS_ATOMIC_SKU_SOURCE_CURRENCY_UNSUPPORTED"
+    with contextlib.closing(sqlite3.connect(database_path(config.data_dir))) as raw:
+        assert raw.execute("SELECT COUNT(*) FROM atomic_sku_source_bindings").fetchone() == (0,)
+    result = container.pricing.price_atomic_sku(item.atomic_sku_item_id, context())
+    assert result.outcome is PricingOutcome.NOT_PRICED and result.snapshot is None
+
+
+def test_the_atomic_path_reads_no_amount_of_a_source_currency_revision(
+    container: Container, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _group, _revision, _source, (item,) = _build(
+        container,
+        (OptionConfiguration(selections=("300mg",), additional_price_krw=0),),
+    )
+    container.atomic_sku_economics.bind_source_configuration(
+        item.atomic_sku_item_id, decided_by="owner", correlation_id="bind"
+    )
+    # The bound revision as a source-currency revision reads back: a binding cannot be opened on
+    # one, so the read is what changes here.
+    read = ProductFactsRevisionStore.get
+
+    def as_cny(self: ProductFactsRevisionStore, revision_id: str) -> StoredRevision | None:
+        stored = read(self, revision_id)
+        return None if stored is None else replace(stored, source_currency="CNY")
+
+    def no_amount_is_read(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("an amount of a source-currency revision was read")
+
+    monkeypatch.setattr(ProductFactsRevisionStore, "get", as_cny)
+    monkeypatch.setattr(pricing_service, "source_inputs", no_amount_is_read)
+    result = container.pricing.price_atomic_sku(item.atomic_sku_item_id, context())
+    assert result.outcome is PricingOutcome.NOT_PRICED
+    assert result.reasons == (
+        Reason(SOURCE_CURRENCY_UNSUPPORTED, ReadinessStatus.REVIEW_REQUIRED, "prices"),
+    )

@@ -114,6 +114,9 @@ export const REASON_COPY = {
     '공급사 판매채널 문구를 확인할 수 없지만, 판매채널 제한을 적용하지 않도록 설정한 공급처입니다 (사용자 책임)',
   'M4_PRICING.PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED':
     '공급사 최저판매가가 있지만, 최저판매가를 적용하지 않도록 설정한 공급처입니다 (사용자 책임)',
+  // ADR-0038 §1 (O1a): a CNY or JPY source is not priced until the FX and landed-cost slice.
+  'M4_PRICING.PRICING_SOURCE_CURRENCY_UNSUPPORTED':
+    '해외 통화(CNY·JPY) 가격의 상품은 아직 가격을 정할 수 없습니다 (환율 적용 준비 중)',
   // B-PRICE1: the repin command's refusals.
   REGISTER_DRAFT_REVISION_MOVED: '초안이 바뀌었습니다. 화면을 새로 고친 뒤 다시 시도하세요.',
   REGISTER_REPIN_INTENT_OPEN: '이 초안의 등록 요청이 아직 진행 중이라 가격을 다시 고정할 수 없습니다.',

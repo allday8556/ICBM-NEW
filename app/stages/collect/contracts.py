@@ -107,6 +107,8 @@ class RevisionView(BaseModel):
     fingerprints_intact: bool
     fields: tuple[FieldView, ...]
     images: tuple[ImageReferenceView, ...]
+    # ADR-0038 §1: the one currency an overseas page states its prices in; None for a KRW page.
+    source_currency: str | None = None
 
 
 class RevisionHistoryView(BaseModel):

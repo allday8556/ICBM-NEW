@@ -6,9 +6,10 @@
 // operator actions (M2 PR-E, instructions §8A), after each of which that truth is re-read, and
 // the registration target policy (Gate 1 G1-A, ADR-0015 §2), the operator-reviewed category
 // metadata (Gate 1 G1-B, ADR-0015 §3), the AI Prompt Registry (ADR-0026 AIF-1) and the detail
-// page's top and bottom notices (ADR-0033 G3): the surfaces the server lists in
-// `editable_surfaces`, each saved through its own contract. What the save bar says comes from
-// those server fields, never from this page.
+// page's top and bottom notices (ADR-0033 G3) and the 해외 구매대행 settings (ADR-0038 §5): the
+// surfaces the server lists in `editable_surfaces`, each saved through its own contract. What the
+// save bar says comes from those server fields, never from this page. The 해외구매대행 tab also
+// holds the Korea Eximbank key (write-only) and the FX rates with 「지금 갱신」 (ADR-0038 §3).
 
 import { getJson } from '../core/api.js';
 import { authLine, statusChip } from '../platforms/smartstore/capability.js';
@@ -27,6 +28,7 @@ import { coupangCredentialsPanel } from './settings/coupang-operator.js';
 import { categoryMetadataPanel } from './settings/category-metadata.js';
 import { targetPolicyPanel } from './settings/target-policy.js';
 import { detailGuidancePanel } from './settings/detail-guidance.js';
+import { fxRatesPanel, overseasSettingsPanel } from './settings/overseas.js';
 
 const ENDPOINT = '/api/v1/screens/settings';
 const READINESS = '/api/ready';
@@ -64,6 +66,7 @@ const SURFACE_LABEL = {
   AI_PROMPT_REGISTRY: 'AI Prompt Registry (공통 › AI / Prompt)',
   DETAIL_GUIDANCE: '상세페이지 공지 (공통 › 상세페이지 공지)',
   SUPPLIER_SALES_POLICY: '공급처 판매정책 (수집관리 › 공급처 관리)',
+  OVERSEAS_SETTINGS: '해외 구매대행 (공통 › 해외구매대행)',
 };
 
 function saveScope(view) {
@@ -199,6 +202,8 @@ function renderItem(item, state) {
   if (item.targetPolicy) return targetPolicyPanel(item.targetPolicy, item.section ?? 'policy');
   if (item.categoryMetadata) return categoryMetadataPanel(item.categoryMetadata);
   if (item.detailGuidance) return detailGuidancePanel();
+  if (item.overseasSettings) return overseasSettingsPanel();
+  if (item.fxRates) return fxRatesPanel();
   if (item.usersTable) return usersTable();
   if (item.aiCapability) return aiCapabilityRow();
   if (item.aiProvider) return aiProviderPanel();
