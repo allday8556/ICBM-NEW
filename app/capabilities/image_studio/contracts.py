@@ -18,8 +18,9 @@ it (AIF-07).
 
 **Seams.** The OCR engine (``OcrProvider``) and the translation task's composition
 (``TranslationComposer``) are ports. Production binds ``NoOcrProvider``, which names no engine, so
-the capability reads ``NOT_CONFIGURED`` and nothing is read or sent. The full OCR port is ADR-0041
-I2's; the registered task and its composer are I4's (``task``).
+the capabilities ``image_ocr`` and ``image_translate`` read ``NOT_CONFIGURED`` and nothing is read
+or sent. The engine side of the OCR port, its preprocessing, tiling and scoring are I2's (``ocr``);
+the registered task and its composer are I4's (``task``).
 
 **What is sent.** A region the operator excludes is never sent, and a contact detail
 (``checks.looks_like_contact``) only when the operator includes it (§6).
@@ -28,6 +29,7 @@ I2's; the registered task and its composer are I4's (``task``).
 import hashlib
 import json
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, Final, Protocol
@@ -68,22 +70,55 @@ class ObservationKey:
     preprocessing_version: str
 
 
+# A key's engine version is one stored column (``image_ocr_observations``, 64 characters).
+KEY_PART_MAX: Final = 64
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
 @dataclass(frozen=True)
 class OcrIdentity:
+    """How a reading is made: the engine, its pinned models (SHA-256) and the preprocessing.
+
+    The pinned models are part of what the engine is, so the observation key's engine version
+    names them too (``key_engine_version``): a changed model is a new reading, never a reuse of
+    the old one, without a new key column (ADR-0041 D2, §3)."""
+
     engine_id: str
     engine_version: str
     preprocessing_version: str
+    model_sha256s: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        parts = (self.engine_id, self.engine_version, self.preprocessing_version)
+        if not all(isinstance(p, str) and p.strip() == p != "" for p in parts):
+            raise ValueError("an OCR identity names its engine, version and preprocessing")
+        if not all(isinstance(m, str) and _SHA256.fullmatch(m) for m in self.model_sha256s):
+            raise ValueError("an OCR model is pinned by its lowercase SHA-256")
+        if len(set(self.model_sha256s)) != len(self.model_sha256s):
+            raise ValueError("an OCR model is pinned once")
+        if any(len(p) > KEY_PART_MAX for p in (*parts, self.key_engine_version)):
+            raise ValueError(f"an OCR key part is at most {KEY_PART_MAX} characters")
+
+    @property
+    def key_engine_version(self) -> str:
+        """The engine version as keyed: with pinned models, ``<version>+models.<digest>`` over
+        their sorted SHA-256s; without, the version itself."""
+        if not self.model_sha256s:
+            return self.engine_version
+        return f"{self.engine_version}+models.{digest(sorted(self.model_sha256s))[:16]}"
 
     def key(self, source_sha256: str) -> ObservationKey:
         return ObservationKey(
-            source_sha256, self.engine_id, self.engine_version, self.preprocessing_version
+            source_sha256, self.engine_id, self.key_engine_version, self.preprocessing_version
         )
 
 
 @dataclass(frozen=True)
 class OcrRegion:
-    """One recognised text region: its box (``left, top, right, bottom``) and optional polygon,
-    its text, its script, the engine's confidence and the background-uniformity score."""
+    """One recognised text region: its box (``left, top, right, bottom``; right and bottom
+    exclusive, as Pillow's area, in the decoded pixel grid with no EXIF orientation) and optional
+    polygon, its text, its script, the engine's confidence and the background-uniformity score
+    (``style.BackgroundReading.score`` on the source, never the engine's)."""
 
     region_id: str
     box: tuple[int, int, int, int]
@@ -264,14 +299,19 @@ def check_language(source_language: str) -> str:
 
 
 class OcrProvider(Protocol):
-    """The local OCR engine seam (ADR-0041 D1, D2). Only its minimal shape lands with I1; the
-    port, its region model and its scoring are I2's."""
+    """The local OCR port (ADR-0041 D1, D2, I2). The job reads through it; the engine behind it
+    (``ocr.EngineOcrProvider`` over an ``ocr.OcrEngine``, I7) is local and sends nothing."""
 
     def identity(self) -> OcrIdentity | None:
-        """The engine a reading would use, or ``None`` when no engine is installed."""
+        """The engine, its pinned models and the preprocessing a reading would use, or ``None``
+        when no engine is installed (the capability ``image_ocr`` reads ``NOT_CONFIGURED``)."""
         ...
 
-    def read(self, image: bytes) -> Sequence[OcrRegion]: ...
+    def read(self, image: bytes) -> tuple[OcrRegion, ...]:
+        """The source's translatable regions in reading order, with ids ``r0, r1, …``: boxes in
+        the decoded pixel grid with no EXIF orientation, the text, the script (``zh``/``ja``),
+        the engine's confidence clamped to 0..1 and the background-uniformity score."""
+        ...
 
 
 class NoOcrProvider:
@@ -280,7 +320,7 @@ class NoOcrProvider:
     def identity(self) -> OcrIdentity | None:
         return None
 
-    def read(self, image: bytes) -> Sequence[OcrRegion]:
+    def read(self, image: bytes) -> tuple[OcrRegion, ...]:
         raise PolicyBlockedError(IMAGE_OCR_NOT_CONFIGURED, "no OCR engine is installed")
 
 

@@ -4,7 +4,8 @@ Everything here only reads pixels, deterministically, with Pillow and the standa
 
 - ``read_background`` scores the ring of pixels just outside a region's box. The text is erased only
   where that ring is one flat colour and the box itself is mostly that colour (``clean``); the fill
-  is the ring's median colour. A gradient, a pattern or a photo is never repainted (IT-04).
+  is the ring's median colour. A gradient, a pattern or a photo is never repainted (IT-04). Its
+  ``score`` is the one background-uniformity number an OCR observation records (I2).
 - ``measure_style`` reads the source text against that background: its colour (the median of the
   pixels farthest from the background), its weight (stroke width relative to the line height), its
   line height and so its size, and its alignment in the box. The face is always sans: no serif
@@ -27,6 +28,8 @@ Rgb = tuple[int, int, int]
 SAME_COLOUR: Final = 12
 # A ring is uniform when this share of its pixels is the same colour as its median.
 RING_UNIFORMITY_MIN: Final = 0.95
+# A region's background-uniformity score (``BackgroundReading.score``) passes from here.
+CLEAN_FROM: Final = RING_UNIFORMITY_MIN
 # The box must be mostly background: glyphs rarely cover half of a text box, a badge or a photo
 # behind the text does.
 INTERIOR_MATCH_MIN: Final = 0.5
@@ -112,6 +115,16 @@ class BackgroundReading:
     interior_match: float
     clean: bool
 
+    @property
+    def score(self) -> float:
+        """The one background-uniformity score an OCR observation carries (ADR-0041 §3, I2): the
+        ring's uniformity, capped by the interior match when the box is not mostly background.
+        It is this reading projected to one number, not a second metric: it passes
+        (``>= CLEAN_FROM``) exactly when the erase is ``clean``."""
+        if self.interior_match >= INTERIOR_MATCH_MIN:
+            return self.ring_uniformity
+        return min(self.ring_uniformity, self.interior_match)
+
 
 @dataclass(frozen=True)
 class MeasuredStyle:
@@ -163,12 +176,13 @@ def read_background(image: Image.Image, box: Box) -> BackgroundReading:
         # The box is the whole image: there is no outside to judge the background by.
         return BackgroundReading(_median(interior), 0.0, 0.0, False)
     colour = _median(ring)
-    uniformity = sum(_distance(p, colour) <= SAME_COLOUR for p in ring) / len(ring)
-    match = sum(_distance(p, colour) <= SAME_COLOUR for p in interior) / len(interior)
+    # Judged on the rounded values the reading carries, so its ``score`` passes exactly when clean.
+    uniformity = round(sum(_distance(p, colour) <= SAME_COLOUR for p in ring) / len(ring), 4)
+    match = round(sum(_distance(p, colour) <= SAME_COLOUR for p in interior) / len(interior), 4)
     return BackgroundReading(
         colour=colour,
-        ring_uniformity=round(uniformity, 4),
-        interior_match=round(match, 4),
+        ring_uniformity=uniformity,
+        interior_match=match,
         clean=uniformity >= RING_UNIFORMITY_MIN and match >= INTERIOR_MATCH_MIN,
     )
 

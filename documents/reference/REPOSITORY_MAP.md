@@ -159,6 +159,13 @@ ADR-0041 I4 registered `TASK_IMAGE_TEXT_TRANSLATE_V1` (the ADR-0026 §3.1 amendm
 the strict answer parser) and `image_studio/checks.py` (the deterministic low-confidence,
 dropped number/unit/model/size and contact-detail checks, flags derived on read), one integration
 and one unit suite; production binds the task, no OCR engine, and no migration was added.
+ADR-0041 I2 added `image_studio/ocr.py`, the engine side of the OCR port: the pinned
+preprocessing `ocr-preprocess/v1` (decode with no EXIF orientation, alpha over white, RGB, no
+resize), the tiling of tall images with the merge of a line across a tile seam, the zh/ja script
+detection, the clamped confidence and the background-uniformity score taken from I3's
+`read_background`; the observation key also names the engine's pinned models. Production still
+binds `NoOcrProvider`, so readiness reports `image_ocr` as `NOT_CONFIGURED`, never a core failure.
+One integration and one unit suite; no migration.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -207,20 +214,16 @@ the category auto-matching agreement endpoint, plus their two unit suites. It ad
 provider caller and no mutation surface.
 All other Coupang adapters remain fake-only, retain sensitive provider envelopes without projecting
 customer or financial data, and grant no provider call or LIVE authority.
-ADR-0038 O3 added the SmartStore cross-border projection of a 구매대행 unit:
-`app/stages/register/overseas.py`, the frozen `overseas-listing/v1` payload section, wire
-`smartstore-register-wire/v11`, two unit, one contract and one integration suite; it has no
-migration and changes no endpoint.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
 | `app/` | 405 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 83 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
+| `app/capabilities/` | 84 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
 | `app/interface/` | 32 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 96 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 189 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/stages/` | 188 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -242,13 +245,13 @@ migration and changes no endpoint.
 | `integrations/` | 107 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 44 |  |
 | `integrations/suppliers/` | 57 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 420 | tests |
-| `tests/contracts/` | 22 | repository-rule and document-contract tests |
+| `tests/` | 418 | tests |
+| `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 18 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 177 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
-| `tests/unit/` | 155 | unit tests by runtime owner |
+| `tests/unit/` | 154 | unit tests by runtime owner |
 | `ui/` | 75 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 66 | the served web client |
