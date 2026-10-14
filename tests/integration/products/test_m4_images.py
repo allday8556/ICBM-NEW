@@ -1285,6 +1285,22 @@ LATER_COLUMNS = frozenset(
         "stated_minimum_sale_price_krw",
         # 0063 (ADR-0038 §1): the revision's source currency, appended in place.
         "source_currency",
+        # 0065 (ADR-0038 §4): a foreign price's landed-cost pins and a foreign binding's unit
+        # price, appended in place.
+        "source_price",
+        "fx_snapshot_id",
+        "fx_publication_date",
+        "usd_fx_snapshot_id",
+        "fx_margin_bp",
+        "overseas_settings_revision_no",
+        "overseas_cost_override_revision_no",
+        "overseas_shipping_krw",
+        "overseas_shipping_source",
+        "duty_decision",
+        "duty_rate_bp",
+        "duties_krw",
+        "declared_value_usd",
+        "source_unit_price",
     }
 )
 

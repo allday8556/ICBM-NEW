@@ -32,6 +32,7 @@ from app.interface.api.routes import (
     onboarding,
     operate,
     overseas,
+    overseas_costs,
     product_images,
     products,
     register,
@@ -213,6 +214,7 @@ def create_app(
     app.include_router(detail_guidance.router)
     app.include_router(sales_policy.router)
     app.include_router(overseas.router)
+    app.include_router(overseas_costs.router)
     app.include_router(ai.router)
     app.include_router(review.router)
 

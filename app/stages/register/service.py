@@ -1253,6 +1253,7 @@ class RegisterService:
         pin = store.pricing_pin(pricing_snapshot_id)
         current_id = None if fact is None else fact.current_price_id
         current = None if current_id is None else store.pricing_pin(current_id)
+        basis = None if pin is None else pin.landed_cost
         return ItemView(
             item_id=item_id,
             product_group_id=product_group_id,
@@ -1265,6 +1266,10 @@ class RegisterService:
             stated_minimum_sale_price_krw=(
                 None if pin is None else pin.stated_minimum_sale_price_krw
             ),
+            # ADR-0038 §4: what a pinned source-currency price was made from, as recorded.
+            source_currency=None if basis is None else basis.source_currency,
+            source_price=None if basis is None else basis.source_price,
+            fx_publication_date=None if basis is None else basis.fx_publication_date,
             registration_item_key=registration_item_key,
             publication_assets=publication_assets,
             option_keys=option_keys,

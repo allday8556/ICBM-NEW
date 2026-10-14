@@ -1010,6 +1010,13 @@ def test_the_products_api_is_read_only(client: TestClient) -> None:
         # fresh results or queues one job. A result is a proposal of its own: still no Product or
         # source fact is ever written by a request.
         "/api/v1/products/{product_group_id}/enrichment": {"get", "post"},
+        # ADR-0038 §4, §8: an overseas source product's own landed-cost inputs (its overseas
+        # shipping and duty rate), read and saved as an append-only, audited revision. Still no
+        # Product or source fact is ever written by a request.
+        "/api/v1/products/by-source/{supplier_key}/{source_product_id}/overseas-costs": {
+            "get",
+            "put",
+        },
     }
     unknown = client.get(f"/api/v1/products/{uuid.uuid4()}")
     assert unknown.status_code == 404

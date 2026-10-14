@@ -248,7 +248,8 @@ class OverseasSettingsStore:
 Percent = Annotated[StrictStr, Field(max_length=6)]
 
 
-def _percent(value: str) -> str:
+def valid_percent(value: str) -> str:
+    """A percentage as decimal text, 0 to 100 with at most two decimals, or a ValueError."""
     if not _PERCENT.fullmatch(value) or percent_to_bp(value) > 10000:
         raise ValueError("a percentage is 0 to 100 with at most two decimals, as text")
     return value
@@ -304,7 +305,7 @@ class SaveOverseasSettingsRequest(BaseModel):
     @field_validator("fx_margin_percent", "duty_rate_percent")
     @classmethod
     def _valid_percent(cls, value: str) -> str:
-        return _percent(value)
+        return valid_percent(value)
 
     @field_validator("smartstore_overseas_shipping_address_id")
     @classmethod

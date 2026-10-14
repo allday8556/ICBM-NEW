@@ -440,7 +440,125 @@ MINIMUM_POLICY_RECORDED = (
 )
 
 
-class PricingSnapshot(Base):
+# ADR-0038 §4 (FX-02), frozen by migration 0065: what a snapshot of a source-currency price records
+# beside its won amounts — the source price as stated, the FX snapshots of one publication day, the
+# margin, the settings and product-input revisions, the overseas shipping and where it came from,
+# the duty decision, its rate and amount, and the declared value. Each column states its own
+# domain; ``landed_cost_recorded`` ties them: a KRW snapshot states none of them, and a foreign one
+# states every one, consistent with the amounts it priced. ``pin_columns`` (the stores, the only
+# writers) applies the same rule before an insert.
+_DECIMAL_TEXT = (
+    "{c} <> '' AND {c} NOT GLOB '*[^0-9.]*' AND {c} NOT GLOB '*.*.*'"
+    " AND {c} NOT GLOB '.*' AND {c} NOT GLOB '*.'"
+)
+LANDED_COST_CHECKS = {
+    "source_currency": (
+        "source_currency_valid",
+        "source_currency IS NULL OR source_currency IN ('CNY', 'JPY')",
+    ),
+    "source_price": (
+        "source_price_decimal",
+        f"source_price IS NULL OR ({_DECIMAL_TEXT.format(c='source_price')})",
+    ),
+    "fx_snapshot_id": ("fx_snapshot_present", "fx_snapshot_id IS NULL OR fx_snapshot_id <> ''"),
+    "fx_publication_date": (
+        "fx_publication_date_iso",
+        "fx_publication_date IS NULL"
+        " OR fx_publication_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'",
+    ),
+    "usd_fx_snapshot_id": (
+        "usd_fx_snapshot_present",
+        "usd_fx_snapshot_id IS NULL OR usd_fx_snapshot_id <> ''",
+    ),
+    "fx_margin_bp": (
+        "fx_margin_bp_range",
+        "fx_margin_bp IS NULL OR fx_margin_bp BETWEEN 0 AND 10000",
+    ),
+    "overseas_settings_revision_no": (
+        "overseas_settings_revision_positive",
+        "overseas_settings_revision_no IS NULL OR overseas_settings_revision_no >= 1",
+    ),
+    "overseas_cost_override_revision_no": (
+        "overseas_cost_override_revision_positive",
+        "overseas_cost_override_revision_no IS NULL OR overseas_cost_override_revision_no >= 1",
+    ),
+    "overseas_shipping_krw": (
+        "overseas_shipping_non_negative",
+        "overseas_shipping_krw IS NULL OR overseas_shipping_krw >= 0",
+    ),
+    "overseas_shipping_source": (
+        "overseas_shipping_source_valid",
+        "overseas_shipping_source IS NULL OR overseas_shipping_source IN ('PRODUCT', 'DEFAULT')",
+    ),
+    "duty_decision": (
+        "duty_decision_valid",
+        "duty_decision IS NULL OR duty_decision IN ('NOT_OVER_150', 'INCLUDED', 'EXCLUDED')",
+    ),
+    "duty_rate_bp": (
+        "duty_rate_bp_range",
+        "duty_rate_bp IS NULL OR duty_rate_bp BETWEEN 0 AND 10000",
+    ),
+    "duties_krw": ("duties_non_negative", "duties_krw IS NULL OR duties_krw >= 0"),
+    "declared_value_usd": (
+        "declared_value_usd_cents",
+        "declared_value_usd IS NULL OR (declared_value_usd GLOB '*.[0-9][0-9]'"
+        f" AND {_DECIMAL_TEXT.format(c='declared_value_usd')})",
+    ),
+}
+_PINS = tuple(LANDED_COST_CHECKS)
+LANDED_COST_RECORDED = (
+    "("
+    + " AND ".join(f"{column} IS NULL" for column in _PINS)
+    + ") OR ("
+    + " AND ".join(
+        f"{column} IS NOT NULL"
+        for column in _PINS
+        if column not in ("overseas_settings_revision_no", "overseas_cost_override_revision_no")
+    )
+    + " AND (source_currency <> 'JPY' OR instr(source_price, '.') = 0)"
+    " AND (instr(source_price, '.') = 0"
+    " OR length(source_price) - instr(source_price, '.') BETWEEN 1 AND 2)"
+    " AND supplier_shipping_krw = overseas_shipping_krw"
+    " AND duties_krw <= purchase_cost_krw"
+    " AND (duty_decision = 'INCLUDED' OR duties_krw = 0)"
+    " AND (overseas_shipping_source = 'DEFAULT' OR overseas_cost_override_revision_no IS NOT NULL))"
+)
+
+
+def landed_cost_checks() -> tuple[CheckConstraint, ...]:
+    """The landed-cost CHECKs of one snapshot table (migration 0065)."""
+    return (
+        *(CheckConstraint(text, name=name) for name, text in LANDED_COST_CHECKS.values()),
+        CheckConstraint(LANDED_COST_RECORDED, name="landed_cost_recorded"),
+    )
+
+
+class LandedCostPinColumns:
+    """ADR-0038 §4 (FX-02): the landed-cost pins of a pricing snapshot, added in place by migration
+    0065 to ``pricing_snapshots`` and ``atomic_sku_pricing_snapshots``. NULL on every KRW price."""
+
+    source_currency: Mapped[str | None] = mapped_column(String(3))
+    # The source price as stated, decimal text in its currency (never a float).
+    source_price: Mapped[str | None] = mapped_column(String(24))
+    # The FX snapshots of one publication day: the source currency's, and USD's (the declared
+    # value's). Both rows are immutable (migration 0064); 0065's trigger names them.
+    fx_snapshot_id: Mapped[str | None] = mapped_column(String(36))
+    fx_publication_date: Mapped[str | None] = mapped_column(String(10))
+    usd_fx_snapshot_id: Mapped[str | None] = mapped_column(String(36))
+    fx_margin_bp: Mapped[int | None] = mapped_column(Integer)
+    # NULL while the defaults apply (no settings revision, no product revision).
+    overseas_settings_revision_no: Mapped[int | None] = mapped_column(Integer)
+    overseas_cost_override_revision_no: Mapped[int | None] = mapped_column(Integer)
+    overseas_shipping_krw: Mapped[int | None] = mapped_column(Integer)
+    overseas_shipping_source: Mapped[str | None] = mapped_column(String(10))
+    duty_decision: Mapped[str | None] = mapped_column(String(16))
+    duty_rate_bp: Mapped[int | None] = mapped_column(Integer)
+    duties_krw: Mapped[int | None] = mapped_column(Integer)
+    # Rounded up to the cent, decimal text: above 150 exactly when the exact value is.
+    declared_value_usd: Mapped[str | None] = mapped_column(String(24))
+
+
+class PricingSnapshot(LandedCostPinColumns, Base):
     __tablename__ = "pricing_snapshots"
     __table_args__ = (
         Index("ix_pricing_snapshots_item_context", "item_id", "pricing_context_fingerprint"),
@@ -515,6 +633,8 @@ class PricingSnapshot(Base):
         # ADR-0039 §3 (migration 0061): whether the supplier's minimum resale price was applied.
         CheckConstraint(MINIMUM_APPLIED_FLAG, name="minimum_applied_flag"),
         CheckConstraint(MINIMUM_POLICY_RECORDED, name="minimum_policy_recorded"),
+        # ADR-0038 §4 (migration 0065): a source-currency price's landed-cost pins.
+        *landed_cost_checks(),
     )
 
     pricing_snapshot_id: Mapped[str] = mapped_column(String(36), primary_key=True)

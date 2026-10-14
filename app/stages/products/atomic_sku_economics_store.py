@@ -1,4 +1,12 @@
-"""Persistence for AtomicSKU-qualified M4 source bindings and pricing history."""
+"""Persistence for AtomicSKU-qualified M4 source bindings and pricing history.
+
+A binding of a source-currency revision (ADR-0038 §4, migration 0065) acquires at its
+configuration's own unit price, as stated in that currency: it states no won (its KRW costs are 0)
+and the pricing owner prices it at the landed cost of the day. A configuration that states no unit
+price of its own is not bound (``PRODUCTS_ATOMIC_SKU_UNIT_PRICE_UNRESOLVED``). A source-currency
+snapshot records its landed-cost pins through ``landed_cost.pin_columns``; a KRW snapshot records
+none.
+"""
 
 import json
 import uuid
@@ -26,6 +34,7 @@ from app.stages.products.atomic_sku_item_models import AtomicSKUProductItem
 from app.stages.products.atomic_sku_item_store import AtomicSKUItemRecord
 from app.stages.products.atomic_sku_models import AtomicSKURevisionMember
 from app.stages.products.atomic_sku_store import AtomicSKUStore
+from app.stages.products.landed_cost import LandedCostPin, pin_columns, pin_of
 from app.stages.products.model import DEFAULT_SINGLE_UNIT_SIGNATURE, GroupStatus
 from app.stages.products.models import ProductGroup
 from app.stages.products.pricing import (
@@ -57,6 +66,10 @@ class AtomicSourceBindingRecord:
     purchase_cost_krw: int
     valid_from: datetime
     valid_to: datetime | None
+    # ADR-0038 §4: the configuration's own unit price of a source-currency revision, as stated;
+    # None on a KRW binding.
+    source_currency: str | None = None
+    source_unit_price: str | None = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +82,9 @@ class AtomicPricingDependencies:
     # ADR-0039 §3: pinned in the fingerprint only when the supplier's minimum is not applied, so
     # every applied fingerprint is unchanged.
     minimum_applied: bool = True
+    # ADR-0038 §4 (FX-02): every input of a source-currency price's landed cost; None for KRW, so
+    # every KRW fingerprint is unchanged.
+    landed_cost: tuple[tuple[str, object], ...] | None = None
 
     def fingerprint(self, context: PricingContextInput) -> str:
         return digest(
@@ -90,6 +106,15 @@ class AtomicPricingDependencies:
                 "purchase_cost_krw": self.binding.purchase_cost_krw,
                 "pricing_context_fingerprint": context.fingerprint,
                 **({} if self.minimum_applied else {"minimum_applied": False}),
+                **(
+                    {}
+                    if self.landed_cost is None
+                    else {
+                        "source_currency": self.binding.source_currency,
+                        "source_unit_price": self.binding.source_unit_price,
+                        "landed_cost": dict(self.landed_cost),
+                    }
+                ),
             }
         )
 
@@ -131,6 +156,8 @@ class AtomicPricingSnapshotRecord:
     # stated when it was not.
     minimum_applied: bool = True
     stated_minimum_sale_price_krw: int | None = None
+    # ADR-0038 §4 (FX-02): the landed-cost pins of a source-currency price; None for KRW.
+    landed_cost: LandedCostPin | None = None
 
 
 @dataclass(frozen=True)
@@ -228,13 +255,18 @@ class AtomicSKUEconomicsUnit:
             raise InputValidationError(
                 "PRODUCTS_ATOMIC_SKU_SOURCE_STALE", "the proving source revision is not current"
             )
+        configuration = OptionConfiguration.model_validate_json(
+            revision_member.source_configuration_json
+        )
         if fact_revision.source_currency is not None:
-            # ADR-0038 §1 (O1a): the binding's costs are whole KRW, and a CNY or JPY amount is
-            # never read as one; nothing converts until the FX and landed-cost slice (O2).
-            raise InputValidationError(
-                "PRODUCTS_ATOMIC_SKU_SOURCE_CURRENCY_UNSUPPORTED",
-                "the proving source revision states its prices in a source currency, which is"
-                " not priced yet",
+            return self._bind_foreign(
+                atomic_sku_item_id,
+                revision_member,
+                membership.member_id,
+                fact_revision,
+                configuration,
+                decided_by=decided_by,
+                correlation_id=correlation_id,
             )
         prices_row = self.session.get(ProductFactsField, (fact_revision.revision_id, "prices"))
         prices = (
@@ -248,9 +280,6 @@ class AtomicSKUEconomicsUnit:
                 "PRODUCTS_ATOMIC_SKU_BASE_PRICE_UNRESOLVED",
                 "one exact confirmed base purchase price is required",
             )
-        configuration = OptionConfiguration.model_validate_json(
-            revision_member.source_configuration_json
-        )
         if configuration.additional_price_krw is None:
             raise InputValidationError(
                 "PRODUCTS_ATOMIC_SKU_OPTION_DELTA_UNRESOLVED",
@@ -272,8 +301,79 @@ class AtomicSKUEconomicsUnit:
             and current.base_purchase_cost_krw == base_cost
             and current.option_additional_price_krw == configuration.additional_price_krw
             and current.purchase_cost_krw == purchase_cost
+            and current.source_currency is None
         ):
             return current
+        return self._open_binding(
+            atomic_sku_item_id,
+            AtomicSKUSourceBinding(
+                binding_id=str(uuid.uuid4()),
+                atomic_sku_item_id=atomic_sku_item_id,
+                atomic_sku_revision_member_id=revision_member.revision_member_id,
+                group_member_id=membership.member_id,
+                provenance_revision_id=fact_revision.revision_id,
+                acquisition_basis=ATOMIC_ACQUISITION_BASIS,
+                base_purchase_cost_krw=base_cost,
+                option_additional_price_krw=configuration.additional_price_krw,
+                purchase_cost_krw=purchase_cost,
+                decided_by=decided_by,
+                correlation_id=correlation_id,
+            ),
+        )
+
+    def _bind_foreign(
+        self,
+        atomic_sku_item_id: str,
+        revision_member: AtomicSKURevisionMember,
+        group_member_id: str,
+        fact_revision: ProductFactsRevision,
+        configuration: OptionConfiguration,
+        *,
+        decided_by: str,
+        correlation_id: str,
+    ) -> AtomicSourceBindingRecord:
+        """ADR-0038 §4: bind a source-currency configuration at its own unit price, as stated. It
+        states no won, and nothing is converted here: the pricing owner prices the landed cost of
+        the day. A configuration without its own price, or in another currency, is not bound."""
+        currency = fact_revision.source_currency
+        if configuration.unit_price is None or configuration.currency != currency:
+            raise InputValidationError(
+                "PRODUCTS_ATOMIC_SKU_UNIT_PRICE_UNRESOLVED",
+                "a source-currency configuration must state its own unit price in the revision's"
+                " currency",
+            )
+        current = self.current_binding(atomic_sku_item_id)
+        if current is not None and (
+            current.atomic_sku_revision_member_id == revision_member.revision_member_id
+            and current.group_member_id == group_member_id
+            and current.provenance_revision_id == fact_revision.revision_id
+            and current.source_currency == currency
+            and current.source_unit_price == configuration.unit_price
+        ):
+            return current
+        return self._open_binding(
+            atomic_sku_item_id,
+            AtomicSKUSourceBinding(
+                binding_id=str(uuid.uuid4()),
+                atomic_sku_item_id=atomic_sku_item_id,
+                atomic_sku_revision_member_id=revision_member.revision_member_id,
+                group_member_id=group_member_id,
+                provenance_revision_id=fact_revision.revision_id,
+                acquisition_basis=ATOMIC_ACQUISITION_BASIS,
+                base_purchase_cost_krw=0,
+                option_additional_price_krw=0,
+                purchase_cost_krw=0,
+                decided_by=decided_by,
+                correlation_id=correlation_id,
+                source_currency=currency,
+                source_unit_price=configuration.unit_price,
+            ),
+        )
+
+    def _open_binding(
+        self, atomic_sku_item_id: str, row: AtomicSKUSourceBinding
+    ) -> AtomicSourceBindingRecord:
+        """Close the Item's open binding and open ``row`` in its place, at one moment."""
         now = self._clock.now()
         for open_row in self.session.scalars(
             select(AtomicSKUSourceBinding).where(
@@ -283,21 +383,8 @@ class AtomicSKUEconomicsUnit:
         ):
             open_row.valid_to = now
         self.session.flush()
-        row = AtomicSKUSourceBinding(
-            binding_id=str(uuid.uuid4()),
-            atomic_sku_item_id=atomic_sku_item_id,
-            atomic_sku_revision_member_id=revision_member.revision_member_id,
-            group_member_id=membership.member_id,
-            provenance_revision_id=fact_revision.revision_id,
-            acquisition_basis=ATOMIC_ACQUISITION_BASIS,
-            base_purchase_cost_krw=base_cost,
-            option_additional_price_krw=configuration.additional_price_krw,
-            purchase_cost_krw=purchase_cost,
-            decided_by=decided_by,
-            correlation_id=correlation_id,
-            valid_from=now,
-            valid_to=None,
-        )
+        row.valid_from = now
+        row.valid_to = None
         self.session.add(row)
         self.session.flush()
         return _binding(row)
@@ -379,6 +466,11 @@ class AtomicSKUEconomicsUnit:
             created_at=self._clock.now(),
             minimum_applied=inputs.minimum_applied,
             stated_minimum_sale_price_krw=inputs.stated_minimum_sale_price_krw,
+            **pin_columns(
+                None if inputs.landed_cost is None else inputs.landed_cost.pin(),
+                purchase_cost_krw=inputs.purchase_cost_krw,
+                supplier_shipping_krw=inputs.supplier_shipping_krw,
+            ),
         )
         self.session.add(row)
         self.session.flush()
@@ -478,6 +570,8 @@ def _binding(row: AtomicSKUSourceBinding) -> AtomicSourceBindingRecord:
         row.purchase_cost_krw,
         row.valid_from,
         row.valid_to,
+        row.source_currency,
+        row.source_unit_price,
     )
 
 
@@ -516,6 +610,7 @@ def _snapshot(row: AtomicSKUPricingSnapshot) -> AtomicPricingSnapshotRecord:
         row.created_at,
         bool(row.minimum_applied),
         row.stated_minimum_sale_price_krw,
+        pin_of(row),
     )
 
 

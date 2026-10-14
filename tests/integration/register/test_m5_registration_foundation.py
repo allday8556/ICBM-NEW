@@ -568,6 +568,8 @@ ADAPTIVE_TABLES = (
     # ADR-0038 §3, §5 (0064): the FX snapshots and the overseas settings.
     "fx_snapshots",
     "overseas_settings_revisions",
+    # ADR-0038 §4, §8 (0065): each overseas source product's landed-cost inputs.
+    "overseas_cost_override_revisions",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

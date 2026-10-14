@@ -605,6 +605,8 @@ def test_0019_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         # ADR-0038 §3, §5 (0064): the FX snapshots and the overseas settings.
         "fx_snapshots",
         "overseas_settings_revisions",
+        # ADR-0038 §4, §8 (0065): each overseas source product's landed-cost inputs.
+        "overseas_cost_override_revisions",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before

@@ -163,6 +163,12 @@ class ItemView(BaseModel):
     # and the minimum the source stated when it did not — shown beside the price, never priced.
     minimum_applied: bool | None = None
     stated_minimum_sale_price_krw: int | None = None
+    # ADR-0038 §4 (FX-02): the basis of a pinned source-currency price, shown beside it — the
+    # source price as stated, its currency and the day of the TTS it was converted at. None for a
+    # KRW price.
+    source_currency: str | None = None
+    source_price: str | None = None
+    fx_publication_date: str | None = None
     # The option fields this Item was frozen with, by name only (§4). Empty for a preparation:
     # nothing durable holds an option an operator has not frozen yet.
     option_keys: tuple[str, ...] = ()

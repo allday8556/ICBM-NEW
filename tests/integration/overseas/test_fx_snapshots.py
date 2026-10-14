@@ -561,6 +561,8 @@ def test_0064_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     database = tmp_path / "icbm.db"
     url = f"sqlite:///{database.as_posix()}"
     upgrade_to_head(url)
+    # Judged at 0064 itself, whatever later revisions add (0065: ADR-0038 O2).
+    command.downgrade(alembic_config(url), "0064_fx_snapshots")
     added = {"fx_snapshots", "overseas_settings_revisions"}
 
     def tables() -> set[str]:
@@ -575,7 +577,7 @@ def test_0064_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     # Empty, it steps down to exactly what it added, and back up.
     command.downgrade(alembic_config(url), "0063_source_currency")
     assert before - tables() == added
-    command.upgrade(alembic_config(url), "head")
+    command.upgrade(alembic_config(url), "0064_fx_snapshots")
     assert tables() == before
     with contextlib.closing(sqlite3.connect(database)) as connection:
         connection.execute(

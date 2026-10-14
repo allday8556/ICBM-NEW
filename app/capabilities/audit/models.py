@@ -176,6 +176,10 @@ class AuditEventType(StrEnum):
     FX_API_KEY_CHANGED = "FX_API_KEY_CHANGED"
     # ADR-0038 §5: one 해외 구매대행 settings revision appended. Its number, values and fingerprint.
     OVERSEAS_SETTINGS_REVISED = "OVERSEAS_SETTINGS_REVISED"
+    # ADR-0038 §4, §8: one overseas source product's landed-cost inputs revised — its overseas
+    # shipping and duty rate. The source product, the revision number, both values and the
+    # fingerprint only.
+    OVERSEAS_COST_OVERRIDE_REVISED = "OVERSEAS_COST_OVERRIDE_REVISED"
 
 
 class AuditOutcome(StrEnum):

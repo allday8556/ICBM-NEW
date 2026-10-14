@@ -214,8 +214,10 @@ CANONICAL_TABLES = (
     # ADR-0038 §3, §5: the immutable FX snapshots and the overseas settings revisions.
     "fx_snapshots",
     "overseas_settings_revisions",
+    # ADR-0038 §4, §8: each overseas source product's landed-cost inputs.
+    "overseas_cost_override_revisions",
 )
-HEAD = "0064_fx_snapshots"
+HEAD = "0065_landed_cost"
 
 
 def _url(path: Path) -> str:
