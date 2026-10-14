@@ -188,7 +188,7 @@ def test_a_fresh_store_is_seeded_upgraded_and_writes_no_audit(
             row[0]
             for row in raw.execute("SELECT DISTINCT seed_version FROM ai_prompt_template_revisions")
         }
-    assert versions == {"v29-ai3"}
+    assert versions == {"v29-ai4"}
 
 
 def test_an_unmodified_store_is_upgraded_once_and_an_edit_is_never_overwritten(
@@ -217,7 +217,7 @@ def test_an_unmodified_store_is_upgraded_once_and_an_edit_is_never_overwritten(
             )
         ]
     assert events == [
-        {"layer": "TASK", "field": "output", "origin": "RESET", "seed_version": "v29-ai3"}
+        {"layer": "TASK", "field": "output", "origin": "RESET", "seed_version": "v29-ai4"}
     ]
     view = container.prompt_registry.registry()
     entry = next(e for e in view.entries if e.key == BUNDLE)

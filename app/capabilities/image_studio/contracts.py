@@ -17,9 +17,12 @@ out is not part of it). A candidate is reused only on an equal fingerprint; any 
 it (AIF-07).
 
 **Seams.** The OCR engine (``OcrProvider``) and the translation task's composition
-(``TranslationComposer``) are ports. I1 binds neither in production: ``NoOcrProvider`` names no
-engine, so the capability reads ``NOT_CONFIGURED`` and nothing is read or sent. The full OCR port
-is ADR-0041 I2's and the registered task I4's.
+(``TranslationComposer``) are ports. Production binds ``NoOcrProvider``, which names no engine, so
+the capability reads ``NOT_CONFIGURED`` and nothing is read or sent. The full OCR port is ADR-0041
+I2's; the registered task and its composer are I4's (``task``).
+
+**What is sent.** A region the operator excludes is never sent, and a contact detail
+(``checks.looks_like_contact``) only when the operator includes it (§6).
 """
 
 import hashlib
@@ -31,6 +34,7 @@ from typing import Any, Final, Protocol
 
 from app.capabilities.ai.composer import ComposedRequest
 from app.capabilities.ai.provider import RequestedIdentity
+from app.capabilities.image_studio.checks import looks_like_contact
 from app.platform.core.errors import InputValidationError, PolicyBlockedError
 
 # The output schema of the translation task: one Korean string per sent region (ADR-0041 §9).
@@ -183,14 +187,19 @@ class SentRegion:
 
 
 def sent_regions(
-    regions: Sequence[OcrRegion], excluded: frozenset[str] = frozenset()
+    regions: Sequence[OcrRegion],
+    excluded: frozenset[str] = frozenset(),
+    included: frozenset[str] = frozenset(),
 ) -> tuple[SentRegion, ...]:
     """The regions a translation sends, in observation order: every region with text that is not
-    excluded. A region the operator keeps is never sent (ADR-0041 §3)."""
+    excluded. A region the operator keeps is never sent (ADR-0041 §3), and a contact detail is
+    kept by default: it is sent only when the operator includes it (§6)."""
     return tuple(
         SentRegion(r.region_id, r.text)
         for r in regions
-        if r.region_id not in excluded and r.text.strip()
+        if r.region_id not in excluded
+        and r.text.strip()
+        and (r.region_id in included or not looks_like_contact(r.text))
     )
 
 
@@ -276,7 +285,7 @@ class NoOcrProvider:
 
 
 class TranslationComposer(Protocol):
-    """Composes the translation task's request for the regions sent (ADR-0041 §9). The registered
-    task is I4's; until it lands nothing is bound in production."""
+    """Composes the translation task's request for the regions sent (ADR-0041 §9): text only.
+    The registered task's composer is ``task.RegistryTranslationComposer`` (I4)."""
 
     def compose(self, source_language: str, regions: Sequence[SentRegion]) -> ComposedRequest: ...
