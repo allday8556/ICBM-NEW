@@ -22,10 +22,17 @@
 
 ## Coupang
 
-- **Locator:** https://developers.coupang.com/en/api — `OFFICIAL_API_DOC`, observed 2026-09-28.
-- **Captured:** `PUT .../seller-products/{sellerProductId}/partial` (path prefix elided in the capture) plus item-level price/quantity changes ([PRICE](PRICE.md#coupang), [STOCK](STOCK.md#coupang)).
-- **Missing:** the full path prefix, request body, success/response, errors, idempotency.
-- **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+- **Locators:** full modification https://developers.coupang.com/en/api/products/modify-product ;
+  partial modification https://developers.coupang.com/en/api/products/product-modification-approval-not-required —
+  `OFFICIAL_API_DOC`, observed 2026-10-14.
+- **Captured:** full modification uses `PUT /v2/providers/seller_api/apis/api/v1/marketplace/seller-products`
+  after reading the product and carrying provider-assigned `sellerProductId` and
+  `sellerProductItemId` in the complete document. Coupang says the partial modification contract
+  cannot modify temporarily saved or approval-pending products.
+- **Missing:** a general idempotency guarantee and complete runtime rate-limit behavior.
+- **ICBM:** generally `NOT_ADOPTED`, `UNVERIFIED`. `C-LIVE-MUT-1` adopts only the full-modification
+  path for the exact saved synthetic product identity returned by its bounded create/recovery flow;
+  the partial-update path is not used. This does not create a generic product-update surface.
 
 ## 11st
 

@@ -108,7 +108,7 @@ preflight only and cannot select another provider target.
 | Field | Value |
 | --- | --- |
 | Products | Exact user-bound synthetic `test 1` through `test 11` only |
-| Runtime surface | Fixed create -> partial update -> read-back -> delete paths on KR |
+| Runtime surface | Fixed create -> full saved-product update -> read-back -> delete paths on KR |
 | Approval request | `requested=false`; sale approval is never requested |
 | Retry | None; an in-flight journal barrier requires manual recovery after ambiguity |
 | Delete authority | Only the `sellerProductId` returned by this run's successful create |
@@ -119,9 +119,25 @@ reordered or additional products, `test 12+`, changed synthetic identities, mult
 request for sale approval. A durable journal records only state, digest and returned identities;
 it is committed before each provider call so a crash or timeout can never cause a blind retry.
 
-Each successful create is updated through the fixed partial-update path, read back and verified as
-the same saved synthetic SKU, then deleted through that exact returned identity. Existing Coupang
+Each successful create is first read back to obtain the provider-assigned item identity, updated
+through Coupang's full saved-product modification path, read back again and verified as the same
+saved synthetic SKU, then deleted through that exact returned identity. The partial-update path is
+not used because Coupang excludes temporarily saved products from that contract. Existing Coupang
 products are never caller-selectable. The live client uses the same clock, redirect, proxy, response
 cap, secret-store and explicit-egress constraints as C-LIVE-R1. CI and tests can supply only an
 in-memory transport. The operator command requires the exclusive data-directory lease and takes a
 reviewed bundle path and digest, never Access Key or Secret Key command-line arguments.
+
+### Ambiguous create recovery
+
+`icbm coupang recover-test-product-create` is the only recovery surface for a journal with exactly
+one `create_inflight` record. It performs no mutation. It queries the exact bound
+`externalVendorSku`, accepts exactly one positive candidate matching the bound vendor and product
+name, then performs one provider-ID product read and verifies vendor, saved status, product name,
+seller product identity, external SKU and provider-assigned item identity. Only that complete
+positive chain may advance the journal to `created` so the normal owner can later resume.
+
+An empty, multiple, malformed, unavailable or mismatching answer proves nothing and leaves the
+barrier unchanged. In particular, zero results never authorize a repeated create. The recovery
+owner is single-use, KR-only, bound to the exact eleven-product bundle digest and full journal key
+set, uses the same fresh clock/IP/secret/egress guards, and has no caller-selectable product ID.

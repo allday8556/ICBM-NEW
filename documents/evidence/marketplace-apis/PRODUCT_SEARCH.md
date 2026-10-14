@@ -68,7 +68,12 @@ Below, `SEARCH` = 5904349289.
 - **Response:** `data` is an array of vendor products, including `sellerProductId`, product name, display category, vendor, sale dates, brand and status (`IN_REVIEW | SAVED | APPROVING | APPROVED | PARTIAL_APPROVED | DENIED | DELETED`).
 - **Safety consequence:** an array result does not establish uniqueness; no complete freshness or zero-result absence guarantee is documented. At most it supplies positive candidates that still require provider-ID product read and Snapshot comparison.
 - **Missing:** uniqueness, completeness, zero-result meaning, stable freshness/read-after-write beyond the one-minute minimum, errors and rate limit; Track C did not complete the general list-paging contract.
-- **ICBM:** research-only; `NOT_ADOPTED`, `UNVERIFIED`.
+- **ICBM:** generally `NOT_ADOPTED`, `UNVERIFIED`. One narrow exception is adopted for
+  `C-LIVE-MUT-1` ambiguous-create recovery only: the exact bound `externalVendorSku` may produce a
+  positive candidate, which must then pass the provider-ID product read-back and all bound identity
+  checks before the journal can advance. Zero, multiple, stale, unavailable or mismatching answers
+  prove nothing, never authorize CREATE and leave the mutation barrier intact. This exception does
+  not adopt general product search or list paging.
 
 ## 11st
 
