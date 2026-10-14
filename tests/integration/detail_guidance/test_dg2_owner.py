@@ -79,6 +79,11 @@ LATER_TABLES = frozenset(
         # ADR-0038 §3, §5 (0064): the FX snapshots and the overseas settings.
         "fx_snapshots",
         "overseas_settings_revisions",
+        # ADR-0041 I1 (0065): the Image Studio translation owner.
+        "image_ocr_observations",
+        "image_translation_candidates",
+        "image_edit_revisions",
+        "image_edit_current",
     }
 )
 TOP: dict[str, Any] = {"blocks": [{"heading": "당일발송", "lines": ["12시 이전 주문시 당일발송"]}]}

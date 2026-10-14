@@ -562,6 +562,13 @@ def test_0064_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     url = f"sqlite:///{database.as_posix()}"
     upgrade_to_head(url)
     added = {"fx_snapshots", "overseas_settings_revisions"}
+    # ADR-0041 I1 (0065): a later owner's tables, empty, step down with it.
+    later = {
+        "image_ocr_observations",
+        "image_translation_candidates",
+        "image_edit_revisions",
+        "image_edit_current",
+    }
 
     def tables() -> set[str]:
         with contextlib.closing(sqlite3.connect(database)) as connection:
@@ -574,7 +581,7 @@ def test_0064_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
     assert added <= before
     # Empty, it steps down to exactly what it added, and back up.
     command.downgrade(alembic_config(url), "0063_source_currency")
-    assert before - tables() == added
+    assert before - tables() == added | later
     command.upgrade(alembic_config(url), "head")
     assert tables() == before
     with contextlib.closing(sqlite3.connect(database)) as connection:
@@ -587,7 +594,8 @@ def test_0064_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         connection.commit()
     with pytest.raises(RuntimeError, match="never silently destroyed"):
         command.downgrade(alembic_config(url), "0063_source_currency")
-    assert tables() == before
+    # The later owner stepped down first, empty; 0064 itself refused.
+    assert tables() == before - later
     with contextlib.closing(sqlite3.connect(database)) as connection:
         assert connection.execute("SELECT COUNT(*) FROM fx_snapshots").fetchone()[0] == 1
 

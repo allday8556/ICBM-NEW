@@ -2193,6 +2193,36 @@ def test_the_detail_guidance_owner_is_the_one_writer_of_its_models() -> None:
     assert _calls(modules[DETAIL_GUIDANCE_WRITER], "append")
 
 
+# ADR-0041 §3 (I1): the Image Studio translation owner is the one constructor of its four models,
+# and every write it makes appends an audit event. It never constructs a source row (IT-01).
+IMAGE_STUDIO_WRITER = "app/capabilities/image_studio/store.py"
+IMAGE_STUDIO_MODELS = (
+    "ImageOcrObservation",
+    "ImageTranslationCandidate",
+    "ImageEditRevision",
+    "ImageEditCurrent",
+)
+
+
+def test_the_image_studio_owner_is_the_one_writer_of_its_models() -> None:
+    constructed: dict[str, set[str]] = {}
+    modules = _production_modules()
+    for path, tree in modules.items():
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in IMAGE_STUDIO_MODELS
+            ):
+                constructed.setdefault(node.func.id, set()).add(path)
+    assert constructed == {name: {IMAGE_STUDIO_WRITER} for name in IMAGE_STUDIO_MODELS}
+    assert _calls(modules[IMAGE_STUDIO_WRITER], "append")
+    package = {p: t for p, t in modules.items() if p.startswith("app/capabilities/image_studio/")}
+    for path, tree in package.items():
+        built = {_callee(call) for call in ast.walk(tree) if isinstance(call, ast.Call)}
+        assert not built & {"SourceAsset", "ProductFactsImageRef", "ProductFactsRevision"}, path
+
+
 # ADR-0036 §3 (O1): the onboarding owner is the one constructor of every onboarding model. O1
 # writes the identities, the state log, the hosts and the words; the policy reads, trials and
 # verifications get their writer in the same module with O2, O3 and O5, and nowhere else.
@@ -4039,6 +4069,12 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         # ADR-0038 §3, §5: the immutable FX snapshots and the overseas settings revisions.
         "fx_snapshots",
         "overseas_settings_revisions",
+        # ADR-0041 §3 (I1): the Image Studio translation owner — OCR observations, translation
+        # candidates, edit revisions and their forward-only current pointer.
+        "image_ocr_observations",
+        "image_translation_candidates",
+        "image_edit_revisions",
+        "image_edit_current",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.
