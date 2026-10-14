@@ -238,7 +238,7 @@ def test_the_save_bar_is_server_owned_and_general_settings_stay_read_only(
         chip = page.locator(".savebar .chip")
         assert chip.get_attribute("data-save-scope") == (
             "REGISTRATION_TARGET_POLICY REGISTRATION_CATEGORY_METADATA AI_PROMPT_REGISTRY"
-            " DETAIL_GUIDANCE SUPPLIER_SALES_POLICY"
+            " DETAIL_GUIDANCE SUPPLIER_SALES_POLICY OVERSEAS_SETTINGS"
         )
         text = chip.inner_text()
         assert "M0" not in text
@@ -246,6 +246,8 @@ def test_the_save_bar_is_server_owned_and_general_settings_stay_read_only(
         assert "등록 대상 정책" in text and "카테고리 메타데이터" in text
         # ADR-0039 §4: the supplier sales policy is saved from the supplier card.
         assert "공급처 판매정책 (수집관리 › 공급처 관리)" in text
+        # ADR-0038 §5: the overseas settings are saved from their own card.
+        assert "해외 구매대행 (공통 › 해외구매대행)" in text
         # Every general setting field is read-only, and the general save is inert.
         fields = page.locator("input[data-setting]")
         assert fields.count() > 0

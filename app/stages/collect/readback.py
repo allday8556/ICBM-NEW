@@ -58,6 +58,7 @@ class SourceTruthReadback:
             captured_at=stored.captured_at,
             recorded_at=stored.recorded_at,
             currency=stored.currency,
+            source_currency=stored.source_currency,
             extractor_revision=stored.extractor_revision,
             extractor_fingerprint=stored.extractor_fingerprint,
             source_fingerprint=stored.source_fingerprint,

@@ -229,27 +229,22 @@ export const SUBTABS = {
       ],
     },
     {
+      // ADR-0038 §3, §5: the 해외 구매대행 settings, saved through their own versioned contract,
+      // and the Korea Eximbank TTS with its write-only API key (overseas.js). Nothing is priced here.
       key: 'overseas',
       label: '해외구매대행',
       blocks: [
         {
           cards: [
             {
-              title: '해외 구매대행 / 전자상거래부호',
-              help: '한 번 입력하면 해외 구매대행 상품 등록 시 지원 플랫폼 필드에 자동 적용합니다.',
-              items: [
-                field('전자상거래부호', 'overseas.ecommerce_code', { placeholder: '전자상거래부호 입력' }),
-                { actions: [{ label: '저장', variant: 'blue' }], layout: 'stretch' },
-              ],
+              title: '해외 구매대행',
+              help: '해외 구매대행 상품의 원가 계산과 등록에 쓰는 기본값입니다. 저장할 때마다 변경 기록이 남고, 가격은 저장된 값으로 계산합니다.',
+              items: [{ overseasSettings: true }],
             },
             {
-              title: '자동 적용',
-              items: [
-                toggle('해외 구매대행 상품 자동 감지', 'overseas.auto_detect'),
-                toggle('지원 플랫폼 등록 payload 자동 포함', 'overseas.auto_send'),
-                toggle('등록 결과 read-back 검증', 'overseas.readback'),
-                note('플랫폼별 API 필드가 확인된 경우 자동 처리하고 예외만 확인필요로 보냅니다.'),
-              ],
+              title: '환율',
+              help: '한국수출입은행 현재환율 API의 송금 보낼때(TTS) 환율을 영업일 11시 이후 하루 한 번 받아 둡니다. 3영업일보다 오래되었거나 없으면 가격을 만들지 않습니다.',
+              items: [{ fxRates: true }],
             },
           ],
         },

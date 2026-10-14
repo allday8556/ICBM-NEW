@@ -112,6 +112,7 @@ _ENV: dict[str, tuple[str, Callable[[str], Any]]] = {
     "operate_order_initial_lookback_s": ("ICBM_OPERATE_ORDER_INITIAL_LOOKBACK_S", float),
     "operate_order_shipping_retention_days": ("ICBM_OPERATE_ORDER_SHIPPING_RETENTION_DAYS", int),
     "review_coverage_max_age_s": ("ICBM_REVIEW_COVERAGE_MAX_AGE_S", float),
+    "fx_refresh_interval_s": ("ICBM_FX_REFRESH_INTERVAL_S", float),
 }
 
 
@@ -162,6 +163,10 @@ class AppConfig:
     operate_order_initial_lookback_s: float = 7 * 86400.0
     operate_order_shipping_retention_days: int = 90
     review_coverage_max_age_s: float = 900.0
+    # ADR-0038 §3: how often the FX scheduler checks for today's Korea Eximbank publication. It
+    # reads only on a business day after 11:00 KST, with the key configured and today not yet
+    # recorded; 0 disables the periodic pass. 「지금 갱신」 works either way.
+    fx_refresh_interval_s: float = 3600.0
 
     def __post_init__(self) -> None:
         if not is_loopback_host(self.host):

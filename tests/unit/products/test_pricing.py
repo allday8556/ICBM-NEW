@@ -14,12 +14,16 @@ from app.stages.collect.facts import (
     EvidenceKind,
     FieldFact,
     FieldStatus,
+    ForeignPrice,
+    ForeignPricesValue,
     PriceRole,
     PricesValue,
     SourcePrice,
 )
+from app.stages.products.model import ReadinessStatus, Reason
 from app.stages.products.pricing import (
     MINIMUM_NET_MARGIN,
+    SOURCE_CURRENCY_UNSUPPORTED,
     TARGET_NET_MARGIN,
     Calculation,
     GuardReason,
@@ -32,6 +36,7 @@ from app.stages.products.pricing import (
     calculate,
     meets_target,
     rate,
+    source_currency_reasons,
     source_inputs,
     target_margin_price,
 )
@@ -322,3 +327,20 @@ def test_a_declared_purchase_price_is_chosen_and_a_list_price_never_is() -> None
     assert source_inputs(product(prices=beside)) == SourceInputs(15000, 0, None)
     alone = _role_prices(("정가", 33000, PriceRole.LIST))
     assert _codes(source_inputs(product(prices=alone))) == {"PRICING_PURCHASE_PRICE_AMBIGUOUS"}
+
+
+# ---------------------------------------------------------------- ADR-0038 O1a: source currency
+
+
+def test_a_source_currency_is_not_priced_until_o2() -> None:
+    assert source_currency_reasons(None) == ()
+    for currency in ("CNY", "JPY"):
+        assert source_currency_reasons(currency) == (
+            Reason(SOURCE_CURRENCY_UNSUPPORTED, ReadinessStatus.REVIEW_REQUIRED, "prices"),
+        )
+    # A foreign price is never read as won, even by a caller that skipped the revision check.
+    cny = ForeignPricesValue(prices=(ForeignPrice(label="p", currency="CNY", amount="5.80"),))
+    fact = FieldFact(
+        FieldStatus.CONFIRMED, cny, (Evidence(EvidenceKind.DOM_TEXT, ".p", FieldStatus.CONFIRMED),)
+    )
+    assert _codes(source_inputs(product(prices=fact))) == {"PRICING_PURCHASE_PRICE_AMBIGUOUS"}

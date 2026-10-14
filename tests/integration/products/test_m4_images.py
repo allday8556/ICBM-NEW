@@ -1283,6 +1283,8 @@ LATER_COLUMNS = frozenset(
         # 0061 (ADR-0039 §3): the pricing snapshot's minimum policy, appended in place.
         "minimum_applied",
         "stated_minimum_sale_price_krw",
+        # 0063 (ADR-0038 §1): the revision's source currency, appended in place.
+        "source_currency",
     }
 )
 

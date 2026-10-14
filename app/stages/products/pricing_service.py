@@ -69,6 +69,7 @@ from app.stages.products.pricing import (
     SourceInputs,
     calculate,
     offer_source_inputs,
+    source_currency_reasons,
     source_inputs,
 )
 from app.stages.products.pricing_store import PricingMove, PricingSnapshotRecord, PricingUnit
@@ -479,6 +480,9 @@ class ProductPricingService:
         stored = self._revisions.get(dependencies.source_revision_id)
         if stored is None:  # pragma: no cover - a foreign key guarantees the revision
             raise NotFoundError("COLLECT_REVISION_UNKNOWN", "the bound revision is missing")
+        # ADR-0038 §1: a revision in a source currency is not priced until O2; no amount is read.
+        if unsupported := source_currency_reasons(stored.source_currency):
+            return _with(base, reasons=unsupported)
         # ADR-0039 §3: the member's supplier's sales policy, read in this unit of work.
         apply_minimum = self._applies_minimum(unit, procurement)
         dependencies = replace(dependencies, minimum_applied=apply_minimum)
@@ -626,6 +630,9 @@ class ProductPricingService:
         stored = self._revisions.get(dependencies.source_revision_id)
         if stored is None:  # pragma: no cover - foreign keys guarantee the revision
             raise NotFoundError("COLLECT_REVISION_UNKNOWN", "the bound revision is missing")
+        # ADR-0038 §1: a revision in a source currency is not priced until O2; no amount is read.
+        if unsupported := source_currency_reasons(stored.source_currency):
+            return _with_atomic(base, reasons=unsupported)
         # ADR-0039 §3: the bound member's supplier's sales policy, read in this unit of work.
         apply_minimum = self._applies_minimum_to(unit.session, dependencies.binding.group_member_id)
         dependencies = replace(dependencies, minimum_applied=apply_minimum)
