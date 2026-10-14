@@ -42,6 +42,7 @@ Date: 2026-10-14
 - **Images** are fetched by the server's policed fetch from the reviewed image hosts (ADR-0019 §7):
   - 1688: `cbu01.alicdn.com` and the other `*.alicdn.com` image hosts that reconnaissance names;
   - Super Delivery: its own image host.
+  - *(Amendment, slice C2: reconnaissance named `cbu01.alicdn.com` and `img.alicdn.com` for 1688, and a description document can reference either. 1688's description images come from a public description document the server reads itself, §3.1.)*
 - **Host permissions.** The extension gains the two product hosts, `detail.1688.com` and `www.superdelivery.com`, as reviewed supplier hosts (AC-07). The optional per-origin permissions of ADR-0036 D3 are not required by this ADR.
 
 ## 2. Super Delivery reads the DOM
@@ -82,6 +83,7 @@ window.context=(function(b,d){…})(window.contextPath,{ … JSON … });
   - finds **exactly one** inline script, with no `src`, that matches the prefix. With zero or more than one match, nothing is sent for the member, and the capture says so;
   - cuts the argument between the marker and the terminator, under the byte bound;
   - parses it with `JSON.parse`, which is a data parser, under a depth bound. It never runs the script and never reads a JS global;
+    - *(Amendment, slice C2: the argument is JSON except that 1688 writes some object keys as bare decimal integers, such as `skuWeight: {5919566953309: 0.23}`. A policy may declare `bare_integer_keys`. The extension then quotes each such key, a run of digits right after `{` or `,` and before `:` outside any string literal, in one pass, and `JSON.parse` decides everything else. Nothing else is accepted.)*
   - **projects** the parsed document onto the allowlist the policy declares: exactly the paths of §4, as listed there. Nothing outside the allowlist leaves the browser.
     - The member's receive address (`freightInfo.recieveAddress`, `receiveAddressId`, the area codes) is never on the allowlist.
     - No other account or member payload is on it either (ADR-0019 AC-07).
@@ -97,6 +99,21 @@ window.context=(function(b,d){…})(window.contextPath,{ … JSON … });
 - The security gate (ADR-0019 §6.1) runs over every string in the member as it does over DOM text. A secret or the member's own identity refuses the capture.
 - The extractor reads the member's allowlisted paths (§4). The member is dropped once the facts are written. Only canonical facts and their evidence are stored (§6.1).
 - **Evidence.** A fact from the member carries evidence kind `EMBEDDED_DATA` with its JSON path as the locator. This is one new `EvidenceKind`, authorized here.
+  - *(Amendment, slice C2: the evidence kind is the existing `EMBEDDED_JSON` (ADR-0010 §8: data embedded in the page, kept as a parsed tree and never as script text), with the locator `embedded:<JSON path>`. That kind already means exactly this. The evidence table constrains its kinds in the database, so a new kind would need a migration and would gain nothing. No `EvidenceKind` is added.)*
+
+### 3.1 Detail images: the public description document (amendment, slice C2)
+
+1688 does not put the product description in the product page. The page names a public description document, `description.fields.detailUrl` (for example `https://itemcdn.tmall.com/1688offer/icoss…`). It answers `text/plain` with exactly one statement: `var offer_details=` followed by a JSON object whose `content` is the description's HTML.
+
+- **The projection allowlists `description.fields.detailUrl`.** The browser sends only that URL.
+- **The server reads the document itself** (ADR-0019 §7, the same policed transport as for images):
+  - only from the profile's declared description hosts (`itemcdn.tmall.com`), over https on port 443, with no query and no fragment;
+  - with no cookie and no session, never following a redirect, under a byte bound;
+  - in its own egress grant for the description hosts alone, reserved in the run's budget (one read per run).
+- **Parsing is strict.** The body, trimmed, is `var offer_details=`, one JSON object and `;`. It is parsed with a JSON parser and never run. The object's `content` string is read as HTML for its `<img>` references, in document order.
+- **Detail images.** A reference on a declared image host is a `DETAIL`-role candidate (ADR-0019 §7, AC-14). The server fetches it under the role's cap, like any other image. A reference on any other host is not a candidate.
+- **Any mismatch gives no detail images.** A mismatch is a URL off the declared hosts, a refused or failed read, a status other than 200, a body that is not exactly that statement, invalid JSON, or no `content` string. The reason is recorded as `REVIEW_REQUIRED` evidence on `detail_description` (`description:<reason>`). Nothing is guessed, and the document is never stored.
+- **OC-01 still holds.** The description document is not a product page of either site, and the server never reads `detail.1688.com`.
 
 ## 4. 1688 fields
 
@@ -105,16 +122,16 @@ The allowlisted paths are under `result.data`.
 | field | read from | rule |
 | --- | --- | --- |
 | `original_name` | the page title in the DOM | as stated (Chinese) |
-| `prices` | `mainPrice.fields.priceModel` | CNY. `priceDisplayType` `skuPrice`: per-SKU prices. `rangePrice`: the first tier (`beginAmount` 1) is the purchase price |
-| `options` | `Root.fields.dataJson.skuModel.skuProps`, `skuInfoMap` | axes and values as stated. Each SKU's own `discountPrice` (or `price` when none) is its purchase price (ADR-0038 §9.3) |
+| `prices` | `mainPrice.fields.priceModel`, `skuInfoMap.*.price` | CNY. `skuPrice`: the lowest SKU original price is the product's labelled `PURCHASE` price, and each SKU's own price is on its option. `rangePrice`: the first tier (`beginAmount` 1) of `originalPrices`, or of `currentPrices` when no original is stated, is the purchase price |
+| `options` | `Root.fields.dataJson.skuModel.skuProps`, `skuInfoMap` | axes and values as stated. Each SKU's original `price` is its purchase price; a `discountPrice` is kept as a fact (ADR-0038 §9.3 as amended) |
 | `stock` | `skuInfoMap.*.canBookCount` | per SKU, as stated |
 | `quantity_tiers` | `priceModel.currentPrices` when `rangePrice` | each tier as stated |
 | `shipping` | `shippingServices.fields.freightInfo.totalCost`, `location` | CNY freight from the stated ship-from location to the user's receive address (the 배대지). A `FIXED` fee as stated, without the address |
 | `brand`, `origin` | the product attribute table (品牌, 产地) | as stated |
-| `images` | the DOM main gallery | server-fetched (§1) |
+| `images` | the DOM main gallery; `DETAIL` images from the description document (§3.1) | server-fetched (§1) |
 | `minimum_sale_price`, `sales_channels` | not stated on 1688 | `ABSENT` |
 
-- **A promotion price is the price actually paid now** (ADR-0038 §9.3). The line price is kept beside it as a fact.
+- **The original (line) price is the purchase price** (ADR-0038 §9.3 as amended, Issue #219 `6164685916`). A promotion or member price is kept beside it as a fact.
 - **Units.** The unit (套, 件, 个) and the minimum order (`beginAmount`) are kept as stated. A minimum order above one is `REVIEW_REQUIRED`: 구매대행 sells one unit.
 
 ## 5. Currency
@@ -139,7 +156,7 @@ The allowlisted paths are under `result.data`.
 - **OC-04** A mismatch in the embedded data refuses that member fail-closed. Its fields are `REVIEW_REQUIRED`, never inferred from the DOM's selected option.
 - **OC-05** The member's receive address and identity never leave the browser. The allowlist excludes them, and the server refuses a member that holds any path outside it.
 - **OC-06** Only allowlisted paths are read, and only canonical facts and evidence are stored.
-- **OC-07** A price the page does not disclose is `REVIEW_REQUIRED`. The purchase price is the price actually paid for one unit, in the source currency.
+- **OC-07** A price the page does not disclose is `REVIEW_REQUIRED`. The purchase price is what one unit costs at the regular price, in the source currency. Super Delivery adds the consumption tax its page's mark decides, and no discount sets the cost.
 - **OC-08** A company's terms are kept as its words. They are not a gate.
 
 ## Slices
@@ -152,3 +169,10 @@ The allowlisted paths are under `result.data`.
 | C3 | the two acceptances, then `ACTIVE` |
 
 Migrations are numbered 0063 or later (0062 is Track A's).
+
+## Amendments
+
+- **2026-10-14, the owner's price basis (Issue #219 `6164685916`).** 1688's purchase price is the SKU's **original** price: the non-discounted `price`, the line price. A promotion or member `discountPrice` is recorded only and never sets the cost. When no original is shown, the shown price is used. A `rangePrice` page uses its first tier. §4 and OC-07 read so, and so does ADR-0038 §9.3.
+- **2026-10-14, slice C2 (implementation choices, Claude Code Track B).**
+  - §3 accepts bare integer object keys when the policy declares them. It records the member's facts under the existing `EMBEDDED_JSON` evidence kind: no new kind and no migration.
+  - §3.1 adds the public description document as the source of 1688's detail images, read by the server under its own egress grant. This extends §1's reviewed hosts with the description host, which serves no image.

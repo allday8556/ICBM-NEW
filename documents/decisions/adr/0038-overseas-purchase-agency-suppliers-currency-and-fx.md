@@ -152,9 +152,10 @@ The owner signed in to both sites; the reconnaissance only read pages.
 2. **The page, exactly.** What the page states is read as stated (ADR-0010), and nothing is inferred.
    - A supplier company's terms, such as "domestic retailers only" or "no drop shipping", are kept as its words. They are not a new gate. Applying a supplier's sales policy stays the user's choice (ADR-0039).
    - A price the page does not show, such as an unapproved Super Delivery company, is not read: the product is `REVIEW_REQUIRED`.
-3. **The price actually paid.** The purchase cost is what an order of one unit would pay now:
-   - Super Delivery: the 税込 price;
-   - 1688: the SKU's current (promotion or member) price, or the first quantity tier.
+3. **The price actually paid, at the regular price** (as amended by Issue #219 `6164685916`). The purchase cost is what an order of one unit pays, without any time-limited discount:
+   - **Super Delivery:** the regular 税抜 price plus Japanese consumption tax. The rate is 8% when the page marks the product 軽減税率対象, else 10%, rounded up to the yen. The rates and the reading of the mark are an ICBM-patched constant, not a user setting. The 税抜 price is kept as stated.
+   - **1688:** the SKU's original (struck) price when one is shown, else its shown price, or the first quantity tier.
+   - **A campaign, promotion or member price** is kept as a fact and never sets the cost, so a discount that ends cannot turn a price into a loss.
    The other stated prices are kept beside it as facts.
 
 These shape the collector ADR (slice O4+); they do not change §1–§8.
