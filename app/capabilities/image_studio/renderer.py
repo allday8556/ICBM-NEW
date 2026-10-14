@@ -199,7 +199,9 @@ def _refuse(message: str, **details: object) -> InputValidationError:
     return InputValidationError(IMAGE_TRANSLATE_INPUT_INVALID, message, details=dict(details))
 
 
-def _open(source: bytes) -> Image.Image:
+def decode_source(source: bytes) -> Image.Image:
+    """The source as the renderer reads it: decoded with no EXIF orientation, RGB (RGBA when it
+    has alpha). OCR scores a region's background on exactly this image (I2)."""
     try:
         image = Image.open(io.BytesIO(source))
         image.load()
@@ -450,7 +452,7 @@ def _completeness(plans: Sequence[_Plan]) -> Completeness:
 
 def render(source: bytes, regions: Sequence[RenderRegion]) -> RenderResult:
     """Draw the included regions' Korean text over ``source`` into a new PNG (ADR-0041 §4–§6)."""
-    original = _open(source)
+    original = decode_source(source)
     _check(original, regions)
     plans = [_plan(original, region) for region in regions]
     canvas = original.copy()
