@@ -25,6 +25,9 @@ from app.capabilities.audit.service import AuditLog
 from app.capabilities.detail_guidance.image_store import GuidanceImageStore
 from app.capabilities.detail_guidance.service import DetailGuidanceService
 from app.capabilities.detail_guidance.store import DetailGuidanceStore
+from app.capabilities.image_studio.contracts import NoOcrProvider
+from app.capabilities.image_studio.store import ImageStudioStore
+from app.capabilities.image_studio.translation import ImageTranslationService
 from app.capabilities.jobs.diagnostic import FAILING_JOB
 from app.capabilities.jobs.policy import RetryPolicy
 from app.capabilities.jobs.registry import JobDefinition, JobRegistry
@@ -242,6 +245,8 @@ from integrations.suppliers.registry import (
     repository_active,
 )
 from integrations.suppliers.sites import PACKAGED_HOSTS, PACKAGED_SUPPLIERS, capture_policy_bytes
+from integrations.suppliers.superdelivery import PROFILE as SD_PROFILE
+from integrations.suppliers.superdelivery.collect.images import ROLE_RULES as SD_ROLE_RULES
 from integrations.suppliers.transport.collection import DeferredCollectionGateway
 from integrations.suppliers.transport.gateway import (
     PolicedPublicReader,
@@ -318,6 +323,9 @@ class Container:
     ai_provider: ProviderProfileService
     # ADR-0033 G2: Settings' 상세페이지 공지 — the Detail Guidance owner and its image store.
     detail_guidance: DetailGuidanceService
+    # ADR-0041 I1: the Image Studio translation owner and the image.translate job (provider-zero).
+    image_studio: ImageStudioStore
+    image_translation: ImageTranslationService
     # ADR-0039 §1, §4: each supplier's sales policy, saved from the supplier card.
     sales_policies: SalesPolicyService
     # ADR-0038 §3, §5: Settings' 해외 구매대행 — the settings card, the FX snapshots, the Korea
@@ -432,6 +440,10 @@ def supplier_image_roles() -> dict[str, dict[str, ImageSlot]]:
             ((rule.rule_id, rule.role.value) for rule in (*KM_ROLE_RULES, KM_OG_IMAGE_RULE)),
             slot_of,
         ),
+        # ADR-0040 §1: 슈퍼딜리버리's own rules.
+        SD_PROFILE.supplier_key: slot_table(
+            ((rule.rule_id, rule.role.value) for rule in SD_ROLE_RULES), slot_of
+        ),
         # ADR-0040 §1: 1688's own rules.
         ALI1688_PROFILE.supplier_key: slot_table(
             ((rule, role.value) for rule, role in ALI1688_ROLE_TABLE), slot_of
@@ -511,7 +523,8 @@ def build_container(
         db,
         clock,
         audit,
-        # ADR-0040: a packaged supplier without a CONNECT definition (1688) is reserved too.
+        # ADR-0040: a packaged supplier without a CONNECT definition (슈퍼딜리버리, 1688) is
+        # reserved too.
         reserved_keys={d.profile.supplier_key for d in suppliers} | set(SITES) | PACKAGED_SUPPLIERS,
         reserved_hosts=_repository_hosts(suppliers),
     )
@@ -1050,6 +1063,22 @@ def build_container(
         ),
     )
     registry.register(enrichment.job_definition())
+    # ADR-0041 I1: the Image Studio translation owner and its job. Provider-zero: no OCR engine
+    # (NoOcrProvider) and no translation task is bound, so the capability reads NOT_CONFIGURED,
+    # every request is refused before anything is written, and nothing is ever read or sent.
+    image_studio = ImageStudioStore(db, clock, audit)
+    image_translation = ImageTranslationService(
+        clock=clock,
+        store=image_studio,
+        audit=audit,
+        jobs=jobs,
+        products=product_store,
+        sources=source_assets,
+        ocr=NoOcrProvider(),
+        composer=None,
+        execution=ai_execution,
+    )
+    registry.register(image_translation.job_definition())
     registration_preparations = RegistrationPreparationService(
         registrations=registrations,
         preflight=registration_preflight,
@@ -1458,6 +1487,8 @@ def build_container(
         ai_execution=ai_execution,
         ai_provider=ai_provider,
         detail_guidance=detail_guidance,
+        image_studio=image_studio,
+        image_translation=image_translation,
         sales_policies=sales_policies,
         overseas_settings=overseas_settings,
         fx=fx,

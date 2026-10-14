@@ -966,7 +966,7 @@ def test_repository_sites_keep_their_identities_and_their_recon_rule(
         "upick": f"{TEMPLATES['cafe24'].revision}+upick-3",
     }
     expected = {r.supplier_key: r for r in _registered(COLLECTIONS)}
-    assert set(expected) == {"kmretail", "ali1688", "upick", "ggsan"}
+    assert set(expected) == {"kmretail", "superdelivery", "ali1688", "upick", "ggsan"}
     for key, registered in expected.items():
         assert catalog.collections[key] == registered, key
         assert catalog.collectable(key) is True
@@ -974,13 +974,19 @@ def test_repository_sites_keep_their_identities_and_their_recon_rule(
         assert catalog.site_active(key) is site.config.active
         assert catalog.collections[key].extractor_fingerprint == site.extractor_fingerprint
     assert catalog.site_active("kmretail") is None
+    # ADR-0040: 슈퍼딜리버리 is a packaged supplier in RECON, collected from captured pages only;
+    # it has no CONNECT definition, and holds its key, host and name all the same.
+    assert catalog.site_active("superdelivery") is False
+    assert "superdelivery" not in catalog.definitions
+    assert catalog.names["superdelivery"] == "슈퍼딜리버리"
+    assert "www.superdelivery.com" in catalog.repository_hosts
     # ADR-0040: 1688 is a packaged supplier in RECON, collected from captured pages only; it has
     # no CONNECT definition, and holds its key, host and name all the same.
     assert catalog.site_active("ali1688") is False
     assert "ali1688" not in catalog.definitions
     assert catalog.names["ali1688"] == "1688"
     assert "detail.1688.com" in catalog.repository_hosts
-    assert catalog.repository_keys == {"kmretail", "ali1688", "upick", "ggsan"}
+    assert catalog.repository_keys == {"kmretail", "superdelivery", "ali1688", "upick", "ggsan"}
 
     # A repository site in RECON still collects (ADR-0030 §7); only PT-06 refuses it.
     recon = SupplierCatalog(

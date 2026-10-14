@@ -143,7 +143,7 @@ The owner signed in to both sites; the reconnaissance only read pages.
   Prices are CNY in one of two modes: per-SKU prices, or quantity tiers (for example 1 → ¥5.80, 90 → ¥5.30). Titles and option labels are Chinese.
 - **Super Delivery.** The account is a domestic (Japan) member.
   - A wholesale price is shown only once that supplier company has approved the member. Until then the page shows a request link and no price.
-  - A shown price has both 税抜 and 税込, beside the maker's suggested retail price, the JAN and the SD item number.
+  - A shown price is 税抜 only (the set table's 価格（税抜） column). It sits beside the maker's suggested retail price, the JAN and the SD item number, and sometimes beside a struck regular price and a time-limited campaign price. *(Corrected 2026-10-14: an earlier reading said both 税抜 and 税込 were shown.)*
   - Shipping is each supplier company's own text and table, within Japan.
   - Some companies state "domestic retailers only" or "no drop shipping".
 

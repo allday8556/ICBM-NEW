@@ -2193,6 +2193,36 @@ def test_the_detail_guidance_owner_is_the_one_writer_of_its_models() -> None:
     assert _calls(modules[DETAIL_GUIDANCE_WRITER], "append")
 
 
+# ADR-0041 §3 (I1): the Image Studio translation owner is the one constructor of its four models,
+# and every write it makes appends an audit event. It never constructs a source row (IT-01).
+IMAGE_STUDIO_WRITER = "app/capabilities/image_studio/store.py"
+IMAGE_STUDIO_MODELS = (
+    "ImageOcrObservation",
+    "ImageTranslationCandidate",
+    "ImageEditRevision",
+    "ImageEditCurrent",
+)
+
+
+def test_the_image_studio_owner_is_the_one_writer_of_its_models() -> None:
+    constructed: dict[str, set[str]] = {}
+    modules = _production_modules()
+    for path, tree in modules.items():
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in IMAGE_STUDIO_MODELS
+            ):
+                constructed.setdefault(node.func.id, set()).add(path)
+    assert constructed == {name: {IMAGE_STUDIO_WRITER} for name in IMAGE_STUDIO_MODELS}
+    assert _calls(modules[IMAGE_STUDIO_WRITER], "append")
+    package = {p: t for p, t in modules.items() if p.startswith("app/capabilities/image_studio/")}
+    for path, tree in package.items():
+        built = {_callee(call) for call in ast.walk(tree) if isinstance(call, ast.Call)}
+        assert not built & {"SourceAsset", "ProductFactsImageRef", "ProductFactsRevision"}, path
+
+
 # ADR-0036 §3 (O1): the onboarding owner is the one constructor of every onboarding model. O1
 # writes the identities, the state log, the hosts and the words; the policy reads, trials and
 # verifications get their writer in the same module with O2, O3 and O5, and nowhere else.
@@ -2757,6 +2787,9 @@ def test_supplier_packages_hold_site_knowledge_only() -> None:
     }
     assert "integrations/suppliers/kmretail/__init__.py" in packages
     assert "integrations/suppliers/kmretail/collect/images.py" in packages
+    # ADR-0040 C1: 슈퍼딜리버리 is a packaged supplier under the same rule.
+    assert "integrations/suppliers/superdelivery/__init__.py" in packages
+    assert "integrations/suppliers/superdelivery/collect/facts.py" in packages
     # ADR-0040 C2: 1688 is a packaged supplier under the same rule.
     assert "integrations/suppliers/ali1688/__init__.py" in packages
     assert "integrations/suppliers/ali1688/collect/facts.py" in packages
@@ -2886,6 +2919,7 @@ def test_every_collection_definition_pins_its_extraction_identity() -> None:
         if path.is_dir() and path.name not in {"transport", "__pycache__"}
     ]
     assert suppliers / "kmretail" in packages
+    assert suppliers / "superdelivery" in packages
     assert suppliers / "ali1688" in packages
     # ADR-0030 §4: a platform template is pinned the same way as a supplier package.
     templates = [path for path in (suppliers / "platforms").iterdir() if path.is_dir()]
@@ -2909,6 +2943,20 @@ def test_image_role_rules_are_bound_to_the_extraction_identity() -> None:
     )
     assert IMAGE_ROLES.identity == ROLE_RULES_REVISION == manifest.revision
     assert len({rule.rule_id for rule in ROLE_RULES}) == len(ROLE_RULES), "rule ids are distinct"
+    # ADR-0040 C1: 슈퍼딜리버리's rules are bound to its own identity the same way.
+    from integrations.suppliers import superdelivery
+    from integrations.suppliers.superdelivery.collect import images as sd_images
+
+    sd_manifest = read_manifest(
+        REPO_ROOT / "integrations" / "suppliers" / "superdelivery" / "extraction_identity.py"
+    )
+    assert (
+        superdelivery.IMAGE_ROLES.identity == sd_images.ROLE_RULES_REVISION == sd_manifest.revision
+    )
+    rule_ids = [rule.rule_id for rule in sd_images.ROLE_RULES]
+    assert len(set(rule_ids)) == len(rule_ids), "rule ids are distinct"
+    assert all(rule_id.startswith("sd.") for rule_id in rule_ids)
+
     # ADR-0040 C2: 1688's rules are bound to its own identity the same way.
     from integrations.suppliers import ali1688
     from integrations.suppliers.ali1688.collect import images as ali_images
@@ -2932,12 +2980,14 @@ def test_a_supplier_parser_owns_nothing_but_reading() -> None:
         if path.startswith(
             (
                 "integrations/suppliers/kmretail/",
+                "integrations/suppliers/superdelivery/",
                 "integrations/suppliers/ali1688/",
                 "integrations/suppliers/platforms/",
             )
         )
     }
     assert "integrations/suppliers/kmretail/collect/facts.py" in package
+    assert "integrations/suppliers/superdelivery/collect/facts.py" in package
     assert "integrations/suppliers/ali1688/collect/facts.py" in package
     assert "integrations/suppliers/ali1688/collect/description.py" in package
     assert "integrations/suppliers/platforms/cafe24/collect/facts.py" in package
@@ -3017,6 +3067,35 @@ def test_one_extraction_identity_covers_the_whole_collect_package() -> None:
         path.relative_to(REPO_ROOT).as_posix() for path in (package / "collect").rglob("*.py")
     }
     assert modules == set(manifest.inputs), "every collect module is part of the identity"
+
+
+def test_superdelivery_is_one_extraction_identity_and_a_capture_only_supplier() -> None:
+    # ADR-0040 C1: 슈퍼딜리버리's identity rule, facts parser and image roles share one revision;
+    # it is collected (COLLECTIONS) and never connected (no SUPPLIERS definition, OC-02); its
+    # profile declares no direct-URL read and no list queue (OC-01, ADR-0019 AC-28); and its
+    # key and product host are packaged, so no site or onboarded supplier can take either.
+    from integrations.suppliers.extraction import read_manifest
+    from integrations.suppliers.registry import COLLECTIONS, SUPPLIERS, repository_active
+    from integrations.suppliers.sites import PACKAGED_HOSTS, PACKAGED_SUPPLIERS
+    from integrations.suppliers.superdelivery import IMAGE_ROLES
+    from integrations.suppliers.superdelivery.collect.revision import EXTRACTION_REVISION
+    from integrations.suppliers.superdelivery.collection import COLLECTION
+
+    package = REPO_ROOT / "integrations" / "suppliers" / "superdelivery"
+    manifest = read_manifest(package / "extraction_identity.py")
+    assert EXTRACTION_REVISION == manifest.revision == IMAGE_ROLES.identity == "superdelivery-4"
+    modules = {
+        path.relative_to(REPO_ROOT).as_posix() for path in (package / "collect").rglob("*.py")
+    }
+    assert modules == set(manifest.inputs), "every collect module is part of the identity"
+    assert COLLECTION in COLLECTIONS
+    assert "superdelivery" not in {d.profile.supplier_key for d in SUPPLIERS}
+    profile = COLLECTION.profile
+    assert profile.direct_url_reads is False and profile.queue_limits is None
+    assert "superdelivery" in PACKAGED_SUPPLIERS
+    assert profile.storefront_host in PACKAGED_HOSTS
+    # ADR-0030 §7: RECON until its acceptance.
+    assert repository_active("superdelivery") is False
 
 
 def test_ali1688_is_one_extraction_identity_and_a_capture_only_supplier() -> None:
@@ -4113,6 +4192,12 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         # ADR-0038 §3, §5: the immutable FX snapshots and the overseas settings revisions.
         "fx_snapshots",
         "overseas_settings_revisions",
+        # ADR-0041 §3 (I1): the Image Studio translation owner — OCR observations, translation
+        # candidates, edit revisions and their forward-only current pointer.
+        "image_ocr_observations",
+        "image_translation_candidates",
+        "image_edit_revisions",
+        "image_edit_current",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

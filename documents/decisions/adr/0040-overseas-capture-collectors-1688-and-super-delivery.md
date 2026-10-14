@@ -51,7 +51,7 @@ Date: 2026-10-14
   - It excludes the header, the member menu, the coupon and point widgets, reviews, and recommendations.
   - It keeps ADR-0019's no-script rule unchanged.
 - **Fields** (ADR-0038 §9.3):
-  - `prices`: JPY. The purchase price is the **税込** price of one set. The 税抜 price, the maker's suggested retail price (メーカー希望小売価格) and the stated wholesale ratio are kept as stated.
+  - `prices`: JPY. The purchase price is the set's **regular 税抜 price plus Japanese consumption tax** (8% when the page marks 軽減税率対象, else 10%, rounded up to the yen; an ICBM-patched constant; Issue #219 `6164685916`). The 税抜 price, a time-limited campaign price, the maker's suggested retail price (メーカー希望小売価格) and the stated wholesale ratio are kept as stated, and the evidence shows the computation.
   - **Undisclosed price.** A page whose price is undisclosed ("卸価格を見る（申請）") has `prices` `REVIEW_REQUIRED` with the reason `PRICE_NOT_DISCLOSED`. Nothing is guessed.
   - `options`: each SD item number of the page (`…S1`, `…S2`, such as a ×18 set) with its own price.
   - `stock`: as stated ("在庫有り" or sold out). A company that keeps no stock count reads as stated.

@@ -214,8 +214,14 @@ CANONICAL_TABLES = (
     # ADR-0038 §3, §5: the immutable FX snapshots and the overseas settings revisions.
     "fx_snapshots",
     "overseas_settings_revisions",
+    # ADR-0041 §3 (I1): the Image Studio translation owner — OCR observations, translation
+    # candidates, edit revisions and their forward-only current pointer.
+    "image_ocr_observations",
+    "image_translation_candidates",
+    "image_edit_revisions",
+    "image_edit_current",
 )
-HEAD = "0064_fx_snapshots"
+HEAD = "0065_image_studio_translation"
 
 
 def _url(path: Path) -> str:

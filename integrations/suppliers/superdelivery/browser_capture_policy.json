@@ -1,0 +1,75 @@
+{
+  "schema": "icbm-browser-capture-policy/v1",
+  "supplier_key": "superdelivery",
+  "revision": "superdelivery-capture-1",
+  "host": "www.superdelivery.com",
+  "product_root": {"by": "id", "token": "product-detail-wrap"},
+  "allowed_regions": [
+    {"by": "id", "token": "dealing_consideration_box"},
+    {"by": "class", "token": "dl-trade-tbl"},
+    {"by": "id", "token": "dealer-carriage"}
+  ],
+  "excluded_regions": [
+    {"by": "class", "token": "js-swiper-slide"},
+    {"by": "class", "token": "js-swiper-thumbnails"},
+    {"by": "class", "token": "large-image-search-button"},
+    {"by": "class", "token": "large-image-zoom-button"},
+    {"by": "class", "token": "product-detail-tooltip-trigger"},
+    {"by": "class", "token": "product-detail-tooltip-contents"},
+    {"by": "class", "token": "td-quantities"},
+    {"by": "class", "token": "td-sp-errors"},
+    {"by": "class", "token": "add-to-wishlist-set"},
+    {"by": "class", "token": "largeorder-box"},
+    {"by": "id", "token": "product-coupon"},
+    {"by": "class", "token": "question-box"},
+    {"by": "class", "token": "dealer-info-list-wrap"}
+  ],
+  "excluded_tags": [
+    "script",
+    "style",
+    "noscript",
+    "template",
+    "textarea",
+    "iframe",
+    "object",
+    "embed",
+    "link",
+    "meta",
+    "base",
+    "input",
+    "select",
+    "button",
+    "svg",
+    "source"
+  ],
+  "allowed_attributes": {
+    "*": ["id", "style"],
+    "a": ["class"],
+    "dd": ["class"],
+    "div": ["class"],
+    "dl": ["class"],
+    "dt": ["class"],
+    "h1": ["class"],
+    "h2": ["class"],
+    "h3": ["class"],
+    "img": ["class", "src"],
+    "label": ["class"],
+    "li": ["class"],
+    "link": ["rel", "href"],
+    "p": ["class"],
+    "picture": ["class"],
+    "span": ["class"],
+    "table": ["class"],
+    "td": ["class", "colspan", "rowspan"],
+    "th": ["class", "colspan", "rowspan", "scope"],
+    "ul": ["class"]
+  },
+  "head_allowance": [
+    {"tag": "link", "attribute": "rel", "value": "canonical"}
+  ],
+  "bounds": {
+    "max_html_bytes": 524288,
+    "max_nodes": 20000,
+    "max_image_refs": 40
+  }
+}
