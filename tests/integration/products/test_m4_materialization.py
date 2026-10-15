@@ -1017,6 +1017,9 @@ def test_the_products_api_is_read_only(client: TestClient) -> None:
             "get",
             "put",
         },
+        # ADR-0039 §2, §3 (P2): the supplier and its own words a policy-not-applied warning on
+        # an Item quotes. A read: it decides no warning and writes nothing.
+        "/api/v1/products/items/{item_id}/sales-policy-note": {"get"},
     }
     unknown = client.get(f"/api/v1/products/{uuid.uuid4()}")
     assert unknown.status_code == 404
