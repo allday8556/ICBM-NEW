@@ -1,6 +1,7 @@
 // Empty, unsupported and error surfaces share the v28 zero-data card shape.
 
 import { h } from '../core/dom.js';
+import { errorCode, errorText } from '../core/errors.js';
 
 export function emptyState({ title, copy, action }) {
   return h(
@@ -17,35 +18,47 @@ export function emptyState({ title, copy, action }) {
   );
 }
 
-// A screen renders only the contract states it has a renderer for. Any other state the server
-// reports is surfaced honestly, with the contract state named, instead of being guessed at.
+// A screen state the page has nothing to draw for. The seller sees one plain line; the server's
+// state name stays in a data attribute for support.
 export function unsupportedState(meta) {
   return h(
     'div',
-    { class: 'empty-state state-unsupported', role: 'status' },
+    { class: 'empty-state state-unsupported', role: 'status', 'data-screen-state': meta?.state ?? '' },
     h(
       'div',
       {},
       h('div', { class: 'empty-icon', 'aria-hidden': 'true' }, '!'),
-      h('h3', {}, '이 상태의 화면은 아직 구현되지 않았습니다'),
-      h('div', { class: 'mini' }, `이 화면에는 해당 상태의 렌더러가 없습니다. 계약 상태: ${meta?.state ?? '알 수 없음'}`),
+      h('h3', {}, '이 화면을 표시할 수 없습니다'),
+      h('div', { class: 'mini' }, '화면을 새로 고치거나 잠시 후 다시 열어 주세요.'),
     ),
   );
 }
 
+// Support-only details (an error code, a request number), folded away under one summary line.
+export function supportDetails(lines) {
+  const shown = lines.filter(Boolean);
+  if (!shown.length) return null;
+  return h(
+    'details',
+    { class: 'support-details' },
+    h('summary', {}, '문제 해결용 정보'),
+    ...shown.map((line) => h('div', { class: 'mini mono' }, line)),
+  );
+}
+
 export function errorState(error) {
-  const detail = error?.error ? `${error.error.class} · ${error.error.code}` : String(error?.message ?? error);
+  const code = errorCode(error);
   const correlationId = error?.correlationId ?? error?.error?.correlation_id;
   return h(
     'div',
-    { class: 'empty-state state-error', role: 'alert' },
+    { class: 'empty-state state-error', role: 'alert', 'data-error-code': code ?? '' },
     h(
       'div',
       {},
       h('div', { class: 'empty-icon', 'aria-hidden': 'true' }, '×'),
-      h('h3', {}, '화면 계약을 불러오지 못했습니다'),
-      h('div', { class: 'mini' }, detail),
-      correlationId ? h('div', { class: 'mini' }, `correlation_id: ${correlationId}`) : null,
+      h('h3', {}, '화면을 불러오지 못했습니다'),
+      h('div', { class: 'mini' }, errorText(error)),
+      supportDetails([code ? `오류 코드 ${code}` : null, correlationId ? `요청 번호 ${correlationId}` : null]),
     ),
   );
 }

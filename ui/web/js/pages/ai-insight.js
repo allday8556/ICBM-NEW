@@ -13,7 +13,7 @@ export default contractPage({
   help: '홈쇼핑 방송 일정, 검색 데이터, 추천 아이템을 한 화면에서 보고 소싱·등록 전략을 빠르게 결정하세요.',
   headActions: (view) => [
     // Opens the agent's role and task in the prompt editor (ADR-0026 AIF-1), as v29 does. It edits
-    // prompts only: no AI provider exists, and nothing here runs an analysis.
+    // prompts only: nothing here runs an analysis.
     h(
       'button',
       {
@@ -22,7 +22,7 @@ export default contractPage({
         'data-prompt-key': 'ROLE_SHOPPING_INSIGHT_V1',
         onclick: () => openPromptEditor({ role: 'ROLE_SHOPPING_INSIGHT_V1', task: 'TASK_TREND_ANALYSIS_V1', layer: 'role' }),
       },
-      '✨ Shopping Insight Agent 설정',
+      '✨ 인사이트 AI 설정',
     ),
     datePill(`${dotDate(view.meta.generated_at)}　오늘 기준`),
   ],
@@ -32,4 +32,11 @@ export default contractPage({
     actionLabel: '통합DB 보기',
     to: { page: 'db' },
   },
+  // Products or orders exist, but the insight analysis is not built yet: say so plainly.
+  readyNote: (view) => ({
+    title: 'AI 쇼핑 인사이트는 준비 중입니다',
+    copy:
+      `상품 ${Number(view.products_total).toLocaleString('ko-KR')}개, 주문 ${Number(view.orders_total).toLocaleString('ko-KR')}건의 이력이 쌓이고 있습니다. ` +
+      '분석 기능이 준비되면 이곳에 표시됩니다.',
+  }),
 });
