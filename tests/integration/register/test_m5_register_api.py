@@ -544,6 +544,8 @@ def test_the_screen_shows_the_servers_own_preflight_category_price_and_qa(
         "required": True,
         "provided": True,
         "detail_page_reference_allowed": False,
+        # An attribute is not named by the notice schema: it keeps its key only.
+        "label": None,
     }
     assert fields["color"]["required"] is False and fields["color"]["provided"] is False
     notice = {field["key"]: field for field in category["notice_fields"]}
