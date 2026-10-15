@@ -214,6 +214,10 @@ the category auto-matching agreement endpoint, plus their two unit suites. It ad
 provider caller and no mutation surface.
 All other Coupang adapters remain fake-only, retain sensitive provider envelopes without projecting
 customer or financial data, and grant no provider call or LIVE authority.
+ADR-0038 O3 added the SmartStore cross-border projection of a 구매대행 unit:
+`app/stages/register/overseas.py`, the frozen `overseas-listing/v1` payload section, wire
+`smartstore-register-wire/v11`, two unit, one contract and one integration suite; it has no
+migration and changes no endpoint.
 
 | path | files | role |
 | --- | --- | --- |
