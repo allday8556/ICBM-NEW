@@ -593,7 +593,8 @@ class ListingLinkService:
                 )
             logger.info(
                 "operate.store_links_pass",
-                extra={"created": created, "linked": linked, "superseded": superseded},
+                # "created" is a reserved LogRecord attribute: logging refuses it as an extra key.
+                extra={"groups_created": created, "linked": linked, "superseded": superseded},
             )
             return result
 
