@@ -1,0 +1,35 @@
+"""The identity of 1688's whole collection contract (ADR-0010 §12, ADR-0040 C2).
+
+One revision covers everything this package decides — the source identity rule, the facts parser
+over the captured page and its embedded-data member, and the image-role rules — because they are
+read from one capture and accepted together. A semantic
+change to any of them advances this string, and the repository pin refuses a package whose files
+changed without it.
+
+``ali1688-1`` (2026-10-14, ADR-0040 slice C2): the first reading, made on five captures the owner's
+signed-in browser showed: three per-SKU priced products (20, 4 and 2 SKUs) and two tier-priced
+ones (2 and 11 SKUs). The purchase price is the SKU's original price (the owner's price basis, Issue
+#219 ``6164685916``); a promotion price is recorded only. A tier price states a unit price, so
+quantity tiers wait for review with every tier quoted; the description is not captured, so
+``detail_description`` waits for review and there are no detail images.
+
+``ali1688-2`` (2026-10-15, PR #357 re-audit): every SKU's stated ``canBookCount`` is kept
+verbatim, one ``stock`` evidence entry per SKU under its own path and labelled with its SKU id and
+selections, so ADR-0040 section 4's "per SKU, as stated" survives in the revision. The stock value
+and each configuration's ``sold_out`` are derived from those counts exactly as before.
+
+``ali1688-3`` (2026-10-15, PR #357 re-audit): no stated price is dropped. Every tier of both
+``originalPrices`` and ``currentPrices`` is quoted verbatim (beginAmount, price, CNY, and which
+list it is) on ``prices`` and on ``quantity_tiers``; every SKU's stated ``price``,
+``discountPrice`` and ``isPromotionSku`` are quoted on ``options``. The purchase price is still the
+first original tier (else the first current tier) or the lowest SKU original price.
+
+``ali1688-4`` (2026-10-15, ADR-0040 §3.2 and OC-09, the owner's decision Issue #219
+``6185408143``): the description's images. The extension reads the description document within
+the user's capture and sends only its image references on ``cbu01.alicdn.com``; each becomes a
+``DETAIL`` candidate (rule ``ali1688.detail.description``) after the page's own references, fetched
+by the ordinary policed image fetch. ``detail_description`` still waits for review (its text is not
+captured, ``DESCRIPTION_TEXT_NOT_CAPTURED``) and records what became of the images.
+"""
+
+EXTRACTION_REVISION = "ali1688-4"

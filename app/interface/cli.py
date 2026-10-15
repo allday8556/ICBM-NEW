@@ -163,10 +163,13 @@ def build_parser() -> argparse.ArgumentParser:
     coupang_commands.add_parser(
         "save-credentials", help="prompt without echo and save one credential bundle"
     )
+    coupang_commands.add_parser(
+        "bind-saved-delivery",
+        help="bind the one current saved delivery policy to the Coupang account inputs",
+    )
     canary = coupang_commands.add_parser(
         "read-canary", help="run the approved one-shot KR read-only canary"
     )
-    canary.add_argument("--source-ip", required=True, help="the outbound IP registered in Wing")
     canary.add_argument(
         "--clock-skew-seconds", required=True, type=float, help="observed absolute clock offset"
     )
@@ -177,7 +180,6 @@ def build_parser() -> argparse.ArgumentParser:
         "read-category-metadata",
         help="read each recommended category contract once and save each safe result immediately",
     )
-    metadata.add_argument("--source-ip", required=True, help="the outbound IP registered in Wing")
     metadata.add_argument(
         "--clock-skew-seconds", required=True, type=float, help="observed absolute clock offset"
     )
@@ -188,7 +190,6 @@ def build_parser() -> argparse.ArgumentParser:
     mutations.add_argument(
         "--bundle", required=True, type=Path, help="closed test 1..11 payload bundle JSON"
     )
-    mutations.add_argument("--source-ip", required=True, help="the outbound IP registered in Wing")
     mutations.add_argument(
         "--clock-skew-seconds", required=True, type=float, help="observed absolute clock offset"
     )
@@ -204,7 +205,6 @@ def build_parser() -> argparse.ArgumentParser:
         "complete-rejected-test-products",
         help="rebuild corrected test 1..11 payloads in memory and complete rejected tests 2..11",
     )
-    corrected.add_argument("--source-ip", required=True, help="the outbound IP registered in Wing")
     corrected.add_argument(
         "--clock-skew-seconds", required=True, type=float, help="observed absolute clock offset"
     )
@@ -223,7 +223,6 @@ def build_parser() -> argparse.ArgumentParser:
     recovery.add_argument(
         "--bundle", required=True, type=Path, help="closed test 1..11 payload bundle JSON"
     )
-    recovery.add_argument("--source-ip", required=True, help="the outbound IP registered in Wing")
     recovery.add_argument(
         "--clock-skew-seconds", required=True, type=float, help="observed absolute clock offset"
     )
@@ -511,14 +510,69 @@ def _coupang_credentials(config: AppConfig, lease: DataDirLease, args: argparse.
     return 0
 
 
+def _coupang_bind_saved_delivery(
+    config: AppConfig, lease: DataDirLease, args: argparse.Namespace
+) -> int:
+    """Use one exact current saved courier; never ask for or print the value again."""
+    from app.container import build_container
+    from app.stages.connect.coupang.credentials import CoupangCredentialStore
+    from app.stages.connect.coupang.live_preflight import CoupangLivePreflightStore
+
+    container = build_container(config, ownership=lease)
+    try:
+        status = container.secrets.status()
+        if not status.available or status.backend == "memory":
+            print("COUPANG_OS_SECRET_STORE_UNAVAILABLE", file=sys.stderr)
+            return 1
+        credentials = CoupangCredentialStore(container.secrets).load()
+        if credentials is None:
+            print("COUPANG_CREDENTIALS_NOT_CONFIGURED", file=sys.stderr)
+            return 1
+        candidates = [
+            policy
+            for policy in container.target_policies.accounts("smartstore").accounts
+            if policy.current is not None
+            and policy.inputs is not None
+            and policy.inputs.delivery_policy is not None
+            and policy.inputs.delivery_policy.delivery_company is not None
+        ]
+        if len(candidates) != 1:
+            print("COUPANG_SAVED_DELIVERY_SELECTION_AMBIGUOUS", file=sys.stderr)
+            return 1
+        candidate = candidates[0]
+        candidate_revision = candidate.current
+        assert candidate_revision is not None
+        current = container.target_policies.policy("smartstore", candidate.marketplace_account_id)
+        if (
+            current.current is None
+            or current.inputs is None
+            or current.inputs.delivery_policy is None
+            or current.inputs.delivery_policy.delivery_company is None
+            or current.current.policy_revision != candidate_revision.policy_revision
+        ):
+            print("COUPANG_SAVED_DELIVERY_REVISION_MOVED", file=sys.stderr)
+            return 1
+        CoupangLivePreflightStore(container.secrets).bind_legacy_account_values_from_saved_courier(
+            credentials=credentials,
+            delivery_company_code=current.inputs.delivery_policy.delivery_company,
+        )
+    except (OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    finally:
+        container.db.dispose()
+    print("Coupang account inputs bound to the current saved delivery policy")
+    return 0
+
+
 def _coupang_read_canary(config: AppConfig, lease: DataDirLease, args: argparse.Namespace) -> int:
     """Run C-LIVE-R1 once; every caller-selectable value is a preflight binding, not a target."""
     from app.platform.core.errors import AppError
     from app.platform.core.secrets import build_secret_store
+    from app.stages.connect.coupang.canary_proof import CoupangCanaryProofStore
     from app.stages.connect.coupang.credentials import CoupangCredentialStore
     from integrations.marketplaces.coupang.auth import (
         AuthContext,
-        IpAllowlistDeclaration,
         Market,
         SystemUtcClock,
     )
@@ -544,21 +598,15 @@ def _coupang_read_canary(config: AppConfig, lease: DataDirLease, args: argparse.
     clock = SystemUtcClock()
     now = clock.now()
     try:
-        declaration = IpAllowlistDeclaration.create(
-            args.source_ip,
-            credential_generation=credentials.credential_generation,
-            recorded_at=now,
-        )
         approval = ReadOnlyCanaryApproval.create(
             scope_id=args.scope_id,
             vendor_id=credentials.vendor_id,
             credential_generation=credentials.credential_generation,
-            source_ip=args.source_ip,
             approved_at=_instant(args.approved_at, "--approved-at"),
             expires_at=_instant(args.expires_at, "--expires-at"),
         )
         result = CoupangReadCanary(
-            context=AuthContext(credentials, Market.KR, declaration),
+            context=AuthContext(credentials, Market.KR),
             approval=approval,
             clock=clock,
             clock_preflight=ClockPreflight.create(
@@ -566,6 +614,7 @@ def _coupang_read_canary(config: AppConfig, lease: DataDirLease, args: argparse.
                 checked_at=now,
             ),
         ).run()
+        CoupangCanaryProofStore(secrets).save_success(credentials=credentials, verified_at=now)
     except (AppError, LiveTransportRefused, ValueError) as exc:
         code = exc.code if isinstance(exc, AppError) else "COUPANG_CANARY_LOCAL_REFUSAL"
         print(code, file=sys.stderr)
@@ -581,10 +630,10 @@ def _coupang_mutate_test_products(
     from app.platform.core.errors import AppError
     from app.platform.core.ownership import require_ownership
     from app.platform.core.secrets import build_secret_store
+    from app.stages.connect.coupang.canary_proof import CoupangCanaryProofStore
     from app.stages.connect.coupang.credentials import CoupangCredentialStore
     from integrations.marketplaces.coupang.auth import (
         AuthContext,
-        IpAllowlistDeclaration,
         Market,
         SystemUtcClock,
     )
@@ -619,22 +668,17 @@ def _coupang_mutate_test_products(
             raise ValueError("payload digest does not match the reviewed bundle")
         clock = SystemUtcClock()
         now = clock.now()
-        declaration = IpAllowlistDeclaration.create(
-            args.source_ip,
-            credential_generation=credentials.credential_generation,
-            recorded_at=now,
-        )
+        proof = CoupangCanaryProofStore(secrets).load_current(credentials=credentials, now=now)
         approval = TestProductMutationApproval.create(
             scope_id=args.scope_id,
             vendor_id=credentials.vendor_id,
             credential_generation=credentials.credential_generation,
-            source_ip=args.source_ip,
             payload_digest=bundle.payload_digest,
             approved_at=_instant(args.approved_at, "--approved-at"),
             expires_at=_instant(args.expires_at, "--expires-at"),
         )
         result = CoupangTestProductMutationRun(
-            context=AuthContext(credentials, Market.KR, declaration),
+            context=AuthContext(credentials, Market.KR, proof),
             approval=approval,
             bundle=bundle,
             clock=clock,
@@ -655,11 +699,11 @@ def _coupang_read_category_metadata(
     """Read exact recommended category contracts once; persist each parsed attempt immediately."""
     from app.platform.core.ownership import require_ownership
     from app.platform.core.secrets import build_secret_store
+    from app.stages.connect.coupang.canary_proof import CoupangCanaryProofStore
     from app.stages.connect.coupang.credentials import CoupangCredentialStore
     from app.stages.connect.coupang.live_preflight import CoupangLivePreflightStore
     from integrations.marketplaces.coupang.auth import (
         AuthContext,
-        IpAllowlistDeclaration,
         Market,
         SystemUtcClock,
     )
@@ -687,13 +731,9 @@ def _coupang_read_category_metadata(
         recommendations = store.category_recommendations()
         clock = SystemUtcClock()
         now = clock.now()
-        declaration = IpAllowlistDeclaration.create(
-            args.source_ip,
-            credential_generation=credentials.credential_generation,
-            recorded_at=now,
-        )
+        proof = CoupangCanaryProofStore(secrets).load_current(credentials=credentials, now=now)
         owner = CoupangCategoryMetadataPreflight(
-            context=AuthContext(credentials, Market.KR, declaration),
+            context=AuthContext(credentials, Market.KR, proof),
             category_codes=recommendations.unique_category_codes,
             clock=clock,
             clock_preflight=ClockPreflight.create(args.clock_skew_seconds, checked_at=now),
@@ -724,10 +764,10 @@ def _coupang_recover_test_product_create(
     from app.platform.core.errors import AppError
     from app.platform.core.ownership import require_ownership
     from app.platform.core.secrets import build_secret_store
+    from app.stages.connect.coupang.canary_proof import CoupangCanaryProofStore
     from app.stages.connect.coupang.credentials import CoupangCredentialStore
     from integrations.marketplaces.coupang.auth import (
         AuthContext,
-        IpAllowlistDeclaration,
         Market,
         SystemUtcClock,
     )
@@ -761,13 +801,9 @@ def _coupang_recover_test_product_create(
             raise ValueError("payload digest does not match the reviewed bundle")
         clock = SystemUtcClock()
         now = clock.now()
-        declaration = IpAllowlistDeclaration.create(
-            args.source_ip,
-            credential_generation=credentials.credential_generation,
-            recorded_at=now,
-        )
+        proof = CoupangCanaryProofStore(secrets).load_current(credentials=credentials, now=now)
         result = CoupangAmbiguousCreateRecovery(
-            context=AuthContext(credentials, Market.KR, declaration),
+            context=AuthContext(credentials, Market.KR, proof),
             bundle=bundle,
             clock=clock,
             clock_preflight=ClockPreflight.create(args.clock_skew_seconds, checked_at=now),
@@ -787,6 +823,7 @@ def _coupang_complete_rejected_test_products(
     """Build corrected payloads only in memory and run tests 2..11 once."""
     from app.container import build_container
     from app.platform.core.errors import AppError
+    from app.stages.connect.coupang.canary_proof import CoupangCanaryProofStore
     from app.stages.connect.coupang.credentials import CoupangCredentialStore
     from app.stages.connect.coupang.live_bundle import (
         PRIOR_REJECTED_PAYLOAD_DIGEST,
@@ -795,7 +832,6 @@ def _coupang_complete_rejected_test_products(
     from app.stages.connect.coupang.live_preflight import CoupangLivePreflightStore
     from integrations.marketplaces.coupang.auth import (
         AuthContext,
-        IpAllowlistDeclaration,
         Market,
         SystemUtcClock,
     )
@@ -839,22 +875,19 @@ def _coupang_complete_rejected_test_products(
             raise ValueError("payload digest does not match the reviewed bundle")
         clock = SystemUtcClock()
         now = clock.now()
-        declaration = IpAllowlistDeclaration.create(
-            args.source_ip,
-            credential_generation=credentials.credential_generation,
-            recorded_at=now,
+        proof = CoupangCanaryProofStore(container.secrets).load_current(
+            credentials=credentials, now=now
         )
         approval = TestProductMutationApproval.create(
             scope_id=args.scope_id,
             vendor_id=credentials.vendor_id,
             credential_generation=credentials.credential_generation,
-            source_ip=args.source_ip,
             payload_digest=bundle.payload_digest,
             approved_at=_instant(args.approved_at, "--approved-at"),
             expires_at=_instant(args.expires_at, "--expires-at"),
         )
         corrected = CoupangCorrectedRejectedTestProductMutationRun(
-            context=AuthContext(credentials, Market.KR, declaration),
+            context=AuthContext(credentials, Market.KR, proof),
             approval=approval,
             bundle=bundle,
             clock=clock,
@@ -866,7 +899,7 @@ def _coupang_complete_rejected_test_products(
             result: object = corrected
         else:
             recovered = CoupangCorrectedAmbiguousCreateCompletion(
-                context=AuthContext(credentials, Market.KR, declaration),
+                context=AuthContext(credentials, Market.KR, proof),
                 approval=approval,
                 bundle=bundle,
                 clock=clock,
@@ -1156,6 +1189,7 @@ OWNING_COMMANDS: dict[Command, Callable[[AppConfig, DataDirLease, argparse.Names
     ("extension", "rotate"): _extension_pairing,
     ("extension", "revoke"): _extension_pairing,
     ("coupang", "save-credentials"): _coupang_credentials,
+    ("coupang", "bind-saved-delivery"): _coupang_bind_saved_delivery,
     ("coupang", "read-canary"): _coupang_read_canary,
     ("coupang", "read-category-metadata"): _coupang_read_category_metadata,
     ("coupang", "mutate-test-products"): _coupang_mutate_test_products,

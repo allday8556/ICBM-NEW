@@ -18,7 +18,18 @@
     return parts.join('');
   };
   const boxOf = (el) => el.getBoundingClientRect();
+  const summaryOf = (details) => [...details.children].find((child) => child.tagName === 'SUMMARY') || null;
+  // The closed <details> that collapses `el` (one not shown through its own <summary>), or null.
+  const collapsedBy = (el) => {
+    for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+      if (node.tagName !== 'DETAILS' || node.open) continue;
+      const summary = summaryOf(node);
+      if (!summary || !summary.contains(el)) return node;
+    }
+    return null;
+  };
   const hidden = (el) => {
+    if (collapsedBy(el)) return 'closed-details';
     if (!el.getClientRects().length) return 'no-box';
     const box = boxOf(el);
     if (box.width < 1 || box.height < 1) return 'zero-size';
@@ -58,30 +69,57 @@
     }
     return null;
   };
+  // Scrolls `el` into view; whether it is off-screen, and what covers its visible centre.
+  const atCentre = (el) => {
+    el.scrollIntoView({ block: 'center', inline: 'nearest' });
+    const box = boxOf(el);
+    const offscreen = box.left < -1 || box.right > window.innerWidth + 1;
+    const x = Math.min(Math.max(box.left + box.width / 2, 0), window.innerWidth - 1);
+    const y = Math.min(Math.max(box.top + Math.min(box.height, 40) / 2, 0), window.innerHeight - 1);
+    const top = document.elementFromPoint(x, y);
+    const covered = !top || !(top === el || el.contains(top)) ? (top ? describe(top) : 'nothing') : null;
+    return { box, offscreen, covered };
+  };
   const selector = stateSelectors.join(',');
+  // ADR-0018 §9 amendment (owner, Issue #219 6185598957): a state inside a closed <details> is
+  // visible on demand when that details' own <summary> passes the same rules: not hidden, not
+  // clipped, not off-screen, not covered. Such a details is opened before anything is measured,
+  // outermost first; any other stays closed, and every state it collapses fails as hidden.
+  // Nothing else on the page is changed.
+  const collapses = (details) => {
+    const summary = summaryOf(details);
+    return [...details.querySelectorAll(selector)].some((el) => !summary || !summary.contains(el));
+  };
+  const revealed = [];
+  const closed = [...new Set(roots.flatMap((root) => [...root.querySelectorAll('details:not([open])')]))];
+  for (const details of closed.filter(collapses)) {
+    const summary = summaryOf(details);
+    if (!summary || hidden(summary) || clipped(summary)) continue;
+    const seen = atCentre(summary);
+    if (seen.offscreen || seen.covered) continue;
+    details.open = true;
+    revealed.push(details);
+  }
+  const revealedBy = (el) => revealed.filter((details) => details.contains(el) && !summaryOf(details).contains(el));
   const elements = [...new Set(roots.flatMap((root) => [...root.querySelectorAll(selector)]))];
   const rootOf = (el) => (card && card.contains(el) ? card : content);
   // A native <option> never has a layout box of its own: the <select> that shows it is judged.
   const subjects = elements.map((el) => (el.tagName === 'OPTION' ? el.closest('select') || el : el));
   const states = subjects.map((el, index) => {
     const found = { at: describe(elements[index]) };
+    const opened = revealedBy(el);
+    if (opened.length) found.revealed = describe(opened[opened.length - 1]);
     const why = hidden(el);
     if (why) {
-      found.hidden = why;
+      found.hidden = why === 'closed-details' ? `${why}:${describe(collapsedBy(el))}` : why;
       return found;
     }
     if (truncated(el)) found.truncated = true;
     const clip = clipped(el);
     if (clip) found.clipped = clip;
-    el.scrollIntoView({ block: 'center', inline: 'nearest' });
-    const box = boxOf(el);
-    if (box.left < -1 || box.right > window.innerWidth + 1) found.offscreen = true;
-    const x = Math.min(Math.max(box.left + box.width / 2, 0), window.innerWidth - 1);
-    const y = Math.min(Math.max(box.top + Math.min(box.height, 40) / 2, 0), window.innerHeight - 1);
-    const top = document.elementFromPoint(x, y);
-    if (!top || !(top === el || el.contains(top))) {
-      found.covered = top ? describe(top) : 'nothing';
-    }
+    const { box, offscreen, covered } = atCentre(el);
+    if (offscreen) found.offscreen = true;
+    if (covered) found.covered = covered;
     found.box = [box.left, box.top + window.scrollY, box.right, box.bottom + window.scrollY];
     return found;
   });

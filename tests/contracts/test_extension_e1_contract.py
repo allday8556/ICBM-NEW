@@ -54,8 +54,9 @@ def test_the_manifest_is_exactly_the_reviewed_one() -> None:
     assert '"minimum_chrome_version": "114"' in _read(EXTENSION / "manifest.json")
     assert manifest["manifest_version"] == 3
     # Ruling B-11: the reviewed supplier hosts and the loopback, and nothing else. ADR-0030 PT-11:
-    # the supplier hosts are exactly the packaged suppliers' (KM통상's, and 슈퍼딜리버리's product
-    # host, ADR-0040 §1) and each configured site's storefront host.
+    # the supplier hosts are exactly the packaged suppliers' (KM통상's, and the product
+    # hosts of 슈퍼딜리버리 and 1688, ADR-0040 §1) and each configured site's storefront
+    # host.
     from integrations.suppliers.registry import SITES
     from integrations.suppliers.sites import PACKAGED_HOSTS
 
@@ -63,10 +64,11 @@ def test_the_manifest_is_exactly_the_reviewed_one() -> None:
     assert manifest["host_permissions"] == [
         "https://kmretail.co.kr/*",
         "https://www.superdelivery.com/*",
+        "https://detail.1688.com/*",
         *sites,
         "http://127.0.0.1/*",
     ]
-    assert {"kmretail.co.kr", "www.superdelivery.com"} == PACKAGED_HOSTS
+    assert {"kmretail.co.kr", "www.superdelivery.com", "detail.1688.com"} == PACKAGED_HOSTS
     # No cookie, request, download, history or tab-content reach.
     assert manifest["permissions"] == ["scripting", "sidePanel", "storage"]
     # ADR-0036 §8 and §10 (owner decision D3, the amendment of this E1 pin): one optional host
@@ -132,15 +134,44 @@ def test_the_extension_reads_no_cookie_storage_or_header_and_downloads_nothing()
         for word in forbidden:
             assert word not in text, f"{path.name}: {word}"
     # The functions injected into the tab talk to nothing: they return, and the service worker
-    # sends. The cut (E1) and the list discovery (E3, ADR-0019 §8.1) alike.
+    # sends. The cut (E1) and the list discovery (E3, ADR-0019 §8.1) alike. The one exception is
+    # ADR-0040 §3.2 (OC-09): within a 1688 capture, the cut reads the one description document the
+    # page names — once, without cookies, never following a redirect — and sends nothing itself.
     for injected in ("capture.js", "discover.js"):
         body = "\n".join(
             line
             for line in _read(EXTENSION / "lib" / injected).splitlines()
             if not line.lstrip().startswith("//")
         )
-        for word in ("fetch(", "chrome.", "import ", "WebSocket", "sendBeacon", "postMessage"):
+        for word in ("chrome.", "import ", "WebSocket", "sendBeacon", "postMessage", "XMLHttp"):
             assert word not in body, (injected, word)
+        reads = 1 if injected == "capture.js" else 0
+        assert body.count("fetch(") == reads, injected
+        assert body.count('credentials: "omit"') == body.count('redirect: "error"') == reads
+        # The description's HTML is read as text: no document or element is ever built from
+        # markup, so nothing in it can load, run or be inserted into the page.
+        for word in (
+            "DOMParser",
+            "parseFromString",
+            "createHTMLDocument",
+            "document.implementation",
+            "createContextualFragment",
+            "innerHTML",
+            "outerHTML",
+            "insertAdjacentHTML",
+            "document.write",
+            "appendChild",
+            "createElement",
+            "srcdoc",
+            "new Image",
+            "importNode",
+            "cloneNode",
+            "XMLSerializer",
+        ):
+            assert word not in body, (injected, word)
+    capture = _read(EXTENSION / "lib" / "capture.js")
+    assert "for (const written of imageSources(content))" in capture
+    assert "rule.description_hosts.includes(target.hostname)" in capture
     # Every request to ICBM omits credentials and refuses a redirect.
     client = _read(EXTENSION / "lib" / "client.js")
     assert client.count("fetch(") == client.count('credentials: "omit"') == 2
@@ -347,6 +378,8 @@ def test_the_ingest_owner_writes_nothing_itself_and_reaches_no_network() -> None
         "__init__.py",
         "buffer.py",
         "capture.py",
+        # ADR-0040 §3: the embedded-data member and the server's re-check of it.
+        "embedded.py",
         "gate.py",
         "nonces.py",
         "pairing.py",

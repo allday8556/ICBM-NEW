@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from hashlib import sha256
+from typing import Any
 from urllib.parse import urlsplit
 
 from app.stages.collect.facts import FieldFact, LocatorForm
@@ -162,10 +163,48 @@ class CollectionProfile:
 
 
 @dataclass(frozen=True)
+class EmbeddedData:
+    """ADR-0040 §3: the embedded-data member of one capture, as the server accepted it.
+
+    ``data`` is the browser's projection after the server re-checked it against the policy's
+    allowlist and ran the security gate over every string in it. It is ``None`` exactly when the
+    member was refused, by the browser or by the server, and ``refusal`` then names why from a
+    closed vocabulary. It lives in memory only: it is never logged, persisted or returned.
+    """
+
+    data: Mapping[str, Any] | None = field(repr=False)
+    refusal: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.data is None) == (self.refusal is None):
+            raise ValueError("an embedded-data member is either accepted data or a refusal")
+
+
+@dataclass(frozen=True)
+class CapturedImages:
+    """ADR-0040 §3.2 (OC-09): image references the extension read for the page within the capture.
+
+    For 1688, the references of the description document the page names, read by the extension
+    and re-checked by the server. ``urls`` is ``None`` exactly when the member was refused, by the
+    browser or by the server, and ``refusal`` then names why; ``total`` is how many distinct
+    references the extension found before the policy's cap.
+    """
+
+    urls: tuple[str, ...] | None
+    total: int | None = None
+    refusal: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.urls is None) == (self.refusal is None):
+            raise ValueError("captured images are either references or a refusal")
+
+
+@dataclass(frozen=True)
 class DocumentView:
     """The only thing a collection parser ever sees: an immutable view of one response.
 
-    ``body`` is used in memory only; it is never logged, persisted whole or returned.
+    ``body`` is used in memory only; it is never logged, persisted whole or returned. ``embedded``
+    exists only for a supplier whose capture policy declares an embedded-data member (ADR-0040 §3).
     """
 
     kind: ReadKind
@@ -174,6 +213,9 @@ class DocumentView:
     location: str | None  # redirect target (path only) for a 3xx response
     content_type: str
     body: str = field(repr=False)
+    embedded: EmbeddedData | None = field(default=None, repr=False, compare=False)
+    # ADR-0040 §3.2: image references the extension read within the capture, if any.
+    captured_images: CapturedImages | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -442,6 +484,10 @@ class SupplierCollection:
     # supplier served and from nothing else; this answers a much smaller question, and answering
     # it wrongly can only make a collection wait, never mislabel a revision.
     url_product_hint: Callable[[str], str | None] = lambda url: None
+    # ADR-0040 §3.2: the candidates a capture's own image references stand for (1688's
+    # description images). Core places them after the page's own references and fetches them
+    # through the same policed image fetch; nothing here reads a document.
+    captured_candidates: Callable[[DocumentView, str], tuple[ImageCandidate, ...]] | None = None
 
     @property
     def supplier_key(self) -> str:

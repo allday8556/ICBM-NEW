@@ -23,6 +23,8 @@ from app.platform.core.errors import ErrorClass
 from integrations.marketplaces.coupang.auth import (
     COUPANG_BASE_URL,
     COUPANG_PROVIDER_HOST,
+    PROVIDER_READ_PROOF_ID,
+    PROVIDER_READ_PROOF_TTL,
     AuthContext,
     Authenticator,
     Market,
@@ -150,16 +152,20 @@ class CoupangCategoryMetadataPreflight:
         self._used = False
 
     def _preflight(self, now: datetime) -> None:
-        declaration = self._context.ip_allowlist
+        proof = self._context.provider_read_proof
         credentials = self._context.credentials
         if self._context.market is not Market.KR:
             raise ValueError("COUPANG_CATEGORY_METADATA_KR_ONLY")
-        if declaration is None:
-            raise ValueError("COUPANG_IP_EVIDENCE_MISSING")
-        if declaration.credential_generation != credentials.credential_generation:
+        if proof is None:
+            raise ValueError("COUPANG_CANARY_PROOF_MISSING")
+        if (
+            proof.endpoint_id != PROVIDER_READ_PROOF_ID
+            or proof.credential_generation != credentials.credential_generation
+        ):
             raise ValueError("COUPANG_CATEGORY_METADATA_CREDENTIAL_GENERATION_MISMATCH")
-        if declaration.recorded_at > now:
-            raise ValueError("COUPANG_IP_EVIDENCE_FROM_FUTURE")
+        proof_age = now - proof.verified_at
+        if proof_age < timedelta(0) or proof_age > PROVIDER_READ_PROOF_TTL:
+            raise ValueError("COUPANG_CANARY_PROOF_STALE")
         age = now - self._clock_preflight.checked_at
         if age < timedelta(0) or age > CLOCK_PREFLIGHT_TTL:
             raise ValueError("COUPANG_CLOCK_PREFLIGHT_STALE")

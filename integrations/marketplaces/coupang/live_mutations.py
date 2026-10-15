@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from ipaddress import IPv4Address, IPv6Address, ip_address
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Final
 from urllib.parse import quote, urlsplit
@@ -30,6 +30,8 @@ from app.platform.core.errors import AppError, ErrorClass
 from integrations.marketplaces.coupang.auth import (
     COUPANG_BASE_URL,
     COUPANG_PROVIDER_HOST,
+    PROVIDER_READ_PROOF_ID,
+    PROVIDER_READ_PROOF_TTL,
     AuthContext,
     Authenticator,
     Market,
@@ -346,7 +348,6 @@ class TestProductMutationApproval:
     scope_id: str
     vendor_id: str
     credential_generation: int
-    source_ip: IPv4Address | IPv6Address
     payload_digest: str
     approved_at: datetime
     expires_at: datetime
@@ -359,7 +360,6 @@ class TestProductMutationApproval:
         scope_id: str,
         vendor_id: str,
         credential_generation: int,
-        source_ip: str,
         payload_digest: str,
         approved_at: datetime,
         expires_at: datetime,
@@ -380,7 +380,6 @@ class TestProductMutationApproval:
             scope_id,
             vendor_id,
             credential_generation,
-            ip_address(source_ip),
             payload_digest,
             start,
             end,
@@ -610,17 +609,19 @@ class CoupangTestProductMutationRun:
 
     def _preflight(self, now: datetime) -> None:
         credentials = self._context.credentials
-        declaration = self._context.ip_allowlist
+        proof = self._context.provider_read_proof
         approval = self._approval
         if self._context.market is not Market.KR or approval.market is not Market.KR:
             raise CoupangLiveMutationError(ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_KR_ONLY")
-        if declaration is None:
-            raise CoupangLiveMutationError(ErrorClass.POLICY_BLOCKED, "COUPANG_IP_EVIDENCE_MISSING")
+        if proof is None:
+            raise CoupangLiveMutationError(
+                ErrorClass.POLICY_BLOCKED, "COUPANG_CANARY_PROOF_MISSING"
+            )
         if not (
             approval.vendor_id == credentials.vendor_id
             and approval.credential_generation == credentials.credential_generation
-            and approval.credential_generation == declaration.credential_generation
-            and approval.source_ip == declaration.source_ip
+            and proof.endpoint_id == PROVIDER_READ_PROOF_ID
+            and proof.credential_generation == credentials.credential_generation
             and approval.payload_digest == self._bundle.payload_digest
         ):
             raise CoupangLiveMutationError(
@@ -637,10 +638,9 @@ class CoupangTestProductMutationRun:
             raise CoupangLiveMutationError(
                 ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_APPROVAL_NOT_CURRENT"
             )
-        if declaration.recorded_at > now:
-            raise CoupangLiveMutationError(
-                ErrorClass.POLICY_BLOCKED, "COUPANG_IP_EVIDENCE_FROM_FUTURE"
-            )
+        proof_age = now - proof.verified_at
+        if proof_age < timedelta(0) or proof_age > PROVIDER_READ_PROOF_TTL:
+            raise CoupangLiveMutationError(ErrorClass.POLICY_BLOCKED, "COUPANG_CANARY_PROOF_STALE")
         age = now - self._clock_preflight.checked_at
         if age < timedelta(0) or age > CLOCK_PREFLIGHT_TTL:
             raise CoupangLiveMutationError(
@@ -1512,18 +1512,20 @@ class CoupangAmbiguousCreateRecovery(CoupangTestProductMutationRun):
 
     def _recovery_preflight(self, now: datetime) -> tuple[dict[str, object], TestProductPlan]:
         credentials = self._context.credentials
-        declaration = self._context.ip_allowlist
+        proof = self._context.provider_read_proof
         if self._context.market is not Market.KR:
             raise CoupangLiveMutationError(ErrorClass.POLICY_BLOCKED, "COUPANG_MUTATION_KR_ONLY")
         if (
-            declaration is None
-            or declaration.credential_generation != credentials.credential_generation
+            proof is None
+            or proof.endpoint_id != PROVIDER_READ_PROOF_ID
+            or proof.credential_generation != credentials.credential_generation
         ):
-            raise CoupangLiveMutationError(ErrorClass.POLICY_BLOCKED, "COUPANG_IP_EVIDENCE_MISSING")
-        if declaration.recorded_at > now:
             raise CoupangLiveMutationError(
-                ErrorClass.POLICY_BLOCKED, "COUPANG_IP_EVIDENCE_FROM_FUTURE"
+                ErrorClass.POLICY_BLOCKED, "COUPANG_CANARY_PROOF_MISSING"
             )
+        proof_age = now - proof.verified_at
+        if proof_age < timedelta(0) or proof_age > PROVIDER_READ_PROOF_TTL:
+            raise CoupangLiveMutationError(ErrorClass.POLICY_BLOCKED, "COUPANG_CANARY_PROOF_STALE")
         age = now - self._clock_preflight.checked_at
         if age < timedelta(0) or age > CLOCK_PREFLIGHT_TTL:
             raise CoupangLiveMutationError(

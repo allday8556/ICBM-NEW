@@ -8,6 +8,7 @@ revisions, the renderer and the M4 image owner's derivation, QA and selection â€
 """
 
 import contextlib
+import dataclasses
 import hashlib
 import json
 import logging
@@ -28,6 +29,7 @@ from app.stages.products.image_model import ImageAssetKind, SourceDecisionKind
 from tests.conftest import LOCAL
 from tests.support.image_studio_support import (
     OPERATOR,
+    REGIONS,
     TEXTS,
     StudioProduct,
     make_ready,
@@ -481,6 +483,48 @@ def test_erase_is_refused_on_a_complex_background(
         headers=HEADERS,
     )
     assert ok.status_code == 200, ok.json()
+
+
+def test_erase_is_refused_where_the_reading_recorded_a_complex_background(
+    client: TestClient,
+    container: Container,
+    config: AppConfig,
+    item: StudioProduct,
+    tmp_path: Path,
+) -> None:
+    """IT-04: the recorded judgement counts too. r0's pixels erase cleanly, but its reading
+    recorded a complex background (the flag the operator saw): ERASE is refused all the same."""
+    ocr, _ = make_ready(container, tmp_path)
+    ocr.regions = tuple(
+        dataclasses.replace(r, background_uniformity=0.3) if r.region_id == "r0" else r
+        for r in REGIONS
+    )
+    _run(client, container, item)
+    state = _state(client, item)
+    regions = {r["region_id"]: r for r in state["regions"]}
+    assert "COMPLEX_BACKGROUND" in regions["r0"]["flags"]
+    assert regions["r0"]["default_erase"] == "OVERLAY"
+    draft = _draft(state, r0=None)
+    for entry in draft:
+        if entry["region_id"] == "r0":
+            entry["erase"] = "ERASE"
+    before = {t: count(config, t) for t in (*STUDIO_TABLES, *IMAGE_TABLES, "audit_events")}
+    saved = client.post(
+        _image(item, "/revisions"),
+        json={
+            "observation_id": state["observation_id"],
+            "source_language": "zh",
+            "items": draft,
+            "expected_seq": state["expected_seq"],
+            "actor": OPERATOR,
+        },
+        headers=HEADERS,
+    )
+    assert saved.status_code == 422
+    error = saved.json()["error"]
+    assert error["code"] == "IMAGE_STUDIO_DRAFT_INVALID"
+    assert error["details"] == {"region_id": "r0", "code": "COMPLEX_BACKGROUND"}
+    assert {t: count(config, t) for t in before} == before
 
 
 def test_a_stale_candidate_is_never_offered_as_a_suggestion(

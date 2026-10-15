@@ -51,10 +51,12 @@ import {
   authoringForm,
   categoryBlock,
   chip,
+  freshPolicyNotes,
   itemRow,
   kv,
   preflightBlock,
   previewBlock,
+  quotePolicyWarning,
   readStateChip,
   reason,
   repinBlock,
@@ -105,7 +107,11 @@ function readyStrip(unit, states, go) {
           : state === 'good'
             ? [h('li', {}, '이 단계의 사전 점검 사유가 없습니다.')]
             : reasons.map((item) =>
-                h('li', { 'data-reason': item.code }, REASON_COPY[item.code] ?? '확인이 필요한 항목입니다.'),
+                // ADR-0039 §2, §3: a policy warning names the supplier and quotes its words.
+                quotePolicyWarning(
+                  h('li', { 'data-reason': item.code }, REASON_COPY[item.code] ?? '확인이 필요한 항목입니다.'),
+                  item,
+                ),
               );
       return h(
         'button',
@@ -709,6 +715,7 @@ export default {
     const draft = ctx.params.get('draft');
     const unitRef = ctx.params.get('unit');
     const mode = ctx.params.get('mode') === 'edit' ? 'edit' : 'register';
+    freshPolicyNotes();
     if (!draft || !unitRef) {
       return emptyState({ title: '편집할 상품이 없습니다', copy: '등록관리에서 상품을 눌러 편집기를 여세요.', action: { label: '등록관리', onSelect: () => ctx.navigate('register') } });
     }
