@@ -116,14 +116,22 @@ class FakeSource:
     def available(self) -> bool:
         return self.is_available
 
-    def enumerate(self, *, pause: Callable[[], None]) -> Enumeration:
+    def enumerate(
+        self, *, pause: Callable[[], None], observe: Callable[[object], None] | None = None
+    ) -> Enumeration:
         pause()
+        if observe is not None:
+            observe({"contents": [], "totalElements": 0})
         if self.hold is not None:
             self.hold.wait(5)
         return self.enumeration
 
-    def read(self, origin_product_no: str) -> ListingRead:
+    def read(
+        self, origin_product_no: str, *, observe: Callable[[object], None] | None = None
+    ) -> ListingRead:
         self.reads.append(origin_product_no)
+        if observe is not None:
+            observe({"originProduct": {"statusType": "SALE"}})
         return self.answers[origin_product_no]
 
 

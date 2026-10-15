@@ -4,6 +4,8 @@
 // its outcome, and always the last complete one (마지막 동기화, SCP-07). A running or failed sync
 // is shown as such, never as an old success. 지금 동기화 asks the server for one read-only sync.
 // The listing table itself is S1b (통합DB 「스토어 상품」).
+// 「문제 해결용 정보」 (ADR-0042 §5.1 item 3) is collapsed and shows only whether a response
+// shape was recorded and how many paths it has; the shape itself is never rendered here.
 
 import { ApiError, getJson, sendJson } from '../../core/api.js';
 import { h } from '../../core/dom.js';
@@ -68,6 +70,13 @@ function lastRun(status) {
 export function storeCatalogPanel() {
   const summary = h('div', { class: 'kv', 'data-role': 'store-catalog-status' }, h('span', {}, '스토어 상품'), h('b', {}, '확인 중'));
   const failure = h('div');
+  const shapeLine = h('div', { class: 'kv', 'data-role': 'store-catalog-shape' });
+  const troubleshooting = h(
+    'details',
+    { class: 'store-catalog-troubleshooting' },
+    h('summary', {}, '문제 해결용 정보'),
+    shapeLine,
+  );
   const button = h('button', { type: 'button', class: 'btn blue', 'data-action': 'sync-store-catalog' }, '지금 동기화');
   let timer = null;
 
@@ -82,6 +91,16 @@ export function storeCatalogPanel() {
     const shown = lastRun(status);
     failure.replaceChildren(...(shown ? [shown] : []));
     button.disabled = Boolean(status.running);
+    shapeLine.replaceChildren(
+      h('span', {}, '응답 구조'),
+      h(
+        'b',
+        {},
+        typeof status.shape_path_count === 'number'
+          ? `응답 구조 기록됨 · 경로 ${count(status.shape_path_count)}개 · ${dotDateTime(status.shape_recorded_at)}`
+          : '아직 기록 없음 (지금 동기화 때 기록)',
+      ),
+    );
   };
 
   const reload = async () => {
@@ -108,5 +127,12 @@ export function storeCatalogPanel() {
   });
 
   reload();
-  return h('div', { class: 'store-catalog' }, summary, failure, h('div', { class: 'api-action-row' }, button));
+  return h(
+    'div',
+    { class: 'store-catalog' },
+    summary,
+    failure,
+    h('div', { class: 'api-action-row' }, button),
+    troubleshooting,
+  );
 }

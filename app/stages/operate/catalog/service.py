@@ -40,6 +40,12 @@ remote absence for ADR-0014 §10/§14/§28 and frees no ``UNKNOWN`` scope (SCP-0
 evidence it is fresh for 60 minutes from ``as_of`` and only until an ICBM mutation of the store
 starts (:meth:`StoreCatalogService.snapshot`; consumed by S3b, ADR-0042 §6).
 
+**The shape-only runtime capture** (ADR-0042 §5.1 item 3). On an operator's 「지금 동기화」
+(``full_read``) the sync also records, with its run, the shape of every raw search page and origin
+read it received — key paths and JSON types, and enum tokens only, never a value
+(:mod:`app.stages.operate.catalog.shape`). It is runtime evidence for E2–E6 and widens no
+retention profile. A periodic sync records none.
+
 One sync per store at a time; a ``429`` or a lost session ends the run as ``UNAVAILABLE``.
 """
 
@@ -83,6 +89,7 @@ from app.stages.operate.catalog.models import (
     CatalogObservation,
     CatalogSyncRun,
 )
+from app.stages.operate.catalog.shape import ShapeRecorder
 
 logger = logging.getLogger("icbm.operate.catalog")
 
@@ -173,6 +180,22 @@ class CatalogRunView:
 
 
 @dataclass(frozen=True)
+class CatalogShape:
+    """The shape-only runtime capture of one operator sync (ADR-0042 §5.1 item 3): the union
+    of the raw search pages' shapes and of the origin reads' shapes. Never a value."""
+
+    run_id: str
+    as_of: datetime
+    outcome: str | None
+    search: Mapping[str, Any]
+    origin_read: Mapping[str, Any]
+
+    @property
+    def path_count(self) -> int:
+        return len(self.search.get("paths", {})) + len(self.origin_read.get("paths", {}))
+
+
+@dataclass(frozen=True)
 class CatalogListingView:
     """One store listing as the catalog knows it: its derived state and its latest read fields.
 
@@ -209,6 +232,9 @@ class CatalogStatus:
     last_run: CatalogRunView | None
     last_complete: CatalogRunView | None
     listing_count: int | None
+    # 「문제 해결용 정보」: when the latest response shape was recorded, and how many paths it has.
+    shape_recorded_at: datetime | None = None
+    shape_path_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -285,6 +311,8 @@ class StoreCatalogService:
         self._sleep = sleep
         self._last_call: float | None = None
         self._lock = threading.Lock()
+        # The search and origin-read shape recorders of the running operator sync, or None.
+        self._shapes: tuple[ShapeRecorder, ShapeRecorder] | None = None
 
     @property
     def marketplace_key(self) -> str:
@@ -357,6 +385,7 @@ class StoreCatalogService:
                 "STORE_CATALOG_SYNC_RUNNING", "a catalog sync is already running"
             )
         try:
+            self._shapes = (ShapeRecorder(), ShapeRecorder()) if full else None
             run_id = self._start(account, trigger, correlation_id, full)
             try:
                 return self._pass(run_id, account, full)
@@ -364,12 +393,15 @@ class StoreCatalogService:
                 self._finish(run_id, INTERRUPTED, SYNC_INTERRUPTED)
                 raise
         finally:
+            self._shapes = None
             self._lock.release()
 
     def _pass(self, run_id: str, account: str, full: bool) -> CatalogRunView:
         if not self._source.available():
             return self._finish(run_id, UNAVAILABLE, "SMARTSTORE_SESSION_UNAVAILABLE")
-        enumeration = self._source.enumerate(pause=self._pace)
+        enumeration = self._source.enumerate(
+            pause=self._pace, observe=None if self._shapes is None else self._shapes[0].add
+        )
         self._progress(
             run_id,
             total_elements=enumeration.total_elements,
@@ -430,8 +462,9 @@ class StoreCatalogService:
         self._last_call = time.monotonic()
 
     def _read(self, origin_product_no: str) -> ListingRead:
+        observe = None if self._shapes is None else self._shapes[1].add
         try:
-            return self._source.read(origin_product_no)
+            return self._source.read(origin_product_no, observe=observe)
         except Exception:
             # A source that raised proves nothing about the listing; the run records a failure.
             logger.warning(
@@ -489,6 +522,10 @@ class StoreCatalogService:
             assert row is not None
             row.state, row.outcome, row.finished_at = FINISHED, outcome, self._clock.now()
             row.error_code = error_code
+            if self._shapes is not None:
+                search, origin = self._shapes
+                row.search_shape_json = _canonical(search.shape())
+                row.origin_shape_json = _canonical(origin.shape())
             session.flush()
             view = _run_view(row)
         logger.info(
@@ -693,6 +730,7 @@ class StoreCatalogService:
             count = None
             if complete is not None:
                 count = len(self._members(session, complete))
+            shape = self._shape(session, account)
             return CatalogStatus(
                 marketplace_key=self.marketplace_key,
                 marketplace_account_id=account,
@@ -701,7 +739,38 @@ class StoreCatalogService:
                 last_run=None if last is None else _run_view(last),
                 last_complete=None if complete is None else _run_view(complete),
                 listing_count=count,
+                shape_recorded_at=None if shape is None else shape.as_of,
+                shape_path_count=None if shape is None else shape.path_count,
             )
+
+    def shape(self) -> CatalogShape | None:
+        """The latest operator sync's response shape (「문제 해결용 정보」), or ``None``."""
+        account = self.account()
+        if account is None:
+            return None
+        with self._db.read() as session:
+            return self._shape(session, account)
+
+    def _shape(self, session: Session, account: str) -> CatalogShape | None:
+        row = session.scalars(
+            select(CatalogSyncRun)
+            .where(
+                CatalogSyncRun.marketplace_key == self.marketplace_key,
+                CatalogSyncRun.marketplace_account_id == account,
+                CatalogSyncRun.search_shape_json.is_not(None),
+            )
+            .order_by(CatalogSyncRun.started_at.desc())
+            .limit(1)
+        ).first()
+        if row is None or row.search_shape_json is None or row.origin_shape_json is None:
+            return None
+        return CatalogShape(
+            run_id=row.run_id,
+            as_of=row.started_at,
+            outcome=row.outcome,
+            search=json.loads(row.search_shape_json),
+            origin_read=json.loads(row.origin_shape_json),
+        )
 
     def listings(self) -> tuple[CatalogListingView, ...]:
         """Every listing of the bound store with its derived state and its latest read fields.
@@ -917,6 +986,7 @@ __all__ = [
     "UNCONFIRMED",
     "CatalogListingView",
     "CatalogRunView",
+    "CatalogShape",
     "CatalogSnapshot",
     "CatalogStatus",
     "StoreCatalogBusy",

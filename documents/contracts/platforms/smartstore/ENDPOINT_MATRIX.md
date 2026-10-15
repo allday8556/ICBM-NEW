@@ -448,6 +448,22 @@ cadence; about `1.2 × N` reads a day), and (c) every known listing the enumerat
 `COMPLETE` only when its enumeration is consistent and every enumerated listing that is not ended
 has a successful origin read no older than 24 hours (`STORE_CATALOG_DETAILS_STALE` otherwise).
 
+**The shape-only runtime capture (ADR-0042 §5.1 item 3; owner 2026-10-15).** The official reference
+cannot be read from this environment, so the gaps it would settle (E2–E6) are to be filled from the
+responses ICBM itself receives. On an operator's 「지금 동기화」 the sync hands every parsed search
+page and origin-read response — before retention — to a shape recorder through the caller's
+`body_sink`, which only these two endpoints accept (every other endpoint refuses it before any
+transport). The recorder keeps every key path (arrays merged as `path[]`; a key that is not a plain
+identifier recorded as `*`) with its JSON types, and **no value**: the one exception is an enum token,
+a string at a key ending in `Type`, `Status`, `Unit` or `Method` that matches
+`^[A-Z][A-Z0-9_]{0,40}$`. Bounds: 2,000 paths, 200 tokens per path, depth 32; the rest is counted
+as truncated. The two shapes (search, origin read) are stored with the run
+(`store_catalog_sync_runs.search_shape_json`, `origin_shape_json`; the database refuses them on a
+periodic run), exposed read-only at `GET /api/v1/operate/store-catalog/shape`, and shown on the
+seller's screen only as a count under 「문제 해결용 정보」. It is runtime evidence
+(`documented != runtime verified`): it widens no retention profile, and a field is retained only
+after an adoption amendment names it on this or official evidence.
+
 What the catalog may conclude, and nothing more: a `COMPLETE` sync proves the presence of what it
 read. A listing the catalog knows that a complete enumeration did not list is read by its origin
 read: `DELETE` or a 404 ends it (ADR-0023 §3), a live one makes the sync `INCOMPLETE` (the

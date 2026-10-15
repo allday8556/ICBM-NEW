@@ -270,8 +270,13 @@ class SmartStoreCatalogSource:
     def available(self) -> bool:
         return self._bearer() is not None
 
-    def enumerate(self, *, pause: Callable[[], None]) -> Enumeration:
-        """Every page of the store's catalog, or an outcome that concludes nothing."""
+    def enumerate(
+        self, *, pause: Callable[[], None], observe: Callable[[object], None] | None = None
+    ) -> Enumeration:
+        """Every page of the store's catalog, or an outcome that concludes nothing.
+
+        ``observe`` receives each parsed page before retention, for the shape-only runtime
+        capture of an operator's sync (ADR-0042 §5.1 item 3); it changes nothing read here."""
         version = search.CATALOG_CONTRACT_VERSION
         bearer = self._bearer()
         if bearer is None:
@@ -290,6 +295,7 @@ class SmartStoreCatalogSource:
                         number,
                         search.CATALOG_PAGE_SIZE,
                     ),
+                    body_sink=observe,
                 )
                 page = search.read_page(answer.retained)
             except SmartStoreCallError as failure:
@@ -342,8 +348,11 @@ class SmartStoreCatalogSource:
             pages_read=len(pages),
         )
 
-    def read(self, origin_product_no: str) -> ListingRead:
-        """One listing's allowlisted fields, its provider removal, or a failure."""
+    def read(
+        self, origin_product_no: str, *, observe: Callable[[object], None] | None = None
+    ) -> ListingRead:
+        """One listing's allowlisted fields, its provider removal, or a failure. ``observe``
+        receives the parsed response before retention (shape-only capture, §5.1 item 3)."""
         bearer = self._bearer()
         if bearer is None:
             return ListingRead(SESSION_UNAVAILABLE, error_code="SMARTSTORE_SESSION_UNAVAILABLE")
@@ -356,6 +365,7 @@ class SmartStoreCatalogSource:
                     bearer.session_generation,
                     origin_product_no,
                 ),
+                body_sink=observe,
             )
         except SmartStoreCallError as failure:
             if failure.error_class is ErrorClass.RATE_LIMITED:

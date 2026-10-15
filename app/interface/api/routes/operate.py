@@ -60,6 +60,26 @@ def store_catalog(container: ContainerDep) -> dict[str, Any]:
     }
 
 
+@router.get("/store-catalog/shape")
+def store_catalog_shape(container: ContainerDep) -> dict[str, Any]:
+    """「문제 해결용 정보」 (ADR-0042 §5.1 item 3), read only: the response shape the latest
+    operator 「지금 동기화」 recorded — key paths, JSON types and enum tokens, never a value — for
+    the search pages and the origin reads. ``shape`` is ``null`` before any such sync."""
+    shape = container.store_catalog.shape()
+    if shape is None:
+        return {"shape": None}
+    return {
+        "shape": {
+            "run_id": shape.run_id,
+            "as_of": shape.as_of,
+            "outcome": shape.outcome,
+            "path_count": shape.path_count,
+            "search": shape.search,
+            "origin_read": shape.origin_read,
+        }
+    }
+
+
 @router.post("/store-catalog/sync", status_code=202)
 def sync_store_catalog(container: ContainerDep) -> dict[str, Any]:
     """「지금 동기화」: start one read-only catalog sync in the background. A store that is not

@@ -87,6 +87,17 @@ already knows that is missing from a complete enumeration is read by its origin 
 one (any status but `DELETE`) makes the sync `INCOMPLETE` (ADR-0042 §5.2, `ENDPOINT_MATRIX.md`
 §4.1.2 S1a amendment).
 
+**How the gaps will be filled (ADR-0042 §5.1 item 3, owner 2026-10-15).** The reference cannot be
+read from this environment, so the `NOT_CAPTURED` rows above (E1 per status, E2, E3, E5, E6) are to
+be settled from **runtime evidence**: the shape-only capture an operator's 「지금 동기화」 records
+with its sync run — every key path of the raw search pages with its JSON type, plus enum tokens at
+`…Type`/`…Status`/`…Unit`/`…Method` keys, never a value (`ENDPOINT_MATRIX.md` §4.1.2). For
+example, the captured paths will show whether the items carry `modifiedDate` and where (E5), which
+item fields exist (E3), and which `statusType` tokens a paging-only enumeration returns (E1). Until
+such a capture is recorded here with its run and date (`R0`, `SOURCES.md` §10.1), every row above
+keeps its status and the dependent behaviour stays fail-closed; a field is retained only after an
+adoption amendment names it.
+
 ### ICBM adoption and runtime state — ICBM-side, not provider facts
 
 - `SMARTSTORE_PRODUCT_SEARCH` is `ADOPTED` for **positive-only reconcile only** (`ENDPOINT_MATRIX.md` §4, §4.1.2; ADR-0020 §4 order 2; ADR-0014 §28.2–§28.4). Adoption is a contract, never a call: execution stays `DRY_RUN`, the lookup reads the CONNECT owner's committed bearer (ROADMAP §14 item 4), so without a proven current committed session every lookup is `UNAVAILABLE`, and runtime stays `UNVERIFIED`. The deterministic-reconcile review closed `INSUFFICIENT` (ADR-0014 §17.2) and is not overturned.

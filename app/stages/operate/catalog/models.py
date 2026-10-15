@@ -74,6 +74,10 @@ class CatalogSyncRun(Base):
             name="identity_present",
         ),
         CheckConstraint("error_code IS NULL OR error_code <> ''", name="error_code_present"),
+        CheckConstraint(
+            "full_read OR (search_shape_json IS NULL AND origin_shape_json IS NULL)",
+            name="shape_only_on_full_read",
+        ),
     )
 
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -97,6 +101,10 @@ class CatalogSyncRun(Base):
     details_done: Mapped[int] = mapped_column(Integer)
     details_failed: Mapped[int] = mapped_column(Integer)
     correlation_id: Mapped[str] = mapped_column(String(64))
+    # ADR-0042 §5.1 item 3: on an operator's full re-read, the shape (key paths, JSON types and
+    # enum tokens only, never a value) of the raw search pages and of the origin reads received.
+    search_shape_json: Mapped[str | None] = mapped_column(Text)
+    origin_shape_json: Mapped[str | None] = mapped_column(Text)
     # The sync's ``as_of`` (ADR-0042 §5.2): what it proves holds relative to its start.
     started_at: Mapped[datetime] = mapped_column(UTCDateTime)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)

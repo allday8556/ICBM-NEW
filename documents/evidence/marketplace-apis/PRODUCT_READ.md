@@ -74,8 +74,16 @@ neither retained nor stored.
 
 Content digests (§5.3: `detailContent`, the notice block, the tag set) are not taken in S1a: they
 serve the change detection of S2b, which takes them with its own evidence check. Every
-`NOT_CAPTURED` row above stays out of the retention profile and out of storage until an official
-capture records its path; S1b shows such a field as 「데이터 없음」, never as a guess.
+`NOT_CAPTURED` row above stays out of the retention profile and out of storage until a capture
+records its path; S1b shows such a field as 「데이터 없음」, never as a guess.
+
+**How the gaps will be filled (ADR-0042 §5.1 item 3, owner 2026-10-15).** The `NOT_CAPTURED` rows
+(the `customerBenefit` members, `modelName`, brand, manufacturer, `wholeCategoryName`, times) and a
+confirmation of the "recorded" paths above are to come from **runtime evidence**: the shape-only
+capture an operator's 「지금 동기화」 records with its sync run — every key path of the raw origin
+reads with its JSON type, plus enum tokens at `…Type`/`…Status`/`…Unit`/`…Method` keys, never a
+value (`ENDPOINT_MATRIX.md` §4.1.2). A path becomes retained only when an adoption amendment names
+it on that evidence (recorded here with its run and date, `R0`) or on official evidence.
 
 ### ICBM adoption and runtime state — ICBM-side, not provider facts
 

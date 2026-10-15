@@ -19,7 +19,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Final, Literal, cast, overload
@@ -89,6 +89,11 @@ _PRODUCT_CREATE = EndpointId.SMARTSTORE_PRODUCT_CREATE_V2
 _IMAGE_UPLOAD = EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD
 _PRODUCT_SEARCH = EndpointId.SMARTSTORE_PRODUCT_SEARCH
 _PRODUCT_DELETE = EndpointId.SMARTSTORE_PRODUCT_DELETE_V2
+# ADR-0042 §5.1 item 3: the only endpoints whose parsed response a caller may observe for the
+# shape-only runtime capture of a store-catalog sync. Every other endpoint refuses a body sink.
+_SHAPE_OBSERVABLE = frozenset({_PRODUCT_SEARCH, EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2})
+# A body sink sees the parsed JSON before retention and must record nothing but its shape.
+BodySink = Callable[[object], None]
 _NOTICE_LIST = EndpointId.SMARTSTORE_NOTICE_TYPES
 _NOTICE_TYPE = EndpointId.SMARTSTORE_NOTICE_TYPE_READ
 _CATEGORY_LIST = EndpointId.SMARTSTORE_CATEGORY_LIST
@@ -944,6 +949,14 @@ def _order_scope(body: object) -> dict[str, object]:
     return {"data": scoped}
 
 
+def _observe(sink: BodySink, body: object) -> None:
+    """Hand a parsed body to a shape sink. A failing sink never changes the call's outcome."""
+    try:
+        sink(body)
+    except Exception:
+        logger.warning("smartstore.shape_sink_failed", exc_info=True)
+
+
 def _json(content: bytes) -> object:
     try:
         return json.loads(content)
@@ -1135,6 +1148,8 @@ class SmartStoreEndpointCaller:
             EndpointId.SMARTSTORE_CHANNEL_PRODUCT_READ_V2,
         ],
         request: ProductReadRequest,
+        *,
+        body_sink: BodySink | None = None,
     ) -> ProductReadback: ...
 
     @overload
@@ -1149,6 +1164,8 @@ class SmartStoreEndpointCaller:
         self,
         endpoint_id: Literal[EndpointId.SMARTSTORE_PRODUCT_SEARCH],
         request: ProductSearchRequest | CatalogSearchRequest,
+        *,
+        body_sink: BodySink | None = None,
     ) -> ProductSearchPage: ...
 
     @overload
@@ -1226,7 +1243,12 @@ class SmartStoreEndpointCaller:
     @overload
     def call(self, endpoint_id: object, request: object) -> _Result: ...
 
-    def call(self, endpoint_id: object, request: object) -> _Result:
+    def call(
+        self, endpoint_id: object, request: object, *, body_sink: BodySink | None = None
+    ) -> _Result:
+        """One adopted call. ``body_sink`` (ADR-0042 §5.1 item 3; the search and the origin read
+        only) is handed every parsed JSON response body before retention, for the shape-only
+        runtime capture; it changes nothing the call sends, retains or returns."""
         started, started_mono = datetime.now(UTC), time.monotonic()
         endpoint = _endpoint_name(endpoint_id)
         recorder = TraceRecorder()
@@ -1237,6 +1259,8 @@ class SmartStoreEndpointCaller:
         error: SmartStoreCallError | None = None
         try:
             contract = resolve(endpoint_id)
+            if body_sink is not None and contract.endpoint_id not in _SHAPE_OBSERVABLE:
+                raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
             if contract.endpoint_id is _PRODUCT_CREATE:
                 # Before the request is composed: no body is encoded for an incomplete CREATE.
                 self._require_complete(request)
@@ -1262,6 +1286,8 @@ class SmartStoreEndpointCaller:
             else:
                 status = response.status_code
                 body = _json(response.content)
+                if body_sink is not None and body is not None:
+                    _observe(body_sink, body)
                 fields = body if isinstance(body, dict) else {}
                 trace_id = _marker(fields.get("traceId")) or _marker(
                     response.headers.get(_TRACE_HEADER)

@@ -7,6 +7,7 @@ each state: not connected, the first sync running with its progress, a complete 
 and time, and a failed sync shown as such beside the last complete one.
 """
 
+import json
 import sqlite3
 
 import pytest
@@ -128,5 +129,30 @@ def test_a_failed_sync_is_shown_as_such_beside_the_last_complete_one(
     with _no_egress(), _page(browser, client, Traffic()) as page:
         text = _status(page)
         last = page.locator("[data-role='store-catalog-last-run']").inner_text()
+        before = page.locator("[data-role='store-catalog-shape']").text_content()
     assert "마지막 동기화" in text
     assert "지금은 확인할 수 없음" in last and "호출 한도로 잠시 멈춤" in last
+    assert before is not None and "아직 기록 없음" in before
+    # An operator sync's recorded shape is shown as a count only, collapsed (§5.1 item 3).
+    shape = json.dumps({"version": "v", "paths": {"$": {"types": ["object"]}, "$.a": {}}})
+    with sqlite3.connect(config.database_path) as raw:
+        raw.execute(
+            "INSERT INTO store_catalog_sync_runs (run_id, marketplace_key, marketplace_account_id,"
+            " trigger, state, outcome, error_code, contract_version, full_read, pages_read,"
+            " listings_enumerated, details_target, details_done, details_failed, correlation_id,"
+            " search_shape_json, origin_shape_json, started_at, finished_at) VALUES ('r-shape',"
+            " 'smartstore', ?, 'OPERATOR', 'FINISHED', 'COMPLETE', NULL, 'fixture/v1', 1, 1, 0,"
+            " 0, 0, 0, 'cid', ?, ?, '2026-10-15 05:50:00.000000', '2026-10-15 05:50:00.000000')",
+            (ACCOUNT, shape, shape),
+        )
+    with _no_egress(), _page(browser, client, Traffic()) as page:
+        _status(page)
+        page.wait_for_function(
+            "() => document.querySelector(\"[data-role='store-catalog-shape']\")"
+            "?.textContent.includes('응답 구조 기록됨')",
+            timeout=15_000,
+        )
+        recorded = page.locator("[data-role='store-catalog-shape']").text_content()
+        tree_shown = page.locator(".store-catalog").inner_text()
+    assert recorded is not None and "응답 구조 기록됨 · 경로 4개" in recorded
+    assert "$.a" not in tree_shown and "object" not in tree_shown

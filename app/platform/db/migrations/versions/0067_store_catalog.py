@@ -7,7 +7,9 @@ Create Date: 2026-10-15
 ADR-0042 §5, §12 (SCP-03, SCP-04, SCP-08). Six tables, nothing else changes:
 
 - **``store_catalog_sync_runs``**: one catalog sync of one store, one running per store. Its
-  progress moves while it runs; a finished run never changes (trigger).
+  progress moves while it runs; a finished run never changes (trigger). An operator's full
+  re-read also carries the shape-only runtime capture of §5.1 item 3 (key paths, JSON types and
+  enum tokens, never a value).
 - **``store_catalog_listings``**: one store listing's identity, the store and its origin product.
   Immutable: never updated, never deleted (triggers).
 - **``store_catalog_field_sets``**: one distinct §5.3 allowlisted field set with its per-group
@@ -89,6 +91,8 @@ def upgrade() -> None:
         sa.Column("details_done", sa.Integer(), nullable=False),
         sa.Column("details_failed", sa.Integer(), nullable=False),
         sa.Column("correlation_id", sa.String(length=64), nullable=False),
+        sa.Column("search_shape_json", sa.Text(), nullable=True),
+        sa.Column("origin_shape_json", sa.Text(), nullable=True),
         sa.Column("started_at", sa.DateTime(), nullable=False),
         sa.Column("finished_at", sa.DateTime(), nullable=True),
         sa.CheckConstraint(
@@ -120,6 +124,10 @@ def upgrade() -> None:
             name="identity_present",
         ),
         sa.CheckConstraint("error_code IS NULL OR error_code <> ''", name="error_code_present"),
+        sa.CheckConstraint(
+            "full_read OR (search_shape_json IS NULL AND origin_shape_json IS NULL)",
+            name="shape_only_on_full_read",
+        ),
         sa.ForeignKeyConstraint(["membership_digest"], [f"{MEMBERSHIPS}.digest"]),
         sa.PrimaryKeyConstraint("run_id"),
     )

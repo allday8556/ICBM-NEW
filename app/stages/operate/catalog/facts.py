@@ -99,9 +99,16 @@ class CatalogSource(Protocol):
 
     def available(self) -> bool: ...
 
-    def enumerate(self, *, pause: Callable[[], None]) -> Enumeration: ...
+    def enumerate(
+        self, *, pause: Callable[[], None], observe: Callable[[object], None] | None = None
+    ) -> Enumeration:
+        """``observe`` receives each raw parsed response before retention, for the shape-only
+        runtime capture (ADR-0042 §5.1 item 3)."""
+        ...
 
-    def read(self, origin_product_no: str) -> ListingRead: ...
+    def read(
+        self, origin_product_no: str, *, observe: Callable[[object], None] | None = None
+    ) -> ListingRead: ...
 
 
 __all__ = [
