@@ -29,6 +29,7 @@ from app.interface.api.routes import (
     detail_guidance,
     diagnostics,
     enrichment,
+    image_studio,
     onboarding,
     operate,
     overseas,
@@ -209,6 +210,7 @@ def create_app(
     app.include_router(products.router)
     app.include_router(enrichment.router)
     app.include_router(product_images.router)
+    app.include_router(image_studio.router)
     app.include_router(register.router)
     app.include_router(settings.router)
     app.include_router(detail_guidance.router)

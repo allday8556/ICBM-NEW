@@ -16,6 +16,11 @@
 // live preview and presets. The choice is saved with the preparation through the same save; the
 // server validates and draws a product's own notice, and states PUBLICATION_GUIDANCE_UNPLACED while
 // the unit's composition cannot place a notice (since G5 only an older composition revision).
+//
+// ADR-0041 I5: 「이미지 자동번역」 in ② (the images the operator ticks) and ⑤ (the detail images)
+// open the Image Studio panel (components/image-studio.js) once the image_translate capability
+// reads READY; while it is NOT_CONFIGURED they stay inert 준비 중 placeholders naming what is
+// missing, as before.
 
 import { getJson, sendJson } from '../core/api.js';
 import { fragment, h } from '../core/dom.js';
@@ -26,6 +31,7 @@ import { NAME_RESULT, NAME_TASK, aiNamePanel } from '../components/ai-name.js';
 import { TAG_RESULT, TAG_TASK, aiTagsPanel } from '../components/ai-tags.js';
 import { CATEGORY_RESULT, CATEGORY_TASK, aiCategoryPanel } from '../components/ai-category.js';
 import { itemImagesEditor } from '../components/item-images.js';
+import { translateButton } from '../components/image-studio.js';
 import { emptyState } from '../components/states.js';
 import {
   GUIDANCE_BASE,
@@ -630,6 +636,7 @@ function editor(unit, ctx, labels, mode, step) {
       2,
       '② 상품 대표이미지',
       '대표 · 추가 · 상세 · 사용 안 함을 이미지마다 정합니다',
+      translateButton(unit, { scope: 'selected', editable }),
       editable ? null : h('div', { class: 'note' }, '등록 요청이나 스냅샷이 있어 이미지는 보기만 합니다.'),
       ...unit.items.map((item) =>
         h('div', { class: 'register-item-images', 'data-item': item.item_id }, h('b', {}, `품목 ${item.ordinal}`), itemImagesEditor(item.item_id, { editable, onChanged: reload })),
@@ -658,7 +665,7 @@ function editor(unit, ctx, labels, mode, step) {
       h('div', { class: 'note' }, '상세 이미지는 대표이미지 단계에서 「상세」로 지정할 수 있습니다.'),
       guidance.TOP,
       parts ? parts.detail : h('div', { class: 'kv' }, h('span', {}, '상세 본문'), h('b', {}, unit.authored?.inputs?.detail_body ?? '—')),
-      h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', 'data-action': 'open-preview', onclick: () => previewModal(unit) }, '미리보기')),
+      h('div', { class: 'row' }, translateButton(unit, { scope: 'detail', editable }), h('button', { type: 'button', class: 'btn', 'data-action': 'open-preview', onclick: () => previewModal(unit) }, '미리보기')),
       guidance.BOTTOM,
     ),
     pane(

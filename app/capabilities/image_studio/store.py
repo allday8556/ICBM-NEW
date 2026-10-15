@@ -24,6 +24,7 @@ import re
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Any, Final
 
@@ -186,6 +187,7 @@ class EditRevisionRecord:
     font_hashes: Mapping[str, str]
     content_fingerprint: str
     authored_by: str
+    authored_at: datetime
     current: bool
 
 
@@ -697,6 +699,7 @@ def _revision(row: ImageEditRevision, *, current: bool) -> EditRevisionRecord:
         font_hashes=json.loads(row.font_hashes_json),
         content_fingerprint=row.content_fingerprint,
         authored_by=row.authored_by,
+        authored_at=row.authored_at,
         current=current,
     )
 

@@ -40,3 +40,24 @@ export function getJson(path) {
 export function sendJson(method, path, payload) {
   return request(method, path, payload);
 }
+
+// A state-changing call whose answer is a file (the image a preview draws): its bytes and headers.
+// A refusal is the same ApiError as any other call's.
+export async function sendForBlob(method, path, payload) {
+  const response = await fetch(path, {
+    method,
+    headers: { Accept: 'image/png, application/json', 'Content-Type': 'application/json', [CLIENT_HEADER]: 'icbm-web' },
+    body: JSON.stringify(payload),
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    let body = null;
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
+    }
+    throw new ApiError(response.status, body?.error ?? null, response.headers.get('X-Correlation-ID'));
+  }
+  return { blob: await response.blob(), headers: response.headers };
+}

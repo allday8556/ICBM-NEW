@@ -169,6 +169,14 @@ One integration and one unit suite; no migration.
 The 2026-10-15 registration usability fixes added the category picker
 `ui/web/js/components/category-picker.js` over the leaf catalog below, the Product DB fact reader
 `ui/web/js/components/product-facts.js`, one unit and three integration suites; no migration.
+ADR-0041 I5 added `image_studio/review.py`, the Studio panel's owner (the review read with the flags
+derived on read, `SCRIPT_MISMATCH` and `COMPLEX_BACKGROUND` included; the stateless preview; the
+save of an edit revision; 「적용」, which records the `image-translate/v1` artifact through the M4
+image owner; the operator's QA verdict, the `USE_DERIVED` selection and 「되돌리기」), the routes
+`app/interface/api/routes/image_studio.py`, the panel `ui/web/js/components/image-studio.js`
+behind the editor's two 「이미지 자동번역」 buttons, the shared test support
+`tests/support/image_studio_support.py`, and one API and one UI integration suite. Production
+still reads `NOT_CONFIGURED`, so neither button is drawn (#352: no inert placeholders); no migration.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -222,9 +230,9 @@ customer or financial data, and grant no provider call or LIVE authority.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 410 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
-| `app/capabilities/` | 84 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
-| `app/interface/` | 32 | operator surfaces: HTTP api, screens, cli |
+| `app/` | 412 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/capabilities/` | 85 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
+| `app/interface/` | 33 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 96 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
 | `app/stages/` | 193 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
@@ -248,13 +256,13 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `integrations/` | 119 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 45 |  |
 | `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 448 | tests |
+| `tests/` | 451 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 184 | integration tests by runtime owner |
-| `tests/support/` | 16 | shared test support |
+| `tests/integration/` | 186 | integration tests by runtime owner |
+| `tests/support/` | 17 | shared test support |
 | `tests/unit/` | 162 | unit tests by runtime owner |
-| `ui/` | 77 | operator clients: the served web client and the capture extension |
+| `ui/` | 78 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 68 | the served web client |
+| `ui/web/` | 69 | the served web client |
