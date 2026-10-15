@@ -9,6 +9,7 @@
 import { getJson, sendJson } from '../../core/api.js';
 import { permissionLine, statusChip } from '../../platforms/smartstore/capability.js';
 import { h } from '../../core/dom.js';
+import { errorText as plainError } from '../../core/errors.js';
 import { dotDateTime } from '../../core/format.js';
 import { toast } from '../../core/toast.js';
 
@@ -17,17 +18,17 @@ const TITLE = '등록 권한 확인';
 
 const REFUSAL = {
   APPLICATION_NOT_CONFIGURED: '스마트스토어 애플리케이션 정보가 아직 연결되지 않아 기록할 수 없습니다.',
-  MAPPING_REVISION_UNAVAILABLE: 'API 권한 매핑 기준이 아직 없어 기록할 수 없습니다.',
+  MAPPING_REVISION_UNAVAILABLE: '권한 확인 기준이 아직 준비되지 않아 기록할 수 없습니다.',
 };
 
 const INVALIDATION = {
-  APPLICATION_NOT_CONFIGURED: '애플리케이션 미연결',
-  APPLICATION_FINGERPRINT_MISMATCH: '애플리케이션 변경됨',
-  REQUIRED_GROUPS_CHANGED: '필수 그룹 기준 변경',
-  MAPPING_REVISION_UNAVAILABLE: '매핑 기준 없음',
-  MAPPING_REVISION_CHANGED: '매핑 기준 변경',
+  APPLICATION_NOT_CONFIGURED: '애플리케이션 정보가 없음',
+  APPLICATION_FINGERPRINT_MISMATCH: '애플리케이션 정보가 바뀜',
+  REQUIRED_GROUPS_CHANGED: '필요한 권한이 바뀜',
+  MAPPING_REVISION_UNAVAILABLE: '권한 확인 기준이 없음',
+  MAPPING_REVISION_CHANGED: '권한 확인 기준이 바뀜',
   EXPIRED: '확인 유효기간 경과',
-  MALFORMED: '기록 손상',
+  MALFORMED: '저장된 기록을 읽을 수 없음',
 };
 
 const CONTRACT = {
@@ -73,7 +74,7 @@ function kv(label, value) {
 
 function errorText(error) {
   const reason = error?.error?.details?.reason;
-  return REFUSAL[reason] ?? error?.error?.message ?? String(error?.message ?? error);
+  return REFUSAL[reason] ?? plainError(error);
 }
 
 function render(root, key, view) {
@@ -93,7 +94,7 @@ function render(root, key, view) {
       const updated = await sendJson('POST', `${BASE}/${key}/permission-attestation`, {
         observed_groups: checks.filter((check) => check.input.checked).map((check) => check.group),
       });
-      toast(TITLE, '관리자 화면에서 본 API 그룹을 기록했습니다.');
+      toast(TITLE, '체크한 권한을 저장했습니다.');
       render(root, key, updated);
     } catch (error) {
       toast(TITLE, errorText(error));
@@ -109,13 +110,15 @@ function render(root, key, view) {
   // Unlike h(), replaceChildren() would render a null child as the text "null".
   const rows = [
     kv('필수 API 그룹', view.required_groups.map(label).join(', ')),
-    h('div', { class: 'kv' }, h('span', {}, '관찰된 API 그룹'), h('span', {}, record ? '' : '확인한 그룹을 선택하세요')),
+    h('div', { class: 'kv' }, h('span', {}, '커머스API센터에서 켜 둔 API 그룹'), h('span', {}, record ? '' : '켜 둔 그룹을 체크하세요')),
     ...checks.map((check) => check.row),
     kv('확인 일시', record ? dotDateTime(record.observed_at) : '저장 시 자동 기록'),
     kv('확인 유효기간', validity(view)),
     h('div', { class: 'kv' }, h('span', {}, '현재 상태'), chip),
-    invalid.length ? kv('미반영 사유', invalid.map((reason) => INVALIDATION[reason] ?? reason).join(', ')) : null,
-    view.recording_available ? null : h('div', { class: 'note' }, REFUSAL[view.recording_refusal] ?? view.recording_refusal),
+    invalid.length ? kv('다시 확인이 필요한 이유', invalid.map((reason) => INVALIDATION[reason] ?? '기준이 바뀜').join(', ')) : null,
+    view.recording_available
+      ? null
+      : h('div', { class: 'note', 'data-reason': view.recording_refusal ?? '' }, REFUSAL[view.recording_refusal] ?? '지금은 기록할 수 없습니다.'),
     h('div', { class: 'api-action-row' }, save),
   ];
   root.replaceChildren(...rows.filter(Boolean));

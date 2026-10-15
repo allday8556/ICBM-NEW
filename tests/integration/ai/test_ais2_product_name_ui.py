@@ -97,7 +97,10 @@ def test_a_recommendation_is_asked_in_the_db_and_applied_in_the_editor(
         assert recommended.inner_text() == RECOMMENDED
         assert "신뢰도 82%" in panel.inner_text()
         assert panel.locator("[data-role='ai-name-fresh']").is_visible()
-        assert "gpt-5.6-sol-2026" in panel.locator("[data-role='ai-name-model']").inner_text()
+        result = panel.locator("[data-role='ai-name-result']")
+        assert "gpt-5.6-sol-2026" in (result.get_attribute("data-model") or "")
+        # UI_SOURCE_OF_TRUTH 상품DB: the panel shows the model that answered.
+        assert "gpt-5.6-sol-2026" in result.locator("[data-role='ai-name-model']").inner_text()
         assert writes == [("POST", f"/api/v1/products/{item.group}/enrichment")]
 
         page.goto(

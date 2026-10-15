@@ -433,6 +433,16 @@ class CollectionRunStore:
             ).all()
             return tuple(_record(row) for row in rows)
 
+    def last_requested_by_supplier(self) -> dict[str, datetime]:
+        """When each supplier was last asked to collect: its newest run's request time."""
+        with self._db.read() as session:
+            rows = session.execute(
+                select(CollectionRun.supplier_key, func.max(CollectionRun.requested_at)).group_by(
+                    CollectionRun.supplier_key
+                )
+            ).tuples()
+            return {key: at for key, at in rows if at is not None}
+
     def count(
         self,
         *,

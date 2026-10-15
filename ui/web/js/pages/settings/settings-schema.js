@@ -24,16 +24,16 @@ const BUNDLE = 'TASK_PRODUCT_RECOMMEND_BUNDLE_V1';
 const REMATCH = 'TASK_CATEGORY_REMATCH_V1';
 const REGISTRY = {
   roles: [
-    { label: '수집 검증 AI', help: 'DOM·가격·배송비·옵션 근거 검증', role: 'ROLE_DATA_VALIDATOR_V1', task: 'TASK_EXTRACT_CORRECT_V1' },
+    { label: '수집 검증 AI', help: '수집한 가격·배송비·옵션 검증', role: 'ROLE_DATA_VALIDATOR_V1', task: 'TASK_EXTRACT_CORRECT_V1' },
     { label: '상품/MD AI', help: '상품명·태그·카테고리·옵션 정리', role: MD, task: BUNDLE },
     { label: '커머스 운영 AI', help: '주문 상태·다음 처리·운영 안내', role: 'ROLE_COMMERCE_OPS_V1', task: 'TASK_ORDER_RESPONSE_ASSIST_V1' },
     { label: 'CS 응대 AI', help: '문의 분석·고객 답변 초안', role: 'ROLE_CS_V1', task: 'TASK_INQUIRY_REPLY_V1' },
-    { label: '판매상태 검증 AI', help: 'BUY/CART·품절 근거 교차검증', role: 'ROLE_STOCK_VALIDATOR_V1', task: 'TASK_SOLDOUT_JUDGMENT_V1' },
+    { label: '판매상태 검증 AI', help: '구매 버튼·품절 표시로 판매 상태 확인', role: 'ROLE_STOCK_VALIDATOR_V1', task: 'TASK_SOLDOUT_JUDGMENT_V1' },
   ],
   policies: [
-    { label: '스마트스토어 정책', help: '추천/제외 태그 ID · SEO · 공식 데이터 우선', policy: 'POLICY_NAVER_V1', role: MD, task: BUNDLE },
+    { label: '스마트스토어 정책', help: '추천/제외 태그 · 검색 최적화 · 공식 데이터 우선', policy: 'POLICY_NAVER_V1', role: MD, task: BUNDLE },
     { label: '쿠팡 정책', help: '카테고리 추천 → AI 재검증 · 필수 옵션 확인', policy: 'POLICY_COUPANG_V1', role: MD, task: REMATCH },
-    { label: '11번가 정책', help: '실제 카테고리 ID 범위 · 등록 정책', policy: 'POLICY_11ST_V1', role: MD, task: REMATCH },
+    { label: '11번가 정책', help: '11번가 카테고리 범위 · 등록 정책', policy: 'POLICY_11ST_V1', role: MD, task: REMATCH },
   ],
   tasks: [
     { label: '추출 보정', help: '수집관리', role: 'ROLE_DATA_VALIDATOR_V1', task: 'TASK_EXTRACT_CORRECT_V1' },
@@ -50,7 +50,7 @@ function apiStatusCard(marketplace, capabilities) {
     title: '연동 상태 / 권한',
     items: [
       { status: '현재 상태', marketplace },
-      ...capabilities.map((label) => ({ status: label, chip: '연동 전' })),
+      ...capabilities.map((label) => ({ status: label, chip: '준비 중' })),
     ],
   };
 }
@@ -60,9 +60,9 @@ function shippingOverrideCard(prefix) {
     title: '배송 관리',
     items: [
       toggle('공통 배송값 사용', `${prefix}.use_common_shipping`),
-      field('배송비 override', `${prefix}.shipping_fee`, { placeholder: '공통값 사용' }),
-      field('출고일 override', `${prefix}.dispatch_days`, { placeholder: '공통값 사용' }),
-      field('출고지 override', `${prefix}.origin`, { placeholder: '공통 출고지 사용' }),
+      field('배송비 (따로 정하기)', `${prefix}.shipping_fee`),
+      field('출고일 (따로 정하기)', `${prefix}.dispatch_days`),
+      field('출고지 (따로 정하기)', `${prefix}.origin`),
     ],
   };
 }
@@ -101,7 +101,6 @@ export const SUBTABS = {
               ],
             },
             { title: '플랫폼 연동 현황', items: [{ marketplaceStatus: ['smartstore', 'coupang', 'st11'] }] },
-            { title: '사용자 권한', items: [{ usersTable: true }] },
           ],
         },
       ],
@@ -134,7 +133,7 @@ export const SUBTABS = {
             },
           ],
         },
-        { inheritNote: { bold: '상속 규칙', text: '각 플랫폼 배송관리에서 `공통값 사용`이 켜져 있으면 이 값을 자동 사용합니다.' } },
+        { inheritNote: { bold: '적용 방법', text: '각 마켓의 배송 관리에서 「공통 배송값 사용」이 켜져 있으면 이 값을 씁니다.' } },
       ],
     },
     {
@@ -178,7 +177,7 @@ export const SUBTABS = {
             {
               title: '적용 우선순위',
               items: [
-                { flow: ['상품 실제 정보', '수집/OCR 사실', '플랫폼 필수값', '공통 기본값'] },
+                { flow: ['상품 실제 정보', '수집한 상품 정보', '마켓 필수값', '공통 기본값'] },
                 note('상품 실제 사실과 충돌하는 공통값은 자동 적용하지 않고 확인필요로 보냅니다.'),
               ],
             },
@@ -197,7 +196,7 @@ export const SUBTABS = {
             title: '상세페이지 공지',
             full: true,
             help:
-              '상세페이지 맨 위(상단 공지)와 맨 아래(하단 공지)에 들어가는 공지입니다. 입력한 문구를 서버가 템플릿 이미지로 그리며, 저장한 공지는 모든 상품의 기본값이 됩니다. · 기간 공지는 시작부터 끝까지만 들어갑니다. · 문구에는 URL이나 마크업을 쓸 수 없습니다.',
+              '상세페이지 맨 위(상단 공지)와 맨 아래(하단 공지)에 들어가는 공지입니다. 입력한 문구로 공지 이미지를 만들며, 저장한 공지는 모든 상품의 기본값이 됩니다. · 기간 공지는 시작부터 끝까지만 들어갑니다. · 문구에는 웹 주소나 태그를 쓸 수 없습니다.',
             items: [{ detailGuidance: true }],
           },
         },
@@ -221,7 +220,11 @@ export const SUBTABS = {
               title: '가격 우선순위',
               items: [
                 { flow: ['판매금지/품절', '매입원가', '최저판매가', '목표마진 계산'] },
-                note('실제 PricingEngine 결과를 화면의 가격기준 라벨과 동일하게 사용합니다.'),
+                // 2026-10-16: the target margin is the pricing owner's fixed 35% (TARGET_NET_MARGIN);
+                // no setting changes it yet, so the note never claims one does.
+                note(
+                  '목표 마진은 지금 35%로 고정되어 있으며 아직 바꿀 수 없습니다. 판매가는 매입원가·배송비와 스마트스토어 › 등록 정책의 수수료 설정으로 자동 계산됩니다.',
+                ),
               ],
             },
           ],
@@ -243,7 +246,7 @@ export const SUBTABS = {
             },
             {
               title: '환율',
-              help: '한국수출입은행 현재환율 API의 송금 보낼때(TTS) 환율을 영업일 11시 이후 하루 한 번 받아 둡니다. 3영업일보다 오래되었거나 없으면 가격을 만들지 않습니다.',
+              help: '한국수출입은행의 송금 보낼 때 환율을 영업일 11시 이후 하루 한 번 받아 둡니다. 3영업일보다 오래되었거나 없으면 가격을 계산하지 않습니다.',
               items: [{ fxRates: true }],
             },
           ],
@@ -252,7 +255,7 @@ export const SUBTABS = {
     },
     {
       key: 'ai',
-      label: 'AI / Prompt',
+      label: 'AI',
       blocks: [
         {
           cards: [
@@ -272,16 +275,15 @@ export const SUBTABS = {
           card: {
             title: 'AI 공급자',
             full: true,
-            help: '내 PC에서 실행하는 CLIProxyAPI를 통해 AI를 호출합니다. 실행 파일·라우팅·상품 정보 전송을 승인해야 연결됩니다 (ADR-0027).',
+            help: '내 PC에서 실행하는 AI 연결 프로그램(CLIProxyAPI)으로 AI를 씁니다. 실행 파일·연결 설정·상품 정보 전송을 승인해야 연결됩니다.',
             items: [{ aiProvider: true }],
           },
         },
         {
           card: {
-            title: 'AI Prompt Registry',
+            title: 'AI 프롬프트',
             full: true,
-            help:
-              'ICBM AI는 공통 규칙(Global) → 역할(Role) → 플랫폼 정책(Platform Policy) → 작업(Task) → 실행 데이터 순서로 조립됩니다.',
+            help: 'AI에게 보내는 지시문입니다. 공통 규칙 → 역할 → 마켓 정책 → 작업 → 상품 정보 순서로 합쳐집니다.',
             items: [{ registry: REGISTRY }],
           },
         },
@@ -320,33 +322,33 @@ export const SUBTABS = {
               // seller account comes only from the authenticated account read.
               title: '스마트스토어 API 인증',
               help:
-                '커머스API 애플리케이션 인증정보를 입력합니다. · 저장하면 새 자격증명 세대로 교체되고 이전 세션과 계정 확인은 무효가 됩니다. · Secret은 OS 보안 저장소에만 저장되며 다시 표시되지 않습니다. · 판매자 계정은 입력값이 아니라 인증된 계정 조회 결과로만 정해집니다.',
+                '커머스API센터에서 발급한 애플리케이션 ID와 시크릿을 입력합니다. · 저장하면 아래에서 계정 확인을 다시 해야 합니다. · 시크릿은 이 PC에 안전하게 저장되며 다시 표시되지 않습니다. · 판매자 계정은 입력값이 아니라 로그인한 계정으로 정해집니다.',
               items: [{ smartstoreCredentials: true }],
             },
             {
               // CAPABILITY_MAPPING §14.11 surface 1 (M2 PR-D): live capability truth, not demo rows.
               title: '연동 상태 / 권한',
               help:
-                '인증·등록 권한·실제 등록은 각각의 증거로 따로 판단합니다. · ● 자동으로 확인된 강한 증거 · ◐ 운영자가 관리자 화면에서 확인한 증거 · ○ 미확인 · 운영자 확인은 이후의 권한 변경을 자동으로 감지하지 않습니다. · 실제 상품 등록은 등록 검증 전까지 확인되지 않습니다.',
+                '로그인(인증)·등록 권한·실제 등록을 따로 보여줍니다. · ● 자동으로 확인됨 · ◐ 직접 확인함 · ○ 아직 확인 안 됨 · 직접 확인한 권한은 이후에 바뀌어도 자동으로 알 수 없습니다. · 실제 등록은 첫 등록이 확인된 뒤 표시됩니다.',
               items: [{ capabilityProjection: 'smartstore' }, { workflowActions: 'smartstore' }],
             },
             {
               // M2 PR-E, instructions §8A: observation and first binding are separate actions.
               title: '계정 확인 / 연결 대상 확정',
               help:
-                '계정 확인은 현재 인증으로 판매자 계정을 조회해 보여줄 뿐 연결하지 않습니다. · 처음 연결할 때는 표시된 계정을 운영자가 확인한 뒤 따로 확정해야 합니다. · 확정할 때 계정을 다시 조회해 같은 계정인지 비교하며, 실패하면 아무것도 연결되지 않습니다. · 이미 연결된 계정은 자동으로 바뀌지 않습니다.',
+                '「계정 확인」은 로그인한 판매자 계정을 보여줄 뿐 연결하지 않습니다. · 처음 연결할 때는 보여준 계정이 맞는지 확인한 뒤 「이 계정 연결」을 누릅니다. · 이미 연결된 계정은 자동으로 바뀌지 않습니다.',
               items: [{ smartstoreAccount: true }],
             },
             {
-              title: 'API 계약 검토 기록',
+              title: 'API 연동 확인',
               help:
-                'ICBM이 채택한 스마트스토어 API 계약을 운영자가 검토한 결과를 기록합니다. · NAVER가 확인한 것이 아닙니다. · 같은 값을 다시 기록해도 새 검토 기록으로 남습니다. · 허용되지 않는 전환은 서버가 거부합니다.',
+                'ICBM이 쓰는 스마트스토어 연동 방식을 직접 확인했다고 기록합니다. 처음 연결할 때 한 번 「직접 확인함」으로 저장해야 계정을 연결할 수 있습니다. · 네이버가 확인한 것이 아니라 내가 확인한 기록입니다.',
               items: [{ contractReview: 'smartstore' }],
             },
             {
               title: '등록 권한 확인',
               help:
-                '커머스API센터 관리자 화면에서 본 API 그룹을 기록합니다. · 운영자 확인(A0) 증거이며 NAVER 자동 확인이 아닙니다. · 필수 그룹·애플리케이션·매핑 기준·확인 일시는 ICBM이 채우고 실제 상품 등록은 확인하지 않습니다. · 확인은 30일(설정으로 줄일 수만 있음)이 지나면 만료되어 다시 확인해야 합니다.',
+                '커머스API센터에서 켜 둔 API 그룹을 체크해 기록합니다. · 내가 직접 확인한 기록이며 네이버가 자동으로 확인한 것이 아닙니다. · 30일이 지나면 다시 확인해야 합니다.',
               items: [{ permissionAttestation: 'smartstore' }],
             },
           ],
@@ -363,7 +365,7 @@ export const SUBTABS = {
             title: '등록 대상 정책',
             full: true,
             help:
-              '계정별 등록 대상 정책입니다. · 저장할 때마다 서버가 새 리비전을 만들고 이전 리비전은 그대로 남습니다. · 모든 값은 서버가 검증하며, 잘못된 값이 하나라도 있으면 아무것도 저장되지 않습니다. · 이미 만들어진 등록 스냅샷은 저장 당시의 정책 리비전을 그대로 유지합니다.',
+              '판매 계정별 등록 정책입니다. · 저장하면 이후 등록부터 적용되고, 이미 등록 내용을 확정한 상품은 그때의 정책을 그대로 씁니다. · 잘못된 값이 하나라도 있으면 아무것도 저장되지 않습니다.',
             items: [{ targetPolicy: 'smartstore' }],
           },
         },
@@ -379,7 +381,7 @@ export const SUBTABS = {
             title: '배송 정책',
             full: true,
             help:
-              '등록할 때 스마트스토어에 보내는 배송·반품·교환 정보입니다. · 등록 정책과 같은 정책 리비전으로 저장되며, 저장하면 새 리비전이 만들어집니다. · 출고지와 반품·교환지는 연결된 계정의 네이버 주소록에서 고릅니다.',
+              '등록할 때 스마트스토어에 보내는 배송·반품·교환 정보입니다. · 등록 정책과 함께 저장됩니다. · 출고지와 반품·교환지는 연결된 계정의 네이버 주소록에서 고릅니다.',
             items: [{ targetPolicy: 'smartstore', section: 'delivery' }],
           },
         },
@@ -394,9 +396,9 @@ export const SUBTABS = {
             {
               title: '상품 / 카테고리',
               items: [
-                toggle('실제 네이버 categoryId 범위 제한', 'smartstore.category_limit'),
+                toggle('네이버 카테고리 범위 안에서만 선택', 'smartstore.category_limit'),
                 toggle('AI 카테고리 검증', 'smartstore.category_ai'),
-                { promptEditor: { label: '네이버 Policy 편집', policy: 'POLICY_NAVER_V1', role: MD, task: REMATCH } },
+                { promptEditor: { label: '네이버 정책 프롬프트 편집', policy: 'POLICY_NAVER_V1', role: MD, task: REMATCH } },
               ],
             },
           ],
@@ -405,10 +407,10 @@ export const SUBTABS = {
           // Gate 1 G1-B (ADR-0015 §3): the operator-reviewed category metadata, saved through its
           // own contract. No provider category endpoint is adopted.
           card: {
-            title: '카테고리 메타데이터 검토',
+            title: '카테고리 정보',
             full: true,
             help:
-              '카테고리별 필수 속성·상품정보고시·옵션·템플릿 규칙을 검토한 근거로부터 기록합니다. · 저장할 때마다 서버가 새 리비전을 만들고 현재 리비전으로 지정하며, 이전 리비전은 그대로 남습니다. · 근거가 증명하지 않는 규칙은 기록하지 않습니다. · AI 제안은 검토 완료로 기록할 수 없습니다. · 현재 리비전이 미검토이면 등록 사전검사는 이전 검토본으로 대체하지 않고 CATEGORY_METADATA_UNREVIEWED로 멈춥니다.',
+              '카테고리별 필수 속성·상품정보고시·옵션·템플릿 규칙을 판매자센터에서 확인한 대로 기록합니다. · 확인 완료로 저장한 카테고리만 등록할 수 있습니다. · AI 제안은 확인 완료로 저장할 수 없습니다.',
             items: [{ categoryMetadata: 'smartstore' }],
           },
         },
@@ -425,7 +427,7 @@ export const SUBTABS = {
               items: [
                 toggle('네이버 추천 태그 우선', 'smartstore.recommended_tags'),
                 toggle('네이버 제외 태그 차단', 'smartstore.excluded_tags'),
-                toggle('tag_id 우선 저장', 'smartstore.tag_id'),
+                toggle('태그 ID로 저장', 'smartstore.tag_id'),
                 toggle('검색데이터 AI 보강', 'smartstore.search_boost'),
                 note('추천/제외 태그와 SEO 가이드가 우선이며 검색데이터는 상품 사실과 직접 관련된 경우에만 보강합니다.'),
               ],
@@ -437,7 +439,7 @@ export const SUBTABS = {
     {
       key: 'extra',
       label: '고유 설정',
-      blocks: [{ cards: [{ title: '스마트스토어 고유 설정', items: [note('플랫폼 고유 설정이 추가되면 이 탭에 모읍니다.')] }] }],
+      blocks: [{ cards: [{ title: '스마트스토어 고유 설정', items: [note('아직 설정할 수 있는 항목이 없습니다.')] }] }],
     },
   ],
 
@@ -451,7 +453,7 @@ export const SUBTABS = {
             {
               title: '쿠팡 Open API 인증',
               help:
-                'Wing에서 발급받은 API 인증정보를 한 번 입력합니다. · Access Key와 Secret Key는 Windows 보안 저장소에만 저장되며 다시 표시하거나 로그/AI 요청에 포함하지 않습니다.',
+                '쿠팡 Wing에서 발급받은 API 정보를 한 번 입력합니다. · 키는 이 PC에 안전하게 저장되며 다시 표시되지 않습니다.',
               items: [{ coupangCredentials: true }],
             },
             apiStatusCard('coupang', ['상품 조회', '상품 등록/수정', '주문 조회']),
@@ -475,9 +477,9 @@ export const SUBTABS = {
               help: '쿠팡 카테고리 추천은 별도 기능 카드가 아니라 AI 추천 내부에서 자동 사용합니다.',
               items: [
                 toggle('쿠팡 카테고리 추천 결과 사용', 'coupang.category_recommend'),
-                toggle('ProductFacts AI 재검증', 'coupang.ai_validate'),
-                toggle('저신뢰 자동확정 금지', 'coupang.low_confidence_block'),
-                { promptEditor: { label: '쿠팡 Policy 편집', policy: 'POLICY_COUPANG_V1', role: MD, task: REMATCH } },
+                toggle('AI로 상품 정보 다시 확인', 'coupang.ai_validate'),
+                toggle('확신이 낮은 추천은 자동 적용 안 함', 'coupang.low_confidence_block'),
+                { promptEditor: { label: '쿠팡 정책 프롬프트 편집', policy: 'POLICY_COUPANG_V1', role: MD, task: REMATCH } },
               ],
             },
           ],
@@ -494,7 +496,7 @@ export const SUBTABS = {
               title: '옵션 / 필수속성',
               items: [
                 toggle('카테고리 필수 옵션 구조 우선', 'coupang.required_options'),
-                toggle('원본 SKU 보존', 'coupang.preserve_sku'),
+                toggle('공급처 옵션 코드 유지', 'coupang.preserve_sku'),
                 toggle('필수속성 충돌 시 확인필요', 'coupang.option_review'),
               ],
             },
@@ -510,9 +512,7 @@ export const SUBTABS = {
           cards: [
             {
               title: '쿠팡 그로스',
-              help:
-                '공식 API와 권한 범위를 확인한 뒤 상품/입고/재고/물류 중 지원 가능한 부분을 연결합니다. · 지원범위 확인 → 권한/인증 → 데이터 매핑 → 운영 UI → read-back',
-              items: [{ button: '기능 설계 보기' }],
+              items: [note('쿠팡 그로스 연동은 준비 중입니다.')],
             },
           ],
         },
@@ -521,7 +521,7 @@ export const SUBTABS = {
     {
       key: 'extra',
       label: '고유 설정',
-      blocks: [{ cards: [{ title: '쿠팡 고유 설정', items: [note('추가 플랫폼 고유 옵션은 이 탭에 모읍니다.')] }] }],
+      blocks: [{ cards: [{ title: '쿠팡 고유 설정', items: [note('아직 설정할 수 있는 항목이 없습니다.')] }] }],
     },
   ],
 
@@ -534,10 +534,9 @@ export const SUBTABS = {
           cards: [
             {
               title: '11번가 Open API 인증',
-              help:
-                '11번가에서 발급받은 API 인증정보를 입력합니다. · 실제 API 스펙 연결 시 공식 문서의 인증 필드 기준으로 최종 매핑합니다.',
+              help: '11번가 연동은 준비 중입니다.',
               items: [
-                field('API Key', 'st11.api_key', { placeholder: 'API Key', secret: true }),
+                field('API 키', 'st11.api_key', { secret: true }),
                 field('판매자 식별값', 'st11.seller_id', { placeholder: '필요한 경우 입력' }),
                 API_ACTIONS,
               ],
@@ -560,7 +559,10 @@ export const SUBTABS = {
           cards: [
             {
               title: '상품 / 카테고리',
-              items: [toggle('실제 categoryId 후보 내 선택', 'st11.category_limit'), { promptEditor: { label: '11번가 Policy 편집', policy: 'POLICY_11ST_V1', role: MD, task: REMATCH } }],
+              items: [
+                toggle('11번가 카테고리 후보 안에서만 선택', 'st11.category_limit'),
+                { promptEditor: { label: '11번가 정책 프롬프트 편집', policy: 'POLICY_11ST_V1', role: MD, task: REMATCH } },
+              ],
             },
           ],
         },
@@ -569,7 +571,7 @@ export const SUBTABS = {
     {
       key: 'extra',
       label: '고유 설정',
-      blocks: [{ cards: [{ title: '11번가 고유 설정', items: [note('추가 설정은 이 탭에 모읍니다.')] }] }],
+      blocks: [{ cards: [{ title: '11번가 고유 설정', items: [note('아직 설정할 수 있는 항목이 없습니다.')] }] }],
     },
   ],
 };

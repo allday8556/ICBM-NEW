@@ -133,7 +133,7 @@ function currentView(current, settings, placement, reload) {
         h('span', { class: 'chip info', 'data-role': 'dg-current-template' }, label),
         h('span', { class: current.enabled ? 'chip good' : 'chip warn', 'data-role': 'dg-enabled' }, current.enabled ? '사용 중' : '꺼짐'),
       ),
-      h('span', { class: 'mini' }, `리비전 #${current.seq} · ${current.authored_by} · ${localTime(current.authored_at)}`),
+      h('span', { class: 'mini', 'data-seq': String(current.seq) }, `마지막 저장 ${localTime(current.authored_at)}`),
       current.enabled ? null : h('span', { class: 'mini' }, '꺼진 공지는 상품에 들어가지 않습니다.'),
       h('div', {}, toggle),
       line,
@@ -171,7 +171,7 @@ function standingPanel(placement, view, settings, reload) {
         // Saving the text keeps the notice on or off as it is; 공지 끄기/켜기 changes that.
         enabled: current ? current.enabled : true,
       });
-      toast(TITLE, `${placement.label} 상시 공지를 저장했습니다 (리비전 #${saved.seq}).`);
+      toast(TITLE, `${placement.label} 상시 공지를 저장했습니다.`);
       await reload();
     } catch (error) {
       report(line, error, reload);
@@ -254,7 +254,7 @@ function periodRow(notice, settings, placement, reload, editHost) {
         h('span', { class: STATUS_CHIP[notice.status] ?? 'chip', 'data-role': 'dg-status' }, notice.status_label ?? notice.status ?? ''),
         h('span', { class: 'chip' }, label),
       ),
-      h('span', { class: 'mini' }, `리비전 #${notice.seq}${notice.enabled ? '' : ' · 조기 종료됨'}`),
+      h('span', { class: 'mini', 'data-seq': String(notice.seq) }, notice.enabled ? '' : '조기 종료됨'),
       line,
     ),
     open ? h('div', { class: 'dg-period-actions' }, edit, end) : null,
@@ -308,7 +308,7 @@ function periodForm(placement, settings, reload, close, notice = null) {
       toast(
         TITLE,
         notice
-          ? `${placement.label} 기간 공지를 수정했습니다 (리비전 #${saved.seq}).`
+          ? `${placement.label} 기간 공지를 수정했습니다.`
           : `${placement.label} 기간 공지를 추가했습니다.`,
       );
       await reload();
@@ -355,7 +355,7 @@ function periodsPanel(placement, view, settings, reload) {
       'div',
       { class: 'dg-part-head' },
       h('b', {}, '기간 공지'),
-      h('span', { class: 'mini' }, '휴무·명절·택배 마감처럼 시작부터 끝까지만 들어가는 공지입니다. 상태는 서버 시각으로 판단합니다.'),
+      h('span', { class: 'mini' }, '휴무·명절·택배 마감처럼 시작부터 끝까지만 들어가는 공지입니다.'),
     ),
     h(
       'div',
@@ -390,7 +390,7 @@ function placementSection(placement, settings) {
     try {
       draw(part, await getJson(BASE));
     } catch (error) {
-      toast(TITLE, `다시 불러오지 못했습니다: ${errorText(error)}`);
+      toast(TITLE, `다시 불러오지 못했습니다. ${errorText(error)}`);
     }
   };
   draw('all', settings);

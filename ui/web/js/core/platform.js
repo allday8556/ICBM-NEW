@@ -29,3 +29,10 @@ export function platformTag(key, { name = false } = {}) {
   }
   return h('span', { class: 'pf' }, mark, name ? h('span', { class: 'pf-name' }, marketplace.label) : null);
 }
+
+// One marketplace account as the seller tells it apart: the marketplace's name and the account's
+// own id. The server keeps no store name for an account (ACCOUNT_IDENTITY §6), so the id is the
+// stable identity; a position in a list ("계정 1") would move when the list changes.
+export function accountLabel(marketplaceKey, accountId) {
+  return `${marketplaceLabel(marketplaceKey)} · ${accountId}`;
+}

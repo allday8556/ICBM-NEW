@@ -96,7 +96,7 @@ def test_coupang_settings_saves_once_clears_inputs_and_makes_no_egress(
         stored = page.evaluate(
             "() => JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)])"
         )
-    assert status == "저장됨 · 자격증명 세대 1"
+    assert status == "저장됨"
     assert values == ["", "", ""]
     assert ACCESS_KEY not in html and SECRET_KEY not in html
     assert ACCESS_KEY not in stored and SECRET_KEY not in stored

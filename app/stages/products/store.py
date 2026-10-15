@@ -40,7 +40,11 @@ from app.platform.core.clock import Clock
 from app.platform.core.errors import InputValidationError, NotFoundError
 from app.platform.db.database import Database
 from app.stages.collect.facts import FactsStatus, FieldStatus, value_from_json
-from app.stages.collect.models import ProductFactsField, ProductFactsRevision
+from app.stages.collect.models import (
+    SYNTHETIC_SUPPLIER_KEY,
+    ProductFactsField,
+    ProductFactsRevision,
+)
 from app.stages.products.model import (
     BASE_PRODUCT_ABSENT_FIELDS,
     BASE_PRODUCT_PROVENANCE_FIELDS,
@@ -1206,7 +1210,12 @@ class ProductFoundationUnit:
     # ------------------------------------------------------------------ product DB list (G1-C)
 
     def active_product_page(
-        self, *, needle: str | None, after: ProductPageKey | None, limit: int
+        self,
+        *,
+        needle: str | None,
+        after: ProductPageKey | None,
+        limit: int,
+        include_test: bool = True,
     ) -> ProductPage:
         """One page of ACTIVE Products, newest first, strictly after ``after``.
 
@@ -1218,6 +1227,22 @@ class ProductFoundationUnit:
         matching = ProductGroup.status == GroupStatus.ACTIVE.value
         if needle is not None:
             matching = and_(matching, _matches_now(needle))
+        if not include_test:
+            # A synthetic test product holds a confirmed member in the reserved namespace.
+            matching = and_(
+                matching,
+                ~select(GroupMember.member_id)
+                .join(
+                    SourceProduct,
+                    SourceProduct.source_product_uid == GroupMember.source_product_uid,
+                )
+                .where(
+                    GroupMember.product_group_id == ProductGroup.product_group_id,
+                    GroupMember.status == MemberStatus.CONFIRMED.value,
+                    SourceProduct.supplier_key == SYNTHETIC_SUPPLIER_KEY,
+                )
+                .exists(),
+            )
         total = self.session.scalar(select(func.count()).select_from(ProductGroup).where(matching))
         query = select(ProductGroup.created_at, ProductGroup.product_group_id).where(matching)
         if after is not None:

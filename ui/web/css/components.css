@@ -261,6 +261,23 @@
   color: var(--color-warn);
 }
 
+/* Support-only details (codes, request numbers), folded away under one plain summary. */
+.support-details {
+  margin-top: var(--space-2);
+  text-align: left;
+}
+
+.support-details > summary {
+  cursor: pointer;
+  color: var(--color-text-faint);
+  font-size: var(--fs-xs);
+}
+
+.support-details > .mini {
+  margin: var(--space-1) 0 0;
+  word-break: break-all;
+}
+
 /* ---------- Help tooltip: the single help system ---------- */
 .help-anchor {
   display: inline-flex;
@@ -864,8 +881,19 @@ body.has-registration-status .content {
 }
 
 .analysis-images {
-  white-space: pre-line;
   margin-top: var(--space-2);
+}
+
+.analysis-image-list {
+  max-height: 16rem;
+  overflow-y: auto;
+  margin: var(--space-1) 0 0;
+  padding-left: 1.5rem;
+  font-size: var(--fs-xs);
+}
+
+.analysis-image-list li {
+  margin: 2px 0;
 }
 
 .analysis .table {
@@ -1255,6 +1283,19 @@ label.kv > [data-prefill] {
   border-radius: var(--radius-sm);
   padding: 8px;
   background: var(--color-input);
+}
+
+/* A fee rate with its 참고값 / 직접 입력 mark beside it (target policy fee preset). */
+.fee-input {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  min-width: 0;
+}
+
+.fee-input input {
+  flex: 1 1 96px;
 }
 
 .collect-submit .note,
@@ -1674,6 +1715,14 @@ td.no-data {
 }
 
 .db-toolbar select[data-inert] {
+  cursor: pointer;
+}
+
+.db-toolbar .db-test-toggle {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -2098,7 +2147,7 @@ td.no-data {
   z-index: 2;
   display: grid;
   place-items: center;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: var(--fw-bold);
   text-align: center;
 }
@@ -2111,7 +2160,7 @@ td.no-data {
   display: grid;
   flex: 1;
   gap: 7px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .legend-row {
@@ -2302,7 +2351,7 @@ body.bare-page .content {
   height: 26px;
   border-radius: 50%;
   background: var(--color-neutral-bg);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: var(--fw-heavy);
 }
 

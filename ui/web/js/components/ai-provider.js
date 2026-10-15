@@ -6,8 +6,9 @@
 // ICBM-dedicated client key is typed once into a password field and written to the OS secret store
 // by the server (ADR-0012 §2); it is never shown again, and the field is cleared after the save.
 
-import { ApiError, getJson, sendJson } from '../core/api.js';
+import { getJson, sendJson } from '../core/api.js';
 import { h } from '../core/dom.js';
+import { errorText } from '../core/errors.js';
 import { toast } from '../core/toast.js';
 
 const ENDPOINT = '/api/v1/ai/provider';
@@ -21,6 +22,14 @@ const DETAIL_COPY = {
   AI_DAILY_CAP_REACHED: '오늘 호출 상한에 도달했습니다',
   AI_PROFILE_UNREADABLE: 'AI 공급자 설정을 읽을 수 없습니다',
 };
+const RUNTIME_LABEL = {
+  NOT_CONFIGURED: '설정이 끝나지 않음',
+  AVAILABLE: '사용 가능',
+  UNAVAILABLE: '실행 중이 아니거나 설정을 읽을 수 없음',
+  VERSION_MISMATCH: '승인한 파일과 다른 프로그램이 실행 중',
+  ROUTING_CONFIG_MISMATCH: '승인한 연결 설정과 다름',
+};
+const BILLING_LABEL = { SUBSCRIPTION: '구독', METERED_API: '사용량 과금', UNKNOWN: '모름' };
 const MISSING_COPY = { model: '모델', executable: '실행 파일', routing: '라우팅', data_transfer: '상품 정보 전송', credential: '접속 키' };
 const ERROR_COPY = {
   AI_PROFILE_INVALID: '주소는 http://127.0.0.1:<포트> 형식의 내 PC 주소만 쓸 수 있습니다.',
@@ -33,21 +42,25 @@ const ERROR_COPY = {
   AI_CREDENTIAL_INVALID: '접속 키는 공백 없는 영문·숫자·기호 16~200자입니다.',
 };
 
+// The capability's state for a button outside 설정 › AI: one plain line that points there.
+export function sellerStateText(capability) {
+  if (capability.status === 'READY') return '연결됨';
+  if (capability.detail === 'no AI provider is configured') return 'AI 공급자가 설정되지 않았습니다 (설정 › AI)';
+  return 'AI 설정을 확인해야 합니다 (설정 › AI)';
+}
+
 export function stateText(capability) {
   if (capability.status === 'READY') return '연결됨';
   const detail = capability.detail ?? '';
   if (detail.startsWith('not approved: ')) {
     return `승인 필요 · ${detail.slice(14).split(', ').map((key) => MISSING_COPY[key] ?? key).join(', ')}`;
   }
-  return DETAIL_COPY[detail] ?? detail;
+  return DETAIL_COPY[detail] ?? '확인 필요';
 }
 
-function short(hash) {
-  return hash ? `${hash.slice(0, 12)}…` : '—';
-}
 
 function errorCopy(error) {
-  return error instanceof ApiError ? ERROR_COPY[error.error?.code] ?? error.message : String(error);
+  return errorText(error, ERROR_COPY);
 }
 
 function row(label, ...value) {
@@ -75,7 +88,7 @@ export function aiProviderPanel() {
       .then((ready) => {
         const signal = (ready.capabilities ?? []).find((capability) => capability.key === 'search_signal');
         signalState.dataset.status = signal?.status ?? 'UNKNOWN';
-        signalState.textContent = !signal ? '확인할 수 없음' : signal.status === 'READY' ? '연결됨' : '연결된 출처 없음 · 출처마다 소유자 결정이 필요합니다';
+        signalState.textContent = !signal ? '확인할 수 없음' : signal.status === 'READY' ? '연결됨' : '연결된 출처 없음';
       })
       .catch(() => {
         signalState.textContent = '확인할 수 없음';
@@ -99,7 +112,9 @@ export function aiProviderPanel() {
     const billing = h(
       'select',
       { name: 'billing_mode', class: 'field' },
-      ...['SUBSCRIPTION', 'METERED_API', 'UNKNOWN'].map((mode) => h('option', { value: mode, selected: (content.billing_mode ?? 'SUBSCRIPTION') === mode }, mode)),
+      ...['SUBSCRIPTION', 'METERED_API', 'UNKNOWN'].map((mode) =>
+        h('option', { value: mode, selected: (content.billing_mode ?? 'SUBSCRIPTION') === mode }, BILLING_LABEL[mode]),
+      ),
     );
     const approvedExe = content.approved_executable;
     const approvedRouting = content.approved_routing;
@@ -115,7 +130,7 @@ export function aiProviderPanel() {
         h('span', {}, '상태'),
         h('span', { class: `chip ${ready ? 'good' : 'warn'}`, 'data-role': 'ai-provider-state', 'data-status': view.capability.status }, stateText(view.capability)),
       ),
-      row('런타임 상태', h('span', { 'data-role': 'ai-provider-runtime' }, view.runtime_state)),
+      row('실행 상태', h('span', { 'data-role': 'ai-provider-runtime', 'data-runtime-state': view.runtime_state }, RUNTIME_LABEL[view.runtime_state] ?? '확인 필요')),
       row('오늘 호출', `${view.calls_today} / ${content.daily_call_cap ?? '—'}`),
       // ADR-0028 §3: the SearchSignal port, provider-zero until a source has its own owner decision.
       row('외부 검색 신호', signalState),
@@ -144,7 +159,7 @@ export function aiProviderPanel() {
         h('label', { class: 'kv' }, h('span', {}, '모델'), model),
         h('label', { class: 'kv' }, h('span', {}, '과금 방식'), billing),
         h('label', { class: 'kv' }, h('span', {}, '하루 호출 상한'), cap),
-        h('div', { class: 'note' }, '모델 변경은 소유자 결정입니다. 주소나 모델을 바꾸면 상품 정보 전송 승인이 취소됩니다.'),
+        h('div', { class: 'note' }, '주소나 모델을 바꾸면 상품 정보 전송을 다시 승인해야 합니다.'),
         h('button', { type: 'submit', class: 'btn blue', 'data-action': 'ai-provider-save' }, '공급자 설정 저장'),
       ),
       h('h4', {}, '접속 키'),
@@ -163,12 +178,12 @@ export function aiProviderPanel() {
           },
         },
         h('label', { class: 'kv' }, h('span', {}, 'ICBM 전용 접속 키'), h('input', { name: 'client_key', type: 'password', autocomplete: 'off', class: 'field', disabled: !revision })),
-        h('div', { class: 'note' }, 'CLIProxyAPI 설정의 api-keys에 ICBM 전용으로 넣은 키입니다. OS 자격 증명 보관소에만 저장되고 다시 보여주지 않습니다.'),
+        h('div', { class: 'note' }, 'CLIProxyAPI 설정 파일의 api-keys에 넣은 ICBM 전용 키입니다. 이 PC에 안전하게 저장되며 다시 보여주지 않습니다.'),
         h('button', { type: 'submit', class: 'btn', 'data-action': 'ai-credential-save', disabled: !revision }, '접속 키 저장'),
       ),
       h('h4', {}, '실행 파일'),
-      row('승인됨', approvedExe ? `${approvedExe.path} · ${short(approvedExe.sha256)}` : '없음'),
-      row('지금 실행 중', observed?.serving ? `${observed.path} · ${short(observed.sha256)}` : '실행 중이 아님'),
+      row('승인됨', approvedExe ? h('span', { title: approvedExe.sha256, 'data-sha256': approvedExe.sha256 }, approvedExe.path) : '없음'),
+      row('지금 실행 중', observed?.serving ? h('span', { title: observed.sha256, 'data-sha256': observed.sha256 }, observed.path) : '실행 중이 아님'),
       h(
         'button',
         {
@@ -180,12 +195,16 @@ export function aiProviderPanel() {
         },
         exeMatches ? '승인한 파일이 실행 중' : '지금 실행 중인 파일 승인',
       ),
-      h('h4', {}, '라우팅'),
-      row('승인됨', approvedRouting ? short(approvedRouting.fingerprint) : '없음'),
+      h('h4', {}, '연결 설정 (라우팅)'),
+      row('승인됨', approvedRouting ? h('span', { 'data-fingerprint': approvedRouting.fingerprint }, routingMatches ? '승인한 설정으로 실행 중' : '승인됨') : '없음'),
       row(
         '지금 설정',
         observed?.routing_fingerprint
-          ? `${short(observed.routing_fingerprint)} · 모델목록 고정 ${observed.local_model ? '켜짐' : '꺼짐'} · 패널 자동업데이트 ${observed.panel_auto_update_disabled ? '꺼짐' : '켜짐'}`
+          ? h(
+              'span',
+              { 'data-fingerprint': observed.routing_fingerprint },
+              `읽음 · 모델 목록 고정 ${observed.local_model ? '켜짐' : '꺼짐'} · 자동 업데이트 ${observed.panel_auto_update_disabled ? '꺼짐' : '켜짐'}`,
+            )
           : '읽을 수 없음',
       ),
       h(

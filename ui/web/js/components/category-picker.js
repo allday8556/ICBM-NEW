@@ -233,10 +233,25 @@ export function categoryPicker({ marketplaceKey, value, onChange }) {
     }
   });
 
-  function setProblem(text) {
+  // A problem, and optionally the one thing the seller can do about it here: `action` is
+  // `{ name, label, run }`, a button the caller owns (2026-10-16: 「이 카테고리 등록 정보 준비」).
+  function setProblem(text, action = null) {
     problem.hidden = !text;
     problem.className = text ? 'note' : '';
-    problem.textContent = text ?? '';
+    problem.replaceChildren();
+    if (!text) return;
+    problem.append(h('span', { 'data-role': 'category-problem-text' }, text));
+    if (!action) return;
+    const button = h('button', { type: 'button', class: 'btn', 'data-action': action.name }, action.label);
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        await action.run();
+      } finally {
+        button.disabled = false;
+      }
+    });
+    problem.append(h('div', { class: 'api-action-row' }, button));
   }
 
   showCurrent(null);

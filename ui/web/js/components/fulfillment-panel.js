@@ -7,7 +7,9 @@
 
 import { ApiError, getJson, sendJson } from '../core/api.js';
 import { h } from '../core/dom.js';
+import { errorText } from '../core/errors.js';
 import { dotDateTime } from '../core/format.js';
+import { supplierName } from '../core/suppliers.js';
 import { toast } from '../core/toast.js';
 
 const ORDERS = '/api/v1/operate/orders';
@@ -34,22 +36,16 @@ const ATTEMPT = {
   APPLIED_PROVEN: '네이버 처리 완료',
   REJECTED: '네이버가 거절',
   NOT_APPLIED_PROVEN: '전송되지 않음',
-  UNKNOWN: '결과 불명 — 다시 보내지 않음',
+  UNKNOWN: '결과 확인 중 (다시 보내지 않음)',
 };
 const VERIFICATION = {
-  DISPATCH_CONFIRMED: '다시 읽어 확인됨',
-  UNDISPATCHED: '미발송 확인 — 다시 승인 가능',
+  DISPATCH_CONFIRMED: '네이버에서 확인됨',
+  UNDISPATCHED: '보내지지 않은 것을 확인함 (다시 보낼 수 있음)',
   CONFLICT: '다른 송장이 등록됨',
 };
-// The send-time layers (ADR-0018 §4.3; ADR-0025 §5) a refusal names.
-const LAYER = {
-  EXECUTION_MODE: 'LIVE 모드 아님',
-  PROTECTED_WRITE_BRAKE: '쓰기 브레이크 잠김',
-  GRANT: '이 주문의 발송 승인 없음',
-  ENDPOINT_ADOPTED: '발송 API 미채택',
-  EVIDENCE_RETENTION: '증거 보존 미증명',
-  PERMISSION_ATTESTED: '주문 판매자 권한 미확인',
-};
+// A refusal names every send-time layer that still blocks (ADR-0018 §4.3; ADR-0025 §5). The seller
+// reads one plain line; the layers stay in a data attribute for support.
+const BLOCKED_LINE = '아직 발송처리를 보낼 수 없습니다. 실등록 모드와 관리자 설정이 필요합니다.';
 const DISPATCH_REASON = {
   OPERATE_DISPATCH_TRACKING_MISSING: '송장을 먼저 입력하세요.',
   OPERATE_DISPATCH_BLOCKED: '이 주문은 이미 발송처리를 보냈습니다. 결과가 불명이면 판매자센터에서 확인하세요.',
@@ -71,7 +67,7 @@ const DELIVERY = {
   NOT_TRACKING: '배송 추적 없음',
 };
 const REASON = {
-  OPERATE_ORDER_NOT_FULFILLABLE: 'ICBM 상품에 연결되지 않은 주문입니다 (연결됨 또는 가져온 상품만 처리할 수 있습니다).',
+  OPERATE_ORDER_NOT_FULFILLABLE: 'ICBM으로 등록했거나 가져온 상품의 주문만 처리할 수 있습니다.',
   OPERATE_ORDER_NOT_PAYED: '결제 완료 상태의 주문만 공급사 주문과 송장을 기록할 수 있습니다.',
 };
 const ACTION = {
@@ -89,7 +85,7 @@ async function carriers() {
 }
 
 function message(error) {
-  return error instanceof ApiError ? error.message : String(error?.message ?? error);
+  return errorText(error, { ...DISPATCH_REASON, ...REASON });
 }
 
 function won(value) {
@@ -181,7 +177,7 @@ function deliveryReadback(view) {
   const parts = [
     view.delivery_company_name ?? view.delivery_company ?? '택배사 —',
     view.delivery_tracking_number ? `송장 ${view.delivery_tracking_number}` : null,
-    view.delivery_status ? DELIVERY[view.delivery_status] ?? view.delivery_status : null,
+    view.delivery_status ? DELIVERY[view.delivery_status] ?? '배송 상태 확인 필요' : null,
     view.sent_at ? `발송 ${dotDateTime(view.sent_at)}` : null,
     view.delivered_at ? `배송완료 ${dotDateTime(view.delivered_at)}` : null,
   ].filter(Boolean);
@@ -202,16 +198,12 @@ function dispatchStep(view, attempts, onDone) {
     send.disabled = true;
     try {
       const attempt = await sendJson('POST', `${ORDERS}/${encodeURIComponent(view.product_order_id)}/dispatch`, {});
-      toast('발송처리', `${ATTEMPT[attempt.state] ?? attempt.state}${attempt.verification ? ` · ${VERIFICATION[attempt.verification] ?? attempt.verification}` : ''}`);
+      toast('발송처리', `${ATTEMPT[attempt.state] ?? '결과 확인 중'}${attempt.verification ? ` · ${VERIFICATION[attempt.verification] ?? '확인 필요'}` : ''}`);
       onDone();
     } catch (error) {
       const layers = error instanceof ApiError ? error.error?.details?.layers ?? [] : [];
-      const reason = error instanceof ApiError ? DISPATCH_REASON[error.error?.code] : null;
-      note.replaceChildren(
-        layers.length
-          ? `보내지 않았습니다 · ${layers.map((layer) => LAYER[layer.layer] ?? layer.layer).join(', ')}`
-          : reason ?? `보내지 않았습니다 · ${message(error)}`,
-      );
+      note.dataset.layers = layers.map((layer) => layer.layer).join(' ');
+      note.replaceChildren(layers.length ? BLOCKED_LINE : `보내지 않았습니다. ${message(error)}`);
       send.disabled = false;
     }
   });
@@ -235,7 +227,7 @@ function dispatchStep(view, attempts, onDone) {
     h('b', {}, '3. 발송처리'),
     send,
     verify,
-    h('span', { class: 'mini' }, '네이버에 택배사·송장을 등록합니다. LIVE 승인이 있을 때만 전송됩니다.'),
+    h('span', { class: 'mini' }, '네이버에 택배사·송장을 등록합니다. 실등록 모드에서만 전송됩니다.'),
     note,
     attempts.length
       ? h(
@@ -244,8 +236,8 @@ function dispatchStep(view, attempts, onDone) {
           ...attempts.map((attempt) =>
             h(
               'li',
-              {},
-              `${attempt.attempt_no}회차 · ${dotDateTime(attempt.started_at)} · 송장 ${attempt.tracking_number} · ${ATTEMPT[attempt.state] ?? attempt.state}${attempt.fail_code ? ` (${attempt.fail_code})` : ''}${attempt.verification ? ` · ${VERIFICATION[attempt.verification] ?? attempt.verification}` : ''}`,
+              { 'data-attempt-state': attempt.state, 'data-fail-code': attempt.fail_code ?? '' },
+              `${attempt.attempt_no}회차 · ${dotDateTime(attempt.started_at)} · 송장 ${attempt.tracking_number} · ${ATTEMPT[attempt.state] ?? '결과 확인 중'}${attempt.verification ? ` · ${VERIFICATION[attempt.verification] ?? '확인 필요'}` : ''}`,
             ),
           ),
         )
@@ -262,28 +254,32 @@ function history(view) {
       h(
         'li',
         {},
-        `${dotDateTime(entry.recorded_at)} · ${ACTION[entry.action] ?? entry.action} · 주문번호 ${entry.supplier_order_ref} · ${won(entry.purchase_amount)}${entry.tracking_number ? ` · 송장 ${entry.tracking_number}` : ''}`,
+        `${dotDateTime(entry.recorded_at)} · ${ACTION[entry.action] ?? '기록'} · 주문번호 ${entry.supplier_order_ref} · ${won(entry.purchase_amount)}${entry.tracking_number ? ` · 송장 ${entry.tracking_number}` : ''}`,
       ),
     ),
   );
 }
 
 // The panel for one order, opened from its row. ``onChanged`` reloads the list after a save.
-export function fulfillmentPanel(order, onChanged) {
+export function fulfillmentPanel(order, onChanged, names = new Map()) {
   const box = h('div', { class: 'fulfillment-panel', 'data-role': 'fulfillment', 'data-order': order.product_order_id }, h('span', { class: 'mini' }, '불러오는 중…'));
   const render = async (view) => {
     try {
       const current = view ?? (await getJson(`${ORDERS}/${encodeURIComponent(order.product_order_id)}/fulfillment`));
-      const [label, tone] = FULFILLMENT_STATE[current.state] ?? [current.state, ''];
+      const [label, tone] = FULFILLMENT_STATE[current.state] ?? ['확인 필요', 'warn'];
       box.setAttribute('data-fulfillment', current.state);
       const head = h(
         'div',
         { class: 'supplier-head-row' },
         h('span', { class: `chip ${tone}`.trim() }, label),
-        current.supplier_key ? h('span', { class: 'mini' }, `공급사 ${current.supplier_key} · 상품 ${current.source_product_id}`) : null,
+        current.supplier_key ? h('span', { class: 'mini' }, `${supplierName(names, current.supplier_key)} · 상품번호 ${current.source_product_id}`) : null,
       );
       if (current.state === 'NOT_FULFILLABLE' || (current.state === 'NOT_PAYED' && !current.revision)) {
-        box.replaceChildren(head, h('div', { class: 'note' }, REASON[current.reason] ?? current.reason ?? ''), deliveryReadback(current));
+        box.replaceChildren(
+          head,
+          h('div', { class: 'note', 'data-reason': current.reason ?? '' }, REASON[current.reason] ?? '지금은 처리할 수 없는 주문입니다.'),
+          deliveryReadback(current),
+        );
         return;
       }
       const copy = h('button', { type: 'button', class: 'btn', 'data-action': 'copy-shipping' }, '배송지 복사');
@@ -293,13 +289,13 @@ export function fulfillmentPanel(order, onChanged) {
         render(next ?? undefined);
         onChanged?.();
       };
-      const steps = [head, deliveryReadback(current), h('div', { class: 'supplier-head-row' }, copy, h('span', { class: 'mini' }, '공급사 주문서에 붙여넣을 배송지를 복사합니다 (열람 기록이 남습니다).')), supplierOrderForm(current, saved)];
+      const steps = [head, deliveryReadback(current), h('div', { class: 'supplier-head-row' }, copy, h('span', { class: 'mini' }, '공급사 주문서에 붙여넣을 배송지를 복사합니다.')), supplierOrderForm(current, saved)];
       if (current.revision) steps.push(trackingForm(current, await carriers(), saved));
       if (current.tracking_number) steps.push(dispatchStep(current, current.dispatch_attempts ?? [], () => saved(null)));
       steps.push(history(current));
       box.replaceChildren(...steps.filter(Boolean));
     } catch (error) {
-      box.replaceChildren(h('span', { class: 'chip warn' }, `처리 정보를 불러오지 못했습니다 · ${message(error)}`));
+      box.replaceChildren(h('span', { class: 'chip warn' }, `처리 정보를 불러오지 못했습니다. ${message(error)}`));
     }
   };
   render();

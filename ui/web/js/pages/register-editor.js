@@ -38,14 +38,17 @@ import {
 } from '../components/guidance-editor.js';
 import { freshProductFacts, unitProductName } from '../components/product-facts.js';
 import {
+  ATTEMPT_HEADERS,
+  IMAGES_READ_ONLY,
   PREPARATION_LABEL,
-  REASON_COPY,
   actionCell,
   attemptRow,
   authoringForm,
   categoryBlock,
+  categoryNameNode,
   chip,
   errorCopy,
+  freshCategoryNames,
   freshPolicyNotes,
   itemRow,
   kv,
@@ -54,6 +57,7 @@ import {
   quotePolicyWarning,
   readStateChip,
   reason,
+  reasonCopy,
   repinBlock,
   scopeBlock,
   table,
@@ -73,7 +77,7 @@ const STEPS = [
   ['etc', '기타 등록정보', '배송 · A/S · 계정 · 안전', ['ACCOUNT', 'POLICY', 'DUPLICATE', 'SAFETY', 'SOURCE', 'UNIT', 'UNCLASSIFIED']],
 ];
 const BAD_STATUSES = new Set(['BLOCKED', 'DUPLICATE']);
-const STATE_LABEL = { good: '통과', warn: '보완 필요', bad: '불통', none: '평가 전' };
+const STATE_LABEL = { good: '완료', warn: '확인 필요', bad: '등록 불가', none: '확인 전' };
 
 function noData(label) {
   return h('div', { class: 'kv', 'data-no-data': label }, h('span', {}, label), h('b', { class: 'no-data' }, NO_DATA));
@@ -98,13 +102,13 @@ function readyStrip(unit, states, go) {
       const { state, reasons } = states[index];
       const lines =
         state === 'none'
-          ? [h('li', {}, REASON_COPY[unit.preflight_unavailable_reason] ?? '아직 등록 준비를 확인하지 않았습니다.')]
+          ? [h('li', {}, reasonCopy(unit.preflight_unavailable_reason, '아직 등록 준비를 확인하지 않았습니다.'))]
           : state === 'good'
-            ? [h('li', {}, '이 단계의 사전 점검 사유가 없습니다.')]
+            ? [h('li', {}, '확인할 항목이 없습니다.')]
             : reasons.map((item) =>
                 // ADR-0039 §2, §3: a policy warning names the supplier and quotes its words.
                 quotePolicyWarning(
-                  h('li', { 'data-reason': item.code }, REASON_COPY[item.code] ?? '확인이 필요한 항목입니다.'),
+                  h('li', { 'data-reason': item.code }, reasonCopy(item.code)),
                   item,
                 ),
               );
@@ -156,7 +160,9 @@ function editorDisplayName(unit) {
 function readOnlyInputs(unit) {
   const inputs = unit.authored?.inputs ?? {};
   return [
-    kv('카테고리', inputs.category?.category_id ?? '—'),
+    inputs.category?.category_id
+      ? h('div', { class: 'kv' }, h('span', {}, '카테고리'), categoryNameNode(unit.marketplace_key, inputs.category.category_id, 'b', true))
+      : kv('카테고리', '—'),
     kv('상품명', inputs.name?.value ?? '—'),
   ];
 }
@@ -512,7 +518,7 @@ function guidanceGroup(unit, placement, read, settings, editable) {
         : h('span', { class: 'mini', 'data-role': 'dg-none' }, '이 상품에 들어가는 공지가 없습니다.'),
     ),
     unplaced
-      ? h('div', { class: 'note', 'data-role': 'dg-unplaced', 'data-reason': GUIDANCE_UNPLACED }, REASON_COPY[GUIDANCE_UNPLACED] ?? GUIDANCE_UNPLACED)
+      ? h('div', { class: 'note', 'data-role': 'dg-unplaced', 'data-reason': GUIDANCE_UNPLACED }, reasonCopy(GUIDANCE_UNPLACED))
       : null,
     customHost,
   );
@@ -630,7 +636,7 @@ function editor(unit, ctx, labels, mode, step) {
       2,
       '② 상품 대표이미지',
       '대표 · 추가 · 상세 · 사용 안 함을 이미지마다 정합니다',
-      editable ? null : h('div', { class: 'note' }, '등록 요청이나 스냅샷이 있어 이미지는 보기만 합니다.'),
+      editable ? null : h('div', { class: 'note' }, IMAGES_READ_ONLY),
       ...unit.items.map((item) =>
         h('div', { class: 'register-item-images', 'data-item': item.item_id }, h('b', {}, `품목 ${item.ordinal}`), itemImagesEditor(item.item_id, { editable, onChanged: reload })),
       ),
@@ -648,7 +654,7 @@ function editor(unit, ctx, labels, mode, step) {
       4,
       '④ 상품정보고시',
       '카테고리가 정한 고시 항목과 속성',
-      unit.category ? categoryBlock(unit.category) : noData('카테고리 요구사항'),
+      unit.category ? categoryBlock(unit.category, unit.marketplace_key) : noData('카테고리 요구사항'),
       parts ? parts.fields : null,
     ),
     pane(
@@ -667,7 +673,7 @@ function editor(unit, ctx, labels, mode, step) {
       '배송·반품·A/S는 등록 정책에서 정합니다',
       h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => ctx.navigate('settings') }, '설정 › 등록 정책 열기')),
       preflightBlock(unit, labels),
-      unit.intent && unit.intent.attempts.length ? table(['시도', '결과', '확인 내용', '시작'], unit.intent.attempts.map(attemptRow)) : null,
+      unit.intent && unit.intent.attempts.length ? table(ATTEMPT_HEADERS, unit.intent.attempts.map(attemptRow)) : null,
       scopeBlock(unit.scope),
       h('div', { class: 'supplier-actions', 'data-role': 'editor-actions' }, ...unit.actions.map((action) => actionCell(unit, action, reload))),
     ),
@@ -716,7 +722,7 @@ function editor(unit, ctx, labels, mode, step) {
     editorDisplayName(unit),
     h('span', { class: `chip ${mode === 'edit' ? 'good' : 'info'}`, 'data-role': 'editor-mode' }, mode === 'edit' ? '상품수정' : '상품등록'),
     platformTag(unit.marketplace_key),
-    chip(PREPARATION_LABEL[unit.preparation] ?? unit.preparation),
+    chip(PREPARATION_LABEL[unit.preparation] ?? '확인 필요'),
     unit.intent ? readStateChip(unit.intent.read_state, unit.intent.read_state_problem) : null,
     h('span', { class: 'spacer' }),
     h('button', { type: 'button', class: 'btn', 'data-action': 'open-preview', onclick: () => previewModal(unit) }, '미리보기'),
@@ -758,6 +764,7 @@ export default {
     const mode = ctx.params.get('mode') === 'edit' ? 'edit' : 'register';
     freshPolicyNotes();
     freshProductFacts();
+    freshCategoryNames();
     if (!draft || !unitRef) {
       return emptyState({ title: '편집할 상품이 없습니다', copy: '등록관리에서 상품을 눌러 편집기를 여세요.', action: { label: '등록관리', onSelect: () => ctx.navigate('register') } });
     }
@@ -779,7 +786,7 @@ export default {
       }
     }
     if (!unit) {
-      return emptyState({ title: '이 등록 단위를 찾을 수 없습니다', copy: '등록관리에서 다시 열어 주세요.', action: { label: '등록관리', onSelect: () => ctx.navigate('register') } });
+      return emptyState({ title: '이 상품을 찾을 수 없습니다', copy: '등록관리에서 상품을 다시 열어 주세요.', action: { label: '등록관리', onSelect: () => ctx.navigate('register') } });
     }
     const labels = Object.fromEntries((readiness?.areas ?? []).map((area) => [area.area, area.label]));
     document.title = `${mode === 'edit' ? '상품수정' : '상품등록'} · ICBM`;

@@ -115,14 +115,23 @@ class ProductsService:
     # ------------------------------------------------------------------ product DB (G1-C)
 
     def page(
-        self, *, query: str | None = None, cursor: str | None = None, limit: int | None = None
+        self,
+        *,
+        query: str | None = None,
+        cursor: str | None = None,
+        limit: int | None = None,
+        include_test: bool = True,
     ) -> ProductPageView:
-        """One page of ACTIVE Products, newest first, optionally matching a search."""
+        """One page of ACTIVE Products, newest first, optionally matching a search. Without
+        ``include_test`` a synthetic test product (a member in the reserved test namespace) is
+        neither listed nor counted."""
         text = search_text(query)
         size = page_limit(limit)
         after = None if cursor is None else decode_cursor(cursor, text)
         with self._store.reading() as unit:
-            page = unit.active_product_page(needle=needle(text), after=after, limit=size)
+            page = unit.active_product_page(
+                needle=needle(text), after=after, limit=size, include_test=include_test
+            )
             rows = []
             for key in page.keys:
                 product = unit.readback(key.product_group_id)

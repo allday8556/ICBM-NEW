@@ -132,6 +132,7 @@ from app.stages.connect.coupang.service import CoupangCredentialService
 from app.stages.connect.credentials import SupplierCredentialStore
 from app.stages.connect.marketplace.attestation import ApiGroup
 from app.stages.connect.marketplace.attestation_service import PermissionAttestationService
+from app.stages.connect.marketplace.capability import AuthStatus
 from app.stages.connect.marketplace.revision import EndpointMappingRevisionProvider
 from app.stages.connect.marketplace.service import MarketplaceCapabilityService
 from app.stages.connect.marketplace.sources import ApplicationIdentitySource
@@ -230,6 +231,7 @@ from integrations.marketplaces.smartstore.notice_catalog import SmartStoreNotice
 from integrations.marketplaces.smartstore.notice_schema import (
     SmartStoreNoticeRules,
     notice_labels,
+    notice_type_choices,
 )
 from integrations.marketplaces.smartstore.orders import SmartStoreOrderSource
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
@@ -970,7 +972,7 @@ def build_container(
     # detail-composition revisions a newly appended target-policy revision is stamped with.
     authoring_revisions = AuthoringRevisionStore(db, clock, audit)
     target_policy_store = TargetPolicyStore(db, clock, audit, authoring_revisions)
-    target_policies = TargetPolicyService(target_policy_store, accounts)
+    target_policies = TargetPolicyService(target_policy_store, accounts, clock)
     # Official SmartStore leaf-category catalog (owner decision 2026-10-04): one read-only provider
     # capture becomes an immutable local snapshot. Its digest is the taxonomy revision used by the
     # target policy and category metadata.
@@ -990,6 +992,8 @@ def build_container(
         category_metadata_store,
         frozenset(m.key for m in MARKETPLACE_IDENTITIES),
         category_catalog,
+        # 2026-10-16: the form offers the documented notice types by their Korean names.
+        notice_types=notice_type_choices,
     )
     # The source-side gates of Items (ADR-0031 §4, ADR-0030 §7) under each supplier's sales policy
     # (ADR-0039 §2): the one seam every marketplace's REGISTER reads.
@@ -1449,6 +1453,10 @@ def build_container(
         editable_surfaces=editable_surfaces(),
         # ADR-0040 §1: a supplier read only from captured pages takes no submitted URL.
         collection_suppliers=collection.submittable_supplier_keys,
+        # A SmartStore account bound with its auth READY is a connected sales channel.
+        capability_marketplaces_connected=lambda: sum(
+            1 for view in marketplace_capability.capabilities() if view.auth is AuthStatus.READY
+        ),
     )
     return Container(
         listing_sync=listing_sync,

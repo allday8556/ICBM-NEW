@@ -3,9 +3,11 @@
 // live listing whose source is sold out (M6-07); nothing here changes a listing. Its one action —
 // 지금 재확인 — asks COLLECT to re-collect the listed sources now, within COLLECT's own pacing.
 
-import { ApiError, getJson, sendJson } from '../core/api.js';
+import { getJson, sendJson } from '../core/api.js';
 import { h } from '../core/dom.js';
+import { errorText } from '../core/errors.js';
 import { dotDateTime } from '../core/format.js';
+import { supplierName, supplierNames } from '../core/suppliers.js';
 import { toast } from '../core/toast.js';
 
 const STOCK = '/api/v1/operate/stock';
@@ -18,7 +20,7 @@ const AVAILABILITY = {
 };
 const OUTCOME = {
   RECORDED: '재수집 완료',
-  NO_REVISION: '재수집됨(기록 없음)',
+  NO_REVISION: '재수집했지만 상품 정보를 읽지 못함',
   FAILED: '재수집 실패',
   REFUSED: '재수집 거절',
 };
@@ -28,11 +30,16 @@ function availabilityChip(value) {
   return h('span', { class: `chip ${tone}`.trim(), 'data-availability': value ?? 'UNKNOWN' }, label);
 }
 
-function row(source) {
+function row(source, names) {
   return h(
     'tr',
     { 'data-source': `${source.supplier_key}:${source.source_product_id}` },
-    h('td', {}, source.product_name ?? '—', h('span', { class: 'mini' }, `${source.supplier_key} · ${source.source_product_id}`)),
+    h(
+      'td',
+      {},
+      source.product_name ?? '상품명 없음',
+      h('span', { class: 'mini' }, `${supplierName(names, source.supplier_key)} · 상품번호 ${source.source_product_id}`),
+    ),
     h('td', {}, availabilityChip(source.availability)),
     h(
       'td',
@@ -41,10 +48,8 @@ function row(source) {
         ? h('span', { class: 'chip', 'data-recheck': 'PENDING' }, '재수집 중')
         : h(
             'span',
-            { class: 'mini', 'data-recheck': source.last_recheck_outcome ?? 'NONE' },
-            source.last_recheck_outcome
-              ? `${OUTCOME[source.last_recheck_outcome] ?? source.last_recheck_outcome}${source.last_recheck_error ? ` · ${source.last_recheck_error}` : ''}`
-              : '아직 재확인 전',
+            { class: 'mini', 'data-recheck': source.last_recheck_outcome ?? 'NONE', 'data-error-code': source.last_recheck_error ?? '' },
+            source.last_recheck_outcome ? OUTCOME[source.last_recheck_outcome] ?? '재수집 결과 확인 필요' : '아직 재확인 전',
           ),
     ),
     h('td', {}, source.last_finished_at ? dotDateTime(source.last_finished_at) : '—'),
@@ -68,16 +73,16 @@ export function stockRecheckPanel() {
   panel.append(content);
   const reload = async () => {
     try {
-      const found = await getJson(STOCK);
+      const [found, names] = await Promise.all([getJson(STOCK), supplierNames()]);
       const button = h('button', { type: 'button', class: 'btn blue', 'data-action': 'recheck-stock' }, '지금 재확인');
       button.addEventListener('click', async () => {
         button.disabled = true;
         try {
           const result = await sendJson('POST', RECHECK, {});
-          toast('공급처 재고', `재수집 요청 ${result.requested}건 · 마감 ${result.settled}건`);
+          toast('공급처 재고', `${result.requested}건 재확인을 요청했습니다${result.settled ? ` · ${result.settled}건 완료` : ''}.`);
           await reload();
         } catch (error) {
-          toast('공급처 재고', error instanceof ApiError ? error.message : String(error?.message ?? error));
+          toast('공급처 재고', errorText(error));
           button.disabled = false;
         }
       });
@@ -95,13 +100,13 @@ export function stockRecheckPanel() {
               'table',
               { class: 'table' },
               h('thead', {}, h('tr', {}, ...['상품', '공급처 재고', '마지막 재확인', '재확인 시각', '결정'].map((label) => h('th', {}, label)))),
-              h('tbody', {}, ...found.sources.map(row)),
+              h('tbody', {}, ...found.sources.map((source) => row(source, names))),
             )
           : h('div', { class: 'note' }, '네이버에 판매 중인 등록 상품이 없습니다.'),
       );
     } catch (error) {
       content.setAttribute('data-stock-recheck', 'UNAVAILABLE');
-      content.replaceChildren(h('span', { class: 'chip warn' }, `공급처 재고를 불러오지 못했습니다 · ${String(error?.message ?? error)}`));
+      content.replaceChildren(h('span', { class: 'chip warn' }, `공급처 재고를 불러오지 못했습니다. ${errorText(error)}`));
     }
   };
   reload();

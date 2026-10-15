@@ -138,6 +138,29 @@ def _three_samples(container: Container, shop: TrialShop) -> str:
     return key
 
 
+def _images_shown_beside_the_buttons(page: Page, client: TestClient, key: str) -> None:
+    """「값이 맞음」 and 「사용 시작」 confirm the images field itself (§7): each sample beside them
+    lists every image the server read — its order, role and address as an openable link — and
+    not only a count (PR #369 audit, SAFETY_GATE_BYPASS)."""
+    view = client.get(f"/api/v1/onboarding/suppliers/{key}/trials").json()
+    assert view["samples"]
+    for sample in view["samples"]:
+        items = sample["summary"]["images"]["items"]
+        assert items, sample["sample_url"]
+        block = page.locator(f".modal [data-sample='{sample['sample_url']}']")
+        listed = block.locator("[data-role='image-urls']")
+        assert listed.get_attribute("data-count") == str(len(items))
+        for item in items:
+            row = listed.locator(f"li[data-image-rank='{item['rank']}']")
+            assert row.get_attribute("data-image-role") == item["role"]
+            link = row.locator("a[data-image-url]")
+            assert link.get_attribute("href") == item["url"]
+            assert link.get_attribute("target") == "_blank"
+            assert "noopener" in (link.get_attribute("rel") or "")
+            assert link.inner_text() == item["url"]
+            assert link.is_visible()
+
+
 def test_three_samples_are_confirmed_started_and_the_supplier_disabled(
     browser: Browser, client: TestClient, shop: TrialShop
 ) -> None:
@@ -161,6 +184,7 @@ def test_three_samples_are_confirmed_started_and_the_supplier_disabled(
         start = modal.locator("[data-action='activate']")
         assert start.is_disabled()
         assert "값 확인 0/3" in modal.locator("[data-role='proven-count']").inner_text()
+        _images_shown_beside_the_buttons(page, client, key)
         _no_horizontal_scroll(page)
 
         for confirmed in (1, 2, 3):

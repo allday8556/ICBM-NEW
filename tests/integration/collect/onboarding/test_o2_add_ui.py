@@ -152,9 +152,11 @@ def test_a_supplier_is_added_saved_tested_and_shown_in_analysis(
         modal = page.locator(MODAL)
         assert modal.locator("h2").inner_text().startswith("새 공급처 추가")
         _detect(page)
-        assert "cafe24_login_form" in modal.locator(".onboarding-evidence").inner_text()
+        markers = modal.locator("[data-role='detection']").get_attribute("data-markers") or ""
+        assert "cafe24_login_form" in markers
         assert modal.locator("[data-warning='ROBOTS_DISALLOWS_PRODUCTS']").is_visible()
-        assert "Disallow: /product/" in modal.locator("[data-role='robots-lines']").inner_text()
+        robots = modal.locator("[data-role='robots-lines']").text_content() or ""
+        assert "Disallow: /product/" in robots
         terms = modal.locator("[data-policy='TERMS'] a")
         assert terms.get_attribute("href") == f"https://{HOST}/member/agreement.html"
         save = modal.locator("[data-action='save-supplier']")
@@ -233,7 +235,8 @@ def test_an_unsupported_site_stops_and_an_ambiguous_one_offers_only_its_matches(
         modal = page.locator(MODAL)
         # NO_MARKERS: "a template is needed", no choice offered, nothing can be saved.
         _detect(page, PLAIN_HOST, "[data-detected='unsupported']")
-        assert "템플릿이 필요합니다" in modal.locator("[data-role='template-needed']").inner_text()
+        needed = modal.locator("[data-role='template-needed']").inner_text()
+        assert "지원하지 않는 쇼핑몰" in needed
         assert modal.locator("[data-role='platform-choice']").count() == 0
         assert modal.locator("[data-role='policy']").count() == 0
         assert modal.locator("[data-role='policy-ack']").count() == 0

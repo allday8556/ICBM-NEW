@@ -70,6 +70,22 @@ def test_a_copy_keeps_every_fact_and_materializes_under_the_reserved_namespace(
     assert kind is None and copy.transport_kind is None
 
 
+def test_the_product_db_list_can_leave_test_products_out(
+    container: Container, config: AppConfig
+) -> None:
+    template_id = _template(container, config)
+    record = _create(container, template_id)
+    synthetic = container.products.product_of_source(
+        SYNTHETIC_SUPPLIER_KEY, record.source_product_id
+    ).product_group_id
+    everything = container.products.page()
+    assert synthetic in {row.product.product_group_id for row in everything.products}
+    assert everything.matching_total == 2
+    collected = container.products.page(include_test=False)
+    assert synthetic not in {row.product.product_group_id for row in collected.products}
+    assert collected.matching_total == 1
+
+
 def test_the_label_is_durable_and_audited(container: Container, config: AppConfig) -> None:
     record = _create(container, _template(container, config))
     (listed,) = container.synthetic_products.list()

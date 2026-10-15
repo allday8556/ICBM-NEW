@@ -6,6 +6,7 @@
 
 import { getJson, sendJson } from '../core/api.js';
 import { fragment, h } from '../core/dom.js';
+import { errorText } from '../core/errors.js';
 import { withHelp } from '../core/help.js';
 import { toast } from '../core/toast.js';
 
@@ -48,9 +49,8 @@ const CHANNEL_SCOPE_LABEL = {
   ALL_ALLOWED: '모든 마켓 판매 가능',
   CLOSED_MALL_ONLY: '폐쇄몰 전용 (오픈마켓 판매 불가)',
 };
-const LEVEL_LABEL = { CORE: '필수', COVERAGE: '보조' };
 const STATUS = {
-  CONFIRMED: ['확정', 'good'],
+  CONFIRMED: ['확인됨', 'good'],
   ABSENT: ['없음', null],
   REVIEW_REQUIRED: ['확인 필요', 'warn'],
 };
@@ -58,13 +58,14 @@ const STATUS_ORDER = ['CONFIRMED', 'ABSENT', 'REVIEW_REQUIRED'];
 const ROLE_LABEL = { REPRESENTATIVE: '대표', DETAIL: '상세' };
 // The image acceptance vocabulary the server records for each reference (ADR-0010 §9; Issue #52
 // ruling 5723016554), worded. Each word names a code the revision already holds; the page judges
-// nothing, and a code it has no word for is shown as the code itself.
+// nothing, and a code it has no word for reads generically (the codes stay in data attributes).
 const DISPOSITION_LABEL = { INCLUDED: '포함', EXCLUDED: '제외', UNRESOLVED: '확인 필요' };
 const EXCLUSION_COPY = {
-  SOURCE_AUTHORED_NON_HTTPS: '원천이 http 주소로 적은 이미지 (보안 연결 아님)',
+  SOURCE_AUTHORED_NON_HTTPS: '공급처가 http 주소로 올린 이미지 (보안 연결 아님)',
 };
+const UNKNOWN_REASON = '알 수 없는 사유';
 const ISSUE_COPY = {
-  BAD_HOST: '허용되지 않은 호스트',
+  BAD_HOST: '허용되지 않은 사이트의 이미지',
   BAD_CONTENT_TYPE: '이미지가 아닌 응답',
   OVERSIZE: '파일 크기 제한 초과',
   BUDGET_EXHAUSTED: '이번 수집의 요청·용량 한도를 다 써서 가져오지 않음',
@@ -80,17 +81,20 @@ const REFUSAL_COPY = {
   NON_HTTPS: 'http 주소 (보안 연결 아님)',
   UNSUPPORTED_SCHEME: '지원하지 않는 주소 형식',
   CREDENTIALS_PRESENT: '주소에 계정 정보가 있음',
-  NON_STANDARD_PORT: '표준이 아닌 포트',
-  HOST_NOT_ALLOWLISTED: '허용되지 않은 이미지 호스트',
-  PATH_NOT_ALLOWED: '허용되지 않은 경로',
-  QUERY_NOT_ALLOWED: '허용되지 않은 주소 매개변수(?)',
+  NON_STANDARD_PORT: '일반적이지 않은 주소',
+  HOST_NOT_ALLOWLISTED: '허용되지 않은 사이트의 이미지',
+  PATH_NOT_ALLOWED: '허용되지 않은 주소',
+  QUERY_NOT_ALLOWED: '주소에 허용되지 않는 부분이 있음',
+};
+// Why the image auto-selection made no selection for this Item (the image owner's codes).
+const BLOCKED_COPY = {
+  ROLE_RULE_UNKNOWN: '이 공급처의 이미지 규칙이 없어 자동 선택하지 않았습니다',
 };
 const AVAILABILITY_LABEL = { ON_SALE: '판매 중', SOLD_OUT: '품절' };
-const TRANSPORT_LABEL = { DIRECT_URL: '직접 URL', EXTENSION: '확장 수집' };
+const TRANSPORT_LABEL = { DIRECT_URL: '상품 URL로 수집', EXTENSION: '크롬 확장으로 수집' };
 const VALUE_LIMIT = 160;
 const HELP =
-  '저장된 원천 리비전의 필드별 상태·값·근거를 그대로 보여줍니다. 화면은 판정하거나 값을 바꾸지 않습니다. ' +
-  '확인 필요는 페이지에 근거가 있지만 페이지만으로 읽을 수 없었던 필드, 없음은 페이지가 밝히지 않은 필드입니다.';
+  '수집한 상품 정보를 항목별로 보여줍니다. 확인 필요는 페이지에서 정확히 읽지 못한 항목, 없음은 페이지에 없는 항목입니다.';
 
 function statusChip(status) {
   const [label, tone] = STATUS[status] ?? [status, null];
@@ -156,7 +160,7 @@ function valueText(valueJson) {
   if (Array.isArray(value.references)) {
     return clip(value.references.map((ref) => `${ROLE_LABEL[ref.role] ?? ref.role} ${ref.ordinal} ${DISPOSITION_LABEL[ref.disposition] ?? ref.status}`).join(' · '));
   }
-  return clip(JSON.stringify(value));
+  return '—';
 }
 
 // The whole stored value, exactly as the revision holds it: never shortened.
@@ -167,28 +171,30 @@ function fullValue(valueJson) {
   } catch {
     text = valueJson;
   }
-  return h('div', { class: 'field-value-full' }, h('div', { class: 'mini' }, '저장된 값 (전체)'), h('pre', { class: 'mono', 'data-role': 'field-value-full' }, text));
+  return h(
+    'details',
+    { class: 'field-value-full support-details' },
+    h('summary', {}, '원본 데이터 (문제 해결용)'),
+    h('pre', { class: 'mono', 'data-role': 'field-value-full' }, text),
+  );
 }
 
 function evidenceTable(evidence) {
-  if (!evidence.length) return h('div', { class: 'note' }, '기록된 근거가 없습니다.');
+  if (!evidence.length) return h('div', { class: 'note' }, '페이지에서 읽은 내용이 없습니다.');
   return h(
     'table',
     { class: 'table evidence-table', 'data-role': 'evidence' },
-    h('thead', {}, h('tr', {}, ...['종류', '위치', '관찰값', '정규화', '상태', '근거 지문'].map((label) => h('th', {}, label)))),
+    h('thead', {}, h('tr', {}, ...['페이지에서 읽은 값', '정리한 값', '상태'].map((label) => h('th', {}, label)))),
     h(
       'tbody',
       {},
       ...evidence.map((entry) =>
         h(
           'tr',
-          { 'data-evidence-kind': entry.kind },
-          h('td', { class: 'mono' }, entry.kind),
-          h('td', { class: 'mono' }, entry.locator),
+          { 'data-evidence-kind': entry.kind, 'data-locator': entry.locator, 'data-digest': entry.digest },
           h('td', {}, entry.observed ?? '—'),
           h('td', {}, entry.normalized ?? '—'),
           h('td', {}, statusChip(entry.status)),
-          h('td', { class: 'mono', title: entry.digest }, entry.digest.slice(0, 12)),
         ),
       ),
     ),
@@ -202,7 +208,7 @@ function fieldRows(field) {
   const toggle = h(
     'button',
     { type: 'button', class: 'btn', 'data-action': 'toggle-evidence', 'aria-expanded': 'false' },
-    field.status === 'CONFIRMED' ? `값·근거 ${field.evidence.length}` : `근거 ${field.evidence.length}`,
+    '자세히',
   );
   let detail = null;
   toggle.addEventListener('click', () => {
@@ -227,7 +233,7 @@ function fieldRows(field) {
   const row = h(
     'tr',
     { 'data-field': field.key, 'data-status': field.status, 'data-level': field.level },
-    h('td', {}, h('b', {}, label), ' ', h('span', { class: 'mini' }, LEVEL_LABEL[field.level] ?? field.level)),
+    h('td', {}, h('b', {}, label)),
     h('td', {}, statusChip(field.status)),
     h(
       'td',
@@ -243,22 +249,18 @@ function fieldRows(field) {
   return [row];
 }
 
-// The recorded reason, worded, with the codes kept beside it. An excluded reference reads its
+// The recorded reason, worded; the codes stay in a data attribute. An excluded reference reads its
 // closed exclusion row; otherwise the target refusal, which is more exact than FETCH_FAILED, and
 // then the issue. Nothing is inferred from the URL.
 function imageReason(image) {
   const codes = [image.exclusion, image.target_refusal, image.issue].filter(Boolean);
   if (!codes.length) return '—';
   const words = image.exclusion
-    ? EXCLUSION_COPY[image.exclusion] ?? image.exclusion
+    ? EXCLUSION_COPY[image.exclusion] ?? UNKNOWN_REASON
     : image.target_refusal
-      ? `가져오기 전 거절: ${REFUSAL_COPY[image.target_refusal] ?? image.target_refusal}`
-      : ISSUE_COPY[image.issue] ?? image.issue;
-  return fragment(
-    h('span', { 'data-role': 'image-reason' }, words),
-    ' ',
-    h('span', { class: 'mini mono', 'data-role': 'image-reason-codes' }, codes.join(' · ')),
-  );
+      ? `가져올 수 없는 주소: ${REFUSAL_COPY[image.target_refusal] ?? UNKNOWN_REASON}`
+      : ISSUE_COPY[image.issue] ?? UNKNOWN_REASON;
+  return h('span', { 'data-role': 'image-reason', 'data-codes': codes.join(' · ') }, words);
 }
 
 // The auto-selection notes of the Product DB Item bound to exactly this revision, through the
@@ -288,21 +290,23 @@ function selectionSummary(selection, errorCopy) {
     const undecided = values.filter((note) => note === 'COMMON_IMAGE_UNDECIDED').length;
     holder.dataset.blocked = String(blocked);
     holder.dataset.undecided = String(undecided);
+    holder.dataset.item = selection.itemId;
+    holder.dataset.selectionBlocked = selection.blocked ?? '';
     holder.append(
       h('span', {}, '공통 이미지 제외'),
       h(
         'b',
         {},
         selection.blocked
-          ? `자동 선택 안 함 · ${selection.blocked}`
-          : `${blocked + undecided}개 (차단 ${blocked} · 확인 필요 ${undecided}) · 통합DB 품목 ${selection.itemId.slice(0, 8)} 기준`,
+          ? BLOCKED_COPY[selection.blocked] ?? '자동 선택하지 않았습니다'
+          : `${blocked + undecided}개 (차단 ${blocked} · 확인 필요 ${undecided})`,
       ),
     );
     return holder;
   }
   const words = {
     NOT_MATERIALIZED: '통합DB 상품에 반영된 뒤 표시됩니다',
-    NOT_BOUND: '이 리비전에 묶인 통합DB 품목이 없어 표시하지 않습니다',
+    NOT_BOUND: '통합DB 상품에 연결된 뒤 표시됩니다',
   };
   holder.append(
     h('span', {}, '공통 이미지 제외'),
@@ -337,7 +341,7 @@ function imagesBlock(images, selection) {
 
 function imagesTable(images, selection) {
   const ready = selection?.state === 'READY';
-  const headers = ['역할', '순서', '호스트', '상태', '판정', '사유', '크기', ...(ready ? ['자동 선택'] : [])];
+  const headers = ['역할', '순서', '상태', '판정', '사유', '크기', ...(ready ? ['자동 선택'] : [])];
   return h(
     'table',
     { class: 'table', 'data-role': 'image-refs' },
@@ -348,12 +352,11 @@ function imagesTable(images, selection) {
       ...images.map((image) =>
         h(
           'tr',
-          { 'data-image-role': image.role, 'data-status': image.status, 'data-disposition': image.disposition ?? '' },
-          h('td', {}, ROLE_LABEL[image.role] ?? image.role),
+          { 'data-image-role': image.role, 'data-status': image.status, 'data-disposition': image.disposition ?? '', 'data-host': image.host ?? '' },
+          h('td', {}, ROLE_LABEL[image.role] ?? '이미지'),
           h('td', {}, String(image.ordinal)),
-          h('td', { class: 'mono', title: image.locator ?? '' }, image.host),
           h('td', {}, statusChip(image.status)),
-          h('td', {}, image.disposition ? DISPOSITION_LABEL[image.disposition] ?? image.disposition : '—'),
+          h('td', {}, image.disposition ? DISPOSITION_LABEL[image.disposition] ?? '확인 필요' : '—'),
           h(
             'td',
             {
@@ -375,7 +378,7 @@ function noteCell(note) {
   return h(
     'td',
     { 'data-note': note ?? '', 'data-common': String(COMMON_NOTES.includes(note)) },
-    note ? NOTE_COPY[note] ?? note : '—',
+    note ? NOTE_COPY[note] ?? '기타' : '—',
   );
 }
 
@@ -408,16 +411,15 @@ function kv(label, value) {
 const OVERSEAS_COSTS_COPY = {
   OVERSEAS_COSTS_REVISION_MOVED: '다른 곳에서 값이 바뀌었습니다. 새로 불러온 값을 확인한 뒤 다시 저장하세요.',
   OVERSEAS_COSTS_UNCHANGED: '바뀐 값이 없습니다.',
-  OVERSEAS_COSTS_SOURCE_UNKNOWN: '아직 상품DB에 없는 원천 상품입니다. 상품이 만들어진 뒤 입력할 수 있습니다.',
+  OVERSEAS_COSTS_SOURCE_UNKNOWN: '아직 통합DB에 없는 상품입니다. 통합DB에 반영된 뒤 입력할 수 있습니다.',
   REQUEST_INVALID: '입력값을 확인하세요. 해외 배송비는 0~10,000,000원, 관세율은 0~100(소수 둘째 자리까지)입니다.',
 };
 const OVERSEAS_COSTS_HELP =
   '해외 구매대행 상품의 원가 입력입니다. 해외 배송비는 공급처 현지 배송·배대지·국제 배송을 합친 1개당 금액이고, ' +
-  '비워 두면 설정 › 해외구매대행의 기본값을 씁니다. 가격은 서버가 송금 보낼때 환율(TTS)로 계산합니다.';
+  '비워 두면 설정 › 해외구매대행의 기본값을 씁니다. 가격은 송금 보낼 때 환율로 계산합니다.';
 
 function overseasCostsText(error) {
-  const code = error?.error?.code;
-  return OVERSEAS_COSTS_COPY[code] ?? error?.error?.message ?? String(error?.message ?? error);
+  return errorText(error, OVERSEAS_COSTS_COPY);
 }
 
 // A whole number as typed, or the text itself so the server refuses it; blank is the default (null).
@@ -514,11 +516,11 @@ export function collectFactsBlock(read, run, errorCopy) {
   }
   const { revision, selection } = read;
   holder.dataset.state = 'ready';
+  holder.dataset.extractor = revision.extractor_revision ?? '';
   const included = revision.images.filter((image) => image.disposition === 'INCLUDED').length;
   holder.append(fragment(
-    h('div', { class: 'supplier-head-row' }, withHelp(h('h4', { class: 'panel-title' }, '수집 사실'), HELP)),
+    h('div', { class: 'supplier-head-row' }, withHelp(h('h4', { class: 'panel-title' }, '수집한 정보'), HELP)),
     counts(revision.fields),
-    kv('추출 규칙', revision.extractor_revision),
     run.transport_kind ? kv('수집 경로', TRANSPORT_LABEL[run.transport_kind] ?? run.transport_kind) : null,
     h(
       'div',
@@ -529,11 +531,13 @@ export function collectFactsBlock(read, run, errorCopy) {
     selectionSummary(selection, errorCopy),
     // ADR-0038 §4: a source-currency product's own landed-cost inputs, beside its facts.
     revision.source_currency ? overseasCostsBlock(revision) : null,
-    revision.fingerprints_intact ? null : h('div', { class: 'note', 'data-reason': 'FINGERPRINTS_NOT_INTACT' }, '저장된 지문이 다시 계산한 값과 다릅니다.'),
+    revision.fingerprints_intact
+      ? null
+      : h('div', { class: 'note', 'data-reason': 'FINGERPRINTS_NOT_INTACT' }, '저장된 수집 정보가 손상되었을 수 있습니다. 다시 수집해 보세요.'),
     h(
       'table',
       { class: 'table', 'data-role': 'field-summary' },
-      h('thead', {}, h('tr', {}, ...['필드', '상태', '값', '근거'].map((label) => h('th', {}, label)))),
+      h('thead', {}, h('tr', {}, ...['항목', '상태', '값', ''].map((label) => h('th', {}, label)))),
       h('tbody', {}, ...revision.fields.flatMap(fieldRows)),
     ),
     imagesBlock(revision.images, selection),
@@ -618,7 +622,7 @@ export function collectPreviewBlock(run, read, { supplier, chips = [], errorCopy
         'div',
         { class: 'preview-name' },
         h('b', { 'data-role': 'preview-name', class: name?.status === 'CONFIRMED' ? null : 'no-data' }, name?.status === 'CONFIRMED' ? valueText(name.value_json) : name ? STATUS[name.status]?.[0] ?? name.status : NO_DATA),
-        h('div', { class: 'mini' }, read?.revision ? `${read.revision.supplier_key} · ${read.revision.source_product_id}` : run.source_url),
+        h('div', { class: 'mini' }, read?.revision ? `${supplier} · 상품번호 ${read.revision.source_product_id}` : run.source_url),
       ),
     ),
     read?.error ? h('div', { class: 'note', 'data-reason': read.error.code ?? '' }, errorCopy(read.error.code, read.error.message)) : null,

@@ -12,6 +12,7 @@ No provider is reached: a target policy is local configuration.
 """
 
 import contextlib
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from urllib.parse import urlsplit
@@ -24,6 +25,7 @@ from playwright.sync_api import Error as PlaywrightError
 from app.config import AppConfig
 from app.container import Container
 from app.main import create_app
+from app.stages.register.category_catalog import CategoryCatalogStore, ProviderCategory
 from tests.conftest import LOCAL
 from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.product_support import raw
@@ -46,9 +48,6 @@ TABLES = (
 VALUES = {
     "taxonomy_revision": "taxonomy-ui-1",
     "sanitizer_profile_version": "sanitizer-ui-1",
-    "fee_table_version": "fee-ui-1",
-    "pricing_policy_version": "pricing-ui-1",
-    "fee_rate": "0.055",
     "fee_fixed_krw": "0",
     "other_cost_rate": "0",
     "other_cost_fixed_krw": "0",
@@ -56,6 +55,10 @@ VALUES = {
     "min_images": "1",
     "max_images": "10",
 }
+# 2026-10-16: the fee rate is never typed; the seller picks a fee preset and the two parts fill
+# from the server's reference table (판매수수료 3.003% + 주문관리수수료 3.63% = 6.633%).
+PRESET = {"fee_store_type": "SMART_STORE", "fee_seller_grade": "GENERAL"}
+REFERENCE = "smartstore-fees-20251001"
 DELIVERY = {
     "base_fee_krw": "3000",
     "return_delivery_fee_krw": "3000",
@@ -136,10 +139,18 @@ def _fill_delivery(page: Page, account: str, values: dict[str, str]) -> None:
     editor.locator("[data-policy-field='physical_delivery']").check()
 
 
+def _pick_preset(page: Page, account: str, preset: dict[str, str]) -> None:
+    editor = page.locator(_editor(account))
+    editor.locator(f"[data-fee-reference='{REFERENCE}']").wait_for(timeout=10_000)
+    for name, value in preset.items():
+        editor.locator(f"[data-policy-field='{name}']").select_option(value)
+
+
 def _fill(page: Page, account: str, values: dict[str, str]) -> None:
     editor = page.locator(_editor(account))
     for name, value in values.items():
         editor.locator(f"[data-policy-field='{name}']").fill(value)
+    _pick_preset(page, account, PRESET)
     editor.locator("[data-policy-field='templates']").fill(
         "shipping=shipping-template-ui\nreturns=returns-template-ui"
     )
@@ -178,12 +189,19 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
                 assert editor.locator(f"[data-policy-field='{reference}']").count() == 0
                 shown = editor.locator(f"[data-policy-reference='{reference}']")
                 assert shown.locator("input, textarea, select").count() == 0
-                assert "서버 소유 리비전" in shown.inner_text()
+                assert "자동으로 기록됩니다" in shown.inner_text()
+            # 2026-10-16: the two pricing labels are the server's too; the seller types only fees.
+            for reference in ("fee_table_version", "pricing_policy_version"):
+                assert editor.locator(f"[data-policy-field='{reference}']").count() == 0
+                shown = editor.locator(f"[data-policy-reference='{reference}']")
+                assert shown.locator("input, textarea, select").count() == 0
             # The delivery fields are not on this tab: they live in 배송 관리.
             assert editor.locator("[data-policy-field='base_fee_krw']").count() == 0
             _fill(page, account, VALUES)
             _save(page, account, 1)
-            assert "현재 리비전 #1" in _state(page, account)[2]
+            assert "저장됨" in _state(page, account)[2]
+            chip = page.locator(f"{_editor(account)} [data-policy-state]")
+            assert chip.get_attribute("data-policy-revision") == "1"
         with _page(browser, client, SHIPPING_TAB, _editor(account), writes) as page:
             editor = page.locator(_editor(account))
             assert editor.get_attribute("data-policy-section") == "delivery"
@@ -192,7 +210,7 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
             _save(page, account, 2)
             saved = _state(page, account)
             assert saved[:2] == ("saved", "2")
-            assert "현재 리비전 #2" in saved[2]
+            assert "저장됨" in saved[2]
             revisions = f"/api/v1/settings/target-policies/{MARKETPLACE}/{account}/revisions"
             assert writes == [("POST", revisions), ("POST", revisions)]
             # A reload rebuilds the same state from the server, nothing kept in the page.
@@ -207,6 +225,10 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
         # The save sent null for both; the server stamped its owner's revisions.
         assert stored.inputs.category_mapping_revision
         assert stored.inputs.detail_composition_revision
+        # And the pricing labels: stamped from the saved fees, kept by the delivery-only save.
+        pricing = stored.inputs.pricing_context
+        assert re.fullmatch(r"fees-\d{8}-[0-9a-f]{12}", pricing.fee_table_version or "")
+        assert re.fullmatch(r"pricing-\d{8}-[0-9a-f]{12}", pricing.pricing_policy_version or "")
     # A restart: a new process owns the same data directory and serves the same durable policy.
     with (
         _served(config) as client,
@@ -218,7 +240,7 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
         target = restarted.registration_preflight.target_policy(MARKETPLACE, account)
         assert target is not None and target.policy_revision == current.policy_revision
         # The delivery save kept the policy tab's values whole.
-        assert target.pricing_context.fee_rate == "0.055"
+        assert target.pricing_context.fee_rate == "0.06633"
         assert target.delivery_policy is not None
         assert target.delivery_policy.shipping_address_id == 200441202
         assert target.delivery_policy.return_address_id == 200401837
@@ -242,8 +264,8 @@ def test_the_save_bar_is_server_owned_and_general_settings_stay_read_only(
         )
         text = chip.inner_text()
         assert "M0" not in text
-        assert "일반 설정은 저장 계약이 없어 읽기 전용입니다" in text
-        assert "등록 대상 정책" in text and "카테고리 메타데이터" in text
+        assert "회색 칸은 아직 설정할 수 없습니다" in text
+        assert "등록 정책" in text and "카테고리 정보" in text
         # ADR-0039 §4: the supplier sales policy is saved from the supplier card.
         assert "공급처 판매정책 (수집관리 › 공급처 관리)" in text
         # ADR-0038 §5: the overseas settings are saved from their own card.
@@ -254,13 +276,35 @@ def test_the_save_bar_is_server_owned_and_general_settings_stay_read_only(
         assert all(
             fields.nth(i).get_attribute("readonly") is not None for i in range(fields.count())
         )
-        general_save = page.locator(".savebar-actions button", has_text="설정 저장")
-        assert general_save.get_attribute("aria-disabled") == "true"
-        # Even a forced click on it only explains itself: it reaches no contract.
-        general_save.click(force=True)
-        page.locator(".toast").first.wait_for(timeout=5_000)
+        # There is no general save: each saveable setting has its own card button, and a card
+        # with nothing saveable says so plainly.
+        assert page.locator(".savebar-actions").count() == 0
+        assert page.locator(".setting-card[data-pending='true'] .setting-pending").count() > 0
         assert writes == []
     assert _counts(config) == dict.fromkeys(TABLES, 0)
+
+
+def test_each_account_editor_names_its_own_stable_account(
+    browser: Browser, config: AppConfig
+) -> None:
+    """With two accounts, each editor reads its own account id — not 「판매 계정 1/2」, a position
+    that moves when the list changes — so the seller knows whose policy a save changes (PR #369
+    audit, DUPLICATE_OR_WRONG_SEND)."""
+    writes: list[tuple[str, str]] = []
+    with _served(config) as client:
+        served: Container = client.app.state.container  # type: ignore[attr-defined]
+        first = establish(served, config, MARKETPLACE, "uid-smartstore-1")
+        second = establish(served, config, MARKETPLACE, "uid-smartstore-2")
+        with _page(browser, client, POLICY_TAB, _editor(second), writes) as page:
+            shown = "[data-role='policy-account']"
+            texts = {
+                account: page.locator(f"{_editor(account)} {shown}").inner_text()
+                for account in (first, second)
+            }
+        assert first in texts[first] and second in texts[second]
+        assert second not in texts[first] and first not in texts[second]
+        assert not any(re.search(r"계정 \d", text) for text in texts.values())
+        assert writes == []
 
 
 def test_a_refused_save_shows_the_server_reason_and_writes_nothing(
@@ -273,7 +317,7 @@ def test_a_refused_save_shows_the_server_reason_and_writes_nothing(
         with _page(browser, client, POLICY_TAB, _editor(account), writes) as page:
             _fill(page, account, {**VALUES, "min_images": "5", "max_images": "2"})
             page.locator(f"{_editor(account)} button[data-action='save-target-policy']").click()
-            toast = page.locator(".toast", has_text="TARGET_POLICY_INVALID")
+            toast = page.locator(".toast", has_text="입력값을 확인하세요")
             toast.wait_for(timeout=10_000)
             assert _state(page, account)[:2] == ("none", "0")
             # The typed values stay for a fix; nothing was promoted locally.
@@ -343,3 +387,101 @@ def test_the_naver_address_book_becomes_named_dropdowns_and_the_choice_is_saved(
         assert target.delivery_policy.return_address_id == 200583581
     revisions = f"/api/v1/settings/target-policies/{MARKETPLACE}/{account}/revisions"
     assert writes == [("POST", revisions), ("POST", revisions)]
+
+
+def test_the_taxonomy_is_aligned_to_the_naver_catalog_only_after_the_seller_confirms(
+    browser: Browser, config: AppConfig
+) -> None:
+    writes: list[tuple[str, str]] = []
+    with _served(config) as client:
+        served: Container = client.app.state.container  # type: ignore[attr-defined]
+        account = establish(served, config, MARKETPLACE, "uid-smartstore-1")
+        CategoryCatalogStore(served.db, served.clock, served.audit).record(
+            MARKETPLACE,
+            (ProviderCategory("50000803", "비타민", "식품>건강식품>비타민", True),),
+            endpoint_mapping_revision="test",
+            actor="operator",
+            correlation_id="align-catalog",
+        )
+        latest = served.category_catalog.catalog(MARKETPLACE, limit=1).taxonomy_revision
+        assert latest
+        with _page(browser, client, POLICY_TAB, _editor(account), writes) as page:
+            editor = page.locator(_editor(account))
+            state = editor.locator("[data-taxonomy-state='BEHIND']")
+            state.wait_for(timeout=10_000)
+            assert "다릅니다" in state.inner_text()
+            editor.locator("button[data-action='align-taxonomy']").click()
+            confirm = page.locator("[data-role='align-taxonomy-confirm']")
+            confirm.wait_for()
+            # Nothing changes before the seller confirms.
+            field = editor.locator("[data-policy-field='taxonomy_revision']")
+            assert field.input_value() == ""
+            page.locator("button[data-action='confirm-align-taxonomy']").click()
+            assert field.input_value() == latest
+            editor.locator("[data-taxonomy-state='CURRENT']").wait_for()
+            assert editor.locator("button[data-action='align-taxonomy']").is_disabled()
+            assert writes == []
+            values = {key: value for key, value in VALUES.items() if key != "taxonomy_revision"}
+            _fill(page, account, values)
+            _save(page, account, 1)
+        target = served.registration_preflight.target_policy(MARKETPLACE, account)
+        assert target is not None and target.taxonomy_revision == latest
+
+
+def test_the_fee_preset_fills_the_fees_and_marks_what_the_seller_changed(
+    browser: Browser, config: AppConfig
+) -> None:
+    writes: list[tuple[str, str]] = []
+    with _served(config) as client:
+        served: Container = client.app.state.container  # type: ignore[attr-defined]
+        account = establish(served, config, MARKETPLACE, "uid-smartstore-1")
+        with _page(browser, client, POLICY_TAB, _editor(account), writes) as page:
+            editor = page.locator(_editor(account))
+            # The free-typed fee rate is gone: the rate is composed from the preset.
+            assert editor.locator("[data-policy-field='fee_rate']").count() == 0
+            _fill(page, account, VALUES)
+            sales = editor.locator("[data-policy-field='sales_fee_percent']")
+            order = editor.locator("[data-policy-field='order_fee_percent']")
+            assert (sales.input_value(), order.input_value()) == ("3.003", "3.63")
+            total = editor.locator("[data-fee-total]")
+            assert total.get_attribute("data-fee-total") == "0.06633"
+            assert "판매수수료 3.003% + 주문관리수수료 3.63% = 6.633%" in total.inner_text()
+            for name in ("sales_fee_percent", "order_fee_percent"):
+                mark = editor.locator(f"[data-fee-source='{name}']")
+                assert mark.get_attribute("data-fee-state") == "REFERENCE"
+                assert mark.inner_text() == "참고값"
+            # 참고값 · 기준일 · 출처, and the line telling the seller to fix a different notice.
+            reference = editor.locator(f"[data-fee-reference='{REFERENCE}']").inner_text()
+            assert "참고값 · 기준일 2025-10-01" in reference
+            assert "네이버 공식 공지가 아닙니다" in reference
+            notice = editor.locator("[data-fee-hint='notice']").inner_text()
+            assert "판매자센터 공지와 다르면 직접 고쳐 주세요" in notice
+            shipping = editor.locator("[data-fee-hint='shipping']").inner_text()
+            assert "건당 기타 비용" in shipping and "≈ 109원" in shipping
+            # Another grade fills its own reference value; a changed number is 직접 입력.
+            editor.locator("[data-policy-field='fee_seller_grade']").select_option("SMALL")
+            assert order.input_value() == "1.947"
+            order.fill("1.9")
+            mark = editor.locator("[data-fee-source='order_fee_percent']")
+            assert mark.get_attribute("data-fee-state") == "MANUAL"
+            assert mark.inner_text() == "직접 입력"
+            assert total.get_attribute("data-fee-total") == "0.04903"
+            assert writes == []
+            _save(page, account, 1)
+            # A reload shows the saved preset again, the changed number still marked.
+            page.reload()
+            page.wait_for_selector(f"{_editor(account)} [data-fee-reference='{REFERENCE}']")
+            grade = editor.locator("[data-policy-field='fee_seller_grade']")
+            assert grade.input_value() == "SMALL"
+            assert order.input_value() == "1.9"
+            assert mark.get_attribute("data-fee-state") == "MANUAL"
+        stored = served.target_policies.policy(MARKETPLACE, account).inputs
+        assert stored is not None and stored.fee_preset is not None
+        assert stored.pricing_context.fee_rate == "0.04903"
+        assert stored.fee_preset.model_dump(mode="json") == {
+            "store_type": "SMART_STORE",
+            "seller_grade": "SMALL",
+            "reference_version": REFERENCE,
+            "sales_fee_rate": "0.03003",
+            "order_fee_rate": "0.019",
+        }

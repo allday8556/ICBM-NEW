@@ -6,7 +6,8 @@ revision, creates its identity, fingerprint, review provenance and audit record,
 current; a route never computes any of that. Every other Settings field stays read-only because no
 save contract exists for it.
 
-No route here reaches a provider or a marketplace: both are local, operator-recorded truth.
+No route here reaches a provider or a marketplace: both are local, operator-recorded truth. The
+fee reference table is local read-only reference data the form fills from (never saved here).
 """
 
 from fastapi import APIRouter, Query
@@ -15,10 +16,12 @@ from app.interface.api.deps import ContainerDep
 from app.platform.core.correlation import get_correlation_id, new_correlation_id
 from app.stages.register.category_catalog import CategoryCatalogView
 from app.stages.register.category_metadata import (
+    CategoryMetadataFormView,
     CategoryMetadataListView,
     CategoryMetadataView,
     RecordRevisionRequest,
 )
+from app.stages.register.fee_reference import FeeReferenceView, fee_reference
 from app.stages.register.target_policy import (
     AppendRevisionRequest,
     TargetPolicyAccountsView,
@@ -68,12 +71,27 @@ def append_revision(
     )
 
 
+@router.get("/fee-reference/{marketplace_key}")
+def fee_reference_table(marketplace_key: str) -> FeeReferenceView:
+    """The read-only fee reference table the target-policy form fills its fee fields from:
+    reference values with their version, reference date and sources, never a saved fee."""
+    return fee_reference(marketplace_key)
+
+
 @router.get("/category-metadata/{marketplace_key}")
 def category_metadata_entries(
     container: ContainerDep, marketplace_key: str
 ) -> CategoryMetadataListView:
     """Every recorded category of the marketplace with its current revision and history."""
     return container.category_metadata.entries(marketplace_key)
+
+
+@router.get("/category-metadata-form/{marketplace_key}")
+def category_metadata_form(
+    container: ContainerDep, marketplace_key: str
+) -> CategoryMetadataFormView:
+    """The metadata form's choices (the notice types by their Korean names) and starting values."""
+    return container.category_metadata.form(marketplace_key)
 
 
 @router.get("/category-metadata/{marketplace_key}/{taxonomy_revision}/{category_id}")

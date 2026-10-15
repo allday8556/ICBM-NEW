@@ -38,8 +38,10 @@ pytestmark = pytest.mark.integration
 
 TIMEOUT = 15_000
 
-# The DOM order of the preview's detail structure, by role.
+# The DOM order of the preview's detail structure, by role. The line naming the sections in Korean
+# (2026-10-15 jargon sweep) is the structure's summary, not one of its parts.
 ORDER = """(detail) => Array.from(detail.children).map((child) => {
+  if (child.dataset.role === 'preview-sections') return 'other';
   if (child.dataset.role) return child.dataset.role;
   if (child.tagName === 'P') return 'paragraph';
   return child.textContent.includes('상세 이미지') ? 'detail-images' : 'other';

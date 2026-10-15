@@ -18,6 +18,7 @@
 
 import { getJson, sendJson } from '../../core/api.js';
 import { h } from '../../core/dom.js';
+import { errorText } from '../../core/errors.js';
 import { openModal } from '../../core/modal.js';
 import { toast } from '../../core/toast.js';
 import { ONBOARDING } from './onboarding.js';
@@ -76,16 +77,16 @@ const RULE_LABEL = {
 };
 
 const STRUCTURAL_COPY = {
-  SCRIPT_RENDERED: '상품 정보가 페이지 HTML에 없습니다(스크립트로 그려지는 페이지).',
+  SCRIPT_RENDERED: '상품 정보가 페이지에 바로 보이지 않는 방식의 쇼핑몰입니다.',
   PRODUCT_BLOCK_NOT_FOUND: '상품 정보 영역을 찾지 못했습니다.',
   PRICE_BLOCK_NOT_FOUND: '가격 영역을 찾지 못했습니다.',
   PRICE_BLOCK_UNREADABLE: '가격 칸이 금액 하나로 읽히지 않습니다.',
   IDENTITY_UNRESOLVED: '페이지가 상품 번호를 일관되게 밝히지 않습니다.',
   DUPLICATED_ORDER_LIST: '상품 영역이나 주문 목록이 중복되어 있습니다.',
-  CAPTURE_DIVERGES: '저장본이 페이지와 다르게 읽힙니다(상품 영역 밖의 내용을 템플릿이 읽음). 이 샘플로는 승인할 수 없습니다.',
+  CAPTURE_DIVERGES: '저장한 화면과 실제 페이지가 다르게 읽힙니다. 이 샘플로는 확인할 수 없습니다.',
 };
 
-const ROLE_LABEL = { image: '이미지', login: '로그인', asset: '자산(수집에 쓰이지 않음)' };
+const ROLE_LABEL = { image: '이미지', login: '로그인', asset: '기타 (수집에 쓰지 않음)' };
 
 const ERROR_COPY = {
   ONBOARDING_SAMPLE_REFUSED: '이 공급처 쇼핑몰의 상품 페이지 주소만 샘플로 읽습니다.',
@@ -93,24 +94,24 @@ const ERROR_COPY = {
   ONBOARDING_SAMPLE_ALREADY_READ: '이미 읽은 샘플입니다. 샘플은 한 번만 읽고, 수집 규칙이 바뀌면 다시 분석으로 저장본을 다시 봅니다.',
   ONBOARDING_TRIAL_PENDING: '이 샘플은 이미 읽기 대기 중입니다.',
   ONBOARDING_TRIAL_TOO_SOON: '너무 이른 읽기입니다. 읽기 사이에는 10초를 둡니다.',
-  ONBOARDING_NOT_RECON: '분석 중(RECON)인 공급처만 사이트 분석을 합니다.',
+  ONBOARDING_NOT_RECON: '분석 중인 공급처만 사이트 분석을 합니다.',
   ONBOARDING_SAMPLE_UNREAD: '상품 페이지 대신 다른 응답(로그인 이동 등)을 받았습니다. 연결 테스트 후 다시 읽으세요.',
   ONBOARDING_SITE_UNBOUND: '이 공급처는 지금 연결할 수 없습니다.',
-  ONBOARDING_HOST_ROLE_UNOBSERVED: '분석에서 그 역할로 관찰된 호스트만 확인할 수 있습니다.',
-  ONBOARDING_HOST_REFUSED: '허용되지 않는 호스트입니다(IP·포트·사설 주소 불가).',
-  ONBOARDING_HOST_UNCHANGED: '이미 확인된 호스트입니다.',
+  ONBOARDING_HOST_ROLE_UNOBSERVED: '분석에서 그 용도로 쓰인 주소만 확인할 수 있습니다.',
+  ONBOARDING_HOST_REFUSED: '허용할 수 없는 주소입니다.',
+  ONBOARDING_HOST_UNCHANGED: '이미 확인된 주소입니다.',
   ONBOARDING_WORDS_MOVED: '분석 중에 수집 규칙이 바뀌었습니다. 다시 분석하세요.',
-  ONBOARDING_TRIAL_NOT_VERIFIABLE: '핵심 필드를 모두 읽고 템플릿 수정이 필요 없는 샘플만 맞다고 확인할 수 있습니다.',
+  ONBOARDING_TRIAL_NOT_VERIFIABLE: '핵심 항목을 모두 읽었고 추가 지원이 필요 없는 샘플만 맞다고 확인할 수 있습니다.',
   ONBOARDING_TRIAL_NOT_CURRENT: '지금 수집 규칙의 결과가 아닙니다. 「다시 분석」 후 확인하세요.',
   ONBOARDING_VERIFICATION_STALE: '확인한 값이 지금 결과와 다릅니다. 창을 닫았다 다시 여세요.',
   ONBOARDING_SAMPLE_RETIRED: '이미 분석에서 제외한 샘플입니다.',
   ONBOARDING_RETIREMENT_REASON_INVALID: '제외 사유를 1~200자로 적어 주세요.',
-  ONBOARDING_ACTIVATION_NOT_PROVEN: '아직 사용 시작 조건(서로 다른 샘플 3개 값 확인, 템플릿 수정 필요 없음)을 채우지 못했습니다.',
+  ONBOARDING_ACTIVATION_NOT_PROVEN: '아직 사용 시작 조건(서로 다른 샘플 3개 값 확인, 지원 필요 없음)을 채우지 못했습니다.',
 };
 
 export function message(error, fallback) {
   const code = error?.error?.code;
-  return ERROR_COPY[code] ?? fallback?.(error) ?? error?.error?.message ?? String(error?.message ?? error);
+  return ERROR_COPY[code] ?? fallback?.(error) ?? errorText(error);
 }
 
 const IMAGE_ROLE = { PRIMARY: '대표', THUMBNAIL: '추가', DETAIL: '상세', PRODUCT_AUX: '보조' };
@@ -190,7 +191,7 @@ function unreadTable(sample) {
   return h(
     'table',
     { class: 'table analysis-unread', 'data-role': 'unread-rows' },
-    h('thead', {}, h('tr', {}, h('th', {}, '읽지 못한 행/문구'), h('th', {}, '값'), h('th', {}, '제안 슬롯'))),
+    h('thead', {}, h('tr', {}, h('th', {}, '읽지 못한 행/문구'), h('th', {}, '값'), h('th', {}, '추천 항목'))),
     h(
       'tbody',
       {},
@@ -202,8 +203,8 @@ function unreadTable(sample) {
           h('td', { class: 'analysis-value' }, u.value || '-'),
           h(
             'td',
-            { 'data-candidate': u.candidate ?? '' },
-            u.candidate ? `${SLOT_LABEL[u.candidate] ?? u.candidate} · ${RULE_LABEL[u.rule] ?? u.rule}` : '제안 없음',
+            { 'data-candidate': u.candidate ?? '', 'data-rule': u.rule ?? '' },
+            u.candidate ? SLOT_LABEL[u.candidate] ?? '기타 항목' : '제안 없음',
           ),
         ),
       ),
@@ -253,8 +254,36 @@ function verdictLine(sample, verify) {
   );
 }
 
+// ADR-0036 §7 (O5): 「값이 맞음」 and 「사용 시작」 confirm the images field itself, not a count, so
+// every product image the sample read is listed — its order, role and address — beside those
+// buttons. The UI loads nothing from another site (CSP img-src 'self') and the analysis downloads no
+// image, so each address is a link that opens the supplier's own image in a new tab.
+function imageList(sample) {
+  const items = sample.summary?.images?.items ?? [];
+  if (!items.length) return null;
+  return h(
+    'div',
+    { class: 'analysis-images', 'data-role': 'image-urls', 'data-count': String(items.length) },
+    h('div', { class: 'mini' }, `찾은 이미지 ${items.length}장 · 주소를 누르면 새 창에서 실제 이미지를 엽니다.`),
+    h(
+      'ol',
+      { class: 'analysis-image-list' },
+      items.map((item) =>
+        h(
+          'li',
+          { 'data-image-rank': String(item.rank), 'data-image-role': item.role },
+          h('span', { class: 'chip' }, IMAGE_ROLE[item.role] ?? '기타'),
+          ' ',
+          /^https?:\/\//.test(item.url ?? '')
+            ? h('a', { href: item.url, target: '_blank', rel: 'noopener noreferrer', title: item.url, 'data-image-url': item.url }, item.url)
+            : h('span', { class: 'mini', 'data-image-url': '' }, '주소를 읽지 못했습니다'),
+        ),
+      ),
+    ),
+  );
+}
+
 function sampleBlock(sample, verify, retire) {
-  const images = sample.summary?.images?.urls ?? [];
   return h(
     'div',
     { class: sample.retired_reason ? 'analysis-sample retired' : 'analysis-sample', 'data-sample': sample.sample_url },
@@ -275,16 +304,16 @@ function sampleBlock(sample, verify, retire) {
       h(
         'div',
         { class: 'note', 'data-structural': code },
-        h('span', { class: 'chip bad' }, '템플릿 수정 필요'),
+        h('span', { class: 'chip bad' }, '추가 지원 필요'),
         ' ',
-        STRUCTURAL_COPY[code] ?? code,
+        STRUCTURAL_COPY[code] ?? '이 쇼핑몰 화면은 아직 읽을 수 없습니다.',
       ),
     ),
     sample.summary === null && !sample.structural.length
-      ? h('div', { class: 'note' }, '저장된 캡처로 이 결과를 다시 만들 수 없습니다. 「다시 분석」 또는 다시 읽으세요.')
+      ? h('div', { class: 'note' }, '저장한 화면으로 이 결과를 다시 만들 수 없습니다. 「다시 분석」하거나 다시 읽으세요.')
       : null,
     fieldTable(sample),
-    images.length ? h('div', { class: 'mini analysis-images', 'data-role': 'image-urls' }, images.join('\n')) : null,
+    imageList(sample),
     verdictLine(sample, verify),
     retirementLine(sample, retire),
     unreadTable(sample),
@@ -292,16 +321,16 @@ function sampleBlock(sample, verify, retire) {
 }
 
 function hostTable(view, act) {
-  if (!view.observed_hosts.length) return h('div', { class: 'mini' }, '관찰된 호스트가 없습니다.');
+  if (!view.observed_hosts.length) return h('div', { class: 'mini' }, '분석에서 쓰인 다른 주소가 없습니다.');
   return h(
     'table',
     { class: 'table analysis-hosts', 'data-role': 'observed-hosts' },
-    h('thead', {}, h('tr', {}, h('th', {}, '호스트'), h('th', {}, '역할'), h('th', {}, '횟수'), h('th', {}, ''))),
+    h('thead', {}, h('tr', {}, h('th', {}, '주소'), h('th', {}, '용도'), h('th', {}, '횟수'), h('th', {}, ''))),
     h(
       'tbody',
       {},
       view.observed_hosts.map((host) => {
-        let action = h('span', { class: 'mini' }, host.refusal ? `허용 불가(${host.refusal})` : '-');
+        let action = h('span', { class: 'mini', 'data-refusal': host.refusal ?? '' }, host.refusal ? '허용 불가' : '-');
         if (host.confirmed) {
           action = h(
             'span',
@@ -316,7 +345,7 @@ function hostTable(view, act) {
           'tr',
           { 'data-host': host.host, 'data-role-name': host.role },
           h('td', { class: 'analysis-value' }, host.host),
-          h('td', {}, ROLE_LABEL[host.role] ?? host.role),
+          h('td', {}, ROLE_LABEL[host.role] ?? '기타'),
           h('td', {}, String(host.count)),
           h('td', {}, action),
         );
@@ -384,14 +413,14 @@ export async function openSiteAnalysis(record, { waitForJob, errorMessage, onCha
     const proven = view.activation.proven_samples;
     start.title = view.can_activate
       ? '확인한 샘플로 이 공급처의 수집을 시작합니다.'
-      : `서로 다른 샘플 ${required}개의 값을 확인해야 하고, 템플릿 수정이 필요한 샘플이 없어야 합니다.`;
+      : `서로 다른 샘플 ${required}개의 값을 확인해야 하고, 추가 지원이 필요한 샘플이 없어야 합니다.`;
     progress.replaceChildren(
       h('b', { 'data-role': 'ready-count' }, `샘플 ${ready}/${required} 확인 가능`),
       h('b', { 'data-role': 'proven-count' }, ` · 값 확인 ${proven}/${required}`),
       h(
         'span',
-        { class: 'mini' },
-        ` · 현재 수집 규칙 w${view.words_seq} · 템플릿 ${view.template_revision} · 샘플 ${view.samples_taken}/${view.sample_limit}`,
+        { class: 'mini', 'data-words-seq': String(view.words_seq), 'data-template-revision': view.template_revision ?? '' },
+        ` · 읽은 샘플 ${view.samples_taken}/${view.sample_limit}`,
       ),
       view.state === 'RECON' ? start : h('span', { class: 'chip good', 'data-role': 'active' }, '사용 중'),
     );
@@ -402,14 +431,14 @@ export async function openSiteAnalysis(record, { waitForJob, errorMessage, onCha
           ? h(
               'div',
               { 'data-stale': 'true', 'data-stale-sample': s.sample_url },
-              h('div', { class: 'note' }, `이전 수집 규칙(w${s.words_seq})의 결과입니다. 분석에서 제외한 샘플이라 그때의 값과 경고를 그대로 보여 줍니다.`),
+              h('div', { class: 'note', 'data-words-seq': String(s.words_seq) }, '이전 수집 규칙의 결과입니다. 분석에서 제외한 샘플이라 그때의 값과 경고를 그대로 보여 줍니다.'),
               sampleBlock(s.retired_trial, verify, retire),
             )
           : h(
               'div',
               { class: 'analysis-sample', 'data-sample': s.sample_url, 'data-stale': 'true' },
               h('b', { class: 'analysis-url' }, s.sample_url),
-              h('div', { class: 'note' }, `이전 수집 규칙(w${s.words_seq})의 결과입니다. 「다시 분석」으로 저장된 캡처를 다시 읽습니다.`),
+              h('div', { class: 'note', 'data-words-seq': String(s.words_seq) }, '이전 수집 규칙의 결과입니다. 「다시 분석」을 누르면 저장한 화면을 지금 규칙으로 다시 읽습니다.'),
             ),
       ),
     );
@@ -524,7 +553,7 @@ export async function openSiteAnalysis(record, { waitForJob, errorMessage, onCha
   });
 
   openModal({
-    eyebrow: 'COLLECT · Site Analysis',
+    eyebrow: '공급처 관리',
     title: `사이트 분석 · ${record.display_name}`,
     help: '샘플 상품 페이지를 한 번만 읽어 각 필드를 읽었는지 보여 줍니다. 읽기 사이에는 10초를 두고, 같은 상품은 일반 수집과 합쳐 60초 안에 다시 읽지 않으며, 이미지는 내려받지 않습니다.',
     body: h(
@@ -534,8 +563,8 @@ export async function openSiteAnalysis(record, { waitForJob, errorMessage, onCha
       h('div', { class: 'analysis-add' }, url, add, reanalyse),
       status,
       samples,
-      h('h3', { class: 'panel-title analysis-hosts-title' }, '관찰된 호스트'),
-      h('div', { class: 'mini' }, '이미지·로그인 호스트를 확인하면 이 공급처의 수집 허용 호스트에 추가됩니다. 언제든 해제할 수 있습니다.'),
+      h('h3', { class: 'panel-title analysis-hosts-title' }, '이미지·로그인 주소'),
+      h('div', { class: 'mini' }, '이 공급처가 쓰는 이미지·로그인 주소를 확인하면 수집에 쓸 수 있게 됩니다. 언제든 해제할 수 있습니다.'),
       hosts,
     ),
   });

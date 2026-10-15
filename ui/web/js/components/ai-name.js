@@ -8,11 +8,12 @@
 // unchanged; otherwise it is one job, and this panel reads the owner again until a newer result is
 // recorded. The page decides nothing and computes no recommendation.
 
-import { ApiError, getJson, sendJson } from '../core/api.js';
+import { getJson, sendJson } from '../core/api.js';
 import { h } from '../core/dom.js';
+import { errorText } from '../core/errors.js';
 import { markInert } from '../core/inert.js';
 import { toast } from '../core/toast.js';
-import { stateText } from './ai-provider.js';
+import { sellerStateText } from './ai-provider.js';
 
 export const NAME_TASK = 'TASK_PRODUCT_RECOMMEND_BUNDLE_V1';
 export const NAME_RESULT = 'product_name';
@@ -20,24 +21,30 @@ const OPERATOR = 'operator';
 const POLL_MS = 2000;
 const POLL_LIMIT = 90; // three minutes
 
-const STALE_COPY = { facts: '상품 정보', prompt: '프롬프트', policy: '정책', provider: 'AI 공급자', schema: '결과 형식' };
-const ERROR_COPY = {
-  AI_OUTPUT_SCHEMA_INVALID: 'AI 답변이 결과 형식(근거 · 신뢰도 · 검토 필요)을 지키지 않았습니다',
-  AI_OUTPUT_FIELD_MISSING: 'AI 답변에 상품명 추천이 없습니다',
-  AI_OUTPUT_NOT_JSON: 'AI 답변이 JSON이 아닙니다',
-  AI_SIDECAR_UNREACHABLE: 'CLIProxyAPI에 연결하지 못했습니다',
-  AI_SIDECAR_AUTH: 'CLIProxyAPI 로그인이 필요합니다',
-  AI_SIDECAR_RATE_LIMITED: 'AI 사용량 제한에 걸렸습니다',
-  AI_SIDECAR_HTTP_ERROR: 'CLIProxyAPI가 오류로 답했습니다',
-  AI_EXECUTABLE_MISMATCH: '지금 실행 중인 CLIProxyAPI가 승인한 파일과 다릅니다',
-  AI_EXECUTABLE_NOT_SERVING: '승인한 CLIProxyAPI가 실행 중이 아닙니다',
-  AI_ROUTING_MISMATCH: 'CLIProxyAPI 라우팅 설정이 승인한 설정과 다릅니다',
-  AI_ROUTING_UNREADABLE: 'CLIProxyAPI 설정 파일을 읽을 수 없습니다',
-  AI_SIDECAR_KEY_UNREADABLE: 'CLIProxyAPI 설정에서 접속 키를 읽을 수 없습니다',
-  AI_PROVENANCE_MISMATCH: '답한 AI가 요청한 공급자와 다릅니다',
-  AI_DAILY_CAP_REACHED: '오늘 호출 상한에 도달했습니다',
-  AI_PROVIDER_NOT_CONFIGURED: 'AI 공급자가 준비되지 않았습니다',
+// Why an AI request failed, in plain words; anything about the AI program's setup points to 설정 › AI.
+const SETUP = 'AI 연결 설정을 확인해야 합니다 (설정 › AI)';
+export const AI_ERROR_COPY = {
+  AI_OUTPUT_SCHEMA_INVALID: 'AI 답변 형식이 올바르지 않습니다. 다시 추천 받으세요',
+  AI_OUTPUT_FIELD_MISSING: 'AI 답변에 추천이 없습니다. 다시 추천 받으세요',
+  AI_OUTPUT_NOT_JSON: 'AI 답변 형식이 올바르지 않습니다. 다시 추천 받으세요',
+  AI_SIDECAR_UNREACHABLE: 'AI 프로그램에 연결하지 못했습니다. 실행 중인지 확인하세요 (설정 › AI)',
+  AI_SIDECAR_AUTH: 'AI 프로그램 로그인이 필요합니다 (설정 › AI)',
+  AI_SIDECAR_RATE_LIMITED: 'AI 사용량 제한에 걸렸습니다. 잠시 후 다시 시도하세요',
+  AI_SIDECAR_HTTP_ERROR: 'AI 프로그램이 오류로 답했습니다. 잠시 후 다시 시도하세요',
+  AI_EXECUTABLE_MISMATCH: SETUP,
+  AI_EXECUTABLE_NOT_SERVING: 'AI 프로그램이 실행 중이 아닙니다 (설정 › AI)',
+  AI_ROUTING_MISMATCH: SETUP,
+  AI_ROUTING_UNREADABLE: SETUP,
+  AI_SIDECAR_KEY_UNREADABLE: SETUP,
+  AI_PROVENANCE_MISMATCH: '요청하지 않은 AI가 답했습니다 (설정 › AI)',
+  AI_DAILY_CAP_REACHED: '오늘 AI 사용 한도에 도달했습니다',
+  AI_PROVIDER_NOT_CONFIGURED: 'AI가 아직 설정되지 않았습니다 (설정 › AI)',
 };
+const ERROR_COPY = AI_ERROR_COPY;
+// A result whose inputs changed since it was made: the reasons stay in data-stale-reasons.
+export function staleChip(role, result) {
+  return h('span', { class: 'chip warn', 'data-role': role, 'data-stale-reasons': result.stale_reasons.join(' ') }, '정보가 바뀜 · 다시 추천 받으세요');
+}
 
 export function enrichmentUrl(productGroupId) {
   return `/api/v1/products/${encodeURIComponent(productGroupId)}/enrichment`;
@@ -49,9 +56,7 @@ export function nameResult(view) {
 }
 
 function errorCopy(error) {
-  // Never the server's English message (2026-10-15): its code's wording, or a Korean sentence.
-  if (error instanceof ApiError) return ERROR_COPY[error.error?.code] ?? '요청을 처리하지 못했습니다. 잠시 뒤 다시 시도하고, 계속되면 화면을 새로 고쳐 주세요.';
-  return '요청을 처리하지 못했습니다. 잠시 뒤 다시 시도하고, 계속되면 화면을 새로 고쳐 주세요.';
+  return errorText(error, ERROR_COPY);
 }
 
 // One recorded result as the operator reads it: the recommendation and its state chips.
@@ -62,24 +67,22 @@ export function recommendation(result) {
       'div',
       { class: 'ai-name-result', 'data-role': 'ai-name-failed', 'data-error': result.error_code ?? '' },
       h('span', { class: 'chip bad' }, '추천 실패'),
-      h('span', { class: 'mini' }, ERROR_COPY[result.error_code] ?? result.error_code ?? '알 수 없는 오류'),
+      h('span', { class: 'mini' }, ERROR_COPY[result.error_code] ?? '추천을 받지 못했습니다. 다시 시도하세요'),
     );
   }
   const confidence = typeof result.confidence === 'number' ? `${Math.round(result.confidence * 100)}%` : '—';
-  const model = result.provenance?.actual_model ?? result.provenance?.requested_model ?? '—';
+  const model = result.provenance?.actual_model ?? result.provenance?.requested_model ?? '';
   return h(
     'div',
-    { class: 'ai-name-result', 'data-role': 'ai-name-result', 'data-sequence': String(result.sequence) },
+    { class: 'ai-name-result', 'data-role': 'ai-name-result', 'data-sequence': String(result.sequence), 'data-model': model },
     h('b', { 'data-role': 'ai-name-recommended' }, result.value?.recommended ?? '—'),
     h(
       'div',
       { class: 'row' },
       h('span', { class: 'chip' }, `신뢰도 ${confidence}`),
       result.requires_review ? h('span', { class: 'chip warn', 'data-role': 'ai-name-review' }, '검토 필요') : null,
-      result.stale
-        ? h('span', { class: 'chip warn', 'data-role': 'ai-name-stale' }, `입력 바뀜 · ${result.stale_reasons.map((key) => STALE_COPY[key] ?? key).join(', ')}`)
-        : h('span', { class: 'chip good', 'data-role': 'ai-name-fresh' }, '최신'),
-      h('span', { class: 'mini', 'data-role': 'ai-name-model' }, `모델 ${model}`),
+      result.stale ? staleChip('ai-name-stale', result) : h('span', { class: 'chip good', 'data-role': 'ai-name-fresh' }, '최신'),
+      model ? h('span', { class: 'mini', 'data-role': 'ai-name-model' }, `모델 ${model}`) : null,
     ),
   );
 }
@@ -100,7 +103,7 @@ export function aiNamePanel(productGroupId, { onResult } = {}) {
       delete button.dataset.inert;
       button.removeAttribute('aria-disabled');
     } else {
-      markInert(button, `AI 추천 · ${stateText(view.ai_capability ?? {})}`);
+      markInert(button, `AI 추천 · ${sellerStateText(view.ai_capability ?? {})}`);
     }
     body.replaceChildren(recommendation(result));
     onResult?.(result);
@@ -119,7 +122,7 @@ export function aiNamePanel(productGroupId, { onResult } = {}) {
       const before = nameResult(await getJson(enrichmentUrl(productGroupId)))?.sequence ?? 0;
       const sent = await sendJson('POST', enrichmentUrl(productGroupId), { actor: OPERATOR, tasks: [NAME_TASK] });
       if (sent.tasks.every((task) => task.decision === 'REUSED')) {
-        toast('이미 최신 추천입니다', '상품 정보와 프롬프트가 그대로라 다시 묻지 않았습니다.');
+        toast('이미 최신 추천입니다', '상품 정보가 바뀌지 않아 다시 묻지 않았습니다.');
         await read();
         return;
       }

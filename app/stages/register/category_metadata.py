@@ -29,7 +29,7 @@ revision changes the next evaluation's dependency fingerprint.
 import json
 import re
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -237,6 +237,33 @@ class CategoryMetadataListView(BaseModel):
     marketplace_key: str
     surface: EditableSurface
     entries: list[CategoryMetadataView]
+
+
+class NoticeTypeChoiceView(BaseModel):
+    """One notice type a seller may choose: the stored enum value and the provider's own name."""
+
+    notice_type: str
+    label: str
+
+
+class CategoryMetadataFormView(BaseModel):
+    """What the metadata form offers as choices and starting values. Nothing here is recorded or
+    reviewed: a save still sends every value, and the server validates it whole.
+
+    ``name_max_length`` is the marketplace's documented product-name limit, or ``None`` when no
+    adopted evidence records one — the seller then enters what they confirmed; nothing is guessed.
+    """
+
+    marketplace_key: str
+    notice_types: list[NoticeTypeChoiceView]
+    name_max_length: int | None
+    options_supported: bool
+    max_options: int
+    max_dimensions: int
+
+
+# The notice types of one marketplace a seller chooses from, as ``(enum value, Korean name)``.
+NoticeTypeChoices = Callable[[str], Sequence[tuple[str, str]]]
 
 
 # ------------------------------------------------------------------ content
@@ -864,10 +891,33 @@ class CategoryMetadataService:
         store: CategoryMetadataStore,
         marketplaces: frozenset[str],
         category_catalog: LeafCategoryCatalog | None = None,
+        notice_types: NoticeTypeChoices | None = None,
     ) -> None:
         self._store = store
         self._marketplaces = marketplaces
         self._category_catalog = category_catalog
+        self._notice_types = notice_types
+
+    def form(self, marketplace_key: str) -> CategoryMetadataFormView:
+        """The choices and starting values of the metadata form (2026-10-16 seller fixes).
+
+        The notice types are the marketplace's documented ones with their own Korean names, so the
+        seller chooses one instead of typing an English enum; the stored value is that same enum.
+        No adopted evidence records a product-name limit, so none is offered. A new category starts
+        without options (one item, one dimension) — the only option limits valid without options.
+        """
+        self._require_marketplace(marketplace_key)
+        choices = () if self._notice_types is None else self._notice_types(marketplace_key)
+        return CategoryMetadataFormView(
+            marketplace_key=marketplace_key,
+            notice_types=[
+                NoticeTypeChoiceView(notice_type=value, label=label) for value, label in choices
+            ],
+            name_max_length=None,
+            options_supported=False,
+            max_options=1,
+            max_dimensions=1,
+        )
 
     def entries(self, marketplace_key: str) -> CategoryMetadataListView:
         self._require_marketplace(marketplace_key)

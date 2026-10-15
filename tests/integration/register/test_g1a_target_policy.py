@@ -17,6 +17,7 @@ No provider is reached: a target policy is local configuration.
 """
 
 import contextlib
+import re
 import sqlite3
 from collections.abc import Iterator
 from dataclasses import replace
@@ -122,6 +123,8 @@ def inputs(**overrides: Any) -> dict[str, Any]:
         },
         "delivery_policy": None,
         "after_service_telephone": "02-000-0000",
+        # The optional fee preset (2026-10-16): none, so the fee rate is the seller's own total.
+        "fee_preset": None,
         "templates": {"shipping": "shipping-template-test", "returns": "returns-template-test"},
         "duplicate_proof_required": True,
         "duplicate_lookup_keys": ["SELLER_CODE"],
@@ -370,7 +373,201 @@ INVALID = {
         422,
         "TARGET_POLICY_INVALID",
     ),
+    # 2026-10-16: a pricing label may be left to the server, but one that is sent is validated
+    # exactly as before.
+    "a typed pricing label that is no label": (
+        inputs(pricing_context={**inputs()["pricing_context"], "fee_table_version": "fee table 1"}),
+        422,
+        "TARGET_POLICY_PRICING_CONTEXT_INVALID",
+    ),
+    "a stamped pricing context M4 would refuse": (
+        inputs(
+            pricing_context={
+                **inputs()["pricing_context"],
+                "fee_table_version": None,
+                "pricing_policy_version": None,
+                "fee_rate": "1.5",
+            }
+        ),
+        422,
+        "TARGET_POLICY_PRICING_CONTEXT_INVALID",
+    ),
 }
+
+
+STAMPED = re.compile(r"^(fees|pricing)-\d{8}-[0-9a-f]{12}$")
+
+
+def _unlabelled(**pricing: Any) -> dict[str, Any]:
+    """What Settings sends since 2026-10-16: the fees, and both pricing labels as null."""
+    return {
+        **inputs()["pricing_context"],
+        "fee_table_version": None,
+        "pricing_policy_version": None,
+        **pricing,
+    }
+
+
+def test_the_server_stamps_the_pricing_labels_the_seller_never_types(
+    api: TestClient, container: Container, account: str
+) -> None:
+    first = save(api, account, inputs(pricing_context=_unlabelled()))
+    assert first.status_code == 200, first.text
+    pricing = first.json()["inputs"]["pricing_context"]
+    fee_label, policy_label = pricing["fee_table_version"], pricing["pricing_policy_version"]
+    assert STAMPED.fullmatch(fee_label) and fee_label.startswith("fees-")
+    assert STAMPED.fullmatch(policy_label) and policy_label.startswith("pricing-")
+    target = container.registration_preflight.target_policy(MARKET, account)
+    assert target is not None
+    fingerprint = target.pricing_context.fingerprint
+
+    # A save that changes no fee keeps both labels, so the pricing context does not move.
+    kept = save(
+        api,
+        account,
+        inputs(
+            pricing_context=_unlabelled(),
+            templates={"shipping": "shipping-template-2", "returns": "returns-template-test"},
+        ),
+        expected=first.json()["current"]["policy_revision"],
+    )
+    assert kept.status_code == 200, kept.text
+    again = kept.json()["inputs"]["pricing_context"]
+    assert (again["fee_table_version"], again["pricing_policy_version"]) == (
+        fee_label,
+        policy_label,
+    )
+    target = container.registration_preflight.target_policy(MARKET, account)
+    assert target is not None and target.pricing_context.fingerprint == fingerprint
+
+    # A changed fee gets a new fee-table label; the untouched pricing policy keeps its own.
+    moved = save(
+        api,
+        account,
+        inputs(pricing_context=_unlabelled(fee_rate="0.11")),
+        expected=kept.json()["current"]["policy_revision"],
+    )
+    assert moved.status_code == 200, moved.text
+    after = moved.json()["inputs"]["pricing_context"]
+    assert STAMPED.fullmatch(after["fee_table_version"])
+    assert after["fee_table_version"] != fee_label
+    assert after["pricing_policy_version"] == policy_label
+    target = container.registration_preflight.target_policy(MARKET, account)
+    assert target is not None and target.pricing_context.fingerprint != fingerprint
+
+
+def test_a_typed_label_is_kept_while_the_fees_it_names_are_unchanged(
+    api: TestClient, account: str
+) -> None:
+    # A policy saved before 2026-10-16 holds the labels its operator typed; leaving them to the
+    # server keeps them as long as the fees they name stay the same.
+    first = save(api, account, inputs())
+    assert first.status_code == 200, first.text
+    kept = save(
+        api,
+        account,
+        inputs(pricing_context=_unlabelled(), after_service_telephone="02-111-1111"),
+        expected=first.json()["current"]["policy_revision"],
+    )
+    assert kept.status_code == 200, kept.text
+    pricing = kept.json()["inputs"]["pricing_context"]
+    assert (pricing["fee_table_version"], pricing["pricing_policy_version"]) == (
+        "fee-test-1",
+        "policy-test-1",
+    )
+
+
+# ------------------------------------------------------------------ the fee preset (2026-10-16)
+
+SMARTSTORE = "smartstore"
+PRESET = {
+    "store_type": "SMART_STORE",
+    "seller_grade": "GENERAL",
+    "reference_version": "smartstore-fees-20251001",
+    "sales_fee_rate": "0.03003",
+    "order_fee_rate": "0.0363",
+}
+
+
+def _smartstore_inputs(fee_rate: str, preset: dict[str, Any] | None) -> dict[str, Any]:
+    pricing = {**_unlabelled(), "marketplace_key": SMARTSTORE, "fee_rate": fee_rate}
+    return inputs(pricing_context=pricing, fee_preset=preset)
+
+
+def _save_smartstore(api: TestClient, account: str, body: dict[str, Any], **extra: Any) -> Any:
+    return api.post(
+        f"{BASE}/{SMARTSTORE}/{account}/revisions",
+        json={"actor": OPERATOR, "expected_current_revision": None, "inputs": body, **extra},
+        headers=CLIENT,
+    )
+
+
+def test_the_fee_reference_table_is_read_only_reference_data(api: TestClient) -> None:
+    table = api.get("/api/v1/settings/fee-reference/smartstore", headers=CLIENT)
+    assert table.status_code == 200, table.text
+    body = table.json()
+    assert body["version"] == "smartstore-fees-20251001"
+    assert body["reference_date"] == "2025-10-01"
+    assert body["official"] is False
+    assert body["sources"] and all(s["url"].startswith("https://") for s in body["sources"])
+    stores = {s["store_type"]: s["sales_fee_rate"] for s in body["store_types"]}
+    assert stores == {"SMART_STORE": "0.03003", "BRAND_STORE": "0.04004"}
+    grades = {g["seller_grade"]: g["order_fee_rate"] for g in body["seller_grades"]}
+    assert grades["GENERAL"] == "0.0363"
+    assert set(grades) == {"GENERAL", "SMB3", "SMB2", "SMB1", "SMALL"}
+    # A marketplace with no table is not found; Coupang's per-category table is a later step.
+    unknown = api.get("/api/v1/settings/fee-reference/coupang", headers=CLIENT)
+    assert unknown.status_code == 404
+    assert unknown.json()["error"]["code"] == "FEE_REFERENCE_UNKNOWN"
+
+
+def test_a_fee_preset_is_saved_beside_its_exact_fee_rate(
+    api: TestClient, container: Container, config: AppConfig
+) -> None:
+    account = establish(container, config, SMARTSTORE, "uid-smartstore-fee-1")
+    saved = _save_smartstore(api, account, _smartstore_inputs("0.06633", PRESET))
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["inputs"]["fee_preset"] == PRESET
+    target = container.registration_preflight.target_policy(SMARTSTORE, account)
+    # The pricing owner reads the one total; the preset never prices anything.
+    assert target is not None and target.pricing_context.fee_rate == "0.06633"
+    restored = api.get(f"{BASE}/{SMARTSTORE}/{account}", headers=CLIENT).json()
+    assert restored["inputs"]["fee_preset"] == PRESET
+
+
+@pytest.mark.parametrize(
+    ("fee_rate", "preset"),
+    [
+        ("0.07", PRESET),  # the parts do not add up to the saved rate
+        ("0.06633", {**PRESET, "order_fee_rate": "3.63"}),  # a part that is no rate
+        ("0.06633", {**PRESET, "reference_version": "smartstore fees"}),  # no label
+    ],
+)
+def test_a_fee_preset_that_does_not_add_up_is_refused_whole(
+    api: TestClient,
+    container: Container,
+    config: AppConfig,
+    fee_rate: str,
+    preset: dict[str, Any],
+) -> None:
+    account = establish(container, config, SMARTSTORE, "uid-smartstore-fee-2")
+    refused = _save_smartstore(api, account, _smartstore_inputs(fee_rate, preset))
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["error"]["code"] in {
+        "TARGET_POLICY_PRICING_CONTEXT_INVALID",
+        "TARGET_POLICY_INVALID",
+    }
+    assert counts(config) == {POLICIES: 0, REVISIONS: 0, CURRENT: 0}
+
+
+def test_a_fee_preset_needs_a_marketplace_with_a_fee_reference(
+    api: TestClient, config: AppConfig, account: str
+) -> None:
+    pricing = {**inputs()["pricing_context"], "fee_rate": "0.06633"}
+    refused = save(api, account, inputs(pricing_context=pricing, fee_preset=PRESET))
+    assert refused.status_code == 422
+    assert refused.json()["error"]["code"] == "TARGET_POLICY_PRICING_CONTEXT_INVALID"
+    assert counts(config) == {POLICIES: 0, REVISIONS: 0, CURRENT: 0}
 
 
 @pytest.mark.parametrize("case", sorted(INVALID))

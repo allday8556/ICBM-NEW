@@ -187,7 +187,7 @@ def test_a_sample_is_read_reported_and_its_image_host_confirmed(
         )
         assert "제안 없음" in unread.locator("[data-unread='발주마감']").inner_text()
         flag = sample.locator("[data-structural='DUPLICATED_ORDER_LIST']")
-        assert "템플릿 수정 필요" in flag.inner_text()
+        assert "추가 지원 필요" in flag.inner_text()
         assert sample.locator("[data-role='not-verifiable']").is_visible()
         assert "샘플 0/3 확인 가능" in modal.locator("[data-role='ready-count']").inner_text()
         _no_horizontal_scroll(page)

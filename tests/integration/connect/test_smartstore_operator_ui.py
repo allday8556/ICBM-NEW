@@ -187,7 +187,7 @@ def test_the_ui_replaces_credentials_without_ever_showing_the_secret(
         status = page.locator(".smartstore-credentials .chip.good").inner_text()
         secret_left = page.input_value("#smartstore-client-secret")
         html, stored = page.content(), _storage(page)
-    assert status == "저장됨 · 자격증명 세대 1"
+    assert status == "저장됨"
     assert secret_left == ""
     assert SECRET not in html and SECRET not in stored
     assert traffic.writes() == [
@@ -251,7 +251,7 @@ def test_a_bound_account_is_offered_no_rebind(
         shown = page.locator(".account-observation").inner_text()
         offered = page.locator("[data-action='bind']").count()
         _wait_auth(page, "계정 확인 필요")
-    assert UID_B in shown and "불일치" in shown
+    assert UID_B in shown and "연결된 계정과 다릅니다" in shown
     assert offered == 0
     assert _binding(config) == UID_A
 

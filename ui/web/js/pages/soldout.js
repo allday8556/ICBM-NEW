@@ -4,20 +4,14 @@ import { countText, reviewCountTable } from '../components/review-counts.js';
 import { stockRecheckPanel } from '../components/stock-recheck.js';
 
 // READY: the STOCK review count as the server states it. Until every producer that can emit STOCK
-// is wired and current, it is not a count, and this screen never says there is nothing to check.
+// is wired and current, it is not a count (it reads 확인 중), and this screen never says there is
+// nothing to check.
 function ready(view) {
   const stock = view.stock_review;
   return h(
     'div',
     { class: 'panel', 'data-role': 'soldout-review', 'data-state': stock.state },
-    h('h2', { class: 'panel-title' }, `재고 검토 항목: ${countText(stock)}`),
-    stock.state === 'CURRENT'
-      ? null
-      : h(
-          'div',
-          { class: 'note', 'data-role': 'soldout-not-authoritative' },
-          '재고 검토 건수가 아직 확정되지 않았습니다. 확인할 항목이 없다는 뜻이 아닙니다.',
-        ),
+    h('h2', { class: 'panel-title' }, `품절 확인: ${countText(stock)}`),
     reviewCountTable([stock]),
   );
 }

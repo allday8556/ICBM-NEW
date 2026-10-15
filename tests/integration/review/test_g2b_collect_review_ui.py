@@ -76,10 +76,15 @@ def test_the_run_focus_shows_its_review_items_and_resolves_one(
             block.wait_for(timeout=15_000)
             # The server's coverage verdict, never a count: the startup pass made it current.
             assert block.get_attribute("data-coverage") == "CURRENT"
-            item = block.locator("[data-review-item][data-state='OPEN']", has_text="field:stock")
+            item = block.locator(
+                "[data-review-item][data-state='OPEN'][data-subject='field:stock']"
+            )
             assert item.count() == 1
             item_id = item.get_attribute("data-review-item")
-            assert "SOURCE_STOCK_REVIEW_REQUIRED" in item.inner_text()
+            # The seller reads the reason in Korean; the server's code stays in data-reason.
+            reason = item.locator("[data-reason]")
+            assert reason.get_attribute("data-reason") == "SOURCE_STOCK_REVIEW_REQUIRED"
+            assert "재고" in reason.inner_text()
             assert writes == []  # rendering reads only
             item.locator("[data-role='review-disposition']").select_option("FOLLOW_UP_REQUIRED")
             item.locator("[data-role='review-note']").fill("재수집 예정")

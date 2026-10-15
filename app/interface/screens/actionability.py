@@ -45,6 +45,9 @@ class FixSurface(StrEnum):
     SETTINGS_CONNECT = "SETTINGS_CONNECT"
     # B-EDITOR: the unit workspace's image section (the image owner's selection routes).
     REGISTER_IMAGES = "REGISTER_IMAGES"
+    # ADR-0038 §5: the 해외 구매대행 settings (설정 › 공통 › 해외구매대행): the TTS rate refresh and
+    # the default overseas shipping.
+    SETTINGS_OVERSEAS = "SETTINGS_OVERSEAS"
 
 
 ACTIONABILITY_LABELS: Final[Mapping[Actionability, str]] = {
@@ -57,11 +60,12 @@ ACTIONABILITY_LABELS: Final[Mapping[Actionability, str]] = {
 
 SURFACE_LABELS: Final[Mapping[FixSurface, str]] = {
     FixSurface.REGISTER_PREPARATION: "등록관리 › 등록 준비 입력",
-    FixSurface.REGISTER_ACTION: "등록관리 › 단위 동작",
+    FixSurface.REGISTER_ACTION: "등록관리 › 상품 등록 작업",
     FixSurface.SETTINGS_TARGET_POLICY: "설정 › 등록 정책",
-    FixSurface.SETTINGS_CATEGORY_METADATA: "설정 › 카테고리 메타데이터",
-    FixSurface.SETTINGS_CONNECT: "설정 › 마켓 연결",
+    FixSurface.SETTINGS_CATEGORY_METADATA: "설정 › 상품 / 카테고리",
+    FixSurface.SETTINGS_CONNECT: "설정 › API 관리",
     FixSurface.REGISTER_IMAGES: "등록관리 › 이미지",
+    FixSurface.SETTINGS_OVERSEAS: "설정 › 공통 › 해외구매대행",
 }
 
 _F, _R, _W, _N, _X = (
@@ -79,6 +83,7 @@ _PREP, _ACT, _POLICY, _META, _CONNECT = (
     FixSurface.SETTINGS_CONNECT,
 )
 _IMAGES = FixSurface.REGISTER_IMAGES
+_OVERSEAS = FixSurface.SETTINGS_OVERSEAS
 
 Entry = tuple[Actionability, FixSurface | None]
 
@@ -93,7 +98,9 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     "CONNECT_AUTH_NOT_READY": (_F, _CONNECT),
     "CONNECT_AUTH_MISMATCH": (_F, _CONNECT),
     "CONNECT_NOT_BOUND": (_F, _CONNECT),
-    "CONNECT_WRITE_SCOPE_MISSING": (_X, None),
+    # The write scope is the operator's own 등록 권한 확인 record (A0 attestation), recorded again
+    # in API 관리 when it is missing or older than its age bound (30 days).
+    "CONNECT_WRITE_SCOPE_MISSING": (_F, _CONNECT),
     "CONNECT_WORKFLOW_PAUSED": (_X, None),
     "CONNECT_WORKFLOW_REVIEW_REQUIRED": (_X, None),
     # The unit: a moved Draft is re-authored; no screen reshapes a unit yet.
@@ -134,12 +141,13 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     "FIELD_VALUE_FORM_INVALID": (_F, _PREP),
     "FIELD_AI_SUGGESTION_UNCONFIRMED": (_F, _PREP),
     "FIELD_DETAIL_REFERENCE_NOT_PERMITTED": (_F, _PREP),
-    "OPTIONS_NOT_SUPPORTED": (_X, None),
-    "OPTION_COUNT_EXCEEDED": (_X, None),
+    # The option limits are the category's reviewed metadata (상품 / 카테고리 › 카테고리 정보).
+    "OPTIONS_NOT_SUPPORTED": (_F, _META),
+    "OPTION_COUNT_EXCEEDED": (_F, _META),
     "OPTION_VALUE_MISSING": (_F, _PREP),
     "OPTION_VALUES_UNEXPECTED": (_F, _PREP),
     "OPTION_DIMENSIONS_INCONSISTENT": (_F, _PREP),
-    "OPTION_DIMENSIONS_EXCEEDED": (_X, None),
+    "OPTION_DIMENSIONS_EXCEEDED": (_F, _META),
     "OPTION_VALUES_NOT_DISTINCT": (_F, _PREP),
     "POLICY_TEMPLATE_MISSING": (_F, _POLICY),
     "POLICY_AFTER_SERVICE_PHONE_MISSING": (_F, _POLICY),
@@ -152,12 +160,14 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     "PUBLICATION_ASSETS_MISSING": (_F, _IMAGES),
     "PUBLICATION_ASSET_COUNT_EXCEEDED": (_F, _IMAGES),
     "PUBLICATION_REPRESENTATIVE_MISSING": (_F, _IMAGES),
-    # B-DETAIL's reason, consumed as it is: no screen places a detail image here.
-    "PUBLICATION_DETAIL_IMAGES_UNPLACED": (_X, None),
-    # ADR-0033 §8: the unit's composition does not place a resolved top or bottom notice (since
-    # G5 only a composition revision older than the SmartStore v3 profile).
-    "PUBLICATION_GUIDANCE_UNPLACED": (_X, None),
-    "PUBLICATION_ASSET_QA_NOT_PASSED": (_X, None),
+    # B-DETAIL, ADR-0033 §8: the preparation's composition does not place the detail images or a
+    # resolved top/bottom notice. A preparation save takes the policy's current composition (v3 for
+    # SmartStore, which places both), so saving it again releases them; a policy still holding an
+    # older composition is saved once first, which stamps the current one.
+    "PUBLICATION_DETAIL_IMAGES_UNPLACED": (_F, _PREP),
+    "PUBLICATION_GUIDANCE_UNPLACED": (_F, _PREP),
+    # The automatic image QA's verdict: another image is chosen in the image section.
+    "PUBLICATION_ASSET_QA_NOT_PASSED": (_F, _IMAGES),
     # ADR-0037 §2: no upload-fit variant could be made for an oversize image; the operator chooses
     # another image (or saves the preparation again after the selection changed).
     "IMAGE_UPLOAD_FIT_FAILED": (_F, _IMAGES),
@@ -194,8 +204,9 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     "PAYLOAD_EXTERNAL_URL": (_F, _PREP),
 }
 
-# The M4 owners' reasons (unprefixed). Only the pricing snapshot is moved from REGISTER, through the
-# re-pin; a sold-out source is a supplier fact; the rest have no operator screen.
+# The M4 owners' reasons (unprefixed). The pricing snapshot is moved from REGISTER, through the
+# re-pin; a 구매대행 cost input in the overseas settings; a sold-out source is a supplier fact; the
+# rest have no operator screen.
 M4_ACTIONS: Final[Mapping[str, Entry]] = {
     "SOURCE_STOCK_SOLD_OUT": (_N, None),
     # ADR-0039 §3: the supplier's minimum is not applied by the user's choice; a warning.
@@ -208,6 +219,11 @@ M4_ACTIONS: Final[Mapping[str, Entry]] = {
     "IMAGE_SELECTION_STALE": (_F, _IMAGES),
     "IMAGE_SELECTION_EMPTY": (_F, _IMAGES),
     "IMAGE_SELECTION_RECHECK_REQUIRED": (_F, _IMAGES),
+    # ADR-0038 §3, §4: a 구매대행 landed cost fails closed without a fresh TTS rate or an overseas
+    # shipping amount; both are refreshed or set in the overseas settings.
+    "PRICING_FX_STALE": (_F, _OVERSEAS),
+    "PRICING_FX_UNAVAILABLE": (_F, _OVERSEAS),
+    "PRICING_OVERSEAS_SHIPPING_UNSET": (_F, _OVERSEAS),
 }
 
 # REGISTRATION_ERROR review conditions of the REGISTER execution producer.

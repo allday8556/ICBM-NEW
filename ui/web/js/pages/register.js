@@ -24,7 +24,8 @@ import { KIND_LABEL } from '../components/review-counts.js';
 import { READ_STATE_TONE } from '../components/registration-status.js';
 import { itemImagesEditor } from '../components/item-images.js';
 import { listingSyncPanel } from '../components/listing-sync.js';
-import { categoryPicker } from '../components/category-picker.js';
+import { categoryPath, categoryPicker, findCategory } from '../components/category-picker.js';
+import { openCategoryMetadataEditor } from './settings/category-metadata.js';
 import { freshProductFacts, unitFacts, unitProductName } from '../components/product-facts.js';
 
 const SCREEN = '/api/v1/screens/register';
@@ -45,42 +46,45 @@ const READINESS_LABEL = {
 // B-UX2: what the operator can fix or re-check now, and where (server-owned).
 const FIXES = '/api/v1/screens/register/fixes';
 const TITLE = '등록관리';
-const HELP =
-  '수집한 상품을 마켓에 등록하고, 등록 상태를 서버가 판단한 그대로 보여줍니다. 실행 가능 여부는 서버가 결정합니다.';
+const HELP = '수집한 상품을 마켓에 등록하고, 등록 결과를 확인합니다.';
 const CANARY_HELP =
-  '실제 마켓에 상품을 보내기 전에 계정 연결, 권한, 등록 결과 확인 경로를 한 번에 점검합니다.';
+  '실제 마켓에 상품을 보내기 전에 계정 연결, 등록 권한, 등록 결과 확인 기능을 한 번에 점검합니다. 모두 완료되어야 첫 상품 1건을 실제로 보낼 수 있습니다.';
 
 const STATUS_HELP =
-  '등록 상태는 서버가 한 가지 기준으로 판정한 등록중 · 등록성공 · 재확인필요 · 등록실패입니다. 결과를 모르는 등록은 실패로 표시하지 않고, 다시 보내지 않은 채 등록 여부를 확인합니다.';
+  '등록 상태는 등록중 · 등록성공 · 재확인필요 · 등록실패 네 가지입니다. 결과를 모르는 등록은 실패로 표시하지 않고, 다시 보내지 않은 채 마켓에 등록되었는지부터 확인합니다.';
 
 const LIVE_HELP =
-  '실등록 잠금과 실행 권한 상태를 보여줍니다. 상세 기록은 문제를 점검할 때만 펼쳐 보세요.';
+  '실제 등록 잠금이 풀리고 유효한 등록 허가가 있을 때만 마켓에 실제로 보냅니다. 잠금 해제와 허가 발급은 관리자가 합니다. 상세 기록은 문제를 점검할 때만 펼쳐 보세요.';
 
-const BRAKE_LABEL = { ENGAGED: '잠김', RELEASED: '해제됨' };
-const GRANT_LABEL = { ACTIVE: '유효', EXPIRED: '만료됨', REVOKED: '회수됨', EXHAUSTED: '소진됨' };
-const STAGE_LABEL = { ASSET: '이미지 업로드', CREATE: '상품 등록', DELETE: '상품 삭제', DISPATCH: '발송처리' };
+// 실등록 안전장치 in a seller's terms: what it is, and who does what.
+const SAFETY_NOTE =
+  '실제 마켓에 상품을 보내기 전에 갖춰야 할 조건입니다. 판매 계정 연결은 설정 › API 관리에서 직접 하고, 실제 등록 잠금 해제와 등록 허가는 관리자가 합니다. 조건이 갖춰지기 전에는 마켓에 실제로 보내지 않습니다.';
+
+const BRAKE_LABEL = { ENGAGED: '잠김 (마켓에 보내지 않음)', RELEASED: '풀림' };
+const GRANT_LABEL = { ACTIVE: '사용 가능', EXPIRED: '기간 만료', REVOKED: '취소됨', EXHAUSTED: '모두 사용함' };
+const STAGE_LABEL = { ASSET: '이미지 올리기', CREATE: '상품 등록', DELETE: '상품 삭제', DISPATCH: '발송처리' };
 const PROOF_LABEL = {
-  evidence_retention_ready: '작업 기록 보존',
-  visual_acceptance_recorded: '화면 검수 완료',
+  evidence_retention_ready: '작업 기록 보관',
+  visual_acceptance_recorded: '화면 검수 기록',
 };
-const EXECUTION_MODE_LABEL = { DRY_RUN: '안전 모드', LIVE: '실등록 모드' };
+const EXECUTION_MODE_LABEL = { DRY_RUN: '연습 (마켓에 보내지 않음)', LIVE: '실제 등록' };
 const WRITE_STATUS_LABEL = { UNVERIFIED: '확인 필요', VERIFIED: '확인됨', BLOCKED: '사용 불가' };
 const CANARY_REQUIREMENT_LABEL = {
-  CLEAN_RUNTIME: '실행 환경 확인',
+  CLEAN_RUNTIME: '프로그램 버전 확인',
   ACCOUNT_BOUND: '판매 계정 연결',
-  AUTH_READY: '마켓 인증',
-  WRITE_SCOPE_PROVEN: '상품 쓰기 권한',
-  UNIT_PREPARED: '등록할 상품 준비',
-  CREATE_ADOPTED: '상품 등록 연결',
-  IMAGE_UPLOAD_ADOPTED: '이미지 등록 연결',
-  RECONCILE_PATH_ADOPTED: '등록 결과 확인 연결',
-  READBACK_ADOPTED: '등록 상품 조회 연결',
+  AUTH_READY: '마켓 로그인(인증)',
+  WRITE_SCOPE_PROVEN: '상품 등록 권한',
+  UNIT_PREPARED: '보낼 상품 준비',
+  CREATE_ADOPTED: '상품 등록 기능',
+  IMAGE_UPLOAD_ADOPTED: '이미지 올리기 기능',
+  RECONCILE_PATH_ADOPTED: '등록 결과 확인 기능',
+  READBACK_ADOPTED: '등록 상품 조회 기능',
   READBACK_EXECUTABLE: '등록 상품 조회 준비',
   PUBLISHED_STATE_PROVABLE: '판매 상태 확인',
-  NO_UNRESOLVED_CONFLICT: '미해결 충돌 없음',
-  SCOPE_SENDS_ALLOWED: '전송 가능 상태',
-  SINGLE_UNIT: '검증 상품 1건 선택',
-  ASSET_MUTATION_READY: '이미지 전송 준비',
+  NO_UNRESOLVED_CONFLICT: '정리 안 된 중복 요청 없음',
+  SCOPE_SENDS_ALLOWED: '전송 멈춤 없음',
+  SINGLE_UNIT: '첫 시험 상품 1건 선택',
+  ASSET_MUTATION_READY: '이미지 올리기 준비',
   CREATE_MUTATION_READY: '상품 등록 준비',
 };
 
@@ -93,27 +97,44 @@ export const INTENT_LABEL = {
 };
 
 const VERIFICATION_LABEL = {
-  NOT_VERIFIED: '읽기 확인 전',
-  PASS: '읽기 확인 일치',
-  MISMATCH: '읽기 확인 불일치',
+  NOT_VERIFIED: '마켓 내용 비교 전',
+  PASS: '마켓 내용과 같음',
+  MISMATCH: '마켓 내용과 다름',
 };
 
 const OUTCOME_LABEL = {
-  APPLIED_PROVEN: '반영 확인됨',
-  NOT_APPLIED_PROVEN: '미반영 확인됨',
+  APPLIED_PROVEN: '마켓에 반영됨',
+  NOT_APPLIED_PROVEN: '마켓에 반영 안 됨',
   UNKNOWN: '결과 미확인',
 };
 
 export const PREPARATION_LABEL = {
-  DRAFTED: '초안',
-  SNAPSHOT_FROZEN: '스냅샷 고정됨',
-  INTENT_OPEN: '등록 요청 생성됨',
+  DRAFTED: '작성 중',
+  SNAPSHOT_FROZEN: '등록 내용 확정됨',
+  INTENT_OPEN: '등록 요청됨',
 };
 
+// The marketplace's own sale status of a registered listing (the provider's enum stays an attribute).
+const PUBLISHED_LABEL = {
+  SALE: '판매중',
+  OUTOFSTOCK: '품절',
+  SUSPENSION: '판매중지',
+  CLOSE: '판매종료',
+  PROHIBITION: '판매금지',
+  WAIT: '판매대기',
+  DELETE: '삭제됨',
+};
+
+// Why a marketplace's sends stopped, and what the seller does about it.
 const PAUSE_LABEL = {
-  AUTH: '인증 중단',
-  POLICY: '정책 중단',
-  FAILURE_BUDGET: '연속 실패 중단',
+  AUTH: '마켓 인증 문제로 멈춤',
+  POLICY: '정책 확인으로 멈춤',
+  FAILURE_BUDGET: '연속 실패로 멈춤',
+};
+const PAUSE_HINT = {
+  AUTH: '설정 › API 관리에서 계정을 다시 확인하면 풀립니다.',
+  POLICY: '등록 정책을 확인한 뒤 「전송 재개」를 누르세요.',
+  FAILURE_BUDGET: '실패 원인을 확인한 뒤 「전송 재개」를 누르세요.',
 };
 
 const ACTION_LABEL = {
@@ -121,7 +142,7 @@ const ACTION_LABEL = {
   FREEZE: '등록 내용 확정',
   CREATE_ENQUEUE: '등록 전송',
   RECONCILE: '등록확인 재시도',
-  VERIFY: '읽기 확인',
+  VERIFY: '마켓 반영 확인',
   RESUME_SCOPE: '전송 재개',
   SETTLE_REJECTION: '거절 확인 · 미등록 처리',
 };
@@ -133,7 +154,7 @@ export const REASON_COPY = {
   // ADR-0031 §4.2, ADR-0030 §7: what the supplier's own source forbids.
   SOURCE_CHANNEL_FORBIDDEN: '공급사가 이 마켓 판매를 금지한 상품입니다',
   SOURCE_CHANNEL_UNRESOLVED: '공급사 판매채널 문구를 확인할 수 없습니다',
-  SUPPLIER_NOT_ACTIVE: '공급사 사이트가 아직 시험 단계(RECON)라 등록할 수 없습니다',
+  SUPPLIER_NOT_ACTIVE: '공급사 사이트가 아직 시험 단계라 등록할 수 없습니다',
   // ADR-0039 §2, §3: the supplier's own policy, not applied by the user's per-supplier choice.
   // A warning that blocks nothing; the restriction is still shown.
   SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED:
@@ -145,102 +166,248 @@ export const REASON_COPY = {
   // The same pricing warning as an Item's own pricing reason (no layer prefix).
   PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED:
     '공급사 최저판매가가 있지만, 최저판매가를 적용하지 않도록 설정한 공급처입니다 (사용자 책임)',
-  // ADR-0038 §1 (O1a): a quantity offer of a CNY or JPY source is never priced.
-  'M4_PRICING.PRICING_SOURCE_CURRENCY_UNSUPPORTED':
-    '해외 통화(CNY·JPY) 수량별 가격은 가격을 정할 수 없습니다',
+  // ADR-0038 §1 (O1a): a quantity offer of a CNY or JPY source is never priced. An Item row
+  // carries these unprefixed; a preflight reason with its layer prefix (reasonCopy strips it).
+  PRICING_SOURCE_CURRENCY_UNSUPPORTED: '해외 통화(CNY·JPY) 수량별 가격은 가격을 정할 수 없습니다',
   // ADR-0038 §3, §4 (O2): the landed cost of a 구매대행 product, failing closed.
-  'M4_PRICING.PRICING_FX_UNAVAILABLE':
-    '환율(송금 보낼때 TTS)이 아직 없어 가격을 정할 수 없습니다. 설정 › 해외구매대행에서 환율을 갱신하세요.',
-  'M4_PRICING.PRICING_FX_STALE':
-    '환율이 영업일 3일보다 오래되어 가격을 정할 수 없습니다. 설정 › 해외구매대행에서 환율을 갱신하세요.',
-  'M4_PRICING.PRICING_OVERSEAS_SHIPPING_UNSET':
-    '해외 배송비가 없어 가격을 정할 수 없습니다. 상품의 해외 배송비를 입력하거나 설정 › 해외구매대행에서 기본값을 정하세요.',
+  PRICING_FX_UNAVAILABLE:
+    '환율(송금 보낼때 TTS)이 아직 없어 가격을 정할 수 없습니다. 설정 › 공통 › 해외구매대행에서 환율을 갱신하세요.',
+  PRICING_FX_STALE:
+    '환율이 영업일 3일보다 오래되어 가격을 정할 수 없습니다. 설정 › 공통 › 해외구매대행에서 환율을 갱신하세요.',
+  PRICING_OVERSEAS_SHIPPING_UNSET:
+    '해외 배송비가 없어 가격을 정할 수 없습니다. 상품의 해외 배송비를 입력하거나 설정 › 공통 › 해외구매대행에서 기본값을 정하세요.',
+  // The other M4 pricing reasons (unprefixed, as an Item row carries them).
+  PRICING_SNAPSHOT_MISSING: '이 품목의 판매가가 아직 계산되지 않았습니다. 「가격 다시 계산」을 누르세요.',
+  PRICING_SNAPSHOT_SUPERSEDED: '판매가가 새로 계산되었습니다. 「가격 다시 계산」을 누르면 새 판매가로 바뀝니다.',
+  PRICE_LOSS: '이 판매가로 팔면 손해입니다. 설정 › 가격정책을 확인하세요.',
+  PRICE_BELOW_MIN_MARGIN: '판매가가 최소 마진보다 낮습니다. 설정 › 가격정책을 확인하세요.',
+  PRICING_PURCHASE_PRICE_UNRESOLVED: '공급처 구매가를 확인할 수 없어 판매가를 정하지 못했습니다.',
+  PRICING_PURCHASE_PRICE_AMBIGUOUS: '공급처 구매가가 여러 개라 판매가를 정하지 못했습니다.',
+  PRICING_SHIPPING_UNRESOLVED: '배송비를 확인할 수 없어 판매가를 정하지 못했습니다.',
+  PRICING_SHIPPING_CONDITIONAL: '조건부 배송비라 판매가를 정하지 못했습니다.',
+  PRICING_SHIPPING_UNKNOWN: '배송비를 알 수 없어 판매가를 정하지 못했습니다.',
+  PRICING_MINIMUM_SALE_PRICE_UNRESOLVED: '공급처 최저판매가 문구를 확인할 수 없어 판매가를 정하지 못했습니다.',
+  PRICING_MINIMUM_SALE_PRICE_NOT_POSITIVE: '공급처 최저판매가가 올바른 금액이 아닙니다.',
+  PRICING_MINIMUM_SALE_PRICE_NOT_OFFER_BOUND: '공급처 최저판매가가 어느 가격에 해당하는지 확인할 수 없습니다.',
+  PRICING_TARGET_MARGIN_UNREACHABLE: '목표 마진을 맞출 수 있는 판매가가 없습니다. 설정 › 가격정책을 확인하세요.',
+  PRICING_QUANTITY_OFFER_UNRESOLVED: '수량별 가격 중 어느 것을 쓸지 정하지 못했습니다.',
+  // The M4 base reasons: the collected product, its 통합DB grouping and its images.
+  GROUP_MEMBER_CANDIDATE_PENDING: '통합DB에서 같은 상품으로 묶을 후보가 아직 정리되지 않았습니다.',
+  SOURCE_CORE_FIELD_REVIEW_REQUIRED: '수집한 상품의 핵심 정보를 확인해야 합니다. 수집관리에서 확인하세요.',
+  SOURCE_CORE_FIELD_ABSENT: '수집한 상품에 꼭 필요한 정보가 없습니다. 상품을 다시 수집하세요.',
+  SOURCE_STOCK_SOLD_OUT: '공급처에서 품절인 상품입니다.',
+  PRODUCT_GROUP_RETIRED: '통합DB에서 더 이상 쓰지 않는 상품입니다.',
+  MEMBERSHIP_REVISION_MISSING: '통합DB의 상품 묶음 정보가 없습니다. 통합DB에서 확인하세요.',
+  MEMBERSHIP_REVISION_NOT_CURRENT: '통합DB의 상품 묶음 정보가 바뀌었습니다. 통합DB에서 다시 확인하세요.',
+  BINDING_MISSING: '이 품목이 공급처 상품과 연결되어 있지 않습니다. 통합DB에서 확인하세요.',
+  BINDING_COMPOSITION_INVALID: '이 품목과 공급처 상품의 연결이 올바르지 않습니다. 통합DB에서 확인하세요.',
+  BINDING_OFFER_INVALID: '이 품목에 연결된 공급처 가격이 올바르지 않습니다. 통합DB에서 확인하세요.',
+  BINDING_MEMBER_NOT_CONFIRMED: '이 품목에 연결된 공급처 상품이 아직 확정되지 않았습니다. 통합DB에서 확인하세요.',
+  BINDING_PROVENANCE_STALE: '공급처 상품 정보가 바뀌어 이 품목의 연결을 다시 확인해야 합니다.',
+  ATOMIC_SKU_SET_STALE: '이 품목의 구성 상품 정보가 바뀌었습니다. 통합DB에서 다시 확인하세요.',
+  ATOMIC_SKU_BINDING_MISSING: '이 품목의 구성 상품이 연결되어 있지 않습니다. 통합DB에서 확인하세요.',
+  ATOMIC_SKU_BINDING_STALE: '이 품목의 구성 상품 연결이 바뀌었습니다. 통합DB에서 다시 확인하세요.',
+  IMAGE_SELECTION_MISSING: '이미지를 아직 고르지 않았습니다. 이미지 단계에서 고르세요.',
+  IMAGE_SELECTION_EMPTY: '고른 이미지가 없습니다. 이미지 단계에서 고르세요.',
+  IMAGE_QA_MISSING: '고른 이미지의 자동 검사가 아직 없습니다. 이미지 선택을 다시 저장하세요.',
+  IMAGE_QA_REVIEW_REQUIRED: '고른 이미지 중 확인이 필요한 이미지가 있습니다.',
+  IMAGE_SELECTION_RECHECK_REQUIRED: '원본 이미지가 바뀌어 이미지 선택을 다시 확인해야 합니다.',
+  IMAGE_SELECTION_STALE: '원본 상품 정보가 바뀌어 이미지를 다시 골라야 합니다.',
+  IMAGE_DERIVATION_STALE: '편집한 이미지가 지금 원본과 맞지 않습니다. 이미지를 다시 고르세요.',
+  IMAGE_QA_STALE: '이미지 자동 검사가 오래되었습니다. 이미지 선택을 다시 저장하세요.',
+  IMAGE_QA_FAILED: '자동 검사를 통과하지 못한 이미지가 있습니다. 다른 이미지를 고르세요.',
+  ATOMIC_SKU_IMAGE_SELECTION_UNAVAILABLE: '구성 상품의 이미지 선택을 확인할 수 없습니다.',
+  // The registration preflight's own reasons (app/stages/register/reason_areas.py).
+  ACCOUNT_UNKNOWN: '판매 계정을 찾을 수 없습니다. 설정 › API 관리에서 계정을 확인하세요.',
+  ACCOUNT_BINDING_MISMATCH: '판매 계정 연결 정보가 맞지 않습니다. 설정 › API 관리에서 계정을 다시 확인하세요.',
+  TARGET_SCOPE_MISMATCH: '이 판매 계정의 등록 정책이 맞지 않습니다. 설정 › 등록 정책을 확인하세요.',
+  CONNECT_CAPABILITY_UNAVAILABLE: '이 마켓의 연결 기능을 지금 쓸 수 없습니다.',
+  CONNECT_AUTH_NOT_READY: '마켓 인증이 준비되지 않았습니다. 설정 › API 관리에서 계정을 확인하세요.',
+  CONNECT_AUTH_MISMATCH: '마켓 인증 정보가 이 판매 계정과 맞지 않습니다. 설정 › API 관리에서 확인하세요.',
+  CONNECT_NOT_BOUND: '마켓 계정이 연결되지 않았습니다. 설정 › API 관리에서 연결하세요.',
+  CONNECT_WRITE_SCOPE_MISSING:
+    '등록 권한 확인에 상품 등록에 필요한 API 그룹이 꺼져 있다고 기록되어 있습니다. 커머스API센터에서 그 그룹을 켠 뒤 설정 › 스마트스토어 › API 관리의 「등록 권한 확인」에서 다시 체크해 저장하세요 (확인 기록은 30일 동안 유효합니다).',
+  CONNECT_WORKFLOW_PAUSED: '마켓 연결 작업이 멈춰 있습니다.',
+  CONNECT_WORKFLOW_REVIEW_REQUIRED: '마켓 연결에 확인할 일이 있습니다. 설정 › API 관리를 확인하세요.',
+  DRAFT_REVISION_STALE: '저장한 뒤 상품 구성이 바뀌었습니다. 준비 내용을 다시 저장하세요.',
+  UNIT_EMPTY: '등록할 품목이 없습니다.',
+  UNIT_ITEM_NOT_OPEN: '등록할 수 없는 상태의 품목이 들어 있습니다.',
+  UNIT_ITEM_DUPLICATED: '같은 품목이 두 번 들어 있습니다.',
+  UNIT_SINGLE_NOT_COVERING: '하나로 등록할 상품에 빠진 품목이 있습니다.',
+  UNIT_SEPARATE_NOT_ONE_ITEM: '따로 등록하는 상품은 품목이 1개여야 합니다.',
+  LISTING_IDENTITY_INVALID: '이 상품의 구성 정보가 올바르지 않습니다.',
+  TARGET_PRICING_CONTEXT_INVALID: '등록 정책의 가격 기준이 올바르지 않습니다. 설정 › 등록 정책을 확인하세요.',
+  DRAFT_PRICE_PIN_MISSING: '이 상품의 판매가가 정해지지 않았습니다.',
+  DRAFT_PRICE_PIN_CONTEXT_INVALID: '판매가 계산 기준이 등록 정책과 맞지 않습니다. 「가격 다시 계산」을 누르세요.',
+  DRAFT_PRICE_PIN_CONTEXT_STALE: '등록 정책의 가격 기준이 바뀌었습니다. 「가격 다시 계산」을 누르세요.',
+  DRAFT_PRICE_PIN_SUPERSEDED: '판매가가 새로 계산되었습니다. 「가격 다시 계산」을 누르세요.',
+  CATEGORY_NOT_SELECTED: '카테고리를 아직 고르지 않았습니다.',
+  CATEGORY_NOT_CONFIRMED: '카테고리가 아직 확정되지 않았습니다. 카테고리를 확인하고 저장하세요.',
+  CATEGORY_TAXONOMY_STALE: '카테고리 목록이 바뀌었습니다. 카테고리를 다시 고르세요.',
+  CATEGORY_NOT_LEAF: '맨 아래 단계의 카테고리를 골라야 합니다.',
+  CATEGORY_RESTRICTED: '이 카테고리에는 등록할 수 없습니다. 다른 카테고리를 고르세요.',
+  LISTING_NAME_MISSING: '상품명을 입력하세요.',
+  LISTING_NAME_TOO_LONG: '상품명이 너무 깁니다. 줄여 주세요.',
+  ATTRIBUTE_REQUIRED_MISSING: '카테고리의 필수 속성 중 비어 있는 항목이 있습니다.',
+  NOTICE_REQUIRED_MISSING: '상품정보고시 필수 항목 중 비어 있는 항목이 있습니다.',
+  NOTICE_POLICY_MISSING: '이 카테고리의 상품정보고시 정보가 준비되지 않았습니다. 설정 › 상품 / 카테고리에서 확인하세요.',
+  NOTICE_TYPE_UNDOCUMENTED: '이 카테고리의 상품정보고시 유형은 아직 마켓에 보낼 수 없습니다.',
+  FIELD_UNDECLARED: '이 카테고리에 없는 항목이 입력되어 있습니다. 상품 정보를 다시 저장하세요.',
+  FIELD_VALUE_EMPTY: '비어 있는 입력 항목이 있습니다.',
+  FIELD_VALUE_TOO_LONG: '너무 긴 입력 값이 있습니다.',
+  FIELD_VALUE_TYPE_MISMATCH: '형식이 맞지 않는 입력 값이 있습니다 (예: 숫자 칸에 글자).',
+  FIELD_VALUE_FORM_INVALID: '날짜 형식이 맞지 않는 값이 있습니다 (예: 2026-01 또는 2026-01-31).',
+  FIELD_AI_SUGGESTION_UNCONFIRMED: 'AI가 넣은 값이 아직 확인되지 않았습니다. 확인한 뒤 저장하세요.',
+  FIELD_DETAIL_REFERENCE_NOT_PERMITTED: '「상세페이지 참조」를 쓸 수 없는 항목입니다. 값을 직접 입력하세요.',
+  OPTIONS_NOT_SUPPORTED:
+    '이 카테고리는 옵션 상품을 등록할 수 없다고 기록되어 있습니다. 설정 › 상품 / 카테고리의 카테고리 등록 정보에서 옵션 지원을 확인하거나, 품목을 하나만 담아 등록하세요.',
+  OPTION_COUNT_EXCEEDED:
+    '옵션 수가 이 카테고리에 기록한 최대 옵션 수를 넘습니다. 설정 › 상품 / 카테고리의 카테고리 등록 정보에서 최대 옵션 수를 확인하거나 품목을 줄이세요.',
+  OPTION_VALUE_MISSING: '비어 있는 옵션값이 있습니다.',
+  OPTION_VALUES_UNEXPECTED: '옵션이 필요 없는 상품에 옵션값이 들어 있습니다.',
+  OPTION_DIMENSIONS_INCONSISTENT: '품목마다 옵션 항목이 다릅니다. 모든 품목에 같은 옵션 항목을 채우세요.',
+  OPTION_DIMENSIONS_EXCEEDED:
+    '옵션 항목(예: 색상, 사이즈)이 이 카테고리에 기록한 최대 단계 수보다 많습니다. 카테고리 등록 정보에서 확인하거나 옵션 항목을 줄이세요.',
+  OPTION_VALUES_NOT_DISTINCT: '옵션값이 같은 품목이 있습니다. 품목마다 다른 옵션값을 넣으세요.',
+  POLICY_TEMPLATE_MISSING: '배송·반품 정책이 없습니다. 설정 › 등록 정책에서 정하세요.',
+  POLICY_AFTER_SERVICE_PHONE_MISSING: 'A/S 전화번호가 없습니다. 설정 › 등록 정책에서 입력하세요.',
+  DETAIL_COMPOSITION_MISSING: '상세페이지 구성이 없습니다. 준비 내용을 다시 저장하세요.',
+  DETAIL_BODY_EMPTY: '상세 본문이 비어 있습니다.',
+  AUTHORING_REVISIONS_UNOWNED: '등록 정책을 한 번 다시 저장해야 합니다. 설정 › 등록 정책을 저장한 뒤 이 상품을 다시 저장하세요.',
+  PUBLICATION_ASSETS_MISSING: '등록할 이미지가 없습니다. 이미지 단계에서 고르세요.',
+  PUBLICATION_ASSET_COUNT_EXCEEDED: '이미지가 마켓 한도보다 많습니다. 일부를 「사용 안 함」으로 바꾸세요.',
+  PUBLICATION_REPRESENTATIVE_MISSING: '대표 이미지가 없습니다. 이미지 단계에서 대표 이미지를 고르세요.',
+  PUBLICATION_DETAIL_IMAGES_UNPLACED:
+    '상세 이미지를 넣을 자리가 없는 예전 상세페이지 구성으로 저장되어 있습니다. 「준비 내용 저장」을 다시 누르세요. 그래도 남으면 설정 › 등록 정책을 한 번 저장한 뒤 다시 저장하세요.',
+  PUBLICATION_ASSET_QA_NOT_PASSED: '자동 검사를 통과하지 못한 이미지가 있습니다. 다른 이미지를 고르세요.',
+  PROVIDER_ASSET_IDENTITY_MISSING: '마켓에 올린 이미지 정보가 없습니다.',
+  PREPARED_ASSET_CANDIDATE_MISMATCH: '마켓에 올린 이미지가 지금 고른 이미지와 다릅니다.',
+  PREPARED_ASSET_PROFILE_MISMATCH: '마켓에 올린 이미지의 형식이 맞지 않습니다.',
+  PREPARED_ASSET_NOT_SELECTED: '고르지 않은 이미지가 마켓에 올라가 있습니다.',
+  PREPARED_ASSET_DUPLICATED: '같은 이미지가 두 번 올라가 있습니다.',
+  PREPARED_ASSET_REF_UNSAFE: '마켓에 올린 이미지 주소를 쓸 수 없습니다.',
+  PREPARED_ASSET_UNEXPECTED: '예상하지 못한 이미지가 마켓에 올라가 있습니다.',
+  UNRESOLVED_CREATE_CONFLICT: '결과를 모르는 등록 요청이 남아 있습니다. 「등록확인 재시도」로 먼저 확인하세요.',
+  LIVE_REGISTRATION_EXISTS: '이미 마켓에 등록된 상품입니다.',
+  ADOPTED_LISTING_EXISTS: '마켓에서 가져온 같은 상품이 이미 있습니다.',
+  PROVIDER_DUPLICATE_FOUND: '마켓에 같은 상품이 이미 있습니다.',
+  PROVIDER_DUPLICATE_WEAK_SIGNAL: '마켓에 비슷한 상품이 있을 수 있습니다. 판매자센터에서 확인하세요.',
+  DUPLICATE_EVIDENCE_MISSING: '마켓에 같은 상품이 이미 있는지 확인할 수 없습니다. 중복 조회 기능이 아직 준비되지 않았습니다.',
+  DUPLICATE_EVIDENCE_INCONCLUSIVE: '마켓에 같은 상품이 있는지 확실하지 않습니다.',
+  DUPLICATE_EVIDENCE_INCOMPLETE: '마켓 중복 조회가 끝까지 되지 않았습니다.',
+  DUPLICATE_EVIDENCE_SCOPE_MISMATCH: '다른 판매 계정의 중복 조회 결과입니다.',
+  DUPLICATE_EVIDENCE_UNSAFE: '마켓 중복 조회 결과를 쓸 수 없습니다.',
+  PAYLOAD_SECRET_MATERIAL: '입력한 내용에 비밀번호나 키처럼 보이는 값이 있습니다. 지우고 다시 저장하세요.',
+  PAYLOAD_EXTERNAL_URL: '입력한 내용에 인터넷 주소(URL)가 있습니다. 지우고 다시 저장하세요.',
   // B-PRICE1: the repin command's refusals.
-  REGISTER_DRAFT_REVISION_MOVED: '초안이 바뀌었습니다. 화면을 새로 고친 뒤 다시 시도하세요.',
-  REGISTER_REPIN_INTENT_OPEN: '이 초안의 등록 요청이 아직 진행 중이라 가격을 다시 고정할 수 없습니다.',
-  REGISTER_DRAFT_ITEM_NOT_PRICED: 'M4가 일부 품목의 가격을 정하지 못해 아무것도 다시 고정하지 않았습니다.',
+  REGISTER_DRAFT_REVISION_MOVED: '다른 곳에서 이 상품이 바뀌었습니다. 화면을 새로 고친 뒤 다시 시도하세요.',
+  REGISTER_REPIN_INTENT_OPEN: '이 상품의 등록 요청이 아직 진행 중이라 가격을 다시 계산할 수 없습니다.',
+  REGISTER_DRAFT_ITEM_NOT_PRICED: '일부 품목의 판매가를 정하지 못해 아무 가격도 바꾸지 않았습니다. 품목의 가격 사유를 확인하세요.',
   REGISTER_READ_QUEUED: '전송 작업이 대기 중입니다.',
   REGISTER_READ_SENDABLE: '전송할 수 있는 상태입니다.',
   REGISTER_READ_SEND_IN_FLIGHT: '전송이 진행 중입니다.',
-  REGISTER_READ_AWAITING_VERIFICATION: '마켓 반영이 확인되어 읽기 확인을 기다리고 있습니다.',
+  REGISTER_READ_AWAITING_VERIFICATION: '마켓 반영이 확인되어, 마켓에 등록된 내용과 비교하기를 기다리고 있습니다.',
   REGISTER_READ_RETRY_SCHEDULED: '자동 재시도가 예약되어 있습니다.',
-  REGISTER_READ_VERIFIED: '읽기 확인이 스냅샷과 일치했습니다.',
+  REGISTER_READ_VERIFIED: '마켓에 등록된 내용이 확정한 등록 내용과 같습니다.',
   REGISTER_READ_OUTCOME_UNKNOWN: '전송 결과를 확인하지 못했습니다. 다시 보내지 않고 등록 여부를 확인합니다.',
-  REGISTER_READ_READBACK_MISMATCH: '마켓에 반영된 내용이 스냅샷과 다릅니다.',
-  REGISTER_READ_VERIFICATION_OVERDUE: '반영 후 읽기 확인이 기한 안에 끝나지 않았습니다.',
+  REGISTER_READ_READBACK_MISMATCH: '마켓에 등록된 내용이 확정한 등록 내용과 다릅니다.',
+  REGISTER_READ_VERIFICATION_OVERDUE: '마켓 반영 뒤 내용 비교가 제때 끝나지 않았습니다.',
   REGISTER_READ_NOT_APPLIED: '마켓에 반영되지 않은 것이 확인되었습니다.',
   REGISTER_READ_PRE_SEND_FAILED: '전송 전에 거부되어 아무 것도 보내지 않았습니다.',
-  REGISTER_READ_STATE_UNCLASSIFIED: '서버가 이 등록 상태를 분류하지 못했습니다. 결함으로 기록되었습니다.',
+  REGISTER_READ_STATE_UNCLASSIFIED: '등록 상태를 판단하지 못했습니다. 화면을 새로 고쳐도 계속되면 관리자에게 알려 주세요.',
   // B-STATUS: the latest Attempt's cause and the reconcile result, shown apart.
-  SMARTSTORE_HTTP_400: '네이버가 400으로 거절했습니다.',
+  SMARTSTORE_HTTP_400: '네이버가 등록을 거절했습니다.',
   SMARTSTORE_CREATE_REJECTED: '네이버가 등록 요청을 거절했습니다 (등록되지 않음).',
+  SMARTSTORE_RATE_LIMITED: '네이버 요청 한도에 걸렸습니다. 잠시 뒤 다시 확인합니다.',
+  SMARTSTORE_GATEWAY_TRANSIENT: '네이버 서버가 잠시 응답하지 않았습니다.',
+  SMARTSTORE_SERVER_ERROR: '네이버 서버에 문제가 있었습니다.',
+  SMARTSTORE_CREATE_REQUEST_INCOMPLETE: '네이버에 보낼 내용이 완전하지 않아 보내지 않았습니다.',
+  SMARTSTORE_CREATE_RESPONSE_UNREADABLE: '네이버의 응답을 읽을 수 없었습니다. 다시 보내지 않고 등록 여부를 확인합니다.',
+  SMARTSTORE_TRANSPORT_UNKNOWN: '네이버와 연결이 끊겨 결과를 모릅니다. 다시 보내지 않고 등록 여부를 확인합니다.',
+  JOB_ENDED_WITHOUT_RESULT: '전송 작업이 결과 없이 끝났습니다. 다시 보내지 않고 등록 여부를 확인합니다.',
   ZERO: '등록 확인: 네이버에서 찾지 못함',
-  MULTIPLE: '등록 확인: 후보가 여러 개',
-  LOOKUP_UNAVAILABLE: '등록 확인: 조회 불가',
-  ERROR: '등록 확인: 조회 오류',
-  REGISTER_REJECTION_NOT_PROVEN: '마지막 시도가 네이버의 400 거절이 아니라 미등록으로 처리할 수 없습니다.',
-  REGISTER_REJECTION_LOOKUP_MISSING: '거절 뒤 등록확인 재시도에서 "찾지 못함"이 한 번 있어야 미등록으로 처리할 수 있습니다.',
+  ONE_MISMATCH: '등록 확인: 네이버에 있지만 내용이 다름',
+  MULTIPLE: '등록 확인: 네이버에 같은 상품이 여러 개',
+  LOOKUP_UNAVAILABLE: '등록 확인: 네이버 조회를 할 수 없음',
+  ERROR: '등록 확인: 네이버 조회 중 오류',
+  REGISTER_REJECTION_NOT_PROVEN: '마지막 전송이 네이버의 거절이 아니어서 미등록으로 정리할 수 없습니다.',
+  REGISTER_REJECTION_LOOKUP_MISSING: '거절된 뒤 「등록확인 재시도」로 네이버에 없는 것이 한 번 확인되어야 미등록으로 정리할 수 있습니다.',
   REGISTER_INTENT_ABSENT: '아직 등록 요청이 만들어지지 않았습니다.',
-  REGISTER_INTENT_NOT_SENDABLE: '지금 상태에서는 서버가 전송을 허용하지 않습니다.',
+  REGISTER_INTENT_NOT_SENDABLE: '지금 상태에서는 보낼 수 없습니다.',
   REGISTER_JOB_ALREADY_QUEUED: '이미 대기 중인 전송 작업이 있습니다.',
-  REGISTER_SCOPE_PAUSED: '이 계정 범위의 전송이 중단되어 있습니다.',
-  REGISTER_FAILURE_BUDGET_EXHAUSTED: '연속 실패 한도를 넘어 전송이 중단되었습니다.',
-  REGISTER_SEND_REQUEST_ABSENT: '고정된 전송 요청이 없습니다.',
-  REGISTER_NOT_UNKNOWN: '결과가 확정되어 대조할 대상이 없습니다.',
-  REGISTER_NOT_APPLIED: '마켓 반영이 확인되지 않아 읽기 확인을 할 수 없습니다.',
-  REGISTER_ALREADY_VERIFIED: '이미 읽기 확인을 마쳤습니다.',
-  REGISTER_SCOPE_NOT_PAUSED: '중단된 범위가 없습니다.',
-  REGISTER_SCOPE_RESUME_NOT_PERMITTED: '인증 중단은 재인증으로만 풀립니다.',
+  REGISTER_SCOPE_PAUSED: '이 판매 계정의 마켓 전송이 멈춰 있습니다.',
+  REGISTER_FAILURE_BUDGET_EXHAUSTED: '연속 실패 한도를 넘어 전송이 멈췄습니다.',
+  REGISTER_SEND_REQUEST_ABSENT: '확정된 전송 요청이 없습니다.',
+  REGISTER_NOT_UNKNOWN: '결과가 이미 확정되어 다시 확인할 것이 없습니다.',
+  REGISTER_NOT_APPLIED: '마켓 반영이 확인되지 않아 마켓 내용과 비교할 수 없습니다.',
+  REGISTER_ALREADY_VERIFIED: '이미 마켓 내용과 비교를 마쳤습니다.',
+  REGISTER_SCOPE_NOT_PAUSED: '멈춘 전송이 없습니다.',
+  REGISTER_SCOPE_RESUME_NOT_PERMITTED: '마켓 인증 문제로 멈춘 전송은 설정 › API 관리에서 계정을 다시 확인해야 풀립니다.',
   REGISTER_ACCOUNT_NOT_BOUND: '판매자 계정 연결이 확인되지 않았습니다.',
   REGISTER_PREFLIGHT_INPUTS_NOT_DURABLE:
     '저장된 등록 준비 정보가 없어 지금 상태를 확인할 수 없습니다.',
+  REGISTER_PREFLIGHT_NOT_WIRED: '등록 준비 확인 기능이 이 프로그램에 연결되어 있지 않아 지금은 확인할 수 없습니다 (관리자 확인 필요).',
   REGISTER_TARGET_POLICY_MISSING: '이 계정의 등록 정책이 아직 설정되지 않았습니다.',
   REGISTER_PREPARATION_ABSENT: '아직 등록 준비 내용이 저장되지 않았습니다.',
   REGISTER_PREFLIGHT_NOT_READY: '등록 준비 확인을 먼저 완료해 주세요.',
-  REGISTER_UNIT_ALREADY_FROZEN: '이미 스냅샷이 고정된 단위입니다.',
+  REGISTER_UNIT_ALREADY_FROZEN: '이미 등록 내용을 확정한 상품입니다.',
   REGISTER_FROZEN_METADATA_UNRESOLVED:
-    '스냅샷이 고정한 카테고리 메타데이터 리비전을 찾을 수 없어 규칙을 표시하지 않습니다. 현재 리비전으로 대신 표시하지 않습니다.',
-  DUPLICATE_EVIDENCE_MISSING: '중복 조회 근거가 없습니다. 조회 계약이 아직 채택되지 않았습니다.',
+    '등록 내용을 확정할 때 쓴 카테고리 등록 정보를 찾을 수 없어 필수 항목을 표시하지 않습니다.',
   // ADR-0033 §8: a resolved top or bottom notice the unit's composition does not place. Since G5
   // the SmartStore composition (v3) places both; an older composition revision does not.
-  PUBLICATION_GUIDANCE_UNPLACED: '이 상품의 상세페이지 구성은 상·하단 공지를 넣지 못합니다. 등록 정책을 다시 저장한 뒤 준비 내용을 저장하면 공지가 들어갑니다. 이 상품에서 그 공지를 끄면 이 사유는 사라집니다.',
+  PUBLICATION_GUIDANCE_UNPLACED:
+    '상·하단 공지를 넣을 자리가 없는 예전 상세페이지 구성으로 저장되어 있습니다. 「준비 내용 저장」을 다시 누르세요. 그래도 남으면 설정 › 등록 정책을 한 번 저장한 뒤 다시 저장하세요. 이 상품에서 공지를 끄면 이 안내는 사라집니다.',
   // ADR-0037 §2: an image over SmartStore's upload limit with no upload-fit variant.
-  IMAGE_UPLOAD_FIT_FAILED: '9.5MB 넘는 이미지의 업로드용 압축본이 없습니다. 아직 없다면 준비 내용을 저장하면 다시 만듭니다. 저장 후에도 남으면 줄일 수 없는 이미지이니 다른 이미지를 고르세요.',
+  IMAGE_UPLOAD_FIT_FAILED: '9.5MB가 넘는 이미지를 줄인 파일이 없습니다. 준비 내용을 저장하면 다시 만듭니다. 저장 후에도 남으면 줄일 수 없는 이미지이니 다른 이미지를 고르세요.',
   GUIDANCE_TEXT_INVALID: '쓸 수 없는 공지 문구입니다. 상세페이지 단계의 직접 작성 문구를 확인하세요.',
   GUIDANCE_TEXT_TOO_WIDE: '공지 문구 중 템플릿 글상자보다 넓은 줄이 있습니다.',
   GUIDANCE_TEMPLATE_UNKNOWN: '알 수 없는 공지 템플릿입니다.',
   REGISTER_GUIDANCE_CHOICE_INVALID: '직접 작성한 공지는 템플릿과 문구가 모두 있어야 합니다.',
-  REGISTER_GUIDANCE_UNAVAILABLE: '상세페이지 공지를 그릴 수 있는 서버 구성 요소가 연결되어 있지 않습니다.',
-  ENDPOINT_NOT_ADOPTED: '해당 마켓 연동 계약이 아직 채택되지 않았습니다.',
-  PROOF_NOT_AVAILABLE_IN_PROCESS: '실행 중인 앱에서는 증명할 수 없는 항목입니다.',
+  REGISTER_GUIDANCE_UNAVAILABLE: '상세페이지 공지 이미지를 지금 만들 수 없습니다. 잠시 뒤 다시 시도하세요.',
+  // B-PREVIEW: a frozen Snapshot the marketplace's request format cannot carry.
+  REGISTER_PREVIEW_PROJECTION_REFUSED:
+    '지금 내용으로는 스마트스토어 등록 형식을 만들 수 없습니다. 등록 준비 확인에서 막힌 항목을 먼저 해결하세요.',
+  // The real-registration checks (실등록 안전장치), in what the seller or the administrator does.
+  ENDPOINT_NOT_ADOPTED: '이 마켓 기능은 아직 준비되지 않았습니다.',
+  PROOF_NOT_AVAILABLE_IN_PROCESS: '이 화면에서는 확인할 수 없는 항목입니다 (관리자 확인 필요).',
   ACCOUNT_NOT_BOUND: '판매자 계정 연결이 확인되지 않았습니다.',
-  AUTH_NOT_READY: '마켓 인증이 준비되지 않았습니다.',
-  WRITE_SCOPE_NOT_PROVEN: '쓰기 권한 범위가 증명되지 않았습니다.',
-  NO_PREPARED_INTENT: '전송 준비된 등록 요청이 없습니다.',
-  READBACK_SESSION_NOT_WIRED: '등록 결과를 되읽을 수 있는 마켓 세션이 연결되어 있지 않습니다.',
-  PUBLISHED_STATE_UNPROVEN: '되읽기 계약이 판매 상태를 증명하지 못해 등록 성공을 확정할 수 없습니다.',
-  UNRESOLVED_CONFLICT: '미해결 충돌이 남아 있습니다.',
-  EXECUTION_SCOPE_STOPPED: '전송이 중단된 범위입니다.',
-  MORE_THAN_ONE_UNIT_SELECTED: '카나리는 한 건만 대상으로 합니다.',
-  ASSET_MUTATION_NOT_READY: '이미지 업로드 단계 준비도가 READY가 아닙니다.',
-  CREATE_MUTATION_NOT_READY: '등록 전송 단계 준비도가 READY가 아닙니다.',
-  RUNTIME_NOT_CLEAN: '실행 중인 코드가 정확한 커밋이 아닙니다.',
-  LIVE_EXECUTION_MODE_NOT_LIVE: '실행 모드가 LIVE가 아닙니다.',
-  LIVE_PROTECTED_WRITE_BRAKE_ENGAGED: '보호 쓰기 브레이크가 잠겨 있습니다.',
-  LIVE_PROTECTED_WRITE_BRAKE_UNREADABLE: '보호 쓰기 브레이크 상태를 읽을 수 없습니다.',
-  LIVE_GRANT_NO_MATCHING_ACTIVE_GRANT: '일치하는 유효 실행 권한이 없습니다.',
-  LIVE_ENDPOINT_NOT_ADOPTED: '해당 마켓 연동 계약이 아직 채택되지 않았습니다.',
-  LIVE_SENDER_NOT_WIRED: '전송 경로가 연결되어 있지 않습니다.',
-  LIVE_CANARY_ELIGIBILITY_UNPROVEN: '카나리 대상 적격성이 증명되지 않았습니다.',
-  LIVE_RESTORE_PROOF_ABSENT: '이 대상의 복원 증명이 없습니다.',
-  LIVE_EVIDENCE_RETENTION_UNPROVEN: '증거 보존이 증명되지 않았습니다.',
-  LIVE_VISUAL_ACCEPTANCE_UNRECORDED: '현재 코드의 화면 검수 기록이 없습니다.',
-  LIVE_ASSET_ATTEMPT_OWNER_UNREADABLE: '업로드 시도 기록을 읽을 수 없습니다.',
-  LIVE_ASSET_REPLAY_UNRESOLVED: '같은 이미지의 미확인 업로드가 남아 있습니다.',
-  LIVE_ASSET_REPLAY_APPLIED_REUSE_NOT_ADOPTED: '이미 반영된 이미지의 재사용 경로가 채택되지 않았습니다.',
-  LIVE_ASSET_REPLAY_KEY_UNDETERMINABLE: '업로드 대상을 식별할 수 없습니다.',
+  AUTH_NOT_READY: '마켓 인증이 준비되지 않았습니다. 설정 › API 관리에서 계정을 확인하세요.',
+  WRITE_SCOPE_NOT_PROVEN: '마켓에 상품을 등록할 권한이 확인되지 않았습니다.',
+  NO_PREPARED_INTENT: '보낼 준비가 된 등록 요청이 없습니다.',
+  NO_UNIT_SELECTED: '첫 시험으로 보낼 상품 1건이 아직 정해지지 않았습니다.',
+  READBACK_SESSION_NOT_WIRED: '등록한 상품을 마켓에서 다시 읽어 올 연결이 준비되지 않았습니다.',
+  PUBLISHED_STATE_UNPROVEN: '마켓의 판매 상태를 확인할 수 없어 등록 성공을 확정할 수 없습니다.',
+  UNRESOLVED_CONFLICT: '정리되지 않은 중복 등록 요청이 남아 있습니다.',
+  EXECUTION_SCOPE_STOPPED: '이 판매 계정의 마켓 전송이 멈춰 있습니다.',
+  MORE_THAN_ONE_UNIT_SELECTED: '처음 실제 등록은 상품 1건으로만 시험합니다.',
+  ASSET_MUTATION_NOT_READY: '이미지 올리기가 아직 실제 등록 준비가 되지 않았습니다.',
+  CREATE_MUTATION_NOT_READY: '상품 등록이 아직 실제 등록 준비가 되지 않았습니다.',
+  RUNTIME_NOT_CLEAN: '실행 중인 프로그램이 정식 배포 버전이 아닙니다 (관리자 확인 필요).',
+  LIVE_EXECUTION_MODE_NOT_LIVE: '지금은 연습 모드라 마켓에 실제로 보내지 않습니다 (관리자 설정 필요).',
+  LIVE_PROTECTED_WRITE_BRAKE_ENGAGED: '실제 등록 잠금이 걸려 있습니다 (관리자가 풀어야 합니다).',
+  LIVE_PROTECTED_WRITE_BRAKE_UNREADABLE: '실제 등록 잠금 상태를 읽을 수 없습니다 (관리자 확인 필요).',
+  LIVE_GRANT_NO_MATCHING_ACTIVE_GRANT: '이 작업에 맞는 실제 등록 허가가 없습니다 (관리자 발급 필요).',
+  LIVE_GRANT_NOT_LIVE: '실제 등록용 허가가 아닙니다 (관리자 확인 필요).',
+  LIVE_GRANT_CANDIDATE_NOT_READY: '등록 준비가 끝나지 않은 상품이라 허가를 쓸 수 없습니다.',
+  LIVE_GRANT_DISPATCH_NOT_WIRED: '발송처리 기능이 아직 연결되지 않았습니다.',
+  LIVE_ENDPOINT_NOT_ADOPTED: '이 마켓 기능은 아직 준비되지 않았습니다.',
+  LIVE_SENDER_NOT_WIRED: '마켓으로 보내는 연결이 준비되지 않았습니다.',
+  LIVE_SCOPE_NOT_APPROVED: '이 판매 계정의 실제 등록이 아직 승인되지 않았습니다 (관리자 확인 필요).',
+  LIVE_ORDER_GROUP_NOT_ATTESTED: '실제 등록 전 확인 항목이 아직 확인되지 않았습니다 (관리자 확인 필요).',
+  LIVE_RESIDUAL_RISK_NOT_ACCEPTED: '실제 등록의 남은 위험에 대한 승인이 없습니다 (관리자 확인 필요).',
+  LIVE_RESIDUAL_RISK_CONTRACT_NOT_CURRENT: '남은 위험 승인이 지금 기준과 맞지 않습니다 (관리자 확인 필요).',
+  LIVE_RESIDUAL_RISK_EVIDENCE_UNSUPPORTED: '남은 위험 승인 기록을 확인할 수 없습니다 (관리자 확인 필요).',
+  LIVE_CANARY_ELIGIBILITY_UNPROVEN: '첫 시험 등록 대상으로 알맞은지 확인되지 않았습니다 (관리자 확인 필요).',
+  LIVE_RESTORE_PROOF_ABSENT: '이 상품을 되돌리는 시험 기록이 없습니다 (관리자 확인 필요).',
+  LIVE_EVIDENCE_RETENTION_UNPROVEN: '작업 기록 보관이 확인되지 않았습니다 (관리자 확인 필요).',
+  LIVE_VISUAL_ACCEPTANCE_UNRECORDED: '이 버전의 화면 검수 기록이 없습니다 (관리자 확인 필요).',
+  LIVE_ASSET_ATTEMPT_OWNER_UNREADABLE: '이미지 올리기 기록을 읽을 수 없습니다.',
+  LIVE_ASSET_REPLAY_UNRESOLVED: '결과를 모르는 이미지 올리기가 남아 있습니다.',
+  LIVE_ASSET_REPLAY_APPLIED_REUSE_NOT_ADOPTED: '이미 올린 이미지를 다시 쓰는 기능이 아직 없습니다.',
+  LIVE_ASSET_REPLAY_DUPLICATE_IN_UNIT_REUSE_NOT_ADOPTED: '같은 이미지를 한 상품에 두 번 쓰는 기능이 아직 없습니다.',
+  LIVE_ASSET_REPLAY_KEY_UNDETERMINABLE: '올릴 이미지를 식별할 수 없습니다.',
   LIVE_ASSET_CANDIDATE_NOT_READY: '이미지 등록 준비가 완료되지 않았습니다.',
-  LIVE_ASSET_CANDIDATE_DRIFT: '실행 권한 발급 이후 후보가 바뀌었습니다.',
+  LIVE_ASSET_CANDIDATE_DRIFT: '허가를 받은 뒤 보낼 내용이 바뀌었습니다. 허가를 다시 받아야 합니다.',
   // 2026-10-15 usability check: a category without reviewed requirements (ADR-0042 will prepare
   // them automatically), and the refusals of the authoring reads.
   REGISTER_CATEGORY_METADATA_MISSING:
@@ -258,8 +425,8 @@ export const REASON_COPY = {
   REGISTER_SEND_FINGERPRINT_DRIFT: '등록 내용을 확정한 뒤 상품 정보가 바뀌었습니다. 준비 내용을 다시 확인하고 확정해 주세요.',
   REGISTER_SEND_ASSET_DRIFT: '확정한 뒤 이미지가 바뀌었습니다. 준비 내용을 다시 확인하고 확정해 주세요.',
   REGISTER_WIRE_NOT_SENDABLE: '마켓에 보낼 내용에 빈 칸이 있어 보내지 않았습니다. 미리보기에서 빈 칸을 확인하세요.',
-  REGISTER_SEND_SCOPE_MISMATCH: '이 상품의 판매 계정이 전송 범위와 맞지 않아 보내지 않았습니다.',
-  REGISTER_SEND_REQUEST_VERSION: '전송 요청 형식이 지금 서버와 맞지 않아 보내지 않았습니다. 등록 내용을 다시 확정해 주세요.',
+  REGISTER_SEND_SCOPE_MISMATCH: '이 상품의 판매 계정이 전송 대상과 맞지 않아 보내지 않았습니다.',
+  REGISTER_SEND_REQUEST_VERSION: '전송 요청 형식이 지금 프로그램과 맞지 않아 보내지 않았습니다. 등록 내용을 다시 확정해 주세요.',
   REGISTER_SNAPSHOT_MISSING: '확정한 등록 내용을 찾을 수 없어 보내지 않았습니다.',
   REGISTER_NOT_SENDABLE: '지금 상태에서는 보낼 수 없습니다.',
   REGISTER_INTENT_RESERVED_BY_BULK: '일괄 등록이 이 상품을 처리하고 있습니다.',
@@ -268,13 +435,45 @@ export const REASON_COPY = {
   REGISTER_CREATE_NOT_ADOPTED: '상품 등록 연동이 아직 준비되지 않았습니다.',
   REGISTER_CREATE_FAILED: '마켓이 상품 등록을 받지 않았습니다.',
   REGISTER_OUTCOME_UNKNOWN: '전송 결과를 확인하지 못했습니다. 다시 보내지 않고 등록 여부를 확인합니다.',
-  SMARTSTORE_SESSION_UNAVAILABLE: '스마트스토어 연결(인증)이 준비되지 않았습니다. 설정에서 계정 연결을 확인하세요.',
+  SMARTSTORE_SESSION_UNAVAILABLE: '스마트스토어 연결(인증)이 준비되지 않았습니다. 설정 › API 관리에서 계정 연결을 확인하세요.',
   SMARTSTORE_CREATE_WIRE_NOT_SENDABLE: '마켓에 보낼 내용에 빈 칸이 있어 보내지 않았습니다.',
-  LIVE_CREATE_STAGE_GATE_NOT_READY: '상품 등록 단계가 아직 실등록 준비가 되지 않았습니다.',
-  LIVE_CREATE_EXECUTION_SCOPE_NOT_ACTIVE: '실등록 실행 범위가 열려 있지 않습니다.',
+  LIVE_CREATE_STAGE_GATE_NOT_READY: '상품 등록이 아직 실제 등록 준비가 되지 않았습니다.',
+  LIVE_CREATE_EXECUTION_SCOPE_NOT_ACTIVE: '이 판매 계정의 실제 등록이 열려 있지 않습니다 (관리자 확인 필요).',
+  LIVE_CREATE_RECONCILE_PATH_NOT_ADOPTED: '등록 결과 확인 기능이 아직 준비되지 않아 실제 등록을 할 수 없습니다.',
   LIVE_SEND_TIME_TRUTH_MOVED: '보내기 직전에 확인한 내용이 바뀌어 보내지 않았습니다.',
-  LIVE_GRANT_NOT_LIVE: '실행 권한이 실등록 모드가 아닙니다.',
+  // Review resolutions (검토 항목) refused by their owner.
+  REVIEW_ITEM_MOVED: '검토 항목이 그 사이 바뀌었습니다. 화면을 새로 고친 뒤 다시 시도하세요.',
+  REVIEW_ITEM_SCOPE_MISMATCH: '이 판매 계정의 검토 항목이 아닙니다.',
+  REVIEW_NOTE_UNSAFE: '메모에 쓸 수 없는 내용(주소나 키처럼 보이는 값)이 있습니다.',
+  REVIEW_RESOLUTION_ALREADY_RECORDED: '이미 처리한 검토 항목입니다.',
+  REVIEW_ITEM_NOT_FOUND: '검토 항목을 찾을 수 없습니다. 화면을 새로 고쳐 주세요.',
 };
+
+// An M4 reason propagated by the preflight carries its layer's prefix (``M4_BASE.``,
+// ``M4_PRICING.``); an Item row carries the same code without it. A layer that is not READY and
+// named no reason propagates as ``M4_<LAYER>.<STATUS>``.
+const M4_LAYERS = {
+  'M4_BASE.': '수집한 상품 정보를 확인해야 합니다. 통합DB에서 확인하세요.',
+  'M4_PRICING.': '판매가를 확인해야 합니다.',
+};
+const IMAGE_FINDING = 'IMAGE_FINDING_';
+const GENERIC_REASON = '확인이 필요한 항목입니다.';
+
+// The Korean wording of one server reason code: its own copy, its unprefixed M4 copy, or the
+// given fallback. The code itself is never the text.
+export function reasonCopy(code, fallback = GENERIC_REASON) {
+  if (!code) return fallback;
+  if (REASON_COPY[code]) return REASON_COPY[code];
+  for (const [prefix, layer] of Object.entries(M4_LAYERS)) {
+    if (!code.startsWith(prefix)) continue;
+    const bare = code.slice(prefix.length);
+    if (REASON_COPY[bare]) return REASON_COPY[bare];
+    if (bare.startsWith(IMAGE_FINDING)) return REASON_COPY.IMAGE_QA_REVIEW_REQUIRED;
+    return layer;
+  }
+  if (code.startsWith(IMAGE_FINDING)) return REASON_COPY.IMAGE_QA_REVIEW_REQUIRED;
+  return fallback;
+}
 
 // Anything the server said that has no Korean wording above is never shown as its English
 // message or its code: the operator reads this sentence instead (the code stays an attribute).
@@ -290,7 +489,7 @@ export function errorCode(error) {
 export function errorCopy(error, copy = REASON_COPY) {
   const code = errorCode(error);
   if (code && copy[code]) return copy[code];
-  if (code && REASON_COPY[code]) return REASON_COPY[code];
+  if (code && reasonCopy(code, null)) return reasonCopy(code);
   if (!(error instanceof ApiError) && error instanceof Error && HANGUL.test(error.message)) return error.message;
   return GENERIC_ERROR;
 }
@@ -304,7 +503,65 @@ export function chip(text, tone) {
 }
 
 export function reason(code) {
-  return code ? h('div', { class: 'mini', 'data-reason': code }, REASON_COPY[code] ?? '확인이 필요한 항목입니다.') : null;
+  return code ? h('div', { class: 'mini', 'data-reason': code }, reasonCopy(code)) : null;
+}
+
+// A summary read that was refused or failed: what could not be shown, in Korean; the code stays
+// an attribute.
+function summaryUnavailable(code, what) {
+  return h(
+    'div',
+    { class: 'mini', 'data-reason': code ?? 'ERROR' },
+    `${what}을(를) 불러오지 못했습니다. 화면을 새로 고쳐 주세요.`,
+  );
+}
+
+function safetyNote() {
+  return h('p', { class: 'mini', 'data-role': 'safety-note' }, SAFETY_NOTE);
+}
+
+export const ATTEMPT_HEADERS = ['전송 회차', '결과', '마켓 응답', '보낸 시각'];
+export const IMAGES_READ_ONLY = '등록 내용이 확정되어 이미지는 볼 수만 있습니다.';
+
+// A marketplace category by its Korean name from the server's own leaf catalog; the id stays an
+// attribute (and the tooltip). Read once per id per page.
+const categoryNames = new Map();
+
+export function freshCategoryNames() {
+  categoryNames.clear();
+}
+
+function categoryEntry(marketplaceKey, categoryId) {
+  const key = `${marketplaceKey}|${categoryId}`;
+  if (!categoryNames.has(key)) categoryNames.set(key, findCategory(marketplaceKey, categoryId));
+  return categoryNames.get(key);
+}
+
+export function categoryNameNode(marketplaceKey, categoryId, tag = 'span', whole = false) {
+  const node = h(
+    tag,
+    { 'data-role': 'category-name', 'data-category-id': categoryId, title: `카테고리 번호 ${categoryId}` },
+    '카테고리 확인 중…',
+  );
+  if (!marketplaceKey) {
+    node.textContent = `카테고리 번호 ${categoryId}`;
+    return node;
+  }
+  categoryEntry(marketplaceKey, categoryId).then((entry) => {
+    const path = entry?.whole_category_name ? categoryPath(entry.whole_category_name) : null;
+    if (!path) {
+      node.textContent = `카테고리 번호 ${categoryId}`;
+      return;
+    }
+    node.textContent = whole ? path : path.split(' > ').at(-1);
+    if (!whole) node.title = path;
+  });
+  return node;
+}
+
+// The notice type by the marketplace's own Korean name; the type code stays an attribute.
+function noticeTypeName(found) {
+  return found.notice_type_label ?? '이름 없는 고시 유형';
 }
 
 export function table(headers, rows) {
@@ -422,9 +679,9 @@ function reasonNode(tag, reason, itemId) {
         'data-reason': reason.code,
         'data-reason-status': reason.status,
         'data-areas': (reason.areas ?? []).join(' '),
-        title: REASON_COPY[reason.code] ?? '확인이 필요한 항목입니다.',
+        title: reasonCopy(reason.code),
       },
-      REASON_COPY[reason.code] ?? '확인이 필요한 항목입니다.',
+      reasonCopy(reason.code),
     ),
     reason,
     itemId,
@@ -438,7 +695,7 @@ export function statusChip(status, codes, reasons, itemId) {
     chip(READINESS_LABEL[status] ?? '확인 필요', status === 'READY' ? 'good' : status === 'BLOCKED' ? 'bad' : 'warn'),
     ...(structured.length
       ? structured.map((reason) => reasonNode('span', reason, itemId))
-      : (codes ?? []).map((code) => h('span', { class: 'mini', 'data-reason': code }, REASON_COPY[code] ?? '확인이 필요한 항목입니다.'))),
+      : (codes ?? []).map((code) => h('span', { class: 'mini', 'data-reason': code }, reasonCopy(code)))),
   );
 }
 
@@ -455,10 +712,24 @@ export function reasonGroups(reasons, labels) {
     h(
       'div',
       { class: 'register-reason-area', 'data-area': area },
-      h('span', { class: 'mini' }, labels?.[area] ?? '기타 확인사항'),
+      h('span', { class: 'mini' }, labels?.[area] ?? '기타'),
       ...members.map((reason) => reasonNode('div', reason)),
     ),
   );
+}
+
+// The Settings tab and sub-tab each Settings fix surface is on. A marketplace's own tab is the
+// unit's marketplace (SmartStore when the row names no unit).
+const SETTINGS_PLACE = {
+  SETTINGS_CONNECT: 'api',
+  SETTINGS_TARGET_POLICY: 'policy',
+  SETTINGS_CATEGORY_METADATA: 'product',
+};
+
+export function settingsPlace(surface, marketplaceKey) {
+  if (surface === 'SETTINGS_OVERSEAS') return { tab: 'common', sub: 'overseas' };
+  const sub = SETTINGS_PLACE[surface];
+  return sub ? { tab: marketplaceKey || 'smartstore', sub } : {};
 }
 
 // B-UX2: the fix-only projection. A row only says where to act; the move is to that surface, and
@@ -466,16 +737,16 @@ export function reasonGroups(reasons, labels) {
 function fixesPanel(found, ctx) {
   if (!found) return null;
   if (found.unavailable) {
-    return h('div', { class: 'register-fixes', 'data-fixes': 'UNAVAILABLE' }, reason(found.unavailable));
+    return h('div', { class: 'register-fixes', 'data-fixes': 'UNAVAILABLE' }, summaryUnavailable(found.unavailable, '확인이 필요한 항목'));
   }
   const go = (row) => {
-    if (row.surface?.startsWith('SETTINGS_')) {
-      ctx.navigate('settings');
-      return;
-    }
     const unit = row.draft_id
       ? document.querySelector(`.register-unit[data-draft='${CSS.escape(row.draft_id)}']`)
       : null;
+    if (row.surface?.startsWith('SETTINGS_')) {
+      ctx.navigate('settings', settingsPlace(row.surface, unit?.dataset.marketplace));
+      return;
+    }
     const section = row.surface === 'REGISTER_IMAGES' ? unit?.querySelector("[data-editor-section='images']") : null;
     (section ?? unit)?.scrollIntoView({ block: 'start' });
   };
@@ -490,7 +761,7 @@ function fixesPanel(found, ctx) {
           'data-source': row.source,
         },
         chip(row.actionability_label, row.actionability === 'FIX_AVAILABLE' ? 'warn' : ''),
-        h('span', { class: 'mini', 'data-reason': row.code }, REASON_COPY[row.code] ?? '확인이 필요한 항목입니다.'),
+        h('span', { class: 'mini', 'data-reason': row.code }, reasonCopy(row.code)),
         h(
           'button',
           { type: 'button', class: 'btn', 'data-action': 'GO_TO_FIX', onclick: () => go(row) },
@@ -539,7 +810,7 @@ function readinessPanel(readiness) {
           'div',
           { class: 'supplier-head-row' },
           ...notEvaluated.map(([code, count]) =>
-            h('span', { class: 'mini', 'data-not-evaluated': code }, `${REASON_COPY[code] ?? '점검할 수 없는 항목'} ${count}`),
+            h('span', { class: 'mini', 'data-not-evaluated': code }, `${reasonCopy(code, '확인할 수 없는 상품')} ${count}`),
           ),
         )
       : null,
@@ -550,7 +821,7 @@ function readinessPanel(readiness) {
           ...areas.map((area) =>
             h(
               'span',
-              { class: 'mini', 'data-area-count': area.area, title: area.codes.join(', ') },
+              { class: 'mini', 'data-area-count': area.area, 'data-codes': area.codes.join(' ') },
               `${area.label} ${area.units}`,
             ),
           ),
@@ -596,7 +867,7 @@ export function itemRow(item) {
         ? h(
             'span',
             { class: 'mini', 'data-price-basis': item.source_currency },
-            ` · 원가 ${sourcePrice(item.source_currency, item.source_price)} · 환율(TTS) ${item.fx_publication_date ?? '—'} 기준`,
+            ` · 원가 ${sourcePrice(item.source_currency, item.source_price)} · 환율 ${item.fx_publication_date ?? '—'} 기준`,
           )
         : null,
     ),
@@ -604,7 +875,7 @@ export function itemRow(item) {
       'td',
       {},
       won(item.current_sale_price_krw),
-      item.price_pin_current === false ? chip('고정가 아님', 'warn') : null,
+      item.price_pin_current === false ? chip('판매가 바뀜', 'warn') : null,
     ),
     h('td', {}, statusChip(item.base_status, item.base_reason_codes, item.base_reasons, item.item_id)),
     h('td', {}, statusChip(item.pricing_status, item.pricing_reason_codes, item.pricing_reasons, item.item_id)),
@@ -628,8 +899,8 @@ function uploadFitLabel(fit) {
   const mb = (fit.byte_size / 1_000_000).toFixed(1);
   return h(
     'span',
-    { class: 'chip', 'data-upload-fit': fit.source_sha256 },
-    `업로드용 압축본 · ${fit.width}×${fit.height} · ${mb}MB`,
+    { class: 'chip', 'data-upload-fit': fit.source_sha256, title: `${fit.width}×${fit.height}` },
+    `자동으로 줄임 · ${mb}MB`,
   );
 }
 
@@ -644,20 +915,22 @@ function fieldRow(field) {
   );
 }
 
-export function categoryBlock(category) {
+export function categoryBlock(category, marketplaceKey) {
   const fields = [...category.attributes, ...category.notice_fields];
   return h(
     'div',
     { class: 'register-category', 'data-category': category.category_id },
-    kv('카테고리', category.category_id),
+    h('div', { class: 'kv' }, h('span', {}, '카테고리'), categoryNameNode(marketplaceKey, category.category_id, 'b', true)),
     category.metadata_unavailable_reason
       ? h(
           'div',
           { class: 'note', 'data-reason': category.metadata_unavailable_reason },
-          REASON_COPY[category.metadata_unavailable_reason] ?? '확인이 필요한 항목입니다.',
+          reasonCopy(category.metadata_unavailable_reason),
         )
       : null,
-    category.notice_type ? kv('정보고시', category.notice_type_label ?? category.notice_type) : null,
+    category.notice_type
+      ? h('div', { class: 'kv', 'data-notice-type': category.notice_type }, h('span', {}, '정보고시'), h('b', {}, noticeTypeName(category)))
+      : null,
     category.options_supported === null
       ? null
       : kv('옵션', category.options_supported ? `최대 ${category.max_options}개` : '미지원'),
@@ -732,8 +1005,56 @@ export function authoringForm(unit, onDone) {
     fieldControls.clear();
     dynamicFields.replaceChildren();
     const text = errorCopy(error);
-    picker.setProblem(text);
+    picker.setProblem(text, prepareCategoryAction(error));
     toast('카테고리 등록 정보를 불러오지 못했습니다', text);
+  }
+
+  // 2026-10-16: a category without reviewed requirements is prepared from here. The server named
+  // the category and the policy's taxonomy it is read under; the same Settings form opens for
+  // exactly that key, the seller confirms and saves it there, and the category is read again —
+  // its fields appear, and a saved preparation is evaluated again. Nothing is reviewed for them.
+  function prepareCategoryAction(error) {
+    if (errorCode(error) !== 'REGISTER_CATEGORY_METADATA_MISSING') return null;
+    const details = error.error?.details ?? {};
+    const categoryId = details.category_id ?? categoryControl.value.trim();
+    const taxonomyRevision = details.taxonomy_revision;
+    if (!categoryId || !taxonomyRevision) return null;
+    return {
+      name: 'PREPARE_CATEGORY_METADATA',
+      label: '이 카테고리 등록 정보 준비',
+      run: async () => {
+        const entry = await findCategory(unit.marketplace_key, categoryId);
+        try {
+          await openCategoryMetadataEditor({
+            marketplaceKey: unit.marketplace_key,
+            taxonomyRevision,
+            categoryId,
+            categoryName: entry?.whole_category_name ? categoryPath(entry.whole_category_name) : null,
+            onSaved: categoryPrepared,
+          });
+        } catch (failed) {
+          toast('카테고리 등록 정보를 열지 못했습니다', errorCopy(failed));
+        }
+      },
+    };
+  }
+
+  async function categoryPrepared() {
+    metadata = null;
+    try {
+      await loadMetadata();
+    } catch (error) {
+      // Saved without 확인 완료, or refused: the problem says why, with the same way back in.
+      metadataFailed(error);
+      return;
+    }
+    if (!authored) return;
+    try {
+      const result = await sendJson('POST', `/api/v1/register/preparations/${authored.preparation_id}/evaluate`, { actor: OPERATOR });
+      toast('등록 준비를 다시 확인했습니다', READINESS_LABEL[result?.preflight?.status] ?? '');
+    } catch (error) {
+      toast('등록 준비를 다시 확인하지 못했습니다', errorCopy(error));
+    }
   }
 
   // A field the marketplace fills itself when it is omitted ("상품상세 참조", a stated default) is
@@ -760,7 +1081,7 @@ export function authoringForm(unit, onDone) {
       });
       control = h('label', { class: 'kv' }, caption, input);
       const placeholder = {
-        YEAR_MONTH: 'yyyy-MM', DATE: 'yyyy-MM-dd', INTEGER: '정수', LONG: '정수',
+        YEAR_MONTH: '예: 2026-01', DATE: '예: 2026-01-31', INTEGER: '숫자', LONG: '숫자',
       }[valueType];
       if (placeholder) input.placeholder = placeholder;
     }
@@ -888,7 +1209,9 @@ export function authoringForm(unit, onDone) {
     hideMissing();
     const controls = [];
     if (found.notice_type) {
-      controls.push(kv('정보고시 유형', found.notice_type_label ?? found.notice_type));
+      controls.push(
+        h('div', { class: 'kv', 'data-notice-type': found.notice_type }, h('span', {}, '정보고시 유형'), h('b', {}, noticeTypeName(found))),
+      );
     }
     for (const rule of found.attributes) {
       controls.push(authoredField(rule, 'attribute', inputs.attributes?.[rule.key]));
@@ -1107,7 +1430,9 @@ export function authoringForm(unit, onDone) {
       toast('등록 준비 내용을 저장했습니다');
       onDone();
     } catch (error) {
-      if (errorCode(error) === 'REGISTER_CATEGORY_METADATA_MISSING') picker.setProblem(errorCopy(error));
+      if (errorCode(error) === 'REGISTER_CATEGORY_METADATA_MISSING') {
+        picker.setProblem(errorCopy(error), prepareCategoryAction(error));
+      }
       toast('저장하지 못했습니다', errorCopy(error));
     }
   });
@@ -1136,7 +1461,7 @@ export function preflightBlock(unit, labels) {
     ),
     ...((preflight.reasons ?? []).length
       ? reasonGroups(preflight.reasons, labels)
-      : preflight.reason_codes.map((code) => h('div', { class: 'mini', 'data-reason': code }, REASON_COPY[code] ?? '확인이 필요한 항목입니다.'))),
+      : preflight.reason_codes.map((code) => h('div', { class: 'mini', 'data-reason': code }, reasonCopy(code)))),
   );
 }
 
@@ -1146,7 +1471,7 @@ export function attemptRow(attempt) {
     {},
     h('td', {}, String(attempt.attempt_no)),
     h('td', {}, OUTCOME_LABEL[attempt.outcome] ?? '진행 중'),
-    h('td', { 'data-error-class': attempt.error_class ?? '', 'data-error-code': attempt.error_code ?? '' }, attempt.error_code ? REASON_COPY[attempt.error_code] ?? '마켓 응답을 확인해 주세요.' : '—'),
+    h('td', { 'data-error-class': attempt.error_class ?? '', 'data-error-code': attempt.error_code ?? '' }, attempt.error_code ? reasonCopy(attempt.error_code, '마켓 응답을 확인해 주세요.') : '—'),
     h('td', {}, attempt.started_at ? dotDateTime(attempt.started_at) : '—'),
   );
 }
@@ -1159,11 +1484,12 @@ export function scopeBlock(scope) {
     h(
       'div',
       { class: 'supplier-head-row' },
-      h('b', {}, '전송 브레이크'),
-      chip(paused ? (PAUSE_LABEL[scope.pause_reason] ?? '중단') : '전송 가능', paused ? 'bad' : 'good'),
+      h('b', {}, '마켓 전송'),
+      chip(paused ? (PAUSE_LABEL[scope.pause_reason] ?? '멈춤') : '정상', paused ? 'bad' : 'good'),
     ),
-    kv('연속 실패', String(scope.consecutive_failures)),
-    scope.paused_at ? kv('중단 시각', dotDateTime(scope.paused_at)) : null,
+    paused && PAUSE_HINT[scope.pause_reason] ? h('div', { class: 'mini', 'data-pause-hint': scope.pause_reason }, PAUSE_HINT[scope.pause_reason]) : null,
+    paused || scope.consecutive_failures > 0 ? kv('연속 실패', `${scope.consecutive_failures}회`) : null,
+    scope.paused_at ? kv('멈춘 시각', dotDateTime(scope.paused_at)) : null,
     scope.resumed_at ? kv('마지막 재개', dotDateTime(scope.resumed_at)) : null,
   );
 }
@@ -1225,7 +1551,7 @@ async function sendOutcome(result, draftId) {
 
 function outcomeCopy({ job, read }) {
   const cause = job?.last_error_code ?? read?.cause_code ?? null;
-  const why = cause ? REASON_COPY[cause] ?? '마켓 응답을 확인해 주세요.' : read ? REASON_COPY[read.reason_code] ?? '' : '';
+  const why = cause ? reasonCopy(cause, '마켓 응답을 확인해 주세요.') : read ? reasonCopy(read.reason_code, '') : '';
   if (!job) {
     return { tone: 'warn', title: '전송 결과를 아직 확인하지 못했습니다', why: why || '잠시 뒤 등록 상태에서 확인하세요.' };
   }
@@ -1297,7 +1623,11 @@ function call(unit, action, intentId) {
 // ADR-0014 §28.5: the server's read state, as it labelled it. Only 등록실패 is red.
 export function readStateChip(read, problem) {
   if (!read) {
-    return h('span', { class: 'chip bad', 'data-reason': problem ?? 'REGISTER_READ_STATE_UNCLASSIFIED' }, '분류 오류');
+    return h(
+      'span',
+      { class: 'chip bad', 'data-reason': problem ?? 'REGISTER_READ_STATE_UNCLASSIFIED', title: reasonCopy(problem ?? 'REGISTER_READ_STATE_UNCLASSIFIED') },
+      '상태 확인 불가',
+    );
   }
   return h('span', { class: `chip ${READ_STATE_TONE[read.state] ?? ''}`.trim(), 'data-read-state': read.state }, read.label);
 }
@@ -1332,7 +1662,7 @@ function statusRow(entry, onDone) {
           'data-intent': entry.intent_id,
           onclick: () => runStatus(entry, action, button, onDone),
         },
-        ACTION_LABEL[action] ?? action,
+        ACTION_LABEL[action] ?? '실행',
       )
     : null;
   // B-STATUS: only when the server says the UNKNOWN is a provider 400 rejection it can settle.
@@ -1351,7 +1681,7 @@ function statusRow(entry, onDone) {
     : null;
   const causes = [read?.attempt_cause_code, read?.cause_code]
     .filter((code, index, all) => code && all.indexOf(code) === index)
-    .map((code) => h('span', { class: 'mini', 'data-cause': code }, REASON_COPY[code] ?? '마켓 응답을 확인해 주세요.'));
+    .map((code) => h('span', { class: 'mini', 'data-cause': code }, reasonCopy(code, '마켓 응답을 확인해 주세요.')));
   return h(
     'tr',
     { 'data-intent': entry.intent_id, 'data-read-row': read?.state ?? 'UNCLASSIFIED' },
@@ -1361,7 +1691,7 @@ function statusRow(entry, onDone) {
       'td',
       {},
       read
-        ? h('span', { class: 'mini', 'data-reason': read.reason_code }, REASON_COPY[read.reason_code] ?? '마켓 응답을 확인해 주세요.')
+        ? h('span', { class: 'mini', 'data-reason': read.reason_code }, reasonCopy(read.reason_code, '마켓 응답을 확인해 주세요.'))
         : reason(entry.read_state_problem),
       ...causes,
     ),
@@ -1418,7 +1748,7 @@ export function actionCell(unit, action, onDone) {
       'data-unit': unit.unit_ref,
       onclick: () => run(unit, action, button, onDone),
     },
-    ACTION_LABEL[action.action] ?? action.action,
+    ACTION_LABEL[action.action] ?? '실행',
   );
   return h('div', { class: 'register-action' }, button, action.enabled ? null : reason(action.reason_code));
 }
@@ -1488,6 +1818,96 @@ function guidanceSlots(slots, placement) {
   );
 }
 
+// B-PREVIEW in a seller's words. A gap the adapter names is an English sentence that starts with
+// the request path it blocks; it is shown as what it means, the sentence staying an attribute.
+const GAP_COPY = [
+  [
+    'originProduct.detailAttribute.productInfoProvidedNotice',
+    '이 카테고리의 상품정보고시 유형은 아직 마켓에 보낼 수 없습니다. 다른 카테고리를 고르거나 관리자에게 알려 주세요.',
+  ],
+  ['optionCombinations', '옵션별 가격을 보내는 방식이 아직 확인되지 않아 옵션 상품은 보낼 수 없습니다.'],
+];
+
+export function gapCopy(gap) {
+  const found = GAP_COPY.find(([path]) => String(gap).startsWith(path));
+  return found ? found[1] : '마켓에 보낼 내용 중 아직 채울 수 없는 칸이 있습니다.';
+}
+
+// The detail page's sections, in order (app/stages/register/detail.py).
+const DETAIL_SECTION_LABEL = {
+  TOP_GUIDANCE: '상단 공지',
+  DETAIL_IMAGES: '상세 이미지',
+  BODY: '본문',
+  BOTTOM_GUIDANCE: '하단 공지',
+};
+
+// The SmartStore request fields a preview row shows, by their own key (the nearest named one of
+// a path); the path itself stays an attribute.
+const PREVIEW_FIELD_LABEL = {
+  name: '상품명',
+  detailContent: '상세 설명',
+  representativeImage: '대표 이미지',
+  optionalImages: '추가 이미지',
+  salePrice: '판매가',
+  stockQuantity: '재고 수량',
+  leafCategoryId: '카테고리',
+  statusType: '판매 상태',
+  deliveryType: '배송 방법',
+  deliveryAttributeType: '배송 속성',
+  deliveryCompany: '택배사',
+  deliveryFeeType: '배송비 종류',
+  baseFee: '기본 배송비',
+  deliveryFeePayType: '배송비 결제 방식',
+  returnDeliveryCompanyPriorityType: '반품 택배사',
+  returnDeliveryFee: '반품 배송비',
+  exchangeDeliveryFee: '교환 배송비',
+  shippingAddressId: '출고지',
+  returnAddressId: '반품지',
+  deliveryInfo: '배송',
+  sellerManagementCode: '판매자 상품코드',
+  sellerManagerCode: '옵션 판매자코드',
+  afterServiceTelephoneNumber: 'A/S 전화번호',
+  afterServiceGuideContent: 'A/S 안내',
+  originAreaCode: '원산지',
+  minorPurchasable: '미성년자 구매',
+  customsTaxType: '관부가세',
+  optionCombinationGroupNames: '옵션명',
+  optionGroupName1: '옵션명',
+  optionGroupName2: '옵션명',
+  optionGroupName3: '옵션명',
+  optionName1: '옵션값',
+  optionName2: '옵션값',
+  optionName3: '옵션값',
+  optionCombinations: '옵션',
+  productInfoProvidedNoticeType: '상품정보고시 유형',
+  naverShoppingRegistration: '네이버쇼핑 노출',
+  channelProductDisplayStatusType: '전시 상태',
+  tags: '태그',
+};
+const NOTICE_PATH = 'productInfoProvidedNotice';
+
+export function previewFieldLabel(path) {
+  const keys = String(path).replace(/\[\d+\]/g, '').split('.');
+  if (keys[0] === 'attributes') return `속성 · ${ATTRIBUTE_LABEL[keys[1]] ?? keys[1] ?? ''}`.trim();
+  const leaf = keys.at(-1);
+  if (keys.includes(NOTICE_PATH) && leaf !== 'productInfoProvidedNoticeType') {
+    return ATTRIBUTE_LABEL[leaf] ? `상품정보고시 · ${ATTRIBUTE_LABEL[leaf]}` : '상품정보고시 항목';
+  }
+  for (let index = keys.length - 1; index >= 0; index -= 1) {
+    if (PREVIEW_FIELD_LABEL[keys[index]]) return PREVIEW_FIELD_LABEL[keys[index]];
+  }
+  return '기타 등록 정보';
+}
+
+// A value as the seller reads it: the request's booleans and the two fixed statuses in Korean.
+const PREVIEW_VALUE_LABEL = { true: '예', false: '아니오', SALE: '판매중', ON: '전시' };
+
+function previewValue(field) {
+  if (field.redacted) return '(마켓 참조 · 표시 안 함)';
+  if (field.value === null || field.value === undefined) return '—';
+  return PREVIEW_VALUE_LABEL[field.value] ?? field.value;
+}
+
 function previewView(view) {
   const detail = view.detail;
   return h(
@@ -1496,12 +1916,12 @@ function previewView(view) {
     h('div', { class: 'supplier-head-row' }, h('b', {}, '스마트스토어 미리보기'),
       view.projected
         ? chip(view.sendable ? '보낼 수 있음' : '빈 칸 있음', view.sendable ? 'good' : 'warn')
-        : chip('투영 거절', 'bad')),
+        : chip('미리보기 불가', 'bad')),
     view.refusal_code ? reason(view.refusal_code) : null,
     kv('상품명', view.name ?? '—'),
     kv('판매가', view.sale_prices_krw.map((price) => won(price)).join(', ') || '—'),
     kv('카테고리', view.category_id ? '선택됨' : '—'),
-    ...view.gaps.map((gap) => h('div', { class: 'mini', 'data-gap': 'true' }, gap)),
+    ...view.gaps.map((gap) => h('div', { class: 'mini', 'data-gap': 'true', 'data-gap-detail': gap }, gapCopy(gap))),
     table(
       ['이미지 역할', '순서', '이미지', '마켓 업로드'],
       view.images.map((image, index) =>
@@ -1513,8 +1933,9 @@ function previewView(view) {
       ),
     ),
     detail
-      ? h('div', { class: 'register-preview-detail', 'data-detail-builder': detail.builder },
-          kv('상세 구획', detail.sections.join(' → ') || '—'),
+      ? h('div', { class: 'register-preview-detail', 'data-detail-builder': detail.builder, 'data-sections': detail.sections.join(' ') },
+          h('div', { class: 'kv', 'data-role': 'preview-sections' }, h('span', {}, '상세페이지 구성'),
+            h('b', {}, detail.sections.map((section) => DETAIL_SECTION_LABEL[section] ?? '기타').join(' → ') || '—')),
           guidanceSlots(detail.guidance?.top ?? [], 'top'),
           kv('상세 이미지', `${detail.image_slots.length}장`),
           ...detail.paragraphs.map((paragraph) => h('p', { class: 'mini' }, paragraph)),
@@ -1523,19 +1944,19 @@ function previewView(view) {
     view.document.length
       ? table(
           ['보낼 항목', '값'],
-          view.document.map((field, index) =>
+          view.document.map((field) =>
             h('tr', { 'data-field': field.path },
-              h('td', {}, `등록 정보 ${index + 1}`),
-              h('td', {}, field.redacted ? '(마켓 참조 · 표시 안 함)' : field.value ?? '—')),
+              h('td', {}, previewFieldLabel(field.path)),
+              h('td', {}, previewValue(field))),
           ),
         )
       : null,
     view.not_sent.length
       ? table(
           ['보내지 않는 항목', '값'],
-          view.not_sent.map((row, index) =>
+          view.not_sent.map((row) =>
             h('tr', { 'data-not-sent': row.path },
-              h('td', {}, `제외 정보 ${index + 1}`),
+              h('td', {}, previewFieldLabel(row.path)),
               h('td', {}, row.value === 'DETAIL_PAGE_REFERENCE' ? '상세페이지 참조' : row.value)),
           ),
         )
@@ -1556,7 +1977,7 @@ export function repinBlock(unit, onDone) {
       (item.pricing_reason_codes ?? []).some((code) => REPIN_REASONS.has(code)),
   );
   if (!moved) return null;
-  const button = h('button', { type: 'button', class: 'btn', 'data-action': 'REPIN_DRAFT' }, '가격 다시 고정');
+  const button = h('button', { type: 'button', class: 'btn', 'data-action': 'REPIN_DRAFT' }, '가격 다시 계산');
   button.addEventListener('click', async () => {
     button.disabled = true;
     try {
@@ -1565,10 +1986,10 @@ export function repinBlock(unit, onDone) {
         expected_draft_revision: unit.draft_revision,
       });
       const count = moved.items.filter((item) => item.repinned).length;
-      toast(count ? `${count}개 품목의 가격을 다시 고정했습니다.` : 'M4 가격이 그대로라 바뀐 것이 없습니다.');
+      toast(count ? `${count}개 품목의 판매가를 새로 반영했습니다.` : '판매가 변동이 없습니다.');
       onDone();
     } catch (error) {
-      toast('가격을 다시 고정하지 못했습니다', errorCopy(error));
+      toast('가격을 다시 계산하지 못했습니다', errorCopy(error));
       button.disabled = false;
     }
   });
@@ -1620,7 +2041,7 @@ function imagesSection(unit, onDone) {
     unit,
     'images',
     '이미지',
-    editable ? null : h('span', { class: 'mini' }, '스냅샷이 고정되어 이미지는 보기만 합니다.'),
+    editable ? null : h('span', { class: 'mini' }, IMAGES_READ_ONLY),
     ...unit.items.map((item) =>
       h(
         'div',
@@ -1648,15 +2069,17 @@ function unitPanel(unit, onDone, labels) {
       'div',
       { class: 'supplier-head-row' },
       h('h2', { class: 'panel-title' }, '등록 상세'),
-      chip(PREPARATION_LABEL[unit.preparation] ?? unit.preparation),
+      chip(PREPARATION_LABEL[unit.preparation] ?? '확인 필요'),
       intent ? readStateChip(intent.read_state, intent.read_state_problem) : null,
     ),
-    intent ? kv('요청 상태', INTENT_LABEL[intent.state] ?? intent.state) : null,
+    intent ? kv('요청 상태', INTENT_LABEL[intent.state] ?? '확인 필요') : null,
     h('div', { class: 'kv' }, h('span', {}, '판매 채널'), platformTag(unit.marketplace_key)),
-    intent ? kv('검증 상태', VERIFICATION_LABEL[intent.verification_state] ?? intent.verification_state) : null,
+    intent ? kv('마켓 반영 확인', VERIFICATION_LABEL[intent.verification_state] ?? '확인 필요') : null,
     intent?.marketplace_product_id ? kv('마켓 상품번호', intent.marketplace_product_id) : null,
-    unit.published_state ? kv('마켓 노출 상태', unit.published_state) : null,
-    unit.conflicting_intents.length ? kv('충돌 중인 요청', String(unit.conflicting_intents.length)) : null,
+    unit.published_state
+      ? h('div', { class: 'kv', 'data-published-state': unit.published_state }, h('span', {}, '마켓 판매 상태'), h('b', {}, PUBLISHED_LABEL[unit.published_state] ?? '확인 필요'))
+      : null,
+    unit.conflicting_intents.length ? kv('정리 안 된 중복 등록 요청', `${unit.conflicting_intents.length}건`) : null,
   );
   panel.append(
     editorNav(panel),
@@ -1664,7 +2087,7 @@ function unitPanel(unit, onDone, labels) {
       unit,
       'info',
       '상품 정보',
-      unit.category ? categoryBlock(unit.category) : null,
+      unit.category ? categoryBlock(unit.category, unit.marketplace_key) : null,
       unit.snapshot ? null : authoringForm(unit, onDone),
     ),
     imagesSection(unit, onDone),
@@ -1686,7 +2109,7 @@ function unitPanel(unit, onDone, labels) {
       preflightBlock(unit, labels),
       previewBlock(unit),
       intent && intent.attempts.length
-        ? table(['시도', '결과', '확인 내용', '시작'], intent.attempts.map(attemptRow))
+        ? table(ATTEMPT_HEADERS, intent.attempts.map(attemptRow))
         : null,
       scopeBlock(unit.scope),
       h('div', { class: 'supplier-actions' }, ...unit.actions.map((action) => actionCell(unit, action, onDone))),
@@ -1702,14 +2125,14 @@ function reviewScopeLabel(item) {
   const scope = item.scope;
   if (scope.intent_id) return '등록 요청';
   if (scope.preparation_id) return '등록 준비';
-  return '계정 범위';
+  return '판매 계정 전체';
 }
 
 function reviewPanel(marketplaceKey, accountId) {
   const block = reviewItemsBlock({
     kindLabel: KIND_LABEL,
     emptyCopy: '이 판매 계정에 기록된 등록 검토 항목이 없습니다.',
-    errorCopy: (code) => REASON_COPY[code] ?? GENERIC_ERROR,
+    errorCopy: (code) => reasonCopy(code, GENERIC_ERROR),
     scopeLabel: reviewScopeLabel,
   });
   const panel = h(
@@ -1732,15 +2155,15 @@ function canaryPanel(canary) {
     h(
       'div',
       { class: 'supplier-head-row' },
-      withHelp(h('h2', { class: 'panel-title' }, '실등록 사전 점검'), CANARY_HELP),
-      chip(blocked ? '차단됨' : '준비됨', blocked ? 'bad' : 'good'),
+      withHelp(h('h2', { class: 'panel-title' }, '실제 등록 전 점검'), CANARY_HELP),
+      chip(blocked ? '아직 보낼 수 없음' : '보낼 수 있음', blocked ? 'bad' : 'good'),
     ),
-    kv('실행 상태', EXECUTION_MODE_LABEL[canary.execution_mode] ?? '확인 필요'),
-    kv('마켓 권한', WRITE_STATUS_LABEL[canary.write_status] ?? '확인 필요'),
+    kv('등록 방식', EXECUTION_MODE_LABEL[canary.execution_mode] ?? '확인 필요'),
+    kv('마켓 상품 등록 권한', WRITE_STATUS_LABEL[canary.write_status] ?? '확인 필요'),
     h(
       'details',
       { class: 'register-safety-details' },
-      h('summary', {}, `세부 점검 ${satisfied}/${canary.requirements.length} 충족`),
+      h('summary', {}, `점검 항목 ${satisfied}/${canary.requirements.length} 완료`),
       h(
         'ul',
         { class: 'requirement-list' },
@@ -1749,7 +2172,7 @@ function canaryPanel(canary) {
             'li',
             { 'data-requirement': item.requirement, 'data-satisfied': item.satisfied ? 'true' : 'false' },
             h('span', {}, CANARY_REQUIREMENT_LABEL[item.requirement] ?? '준비 상태 확인'),
-            chip(item.satisfied ? '충족' : '미충족', item.satisfied ? 'good' : 'warn'),
+            chip(item.satisfied ? '완료' : '확인 필요', item.satisfied ? 'good' : 'warn'),
             item.satisfied ? null : reason(item.reason_code),
           ),
         ),
@@ -1765,17 +2188,17 @@ function grantRow(grant) {
         h(
           'ul',
           { class: 'requirement-list' },
-          ...grant.readiness.missing.map((code) => h('li', { 'data-missing': code }, REASON_COPY[code] ?? '확인이 필요한 항목입니다.')),
+          ...grant.readiness.missing.map((code) => h('li', { 'data-missing': code }, reasonCopy(code))),
         ),
       )
-    : h('span', { class: 'mini' }, '등록 단계 준비도는 카나리 준비도에서 확인합니다.');
+    : h('span', { class: 'mini' }, '준비 상태는 위 「실제 등록 전 점검」에서 확인합니다.');
   return h(
     'tr',
     { 'data-grant': grant.grant_id, 'data-grant-state': grant.state, 'data-stage': grant.stage },
-    h('td', {}, STAGE_LABEL[grant.stage] ?? grant.stage),
-    h('td', {}, chip(GRANT_LABEL[grant.state] ?? grant.state, grant.state === 'ACTIVE' ? 'good' : 'warn')),
+    h('td', {}, STAGE_LABEL[grant.stage] ?? '기타 작업'),
+    h('td', {}, chip(GRANT_LABEL[grant.state] ?? '확인 필요', grant.state === 'ACTIVE' ? 'good' : 'warn')),
     h('td', {}, '연결됨'),
-    h('td', {}, `${grant.budget_used} / ${grant.budget_max}`),
+    h('td', {}, `${grant.budget_used} / ${grant.budget_max}회`),
     h('td', {}, dotDateTime(grant.expires_at)),
     h('td', {}, readiness),
   );
@@ -1789,21 +2212,21 @@ function livePanel(live) {
   return h(
     'section',
     { class: 'panel register-live', 'data-role': 'live-panel' },
-    withHelp(h('h2', { class: 'panel-title' }, '보호 쓰기 · 실행 권한'), LIVE_HELP),
+    withHelp(h('h2', { class: 'panel-title' }, '실제 등록 잠금 · 허가'), LIVE_HELP),
     h(
       'div',
       { 'data-role': 'live-brake', 'data-brake-state': brake.state },
-      kv('보호 쓰기 브레이크', BRAKE_LABEL[brake.state] ?? brake.state),
+      kv('실제 등록 잠금', BRAKE_LABEL[brake.state] ?? '확인 필요'),
       chip(BRAKE_LABEL[brake.state] ?? '확인 필요', brake.state === 'RELEASED' ? 'good' : 'bad'),
       brake.recorded
         ? null
-        : h('div', { class: 'mini', 'data-reason': 'BRAKE_NOT_RECORDED' }, '기록이 없어 기본값인 잠김으로 판단합니다.'),
-      brake.reason_code ? h('div', { class: 'mini', 'data-reason': brake.reason_code }, REASON_COPY[brake.reason_code] ?? '안전 잠금 사유가 기록되어 있습니다.') : null,
+        : h('div', { class: 'mini', 'data-reason': 'BRAKE_NOT_RECORDED' }, '잠금 기록이 없어 잠긴 것으로 봅니다.'),
+      brake.reason_code ? h('div', { class: 'mini', 'data-reason': brake.reason_code }, reasonCopy(brake.reason_code, '잠금 사유가 기록되어 있습니다.')) : null,
     ),
     h(
       'details',
       { class: 'register-safety-details' },
-      h('summary', {}, `실행 권한 상세 · 사용 가능 ${active}건`),
+      h('summary', {}, `등록 허가 상세 · 사용 가능 ${active}건`),
       h(
         'ul',
         { class: 'requirement-list', 'data-role': 'live-proofs' },
@@ -1811,7 +2234,7 @@ function livePanel(live) {
           h(
             'li',
             { 'data-proof': name, 'data-satisfied': proven ? 'true' : 'false' },
-            h('span', {}, PROOF_LABEL[name] ?? '안전 상태 확인'),
+            h('span', {}, PROOF_LABEL[name] ?? '안전 조건 확인'),
             chip(proven ? '확인됨' : '확인 필요', proven ? 'good' : 'warn'),
           ),
         ),
@@ -1820,8 +2243,8 @@ function livePanel(live) {
         'div',
         { 'data-role': 'live-grants' },
         live.grants.length
-          ? table(['단계', '상태', '계정 연결', '사용량', '만료', '준비도'], live.grants.map(grantRow))
-          : h('div', { class: 'mini', 'data-grant-state': 'NONE' }, '발급된 실행 권한이 없습니다.'),
+          ? table(['작업', '상태', '판매 계정', '사용 횟수', '만료', '보낼 준비'], live.grants.map(grantRow))
+          : h('div', { class: 'mini', 'data-grant-state': 'NONE' }, '발급된 등록 허가가 없습니다. 실제 등록을 시작할 때 관리자가 발급합니다.'),
       ),
     ),
   );
@@ -1883,7 +2306,11 @@ function utilityRow(overview) {
   return h(
     'div',
     { class: 'register-utility-row' },
-    h('span', { class: 'mini', 'data-role': 'paused-scopes' }, `중단된 범위 ${overview.paused_scopes.length}`),
+    h(
+      'span',
+      { class: 'mini', 'data-role': 'paused-scopes', title: '마켓 전송이 멈춘 판매 계정 수입니다.' },
+      `중단된 범위 ${overview.paused_scopes.length}`,
+    ),
     h('button', { type: 'button', class: 'btn', 'data-action': 'open-history', onclick: () => goTo('failed') }, '등록 이력'),
   );
 }
@@ -1950,7 +2377,7 @@ function openUnitChoice(unit) {
         'div',
         { class: 'detail-group' },
         h('div', { class: 'kv' }, h('span', {}, '대상 플랫폼'), platformTag(unit.marketplace_key)),
-        kv('준비 상태', PREPARATION_LABEL[unit.preparation] ?? unit.preparation),
+        kv('준비 상태', PREPARATION_LABEL[unit.preparation] ?? '확인 필요'),
         unit.intent ? h('div', { class: 'kv' }, h('span', {}, '등록 상태'), readStateChip(unit.intent.read_state, unit.intent.read_state_problem)) : null,
       ),
       h(
@@ -1981,8 +2408,10 @@ function queueRow(unit) {
     },
     h('td', {}, unitNameNode(unit)),
     h('td', {}, platformTag(unit.marketplace_key)),
-    unit.category ? h('td', {}, h('span', { class: 'mono' }, unit.category.category_id)) : noDataCell('카테고리'),
-    h('td', {}, chip(PREPARATION_LABEL[unit.preparation] ?? unit.preparation)),
+    unit.category
+      ? h('td', { 'data-category': unit.category.category_id }, categoryNameNode(unit.marketplace_key, unit.category.category_id, 'span'))
+      : noDataCell('카테고리'),
+    h('td', {}, chip(PREPARATION_LABEL[unit.preparation] ?? '확인 필요')),
     h('td', {}, read ? h('span', { class: `chip ${READ_STATE_TONE[read.state] ?? ''}`.trim() }, read.label) : '-'),
     h(
       'td',
@@ -2050,7 +2479,7 @@ function sectionWrap(section, title, ...children) {
 // arrive. Every slower read (readiness, fixes, canary, live) is its own place that says it is
 // loading and is replaced by what the server answers — or by its error — when that read does.
 function loadingSlot(role, label) {
-  return h('div', { class: 'register-loading', 'data-loading': role, role: 'status' }, chip(`${label} 불러오는 중`));
+  return h('div', { class: 'register-loading', 'data-loading': role, 'data-label': label, role: 'status' }, chip(`${label} 불러오는 중`));
 }
 
 function fill(slot, read, render) {
@@ -2060,7 +2489,15 @@ function fill(slot, read, render) {
       if (node) slot.replaceWith(node);
       else slot.remove();
     })
-    .catch((error) => slot.replaceWith(h('div', { class: 'register-loading', 'data-load-failed': slot.dataset.loading }, errorState(error))));
+    .catch((error) =>
+      slot.replaceWith(
+        h(
+          'div',
+          { class: 'register-loading', 'data-load-failed': slot.dataset.loading },
+          summaryUnavailable(errorCode(error) ?? 'ERROR', slot.dataset.label ?? '이 정보'),
+        ),
+      ),
+    );
 }
 
 function summaryRead(path) {
@@ -2080,6 +2517,7 @@ export default {
     const head = pageHead({ title: TITLE, help: HELP });
     freshPolicyNotes();
     freshProductFacts();
+    freshCategoryNames();
     let screen;
     let overview;
     try {
@@ -2095,12 +2533,12 @@ export default {
     const readinessSlot = loadingSlot('readiness', '등록 준비 현황');
     fill(readinessSlot, readinessRead, (readiness) =>
       readiness?.unavailable
-        ? h('div', { class: 'register-readiness', 'data-readiness': 'UNAVAILABLE' }, reason(readiness.unavailable))
+        ? h('div', { class: 'register-readiness', 'data-readiness': 'UNAVAILABLE' }, summaryUnavailable(readiness.unavailable, '등록 준비 현황'))
         : readinessPanel(readiness),
     );
-    const canarySlot = loadingSlot('canary', '실등록 사전 점검');
+    const canarySlot = loadingSlot('canary', '실제 등록 전 점검');
     fill(canarySlot, canaryRead, canaryPanel);
-    const liveSlot = loadingSlot('live', '보호 쓰기 · 실행 권한');
+    const liveSlot = loadingSlot('live', '실제 등록 잠금 · 허가');
     fill(liveSlot, liveRead, livePanel);
     const statusPanel = registrationStatusPanel(overview.registration_status, reload);
     // Opened from the registration status card: its detail panel is brought into view.
@@ -2132,7 +2570,7 @@ export default {
         ),
         sectionWrap('products', '등록상품 관리', listingSyncPanel()),
         sectionWrap('failed', '실패 / 재시도', statusPanel),
-        sectionWrap('safety', '실등록 안전장치', canarySlot, liveSlot),
+        sectionWrap('safety', '실등록 안전장치', safetyNote(), canarySlot, liveSlot),
       );
     }
     // Opened from the Product DB with the Draft it just created (Gate 1 G1-D): that Draft's
@@ -2180,7 +2618,7 @@ export default {
       h('div', { class: 'section-grid register-layout' }, queuePanel(overview.units, readinessSlot, null), settingsPanel(ctx)),
       sectionWrap('products', '등록상품 관리', listingSyncPanel()),
       sectionWrap('failed', '실패 / 재시도', fixesSlot, statusPanel),
-      sectionWrap('safety', '실등록 안전장치', canarySlot, liveSlot),
+      sectionWrap('safety', '실등록 안전장치', safetyNote(), canarySlot, liveSlot),
       sectionWrap('reviews', '검토 항목', ...reviews),
       sectionWrap('units', '상품 등록 작업', panelsSlot),
     );

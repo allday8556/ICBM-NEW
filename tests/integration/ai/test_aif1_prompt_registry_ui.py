@@ -86,9 +86,9 @@ def test_the_registry_edits_one_layer_at_a_time_and_previews_the_composition(
         tabs = [t.inner_text().strip() for t in editor.locator("[data-layer-tab]").all()]
         assert tabs == [
             "공통 규칙",
-            "역할 Role",
-            "플랫폼 Policy",
-            "작업 Task",
+            "역할",
+            "플랫폼 정책",
+            "작업",
             "출력 형식",
             "입력 변수",
             "조립 미리보기",
@@ -108,7 +108,7 @@ def test_the_registry_edits_one_layer_at_a_time_and_previews_the_composition(
         assert writes == [("POST", f"/api/v1/ai/prompts/{BUNDLE}/revisions")]
         page.wait_for_function(
             f"() => document.querySelector(\".registry-grid [data-prompt-key='{BUNDLE}'] em\")"
-            "?.innerText.includes('v2')"
+            "?.dataset.revision === '2'"
         )
         assert _card(page, BUNDLE) == "v2 · 사용자 수정본"
 
@@ -126,7 +126,7 @@ def test_the_registry_edits_one_layer_at_a_time_and_previews_the_composition(
         assert writes[-1] == ("POST", f"/api/v1/ai/prompts/{BUNDLE}/reset")
         page.wait_for_function(
             f"() => document.querySelector(\".registry-grid [data-prompt-key='{BUNDLE}'] em\")"
-            "?.innerText.includes('v3')"
+            "?.dataset.revision === '3'"
         )
         assert _card(page, BUNDLE) == "v3 · 기본값"
         assert len(writes) == 2

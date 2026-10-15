@@ -35,7 +35,7 @@ from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.collect_support import confirmed
 from tests.support.gate1_support import MARKET, save_policy
 from tests.support.product_support import SUPPLIER, Collections, product, raw
-from tests.support.register_support import establish
+from tests.support.register_support import bind, establish
 
 pytestmark = pytest.mark.integration
 
@@ -209,12 +209,16 @@ def test_one_click_is_one_command_and_the_draft_opens_in_registration_management
             draft_id = result.get_attribute("data-draft")
             draft = setup.container.registrations.draft(str(draft_id))
             assert draft is not None
+            # The confirmation names the account the Draft targets (PR #369 audit).
+            account = result.locator("[data-role='draft-account']")
+            assert account.get_attribute("data-account") == setup.account
+            assert setup.account in account.inner_text()
             shown = {
                 row.get_attribute("data-pin-item"): row.get_attribute("data-pricing-snapshot")
                 for row in result.locator("tr[data-pin-item]").all()
             }
             assert shown == {row.item_id: row.pricing_snapshot_id for row in draft.items}
-            assert policy_revision[:8] in result.inner_text()
+            assert result.get_attribute("data-policy-revision") == policy_revision
             page.locator("[data-action='open-draft']").click()
             unit = page.locator(f".register-unit[data-draft='{draft_id}'][aria-current='true']")
             unit.wait_for(timeout=15_000)
@@ -227,6 +231,31 @@ def test_one_click_is_one_command_and_the_draft_opens_in_registration_management
             assert page.locator("[data-role='draft-result'][data-state]").count() == 0
     assert len(wire.posts()) == 1
     assert _drafts(config) == 1
+
+
+def test_each_account_is_named_by_its_own_stable_identity(
+    browser: Browser, config: AppConfig
+) -> None:
+    """Two accounts of one marketplace read differently, each by its own account id — never by a
+    position in the list that moves when the list changes (PR #369 audit,
+    DUPLICATE_OR_WRONG_SEND)."""
+    wire = Wire()
+    with TestClient(create_app(config), base_url=LOCAL) as client:
+        setup = Setup(client, config)
+        bind(config, MARKET, "provider-account-2")
+        second = establish(setup.container, config, MARKET, "provider-account-2")
+        group = setup.product("S-TIER", 1, 2)
+        with _page(browser, client, wire, _db(group)) as page:
+            _ready(page, group)
+            texts: dict[str, str] = {}
+            for account in (setup.account, second):
+                option = page.locator(f"#draft-target option[data-account='{account}']")
+                option.wait_for(state="attached")
+                texts[account] = option.inner_text()
+            assert setup.account in texts[setup.account] and second in texts[second]
+            assert second not in texts[setup.account] and setup.account not in texts[second]
+            assert all("계정 1" not in text and "계정 2" not in text for text in texts.values())
+    assert wire.posts() == []
 
 
 def test_a_command_pending_for_product_a_never_renders_under_product_b(
