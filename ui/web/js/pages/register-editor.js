@@ -22,7 +22,7 @@
 // reads READY; while it is NOT_CONFIGURED they stay inert 준비 중 placeholders naming what is
 // missing, as before.
 
-import { ApiError, getJson, sendJson } from '../core/api.js';
+import { getJson, sendJson } from '../core/api.js';
 import { fragment, h } from '../core/dom.js';
 import { closeModal, openModal } from '../core/modal.js';
 import { platformTag } from '../core/platform.js';
@@ -38,11 +38,11 @@ import {
   OPENING,
   PLACEMENTS,
   composer,
-  errorText,
   exampleNote,
   labelOf,
   presetBar,
 } from '../components/guidance-editor.js';
+import { freshProductFacts, unitProductName } from '../components/product-facts.js';
 import {
   PREPARATION_LABEL,
   REASON_COPY,
@@ -51,6 +51,7 @@ import {
   authoringForm,
   categoryBlock,
   chip,
+  errorCopy,
   freshPolicyNotes,
   itemRow,
   kv,
@@ -146,8 +147,16 @@ function platformTabs(unit) {
   );
 }
 
+// The authored 상품명, else (2026-10-15) the collected product name once the Product DB answers.
 function editorDisplayName(unit) {
-  return unit.authored?.inputs?.name?.value?.trim() || '상품 등록';
+  const authored = unit.authored?.inputs?.name?.value?.trim();
+  const title = h('span', { class: 'title', 'data-role': 'editor-title' }, authored || '상품 등록');
+  if (!authored) {
+    unitProductName(unit).then((name) => {
+      if (name) title.textContent = name;
+    });
+  }
+  return title;
 }
 
 function readOnlyInputs(unit) {
@@ -169,10 +178,25 @@ const APPLY_COPY = {
 // A confirmed or source value is never overwritten by an AI value (ADR-0026 §7).
 const LOCKED_PROVENANCE = new Set(['OPERATOR_CONFIRMED', 'SOURCE_FACT']);
 
+// The preparation an AI apply names (ADR-0026 §7): the saved one, or — before anything is saved
+// (2026-10-15 usability check) — the one the operator's entries are saved as first, without the
+// field the AI fills. The apply itself is unchanged: AI_SUGGESTION, the exact result shown.
+async function applyTarget(authored, form, field) {
+  if (authored) return { preparation_id: authored.preparation_id, revision_no: authored.revision_no, created: false };
+  const created = await form.saveForApply(field);
+  return { preparation_id: created.preparation_id, revision_no: created.revision_no, created: true };
+}
+
+function unsavedWhy(result, fresh, savesFirst, what) {
+  if (!savesFirst) return '먼저 준비 내용을 저장하면 적용할 수 있습니다.';
+  if (fresh) return `적용하면 지금까지 입력한 내용을 준비 내용으로 먼저 저장한 뒤 ${what}`;
+  return result?.stale ? '추천 이후 입력이 바뀌었습니다. 다시 추천받으세요.' : '';
+}
+
 // ADR-0027 AIS-2: the product's current name recommendation beside the name field, and its apply
 // as AI_SUGGESTION naming the exact result revision shown (ADR-0026 §7). The operator's own save
 // of the name confirms it (OPERATOR_CONFIRMED); until then the preflight keeps it unconfirmed.
-function aiNameBlock(unit, reload) {
+function aiNameBlock(unit, reload, form) {
   const authored = unit.authored;
   const productGroupId = unit.items[0]?.product_group_id;
   if (!productGroupId) return null;
@@ -182,13 +206,15 @@ function aiNameBlock(unit, reload) {
   const apply = h('button', { type: 'button', class: 'btn blue', 'data-action': 'ai-name-apply', disabled: true }, 'AI 추천 적용');
   const why = h('span', { class: 'mini', 'data-role': 'ai-name-apply-why' });
   let shown = null;
+  const savesFirst = !authored && Boolean(form?.saveForApply);
   const panel = aiNamePanel(productGroupId, {
     onResult: (result) => {
       shown = result;
-      const usable = Boolean(authored && !locked && result?.status === 'OK' && !result.stale && result.value?.recommended);
+      const fresh = Boolean(result?.status === 'OK' && !result.stale && result.value?.recommended);
+      const usable = Boolean((authored || savesFirst) && !locked && fresh);
       apply.disabled = !usable;
       why.textContent = !authored
-        ? '먼저 준비 내용을 저장하면 적용할 수 있습니다.'
+        ? unsavedWhy(result, fresh, savesFirst, 'AI 추천 상품명을 넣습니다. 다시 저장하면 확인된 상품명이 됩니다.')
         : locked
           ? '확인된 상품명이 있어 AI 값으로 덮어쓰지 않습니다. 상품명을 비우고 저장하면 적용할 수 있습니다.'
           : result?.stale
@@ -201,10 +227,12 @@ function aiNameBlock(unit, reload) {
   apply.addEventListener('click', async () => {
     if (apply.disabled || !shown) return;
     apply.disabled = true;
+    let into = null;
     try {
-      await sendJson('POST', `/api/v1/register/preparations/${authored.preparation_id}/apply-enrichment`, {
+      into = await applyTarget(authored, form, 'name');
+      await sendJson('POST', `/api/v1/register/preparations/${into.preparation_id}/apply-enrichment`, {
         actor: OPERATOR,
-        expected_revision_no: authored.revision_no,
+        expected_revision_no: into.revision_no,
         field: 'name',
         product_group_id: productGroupId,
         task_key: NAME_TASK,
@@ -216,9 +244,10 @@ function aiNameBlock(unit, reload) {
       toast('AI 추천 상품명을 적용했습니다', '저장하면 확인된 상품명이 됩니다.');
       reload();
     } catch (error) {
-      const code = error instanceof ApiError ? error.error?.code : null;
-      toast('적용하지 못했습니다', APPLY_COPY[code] ?? (error instanceof ApiError ? error.message : String(error)));
-      apply.disabled = false;
+      toast('적용하지 못했습니다', errorCopy(error, APPLY_COPY));
+      // A preparation saved for the apply is shown as saved, whatever the apply answered.
+      if (into?.created) reload();
+      else apply.disabled = false;
     }
   });
   return h(
@@ -242,7 +271,7 @@ const CATEGORY_APPLY_COPY = {
 // `AI 카테고리 적용` — the exact result revision shown, as an AI_SUGGESTION selection under the
 // target's current mapping revision. It never confirms a category (AIC-04): the operator's own
 // save of the category does; an operator-confirmed selection is never overwritten (AIC-05).
-function aiCategoryBlock(unit, reload) {
+function aiCategoryBlock(unit, reload, form) {
   const authored = unit.authored;
   const productGroupId = unit.items[0]?.product_group_id;
   if (unit.marketplace_key !== 'smartstore' || !productGroupId) return null;
@@ -252,14 +281,18 @@ function aiCategoryBlock(unit, reload) {
   const apply = h('button', { type: 'button', class: 'btn blue', 'data-action': 'ai-category-apply', disabled: true }, 'AI 카테고리 적용');
   const why = h('span', { class: 'mini', 'data-role': 'ai-category-apply-why' });
   let shown = null;
+  // 2026-10-15 usability check: usable before anything is saved too (applyTarget). It still
+  // never confirms a category (AIC-04): the operator's own save of the category does.
+  const savesFirst = !authored && Boolean(form?.saveForApply);
   const target = { marketplace_key: unit.marketplace_key, marketplace_account_id: unit.marketplace_account_id };
   const panel = aiCategoryPanel(productGroupId, target, {
     onResult: (result) => {
       shown = result;
-      const usable = Boolean(authored && !locked && result?.status === 'OK' && !result.stale && result.value?.category_id);
+      const fresh = Boolean(result?.status === 'OK' && !result.stale && result.value?.category_id);
+      const usable = Boolean((authored || savesFirst) && !locked && fresh);
       apply.disabled = !usable;
       why.textContent = !authored
-        ? '먼저 준비 내용을 저장하면 적용할 수 있습니다.'
+        ? unsavedWhy(result, fresh, savesFirst, 'AI 추천 카테고리를 넣습니다. 카테고리는 다시 저장해야 확정됩니다.')
         : locked
           ? '확정된 카테고리가 있어 AI 값으로 덮어쓰지 않습니다.'
           : result?.stale
@@ -272,10 +305,12 @@ function aiCategoryBlock(unit, reload) {
   apply.addEventListener('click', async () => {
     if (apply.disabled || !shown) return;
     apply.disabled = true;
+    let into = null;
     try {
-      await sendJson('POST', `/api/v1/register/preparations/${authored.preparation_id}/apply-enrichment`, {
+      into = await applyTarget(authored, form, 'category');
+      await sendJson('POST', `/api/v1/register/preparations/${into.preparation_id}/apply-enrichment`, {
         actor: OPERATOR,
-        expected_revision_no: authored.revision_no,
+        expected_revision_no: into.revision_no,
         field: 'category',
         product_group_id: productGroupId,
         task_key: CATEGORY_TASK,
@@ -287,9 +322,9 @@ function aiCategoryBlock(unit, reload) {
       toast('AI 추천 카테고리를 적용했습니다', '저장해야 확정된 카테고리가 됩니다.');
       reload();
     } catch (error) {
-      const code = error instanceof ApiError ? error.error?.code : null;
-      toast('적용하지 못했습니다', CATEGORY_APPLY_COPY[code] ?? (error instanceof ApiError ? error.message : String(error)));
-      apply.disabled = false;
+      toast('적용하지 못했습니다', errorCopy(error, CATEGORY_APPLY_COPY));
+      if (into?.created) reload();
+      else apply.disabled = false;
     }
   });
   return h(
@@ -312,7 +347,7 @@ const TAGS_APPLY_COPY = {
 // with `AI 태그 적용` — the exact result revision shown, as one AI_SUGGESTION set. The operator's
 // own save confirms the set; a confirmed, non-empty set is never overwritten. No tag is sent to
 // the marketplace (AIT-01). Tag editing itself stays inert.
-function tagsBlock(unit, reload) {
+function tagsBlock(unit, reload, form) {
   const authored = unit.authored;
   const tags = authored?.inputs?.tags ?? [];
   const applied = authored?.inputs?.tags_provenance === 'AI_SUGGESTION';
@@ -326,6 +361,7 @@ function tagsBlock(unit, reload) {
     return h('div', { class: 'field', 'data-role': 'editor-tags' }, h('label', {}, '태그 / 검색어'), current);
   }
   const locked = tags.length > 0 && !applied;
+  const savesFirst = !authored && Boolean(form?.saveForApply);
   const apply = h('button', { type: 'button', class: 'btn blue', 'data-action': 'ai-tags-apply', disabled: true }, 'AI 태그 적용');
   const why = h('span', { class: 'mini', 'data-role': 'ai-tags-apply-why' });
   let shown = null;
@@ -333,10 +369,11 @@ function tagsBlock(unit, reload) {
   const panel = aiTagsPanel(productGroupId, target, {
     onResult: (result) => {
       shown = result;
-      const usable = Boolean(authored && !locked && result?.status === 'OK' && !result.stale && result.value?.recommended?.length);
+      const fresh = Boolean(result?.status === 'OK' && !result.stale && result.value?.recommended?.length);
+      const usable = Boolean((authored || savesFirst) && !locked && fresh);
       apply.disabled = !usable;
       why.textContent = !authored
-        ? '먼저 준비 내용을 저장하면 적용할 수 있습니다.'
+        ? unsavedWhy(result, fresh, savesFirst, 'AI 추천 태그를 넣습니다. 다시 저장하면 확인된 태그가 됩니다.')
         : locked
           ? '확인된 태그가 있어 AI 값으로 덮어쓰지 않습니다.'
           : result?.stale
@@ -349,10 +386,12 @@ function tagsBlock(unit, reload) {
   apply.addEventListener('click', async () => {
     if (apply.disabled || !shown) return;
     apply.disabled = true;
+    let into = null;
     try {
-      await sendJson('POST', `/api/v1/register/preparations/${authored.preparation_id}/apply-enrichment`, {
+      into = await applyTarget(authored, form, 'tags');
+      await sendJson('POST', `/api/v1/register/preparations/${into.preparation_id}/apply-enrichment`, {
         actor: OPERATOR,
-        expected_revision_no: authored.revision_no,
+        expected_revision_no: into.revision_no,
         field: 'tags',
         product_group_id: productGroupId,
         task_key: TAG_TASK,
@@ -364,9 +403,9 @@ function tagsBlock(unit, reload) {
       toast('AI 추천 태그를 적용했습니다', '저장하면 확인된 태그가 됩니다. 마켓으로 보내지는 않습니다.');
       reload();
     } catch (error) {
-      const code = error instanceof ApiError ? error.error?.code : null;
-      toast('적용하지 못했습니다', TAGS_APPLY_COPY[code] ?? (error instanceof ApiError ? error.message : String(error)));
-      apply.disabled = false;
+      toast('적용하지 못했습니다', errorCopy(error, TAGS_APPLY_COPY));
+      if (into?.created) reload();
+      else apply.disabled = false;
     }
   });
   return h(
@@ -531,7 +570,7 @@ function guidanceGroups(unit, form, editable) {
       for (const placement of PLACEMENTS) {
         const host = hosts[placement.key];
         host.dataset.state = 'error';
-        host.replaceChildren(h('h4', {}, placement.label), h('span', { class: 'chip warn' }, `확인 불가 · ${errorText(error)}`));
+        host.replaceChildren(h('h4', {}, placement.label), h('span', { class: 'chip warn' }, `확인 불가 · ${errorCopy(error)}`));
       }
     });
   return hosts;
@@ -590,8 +629,8 @@ function editor(unit, ctx, labels, mode, step) {
       '판매 채널에 표시할 기본 정보를 확인합니다',
       h('div', { class: 'hero' }, mainImage(unit), h('div', { class: 'stack' }, h('span', { class: 'mini' }, '대표 이미지와 상품 기본정보를 확인해 주세요.'))),
       platformTabs(unit),
-      ...(parts ? [parts.head, parts.category, aiCategoryBlock(unit, reload), parts.name, aiNameBlock(unit, reload)] : readOnlyInputs(unit)),
-      tagsBlock(unit, reload),
+      ...(parts ? [parts.head, parts.category, aiCategoryBlock(unit, reload, form), parts.name, aiNameBlock(unit, reload, form)] : readOnlyInputs(unit)),
+      tagsBlock(unit, reload, form),
     ),
     pane(
       2,
@@ -668,11 +707,20 @@ function editor(unit, ctx, labels, mode, step) {
     window.scrollTo(0, 0);
   }
 
+  // 2026-10-15: an empty required field the save names is on some step; that step is shown first.
+  if (form) {
+    form.reveal = (control) => {
+      const pane = control.closest('.editor-pane');
+      if (pane) go(Number(pane.dataset.pane));
+      control.scrollIntoView({ block: 'center' });
+    };
+  }
+
   const enabled = unit.actions.filter((action) => action.enabled);
   const top = h(
     'header',
     { class: 'editor-top' },
-    h('span', { class: 'title' }, editorDisplayName(unit)),
+    editorDisplayName(unit),
     h('span', { class: `chip ${mode === 'edit' ? 'good' : 'info'}`, 'data-role': 'editor-mode' }, mode === 'edit' ? '상품수정' : '상품등록'),
     platformTag(unit.marketplace_key),
     chip(PREPARATION_LABEL[unit.preparation] ?? unit.preparation),
@@ -716,6 +764,7 @@ export default {
     const unitRef = ctx.params.get('unit');
     const mode = ctx.params.get('mode') === 'edit' ? 'edit' : 'register';
     freshPolicyNotes();
+    freshProductFacts();
     if (!draft || !unitRef) {
       return emptyState({ title: '편집할 상품이 없습니다', copy: '등록관리에서 상품을 눌러 편집기를 여세요.', action: { label: '등록관리', onSelect: () => ctx.navigate('register') } });
     }

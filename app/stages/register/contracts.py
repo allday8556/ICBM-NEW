@@ -207,6 +207,9 @@ class FieldStateView(BaseModel):
     required: bool
     provided: bool
     detail_page_reference_allowed: bool = False
+    # The marketplace's own Korean name of the field, from its captured notice schema, when it
+    # has one: the screen shows it and keeps the key only as an attribute.
+    label: str | None = None
 
 
 class CategoryView(BaseModel):
@@ -219,6 +222,8 @@ class CategoryView(BaseModel):
     # None when the metadata source has no reviewed entry for this taxonomy revision.
     reviewed: bool | None = None
     notice_type: str | None = None
+    # The marketplace's own Korean name of that notice type, when its schema names it.
+    notice_type_label: str | None = None
     attributes: tuple[FieldStateView, ...] = ()
     notice_fields: tuple[FieldStateView, ...] = ()
     # Whether this category's listings may carry several Items as options, and how many (§4).
@@ -263,6 +268,9 @@ class AuthoringFieldView(BaseModel):
     omitted_default: bool = False
     required_without: tuple[str, ...] = ()
     one_of: tuple[str, ...] = ()
+    # The marketplace's own Korean name of the field (its captured notice schema), when it has
+    # one. A label only: the key stays the field's identity.
+    label: str | None = None
 
 
 class AuthoringMetadataView(BaseModel):
@@ -281,6 +289,7 @@ class AuthoringMetadataView(BaseModel):
     # ``BODY`` alone without a profile or under content v1.
     detail_sections: tuple[str, ...] = ("BODY",)
     notice_type: str | None = None
+    notice_type_label: str | None = None
     attributes: tuple[AuthoringFieldView, ...] = ()
     notice_fields: tuple[AuthoringFieldView, ...] = ()
     options_supported: bool = False

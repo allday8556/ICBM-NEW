@@ -485,6 +485,19 @@ def notice_policy(notice_type: str) -> NoticePolicy:
     return NoticePolicy(notice_type, tuple(rules), contract=schema.revision)
 
 
+def notice_labels(marketplace_key: str, notice_type: str) -> tuple[str | None, Mapping[str, str]]:
+    """The provider's own Korean names of one notice type and of each of its fields, exactly as
+    the schema records them, for the screen to show in place of the wire keys. Another
+    marketplace, or a type the schema does not document, is named by nothing: no name is guessed.
+    """
+    if marketplace_key != NOTICE_MARKETPLACE_KEY:
+        return None, MappingProxyType({})
+    notice = load_notice_schema().types.get(notice_type)
+    if notice is None:
+        return None, MappingProxyType({})
+    return notice.name, MappingProxyType({item.name: item.label for item in notice.fields})
+
+
 class SmartStoreNoticeRules:
     """The SmartStore ``NoticeRuleSource``: every notice field the REGISTER owner declares for a
     SmartStore category is the provider schema's own (notice coverage S3)."""

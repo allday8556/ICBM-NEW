@@ -53,7 +53,7 @@ from tests.support.gate1_support import (
     save_policy,
 )
 from tests.support.product_support import raw
-from tests.support.register_support import establish
+from tests.support.register_support import choose_category, establish
 
 pytestmark = pytest.mark.integration
 
@@ -205,7 +205,7 @@ def test_gate1_from_a_fresh_data_root_through_reload_and_restart(
             unit.wait_for(timeout=15_000)
             assert unit.get_attribute("data-preparation") == "DRAFTED"
             items = [i.item_id for i in container.registrations.draft(draft_id).items]  # type: ignore[union-attr]
-            unit.locator("input[name='category_id']").fill(CATEGORY)
+            choose_category(unit, CATEGORY)
             unit.locator("input[name='name']").fill("리허설 합성 상품")
             unit.locator("input[name='attribute.brand']").fill("합성 브랜드")
             fill_etc_notice(unit)

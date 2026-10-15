@@ -166,6 +166,9 @@ detection, the clamped confidence and the background-uniformity score taken from
 `read_background`; the observation key also names the engine's pinned models. Production still
 binds `NoOcrProvider`, so readiness reports `image_ocr` as `NOT_CONFIGURED`, never a core failure.
 One integration and one unit suite; no migration.
+The 2026-10-15 registration usability fixes added the category picker
+`ui/web/js/components/category-picker.js` over the leaf catalog below, the Product DB fact reader
+`ui/web/js/components/product-facts.js`, one unit and three integration suites; no migration.
 ADR-0041 I5 added `image_studio/review.py`, the Studio panel's owner (the review read with the flags
 derived on read, `SCRIPT_MISMATCH` and `COMPLEX_BACKGROUND` included; the stateless preview; the
 save of an edit revision; 「적용」, which records the `image-translate/v1` artifact through the M4
@@ -253,13 +256,13 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `integrations/` | 119 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 45 |  |
 | `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 447 | tests |
+| `tests/` | 451 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 183 | integration tests by runtime owner |
+| `tests/integration/` | 186 | integration tests by runtime owner |
 | `tests/support/` | 17 | shared test support |
-| `tests/unit/` | 161 | unit tests by runtime owner |
-| `ui/` | 76 | operator clients: the served web client and the capture extension |
+| `tests/unit/` | 162 | unit tests by runtime owner |
+| `ui/` | 78 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 67 | the served web client |
+| `ui/web/` | 69 | the served web client |
