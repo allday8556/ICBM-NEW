@@ -401,16 +401,15 @@ Each listing then has:
 
 Listings are independent: one listing's failure fails only that listing, and the result is per listing.
 
-**A3 — `UNKNOWN`.** An update whose outcome is unknown is **never resent blindly**. It is resolved by **read-back reconcile** before any retry:
-- after-values read back → `APPLIED_PROVEN`;
-- otherwise it stays 「재확인 필요」, and the listing is blocked for new plans.
+**A3 — `UNKNOWN`.** An update whose outcome is unknown is **never resent blindly**. Only a **read-back reconcile** resolves it, with exactly two exits:
+- **`APPLIED_PROVEN`**: every touched field reads back as its after-value.
+- **`NOT_APPLIED_PROVEN`**: proof that the update was not applied and cannot still apply. It needs a provider fact that shows no change since the attempt's pre-read, such as an unchanged provider modification time (E5), observed after a settle window. A read-back that merely lacks the after-values is **not** this proof: a request that was received may still land later.
 
-A retry is possible only:
-- after a recorded reconcile read-back that does not show the after-values;
-- as a new plan built from a fresh read;
-- with a new user approval and a new grant.
+Anything else keeps it `UNKNOWN`, shown as 「재확인 필요」. The listing is then blocked for new UPDATE plans, and the reconcile read may be repeated.
 
-It is never automatic, and the spent grant is never reused.
+A new plan for that listing is possible only after `NOT_APPLIED_PROVEN` or `APPLIED_PROVEN`. It is built from a fresh read and needs a new user approval and a new grant. It is never automatic, and the spent grant is never reused.
+
+S2c defines the concrete non-application proof from E5 and E7 evidence before it ships. If no provider fact can prove non-application, an `UNKNOWN` listing stays blocked for ICBM updates. The seller sees why and can still edit it in the seller center; that edit is detected as an external change (§10).
 
 ## 12. Owners and storage (migrations from `0067`, one per slice)
 
@@ -479,7 +478,7 @@ S3b comes early because it unblocks registration. Each slice follows the global 
 | Q7 | first S2c fields | price, stock, sale status; name, images, detail and options later (S2d) | owner `6190978708` |
 | A1 | content ownership | a new CommonContent owner, separate from the REGISTER preparation; the preparation reads from it | implementation agent (ADR-0022), 2026-10-15 |
 | A2 | full body vs allowlist | partial, field-allowlisted updates only; never a full-body overwrite | implementation agent, 2026-10-15 |
-| A3 | an `UNKNOWN` update | resolved by read-back reconcile before any retry; never a blind resend | implementation agent, 2026-10-15 |
+| A3 | an `UNKNOWN` update | leaves `UNKNOWN` only by `APPLIED_PROVEN` or `NOT_APPLIED_PROVEN`; never a blind resend | implementation agent, 2026-10-15 |
 | A4 | the batch approval | at most 50 listings, expiry 30 minutes; one exact grant per listing, budget 1; every ADR-0018 brake and check applies | implementation agent, 2026-10-15 |
 
 What is not decided is a provider fact, not a choice. Those facts are the evidence-capture tasks E1–E8 (§4).
@@ -504,7 +503,7 @@ SCP-14  per-supplier prices are each member's own facts; the procurement binding
 SCP-15  a seller-center change is detected, shown and never silently overwritten; the user chooses per field
 SCP-16  a listing is updated only through partial endpoints with exactly the touched allowlisted fields, and only if its fresh read equals the plan's before digest
 SCP-17  one UI approval covers at most 50 listings and expires in 30 minutes; it yields one exact UPDATE grant of budget 1 per listing; LIVE, brake, grant, adoption, retention and the attempt owner are checked per listing at send time
-SCP-18  an UNKNOWN update is resolved by read-back reconcile before any retry and is never resent blindly; one listing's failure never fails another
+SCP-18  an UNKNOWN update is never resent blindly; it leaves UNKNOWN only by APPLIED_PROVEN or NOT_APPLIED_PROVEN (provider proof of non-application, never a mere missing after-value), and until then the listing takes no new UPDATE plan; one listing's failure never fails another
 SCP-19  no endpoint is called before its adoption; adoption is never a call and never LIVE authority
 SCP-20  every slice is accepted by a seller walkthrough on the real UI, not by tests alone
 ```
