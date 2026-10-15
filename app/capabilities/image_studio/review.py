@@ -537,7 +537,7 @@ class ImageStudioReviewService:
             )
         # The caller's language never narrows the checks: SCRIPT_MISMATCH is judged against the
         # language the server recorded for this edit as well (IT-05).
-        languages = self._bound_languages(revision, observation, source_language)
+        languages = self._bound_languages(observation, source_language)
         source = self._sources.read(sha256)
         styles = _matched_styles(source, observation)
         result = render(source, _render_regions(observation, items, styles))
@@ -628,19 +628,14 @@ class ImageStudioReviewService:
             qa_verdict=None if qa is None else qa.verdict.value,
         )
 
-    def _bound_languages(
-        self, revision: EditRevisionRecord, observation: ObservationRecord, claimed: str
-    ) -> tuple[str, ...]:
-        """The languages an applied edit is checked against: the caller's and the recorded one,
-        which is the revision's own candidate's, else the observation's newest candidate's. With
-        no candidate at all, the observation's most common script; on a tie, every language."""
+    def _bound_languages(self, observation: ObservationRecord, claimed: str) -> tuple[str, ...]:
+        """The languages an applied edit is checked against, so that no claim can narrow them:
+        the caller's, together with every language the server recorded a candidate of this
+        reading in (fresh or stale, whichever the edit was saved from). With no candidate at all,
+        the reading's most common script; on a tie, every language."""
         candidates = self._store.candidates(observation.observation_id)
-        bound = next(
-            (c for c in candidates if c.candidate_id == revision.candidate_id),
-            candidates[0] if candidates else None,
-        )
-        if bound is not None:
-            recorded: tuple[str, ...] = (bound.source_language,)
+        if candidates:
+            recorded: tuple[str, ...] = tuple({c.source_language for c in candidates})
         else:
             counts = {
                 language: sum(1 for r in observation.regions if r.script == language)
