@@ -38,7 +38,6 @@ const FLAG_COPY = {
 };
 // The flags a region is confirmed for one by one (IT-05); the last two block 「적용」 outright.
 const CONFIRM_FLAGS = new Set(['LOW_CONFIDENCE', 'NUMBER_UNIT_DROPPED', 'CONTACT_DETAIL', 'SCRIPT_MISMATCH', 'COMPLEX_BACKGROUND']);
-const STALE_COPY = { input: '입력', prompt: '프롬프트', policy: '정책', provider: 'AI 공급자', schema: '결과 형식' };
 const ERROR_COPY = {
   IMAGE_TRANSLATE_NOT_CONFIGURED: '이미지 번역이 준비되지 않았습니다.',
   IMAGE_EDIT_MOVED: '다른 곳에서 먼저 저장했습니다. 다시 불러온 뒤 적용하세요.',
@@ -49,7 +48,7 @@ const ERROR_COPY = {
   IMAGE_STUDIO_SELECTION_MISSING: '먼저 대표이미지 단계에서 이미지 쓰임을 저장하세요.',
   IMAGE_STUDIO_IMAGE_NOT_PLACED: '이 이미지는 지금 사용 안 함입니다. 먼저 쓰임을 고르세요.',
   IMAGE_STUDIO_REVISION_NOT_CURRENT: '편집이 바뀌었습니다. 다시 불러온 뒤 적용하세요.',
-  IMAGE_STUDIO_RENDERER_CHANGED: '렌더러가 바뀌었습니다. 다시 적용하세요.',
+  IMAGE_STUDIO_RENDERER_CHANGED: '번역 그리기 방식이 바뀌었습니다. 다시 적용하세요.',
 };
 
 let capabilityRead = null;
@@ -61,8 +60,9 @@ function capability() {
 }
 
 function errorText(error) {
-  if (error instanceof ApiError) return ERROR_COPY[error.error?.code] ?? `${error.message} (${error.error?.code ?? error.status})`;
-  return String(error?.message ?? error);
+  // Plain Korean only: a code or a server message never reaches the operator's screen.
+  if (error instanceof ApiError) return ERROR_COPY[error.error?.code] ?? '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+  return '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.';
 }
 
 // 「이미지 자동번역」 in ② (scope 'selected': the images the operator ticks) or ⑤ (scope 'detail':
@@ -113,7 +113,7 @@ function selectionChip(selection) {
 
 function flagChips(flags) {
   return flags.map((flag) => {
-    const [label, tone] = FLAG_COPY[flag] ?? [flag, 'warn'];
+    const [label, tone] = FLAG_COPY[flag] ?? ['확인 필요', 'warn'];
     return h('span', { class: `chip ${tone}`, 'data-flag': flag }, label);
   });
 }
@@ -203,7 +203,7 @@ export function openStudio(unit, { scope, languages, max }) {
       await loadImages();
       if (job.state === 'DEAD') {
         runLine.textContent = '일부 이미지를 번역하지 못했습니다. 번역된 이미지만 검토할 수 있습니다.';
-        toast('일부 이미지를 번역하지 못했습니다', job.last_error_code ?? '');
+        toast('일부 이미지를 번역하지 못했습니다', '잠시 후 다시 시도해 주세요.');
       } else {
         runLine.textContent = '번역을 마쳤습니다. 이미지마다 검토하세요.';
       }
@@ -254,7 +254,7 @@ export function openStudio(unit, { scope, languages, max }) {
       ? h('span', { class: 'chip warn', 'data-role': 'studio-candidate', 'data-status': 'NONE' }, '번역 없음 · 번역 시작을 누르세요')
       : candidate.status === 'FRESH'
         ? h('span', { class: 'chip good', 'data-role': 'studio-candidate', 'data-status': 'FRESH' }, 'AI 번역 제안 · 최신')
-        : h('span', { class: 'chip warn', 'data-role': 'studio-candidate', 'data-status': 'STALE' }, `제안이 최신이 아님 · ${candidate.stale_reasons.map((key) => STALE_COPY[key] ?? key).join(', ')} 바뀜 · 다시 번역하세요`);
+        : h('span', { class: 'chip warn', 'data-role': 'studio-candidate', 'data-status': 'STALE' }, '번역 제안이 최신이 아닙니다 · 다시 번역하세요');
     const allButton = h('button', { type: 'button', class: 'btn', 'data-action': 'studio-apply-all' }, '모두 적용');
     const applyButton = h('button', { type: 'button', class: 'btn blue', 'data-action': 'studio-apply', disabled: true }, '적용');
     const revertButton = h('button', { type: 'button', class: 'btn', 'data-action': 'studio-revert', disabled: state.selection.decision !== 'USE_DERIVED' }, '되돌리기');
