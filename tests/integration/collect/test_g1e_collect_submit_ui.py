@@ -1040,7 +1040,8 @@ def test_the_suppliers_common_images_preview_and_each_decision_is_the_owners(
             if seeded:
                 first = page.locator(f".common-image-tile[data-sha='{seeded[0]['sha256']}']")
                 assert (
-                    "초기 지정" in first.locator("[data-role='common-image-decision']").inner_text()
+                    "기본으로 지정됨"
+                    in first.locator("[data-role='common-image-decision']").inner_text()
                 )
             unseen = [i["sha256"] for i in listed["images"] if i["product_count"] == 0]
             for sha in unseen:
@@ -1069,7 +1070,7 @@ def test_the_suppliers_common_images_preview_and_each_decision_is_the_owners(
             )
             decision = tile.locator("[data-role='common-image-decision']")
             assert decision.get_attribute("data-revision") == "2"
-            assert "이전 결정 기록 데이터 없음" in decision.inner_text()
+            assert "직접 정함" in decision.inner_text()
             # Pressing the verdict it already has sends nothing.
             tile.locator("[data-action='decide-keep']").click()
             page.wait_for_selector(

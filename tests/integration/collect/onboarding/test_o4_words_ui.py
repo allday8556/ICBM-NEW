@@ -176,7 +176,7 @@ def test_words_are_previewed_saved_and_reanalysed_without_a_supplier_read(
         modal.locator("[data-action='save-words']").click()
         page.wait_for_function(
             "() => document.querySelector(\"[data-role='words-status']\")"
-            "?.textContent.includes('w1')",
+            "?.dataset.wordsSeq === '1'",
             timeout=15_000,
         )
         assert (
