@@ -231,6 +231,8 @@ from integrations.marketplaces.smartstore.notice_schema import SmartStoreNoticeR
 from integrations.marketplaces.smartstore.orders import SmartStoreOrderSource
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
 from integrations.marketplaces.smartstore.tags import SmartStoreTagSource
+from integrations.suppliers.ali1688 import PROFILE as ALI1688_PROFILE
+from integrations.suppliers.ali1688.collect.images import ROLE_TABLE as ALI1688_ROLE_TABLE
 from integrations.suppliers.base import PublicReader, SupplierDefinition, SupplierGateway
 from integrations.suppliers.collection import ImageRole as SupplierImageRole
 from integrations.suppliers.collection import SupplierCollection
@@ -447,6 +449,10 @@ def supplier_image_roles() -> dict[str, dict[str, ImageSlot]]:
         SD_PROFILE.supplier_key: slot_table(
             ((rule.rule_id, rule.role.value) for rule in SD_ROLE_RULES), slot_of
         ),
+        # ADR-0040 §1: 1688's own rules.
+        ALI1688_PROFILE.supplier_key: slot_table(
+            ((rule, role.value) for rule, role in ALI1688_ROLE_TABLE), slot_of
+        ),
         # ADR-0030 §6: a site's rule names are its template's.
         **{key: slot_table(site.template.role_table, slot_of) for key, site in SITES.items()},
     }
@@ -522,7 +528,8 @@ def build_container(
         db,
         clock,
         audit,
-        # ADR-0040: a packaged supplier without a CONNECT definition (슈퍼딜리버리) is reserved too.
+        # ADR-0040: a packaged supplier without a CONNECT definition (슈퍼딜리버리, 1688) is
+        # reserved too.
         reserved_keys={d.profile.supplier_key for d in suppliers} | set(SITES) | PACKAGED_SUPPLIERS,
         reserved_hosts=_repository_hosts(suppliers),
     )

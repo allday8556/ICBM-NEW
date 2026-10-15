@@ -140,9 +140,149 @@ export function captureInPage(policy) {
   if (new TextEncoder().encode(html).length > bounds.max_html_bytes) {
     return refuse("CEILING_HTML_BYTES");
   }
+
+  // ---- 5. the embedded-data member (ADR-0040 §3; 1688 only) -------------------------------
+  // Only a policy that declares `embedded_data` has one. Exactly one inline script that starts
+  // with the declared prefix is read; the text between the argument marker and the terminator is
+  // parsed as data (JSON.parse, never run), bounded, and projected onto the declared allowlist.
+  // Nothing outside the allowlist leaves the page, and the script's text is never sent. Any
+  // mismatch sends no data at all, only the code that says why: the DOM capture itself goes on.
+  const embedded = (rule) => {
+    const mismatch = (code) => ({ refused: code });
+    const scripts = Array.from(document.scripts).filter(
+      (script) => !script.hasAttribute("src") && script.text.trimStart().startsWith(rule.prefix),
+    );
+    if (scripts.length !== 1) return mismatch("EMBEDDED_SCRIPT_NOT_EXACTLY_ONE");
+    const source = scripts[0].text.trim();
+    const at = source.indexOf(rule.argument_marker);
+    if (at < 0 || source.indexOf(rule.argument_marker, at + 1) >= 0) {
+      return mismatch("EMBEDDED_MARKER_NOT_EXACTLY_ONE");
+    }
+    if (!source.endsWith(rule.terminator)) return mismatch("EMBEDDED_TERMINATOR");
+    let argument = source.slice(at + rule.argument_marker.length, -rule.terminator.length);
+    if (new TextEncoder().encode(argument).length > rule.max_bytes) {
+      return mismatch("EMBEDDED_OVER_BYTES");
+    }
+    if (rule.bare_integer_keys) {
+      // The one departure from JSON a policy may declare: an object key written as a bare decimal
+      // integer ({5919566953309:0.23}). Outside string literals, a run of digits right after "{"
+      // or "," and before ":" is quoted; JSON.parse then decides everything else.
+      let quoted = "";
+      let inString = false;
+      let previous = "";
+      for (let index = 0; index < argument.length; ) {
+        const character = argument[index];
+        if (inString) {
+          if (character === "\\") {
+            quoted += argument.slice(index, index + 2);
+            index += 2;
+            continue;
+          }
+          if (character === '"') inString = false;
+          quoted += character;
+          index += 1;
+          continue;
+        }
+        if (character === '"') {
+          inString = true;
+        } else if ((previous === "{" || previous === ",") && character >= "0" && character <= "9") {
+          let end = index;
+          while (end < argument.length && argument[end] >= "0" && argument[end] <= "9") end += 1;
+          let after = end;
+          while (after < argument.length && /\s/.test(argument[after])) after += 1;
+          if (argument[after] === ":") {
+            quoted += `"${argument.slice(index, end)}"`;
+            previous = '"';
+            index = end;
+            continue;
+          }
+        }
+        quoted += character;
+        if (!/\s/.test(character)) previous = character;
+        index += 1;
+      }
+      argument = quoted;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(argument);
+    } catch {
+      return mismatch("EMBEDDED_NOT_JSON");
+    }
+    // The depth bound, walked without recursion so no document can exhaust the stack.
+    const pending = [[parsed, 1]];
+    while (pending.length) {
+      const [value, depth] = pending.pop();
+      if (depth > rule.max_depth) return mismatch("EMBEDDED_OVER_DEPTH");
+      if (value !== null && typeof value === "object") {
+        for (const child of Object.values(value)) pending.push([child, depth + 1]);
+      }
+    }
+    // The allowlist as a tree. A path is dot-separated segments: a key name, or "*" for every key
+    // of a map; a segment ending in "[]" names an array whose every element the rest applies to.
+    const tree = () => ({ keys: new Map(), any: null, each: false, type: null });
+    const root = tree();
+    for (const entry of rule.allowlist) {
+      let node = root;
+      for (const segment of entry.path.split(".")) {
+        const name = segment.endsWith("[]") ? segment.slice(0, -2) : segment;
+        let next;
+        if (name === "*") {
+          next = node.any || (node.any = tree());
+        } else {
+          next = node.keys.get(name) || tree();
+          node.keys.set(name, next);
+        }
+        next.each = segment.endsWith("[]");
+        node = next;
+      }
+      node.type = entry.type;
+    }
+    const WRONG = {};
+    const fits = (value, type) =>
+      (type === "string" && typeof value === "string") ||
+      (type === "integer" && Number.isSafeInteger(value)) ||
+      (type === "number" && typeof value === "number" && Number.isFinite(value)) ||
+      (type === "boolean" && typeof value === "boolean");
+    // One value under one node: a leaf of its declared type, or an object of its allowed keys
+    // only. A null is no value; a wrong shape or type refuses the whole member.
+    const every = (value, node) => {
+      if (!Array.isArray(value)) throw WRONG;
+      return value.map((element) => one(element, node));
+    };
+    const one = (value, node) => {
+      if (node.type !== null) {
+        if (!fits(value, node.type)) throw WRONG;
+        return value;
+      }
+      if (value === null || typeof value !== "object" || Array.isArray(value)) throw WRONG;
+      const kept = {};
+      const keep = (key, child) => {
+        if (!Object.hasOwn(value, key) || value[key] === null) return;
+        Object.defineProperty(kept, key, {
+          value: child.each ? every(value[key], child) : one(value[key], child),
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
+      };
+      for (const [key, child] of node.keys) keep(key, child);
+      if (node.any) for (const key of Object.keys(value)) keep(key, node.any);
+      return kept;
+    };
+    try {
+      return { projection: one(parsed, root) };
+    } catch (failure) {
+      if (failure === WRONG) return mismatch("EMBEDDED_WRONG_SHAPE");
+      throw failure;
+    }
+  };
+  const member = policy.embedded_data ? { embedded_data: embedded(policy.embedded_data) } : {};
+
   return {
     ok: true,
     html,
+    ...member,
     transport: {
       url: location.href,
       navigation_name: navigation.name,

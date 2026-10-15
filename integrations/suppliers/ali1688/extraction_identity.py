@@ -1,0 +1,19 @@
+"""Extraction identity of 1688's collection knowledge (ADR-0010 §12, ADR-0040 C2).
+
+The hashed set is every module of ``collect/``; this manifest is never part of it.
+"""
+
+EXTRACTOR_REVISION = "ali1688-3"
+EXTRACTOR_INPUTS = (
+    "integrations/suppliers/ali1688/collect/__init__.py",
+    "integrations/suppliers/ali1688/collect/dom.py",
+    "integrations/suppliers/ali1688/collect/embedded.py",
+    "integrations/suppliers/ali1688/collect/facts.py",
+    "integrations/suppliers/ali1688/collect/identity.py",
+    "integrations/suppliers/ali1688/collect/images.py",
+    "integrations/suppliers/ali1688/collect/revision.py",
+)
+# A reader cannot recompute a SHA-256; the proof is mechanical:
+# tests/contracts/test_repository_rules.py recomputes this digest from EXTRACTOR_INPUTS, and the
+# merge guard requires that test green in the FULL CI of the exact HEAD.
+EXTRACTOR_FINGERPRINT = "7fa5cf5f548f4d53b57a5967f9c42937bfd9fececdf54794dd0a215d3dee6878"

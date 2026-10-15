@@ -59,6 +59,7 @@ from app.interface.api.deps import ContainerDep
 from app.interface.api.middleware import CLIENT_HEADER
 from app.platform.core.errors import InputValidationError, PolicyBlockedError
 from app.stages.collect.extension.capture import CaptureEnvelope
+from app.stages.collect.extension.embedded import MAX_PROJECTION_BYTES
 from app.stages.collect.extension.pairing import (
     EMPTY_BODY_SHA256,
     SIGNED_HEADERS,
@@ -95,9 +96,10 @@ SUPPLIERS_PATH = "/api/v1/collect/extension/suppliers"
 ONBOARDED_ORIGINS_PATH = "/api/v1/collect/extension/onboarded-origins"
 POLICY_REVISION_HEADER = "X-ICBM-Capture-Policy-Revision"
 POLICY_DIGEST_HEADER = "X-ICBM-Capture-Policy-Digest"
-# The whole request: the capture, JSON-escaped at worst, and its small envelope. It bounds what is
-# read into memory at all; the capture's own ceilings are applied to what it then holds.
-MAX_REQUEST_BYTES = 2 * MAX_HTML_BYTES + 64 * 1024
+# The whole request: the capture, JSON-escaped at worst, its embedded-data member where a policy
+# declares one (ADR-0040 §3), and its small envelope. It bounds what is read into memory at all;
+# the capture's own ceilings are applied to what it then holds.
+MAX_REQUEST_BYTES = 2 * MAX_HTML_BYTES + 2 * MAX_PROJECTION_BYTES + 64 * 1024
 # A queue declaration: product URLs only, bounded again by the supplier's declared link count.
 MAX_QUEUE_REQUEST_BYTES = 512 * 1024
 # The most links a declaration may parse at all, before the supplier's own bound is applied.

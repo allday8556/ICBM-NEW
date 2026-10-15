@@ -90,6 +90,9 @@ export async function sendCapture(
     html: capture.html,
   };
   if (ticket) envelope.queue_ticket = ticket;
+  // ADR-0040 §3: the projected embedded data, or the code that says why there is none. Only a
+  // policy that declares embedded data makes the cut produce this member.
+  if (capture.embedded_data) envelope.embedded_data = capture.embedded_data;
   const body = JSON.stringify(envelope);
   const response = await request(pairing, extensionId, { method: "POST", path: CAPTURE_PATH, body });
   if (response.status !== 202) throw await refusal(response);

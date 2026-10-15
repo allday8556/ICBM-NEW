@@ -37,9 +37,10 @@ TEMPLATES: Mapping[str, PlatformTemplate] = MappingProxyType(
     {CAFE24.platform: CAFE24, GODOMALL.platform: GODOMALL}
 )
 # Supplier keys that have their own package, and their storefront hosts; a site takes neither.
-# ADR-0040: 슈퍼딜리버리 is a packaged supplier read only from pages the user captured.
-PACKAGED_SUPPLIERS = frozenset({"kmretail", "superdelivery"})
-PACKAGED_HOSTS = frozenset({"kmretail.co.kr", "www.superdelivery.com"})
+# ADR-0040: 슈퍼딜리버리 and 1688 are packaged suppliers read only from pages the user
+# captured.
+PACKAGED_SUPPLIERS = frozenset({"kmretail", "superdelivery", "ali1688"})
+PACKAGED_HOSTS = frozenset({"kmretail.co.kr", "www.superdelivery.com", "detail.1688.com"})
 
 
 @dataclass(frozen=True)

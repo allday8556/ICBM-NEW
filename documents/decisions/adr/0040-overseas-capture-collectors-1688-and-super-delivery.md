@@ -42,6 +42,7 @@ Date: 2026-10-14
 - **Images** are fetched by the server's policed fetch from the reviewed image hosts (ADR-0019 §7):
   - 1688: `cbu01.alicdn.com` and the other `*.alicdn.com` image hosts that reconnaissance names;
   - Super Delivery: its own image host.
+  - *(Amendment, slice C2: reconnaissance named `cbu01.alicdn.com` for 1688's gallery, the only image host slice C2 declares. 1688's description, and so its `DETAIL` images, is a separate document the page names; it is not captured, and those images await a separate owner-approved amendment.)*
 - **Host permissions.** The extension gains the two product hosts, `detail.1688.com` and `www.superdelivery.com`, as reviewed supplier hosts (AC-07). The optional per-origin permissions of ADR-0036 D3 are not required by this ADR.
 
 ## 2. Super Delivery reads the DOM
@@ -82,6 +83,7 @@ window.context=(function(b,d){…})(window.contextPath,{ … JSON … });
   - finds **exactly one** inline script, with no `src`, that matches the prefix. With zero or more than one match, nothing is sent for the member, and the capture says so;
   - cuts the argument between the marker and the terminator, under the byte bound;
   - parses it with `JSON.parse`, which is a data parser, under a depth bound. It never runs the script and never reads a JS global;
+    - *(Amendment, slice C2: the argument is JSON except that 1688 writes some object keys as bare decimal integers, such as `skuWeight: {5919566953309: 0.23}`. A policy may declare `bare_integer_keys`. The extension then quotes each such key, a run of digits right after `{` or `,` and before `:` outside any string literal, in one pass, and `JSON.parse` decides everything else. Nothing else is accepted.)*
   - **projects** the parsed document onto the allowlist the policy declares: exactly the paths of §4, as listed there. Nothing outside the allowlist leaves the browser.
     - The member's receive address (`freightInfo.recieveAddress`, `receiveAddressId`, the area codes) is never on the allowlist.
     - No other account or member payload is on it either (ADR-0019 AC-07).
@@ -97,6 +99,7 @@ window.context=(function(b,d){…})(window.contextPath,{ … JSON … });
 - The security gate (ADR-0019 §6.1) runs over every string in the member as it does over DOM text. A secret or the member's own identity refuses the capture.
 - The extractor reads the member's allowlisted paths (§4). The member is dropped once the facts are written. Only canonical facts and their evidence are stored (§6.1).
 - **Evidence.** A fact from the member carries evidence kind `EMBEDDED_DATA` with its JSON path as the locator. This is one new `EvidenceKind`, authorized here.
+  - *(Amendment, slice C2: the evidence kind is the existing `EMBEDDED_JSON` (ADR-0010 §8: data embedded in the page, kept as a parsed tree and never as script text), with the locator `embedded:<JSON path>`. That kind already means exactly this. The evidence table constrains its kinds in the database, so a new kind would need a migration and would gain nothing. No `EvidenceKind` is added.)*
 
 ## 4. 1688 fields
 
@@ -105,10 +108,10 @@ The allowlisted paths are under `result.data`.
 | field | read from | rule |
 | --- | --- | --- |
 | `original_name` | the page title in the DOM | as stated (Chinese) |
-| `prices` | `mainPrice.fields.priceModel` | CNY. `priceDisplayType` `skuPrice`: per-SKU prices. `rangePrice`: the first tier (`beginAmount` 1) is the purchase price |
+| `prices` | `mainPrice.fields.priceModel`, `skuInfoMap.*.price` | CNY. `skuPrice`: the lowest SKU original price is the product's labelled `PURCHASE` price, and each SKU's own price is on its option. `rangePrice`: the first tier (`beginAmount` 1) of `originalPrices`, or of `currentPrices` when no original is stated, is the purchase price |
 | `options` | `Root.fields.dataJson.skuModel.skuProps`, `skuInfoMap` | axes and values as stated. Each SKU's original `price` is its purchase price; a `discountPrice` is kept as a fact (ADR-0038 §9.3 as amended) |
 | `stock` | `skuInfoMap.*.canBookCount` | per SKU, as stated |
-| `quantity_tiers` | `priceModel.currentPrices` when `rangePrice` | each tier as stated |
+| `quantity_tiers` | `priceModel.currentPrices` when `rangePrice` | each tier as stated. *(Slice C2: a 1688 tier states a unit price, and a quantity tier is a stated (quantity, total) pair, so the field is `REVIEW_REQUIRED` with every tier quoted in its evidence; no total is computed.)* |
 | `shipping` | `shippingServices.fields.freightInfo.totalCost`, `location` | CNY freight from the stated ship-from location to the user's receive address (the 배대지). A `FIXED` fee as stated, without the address |
 | `brand`, `origin` | the product attribute table (品牌, 产地) | as stated |
 | `images` | the DOM main gallery | server-fetched (§1) |
@@ -152,3 +155,11 @@ The allowlisted paths are under `result.data`.
 | C3 | the two acceptances, then `ACTIVE` |
 
 Migrations are numbered 0063 or later (0062 is Track A's).
+
+## Amendments
+
+- **2026-10-14, the owner's price basis (Issue #219 `6164685916`).** 1688's purchase price is the SKU's **original** price: the non-discounted `price`, the line price. A promotion or member `discountPrice` is recorded only and never sets the cost. When no original is shown, the shown price is used. A `rangePrice` page uses its first tier. §4 and OC-07 read so, and so does ADR-0038 §9.3.
+- **2026-10-14, slice C2 (implementation choices, Claude Code Track B).**
+  - §3 accepts bare integer object keys when the policy declares them. It records the member's facts under the existing `EMBEDDED_JSON` evidence kind: no new kind and no migration.
+  - 1688's description is a separate document the page names. Slice C2 does not capture it: `detail_description` is `REVIEW_REQUIRED` (`DESCRIPTION_NOT_CAPTURED`) and there are no description images. Reading that document, and with it 1688's `DETAIL` images, awaits a separate owner-approved amendment.
+  - Quantity tiers are not written as totals (§4 note on `quantity_tiers`).

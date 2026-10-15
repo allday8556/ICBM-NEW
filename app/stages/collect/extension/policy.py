@@ -13,6 +13,19 @@ There is no second copy. The extension receives exactly the canonical bytes serv
 The digest is the SHA-256 of one canonical UTF-8 JSON serialization: sorted keys, no insignificant
 whitespace. It is recomputed from the file on every load and never cached, so a policy that changed
 since a capture was cut can never be mistaken for the one it was cut with.
+
+**Embedded data** (ADR-0040 §3, 1688 only). A policy may declare one optional ``embedded_data``
+entry: the inline script's prefix, argument marker and terminator, whether bare integer object keys
+are accepted, the byte and depth bounds, and the allowlist of JSON paths with their types. It is
+part of the canonical bytes, so it is digested with everything else. A policy without the entry is
+exactly what it was before, byte for byte.
+
+The path grammar is small and explicit: dot-separated segments, each a key name
+(``[A-Za-z_][A-Za-z0-9_]*``) or ``*`` (every key of a map), optionally followed by ``[]`` (the value
+is an array, and the rest of the path applies to each element). Every path starts at
+``result.data`` and ends at a leaf of type ``string``, ``integer``, ``number`` or ``boolean``. A
+path never names a member's receive address, identity or account (ADR-0040 OC-05): such a segment
+refuses the whole policy.
 """
 
 import hashlib
@@ -57,6 +70,33 @@ _KEYS = frozenset(
     }
 )
 _BOUND_KEYS = frozenset({"max_html_bytes", "max_nodes", "max_image_refs"})
+# ADR-0040 §3: the optional embedded-data entry, and its exact keys.
+EMBEDDED_DATA_KEY = "embedded_data"
+_EMBEDDED_KEYS = frozenset(
+    {
+        "prefix",
+        "argument_marker",
+        "terminator",
+        "bare_integer_keys",
+        "max_bytes",
+        "max_depth",
+        "allowlist",
+    }
+)
+# The ceilings an embedded-data entry may declare. A policy may bound the argument more tightly,
+# never more loosely.
+MAX_EMBEDDED_ARGUMENT_BYTES = 2 * 1024 * 1024
+MAX_EMBEDDED_DEPTH = 64
+MAX_EMBEDDED_PATHS = 64
+EMBEDDED_ROOT = ("result", "data")
+EMBEDDED_TYPES = frozenset({"string", "integer", "number", "boolean"})
+_SEGMENT = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|\*)(?:\[\])?$")
+_MARKER = re.compile(r"^[\x20-\x7e\n]{1,200}$")
+# OC-05: no allowlisted segment may name a member's receive address, identity or account. Matched
+# case-insensitively anywhere in a segment, so 1688's own misspelling (recieveAddress) is caught.
+_FORBIDDEN_SEGMENT = re.compile(
+    r"(?i)(receiv|reciev|address|member|nick|login|user|buyer|account|token|cookie|session|passw)"
+)
 
 
 class CapturePolicyRefused(PolicyBlockedError):
@@ -93,6 +133,28 @@ class CaptureBounds:
 
 
 @dataclass(frozen=True)
+class EmbeddedPath:
+    """One allowlisted JSON path and the type of the leaf it names."""
+
+    path: str
+    segments: tuple[str, ...]
+    type: str
+
+
+@dataclass(frozen=True)
+class EmbeddedDataRule:
+    """ADR-0040 §3: the one inline script whose data argument a capture may carry, projected."""
+
+    prefix: str
+    argument_marker: str
+    terminator: str
+    bare_integer_keys: bool
+    max_bytes: int
+    max_depth: int
+    allowlist: tuple[EmbeddedPath, ...]
+
+
+@dataclass(frozen=True)
 class BrowserCapturePolicy:
     supplier_key: str
     revision: str
@@ -108,6 +170,8 @@ class BrowserCapturePolicy:
     # Exactly what is served to the extension and what the digest is computed over.
     canonical: bytes = field(repr=False)
     digest: str
+    # ADR-0040 §3: the embedded-data member this supplier's captures carry, if any.
+    embedded_data: EmbeddedDataRule | None = None
 
     def keeps_attribute(self, tag: str, name: str) -> bool:
         return name in self.allowed_attributes.get("*", frozenset()) or name in (
@@ -189,6 +253,93 @@ def _bound(value: Any, ceiling: int, what: str) -> int:
     return value
 
 
+def _marker(value: Any, what: str) -> str:
+    if not isinstance(value, str) or not _MARKER.fullmatch(value):
+        raise _policy_refused(
+            "CAPTURE_POLICY_INVALID", f"the embedded-data {what} is not printable text"
+        )
+    return value
+
+
+def _embedded_path(entry: Any) -> EmbeddedPath:
+    if not isinstance(entry, dict) or set(entry) != {"path", "type"}:
+        raise _policy_refused("CAPTURE_POLICY_INVALID", "an embedded-data path is not exact")
+    path, kind = entry["path"], entry["type"]
+    if not isinstance(path, str) or kind not in EMBEDDED_TYPES:
+        raise _policy_refused("CAPTURE_POLICY_INVALID", "an embedded-data path is not valid")
+    segments = tuple(path.split("."))
+    if (
+        segments[: len(EMBEDDED_ROOT)] != EMBEDDED_ROOT
+        or len(segments) <= len(EMBEDDED_ROOT)
+        or not all(_SEGMENT.fullmatch(segment) for segment in segments)
+    ):
+        raise _policy_refused(
+            "CAPTURE_POLICY_INVALID", "an embedded-data path is not under result.data"
+        )
+    if any(_FORBIDDEN_SEGMENT.search(segment) for segment in segments):
+        # OC-05: a receive address, a member identity or an account is never allowlisted.
+        raise _policy_refused(
+            "CAPTURE_POLICY_INVALID", "an embedded-data path names member or account data"
+        )
+    return EmbeddedPath(path=path, segments=segments, type=kind)
+
+
+def _check_tree(paths: tuple[EmbeddedPath, ...]) -> None:
+    """The allowlist is one tree: no path twice, no leaf that is also a container, no segment
+    used both with and without ``[]``, and no map that has both named keys and ``*``."""
+    leaves = {path.segments for path in paths}
+    if len(leaves) != len(paths):
+        raise _policy_refused("CAPTURE_POLICY_INVALID", "an embedded-data path is listed twice")
+    shapes: dict[tuple[str, ...], str] = {}
+    children: dict[tuple[str, ...], set[str]] = {}
+    for path in paths:
+        for depth in range(1, len(path.segments) + 1):
+            prefix = tuple(segment.removesuffix("[]") for segment in path.segments[:depth])
+            shape = path.segments[depth - 1]
+            if shapes.setdefault(prefix, shape) != shape:
+                raise _policy_refused(
+                    "CAPTURE_POLICY_INVALID", "an embedded-data segment has two shapes"
+                )
+            children.setdefault(prefix[:-1], set()).add(prefix[-1])
+    for path in paths:
+        bare = tuple(segment.removesuffix("[]") for segment in path.segments)
+        if bare in children:
+            raise _policy_refused(
+                "CAPTURE_POLICY_INVALID", "an embedded-data leaf is also a container"
+            )
+    if any("*" in names and len(names) > 1 for names in children.values()):
+        raise _policy_refused(
+            "CAPTURE_POLICY_INVALID", "an embedded-data map names keys beside its wildcard"
+        )
+
+
+def _embedded_data(value: Any) -> EmbeddedDataRule:
+    if not isinstance(value, dict) or set(value) != _EMBEDDED_KEYS:
+        raise _policy_refused(
+            "CAPTURE_POLICY_INVALID", "the capture policy's embedded data does not have its keys"
+        )
+    if not isinstance(value["bare_integer_keys"], bool):
+        raise _policy_refused(
+            "CAPTURE_POLICY_INVALID", "the embedded-data integer-key flag is not a boolean"
+        )
+    allowlist = value["allowlist"]
+    if not isinstance(allowlist, list) or not 1 <= len(allowlist) <= MAX_EMBEDDED_PATHS:
+        raise _policy_refused(
+            "CAPTURE_POLICY_INVALID", "the embedded-data allowlist is not a bounded list"
+        )
+    paths = tuple(_embedded_path(entry) for entry in allowlist)
+    _check_tree(paths)
+    return EmbeddedDataRule(
+        prefix=_marker(value["prefix"], "prefix"),
+        argument_marker=_marker(value["argument_marker"], "argument marker"),
+        terminator=_marker(value["terminator"], "terminator"),
+        bare_integer_keys=value["bare_integer_keys"],
+        max_bytes=_bound(value["max_bytes"], MAX_EMBEDDED_ARGUMENT_BYTES, "embedded byte bound"),
+        max_depth=_bound(value["max_depth"], MAX_EMBEDDED_DEPTH, "embedded depth bound"),
+        allowlist=paths,
+    )
+
+
 def parse_policy(raw: bytes, supplier_key: str) -> BrowserCapturePolicy:
     """Validate one policy document strictly and bind it to its canonical bytes and digest."""
     try:
@@ -197,7 +348,7 @@ def parse_policy(raw: bytes, supplier_key: str) -> BrowserCapturePolicy:
         raise _policy_refused(
             "CAPTURE_POLICY_INVALID", "the capture policy is not UTF-8 JSON"
         ) from None
-    if not isinstance(document, dict) or set(document) != _KEYS:
+    if not isinstance(document, dict) or set(document) - {EMBEDDED_DATA_KEY} != _KEYS:
         raise _policy_refused(
             "CAPTURE_POLICY_INVALID", "the capture policy does not have its exact keys"
         )
@@ -252,6 +403,9 @@ def parse_policy(raw: bytes, supplier_key: str) -> BrowserCapturePolicy:
         ),
         canonical=canonical,
         digest=policy_digest(canonical),
+        embedded_data=(
+            _embedded_data(document[EMBEDDED_DATA_KEY]) if EMBEDDED_DATA_KEY in document else None
+        ),
     )
 
 

@@ -180,7 +180,7 @@ product-scope cut → browser sanitize → loopback → server final scan → Do
 > - **What never leaves the browser** (AC-07): the member's receive address, and any other account or member payload. Neither is on the allowlist.
 > - **The server re-checks** the member against the same allowlist, refuses anything outside it, and runs the security gate over its strings.
 > - **Unchanged:** the DOM capture keeps `script` excluded, and every other supplier is as before.
-> - **Evidence kind.** ADR-0040 also authorizes `EMBEDDED_DATA` (AC-18).
+> - **Evidence kind.** ADR-0040 also authorizes `EMBEDDED_DATA` (AC-18). *(Slice C2 records the member's facts under the existing `EMBEDDED_JSON` kind instead, so no kind is added; ADR-0040 §3.)*
 
 ### 6.1 Broad product capture, security-only gate (the user's decision, 2026-10-01)
 

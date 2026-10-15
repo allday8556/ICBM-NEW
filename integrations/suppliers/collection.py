@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from hashlib import sha256
+from typing import Any
 from urllib.parse import urlsplit
 
 from app.stages.collect.facts import FieldFact, LocatorForm
@@ -162,10 +163,29 @@ class CollectionProfile:
 
 
 @dataclass(frozen=True)
+class EmbeddedData:
+    """ADR-0040 §3: the embedded-data member of one capture, as the server accepted it.
+
+    ``data`` is the browser's projection after the server re-checked it against the policy's
+    allowlist and ran the security gate over every string in it. It is ``None`` exactly when the
+    member was refused, by the browser or by the server, and ``refusal`` then names why from a
+    closed vocabulary. It lives in memory only: it is never logged, persisted or returned.
+    """
+
+    data: Mapping[str, Any] | None = field(repr=False)
+    refusal: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.data is None) == (self.refusal is None):
+            raise ValueError("an embedded-data member is either accepted data or a refusal")
+
+
+@dataclass(frozen=True)
 class DocumentView:
     """The only thing a collection parser ever sees: an immutable view of one response.
 
-    ``body`` is used in memory only; it is never logged, persisted whole or returned.
+    ``body`` is used in memory only; it is never logged, persisted whole or returned. ``embedded``
+    exists only for a supplier whose capture policy declares an embedded-data member (ADR-0040 §3).
     """
 
     kind: ReadKind
@@ -174,6 +194,7 @@ class DocumentView:
     location: str | None  # redirect target (path only) for a 3xx response
     content_type: str
     body: str = field(repr=False)
+    embedded: EmbeddedData | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)

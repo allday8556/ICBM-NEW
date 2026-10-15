@@ -1,0 +1,84 @@
+{
+  "schema": "icbm-browser-capture-policy/v1",
+  "supplier_key": "ali1688",
+  "revision": "ali1688-capture-1",
+  "host": "detail.1688.com",
+  "product_root": {"by": "id", "token": "gallery"},
+  "allowed_regions": [
+    {"by": "id", "token": "productTitle"},
+    {"by": "id", "token": "productAttributes"}
+  ],
+  "excluded_regions": [
+    {"by": "class", "token": "od-picture-gallery-list-wapper"},
+    {"by": "class", "token": "pic-list-for-plugin"},
+    {"by": "class", "token": "core-attributes"},
+    {"by": "class", "token": "od-gallery-preview-tools"},
+    {"by": "class", "token": "od-video-wrapper"},
+    {"by": "class", "token": "yx-data-component"},
+    {"by": "class", "token": "sell-point-wrapper"},
+    {"by": "class", "token": "title-icons"},
+    {"by": "class", "token": "collapse-footer"}
+  ],
+  "excluded_tags": [
+    "script",
+    "style",
+    "noscript",
+    "template",
+    "textarea",
+    "iframe",
+    "object",
+    "embed",
+    "link",
+    "meta",
+    "base",
+    "input",
+    "select",
+    "button",
+    "svg",
+    "video",
+    "audio",
+    "source",
+    "canvas"
+  ],
+  "allowed_attributes": {
+    "*": ["id", "class"],
+    "img": ["src"],
+    "link": ["rel", "href"],
+    "td": ["colspan", "rowspan"],
+    "th": ["colspan", "rowspan"]
+  },
+  "head_allowance": [
+    {"tag": "link", "attribute": "rel", "value": "canonical"}
+  ],
+  "bounds": {
+    "max_html_bytes": 524288,
+    "max_nodes": 20000,
+    "max_image_refs": 40
+  },
+  "embedded_data": {
+    "prefix": "window.contextPath = \"/default\";\nwindow.context=(",
+    "argument_marker": "})(window.contextPath,",
+    "terminator": ");",
+    "bare_integer_keys": true,
+    "max_bytes": 1048576,
+    "max_depth": 40,
+    "allowlist": [
+      {"path": "result.data.gallery.fields.offerId", "type": "integer"},
+      {"path": "result.data.mainPrice.fields.unit", "type": "string"},
+      {"path": "result.data.mainPrice.fields.priceModel.priceDisplayType", "type": "string"},
+      {"path": "result.data.mainPrice.fields.priceModel.currentPrices[].price", "type": "string"},
+      {"path": "result.data.mainPrice.fields.priceModel.currentPrices[].beginAmount", "type": "integer"},
+      {"path": "result.data.mainPrice.fields.priceModel.originalPrices[].price", "type": "string"},
+      {"path": "result.data.mainPrice.fields.priceModel.originalPrices[].beginAmount", "type": "integer"},
+      {"path": "result.data.Root.fields.dataJson.skuModel.skuProps[].prop", "type": "string"},
+      {"path": "result.data.Root.fields.dataJson.skuModel.skuProps[].value[].name", "type": "string"},
+      {"path": "result.data.Root.fields.dataJson.skuModel.skuInfoMap.*.skuId", "type": "integer"},
+      {"path": "result.data.Root.fields.dataJson.skuModel.skuInfoMap.*.price", "type": "string"},
+      {"path": "result.data.Root.fields.dataJson.skuModel.skuInfoMap.*.discountPrice", "type": "string"},
+      {"path": "result.data.Root.fields.dataJson.skuModel.skuInfoMap.*.canBookCount", "type": "integer"},
+      {"path": "result.data.Root.fields.dataJson.skuModel.skuInfoMap.*.isPromotionSku", "type": "boolean"},
+      {"path": "result.data.shippingServices.fields.freightInfo.location", "type": "string"},
+      {"path": "result.data.shippingServices.fields.freightInfo.totalCost", "type": "number"}
+    ]
+  }
+}

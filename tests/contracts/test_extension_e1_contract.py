@@ -54,8 +54,9 @@ def test_the_manifest_is_exactly_the_reviewed_one() -> None:
     assert '"minimum_chrome_version": "114"' in _read(EXTENSION / "manifest.json")
     assert manifest["manifest_version"] == 3
     # Ruling B-11: the reviewed supplier hosts and the loopback, and nothing else. ADR-0030 PT-11:
-    # the supplier hosts are exactly the packaged suppliers' (KM통상's, and 슈퍼딜리버리's product
-    # host, ADR-0040 §1) and each configured site's storefront host.
+    # the supplier hosts are exactly the packaged suppliers' (KM통상's, and the product
+    # hosts of 슈퍼딜리버리 and 1688, ADR-0040 §1) and each configured site's storefront
+    # host.
     from integrations.suppliers.registry import SITES
     from integrations.suppliers.sites import PACKAGED_HOSTS
 
@@ -63,10 +64,11 @@ def test_the_manifest_is_exactly_the_reviewed_one() -> None:
     assert manifest["host_permissions"] == [
         "https://kmretail.co.kr/*",
         "https://www.superdelivery.com/*",
+        "https://detail.1688.com/*",
         *sites,
         "http://127.0.0.1/*",
     ]
-    assert {"kmretail.co.kr", "www.superdelivery.com"} == PACKAGED_HOSTS
+    assert {"kmretail.co.kr", "www.superdelivery.com", "detail.1688.com"} == PACKAGED_HOSTS
     # No cookie, request, download, history or tab-content reach.
     assert manifest["permissions"] == ["scripting", "sidePanel", "storage"]
     # ADR-0036 §8 and §10 (owner decision D3, the amendment of this E1 pin): one optional host
@@ -347,6 +349,8 @@ def test_the_ingest_owner_writes_nothing_itself_and_reaches_no_network() -> None
         "__init__.py",
         "buffer.py",
         "capture.py",
+        # ADR-0040 §3: the embedded-data member and the server's re-check of it.
+        "embedded.py",
         "gate.py",
         "nonces.py",
         "pairing.py",

@@ -64,7 +64,13 @@ from app.stages.collect.extension.capture import (
     measure,
     policy_violations,
 )
-from app.stages.collect.extension.gate import GateResult
+from app.stages.collect.extension.embedded import (
+    EMBEDDED_DATA_ABSENT,
+    EmbeddedDataMember,
+    projection_problem,
+    strings_of,
+)
+from app.stages.collect.extension.gate import GateResult, embedded_data_gate
 from app.stages.collect.extension.policy import (
     MAX_HTML_BYTES,
     MAX_IMAGE_REFS,
@@ -80,6 +86,7 @@ from integrations.suppliers.base import SupplierTransport
 from integrations.suppliers.collection import (
     CollectionProfile,
     DocumentView,
+    EmbeddedData,
     ReadKind,
 )
 from integrations.suppliers.transport.collection import CollectionTargetRefused, check_target
@@ -291,6 +298,12 @@ class ExtensionCaptureService:
                 "CAPTURE_POLICY_MISMATCH",
                 "the capture was not cut with the current reviewed policy; fetch it again",
             )
+        if envelope.embedded_data is not None and policy.embedded_data is None:
+            # ADR-0040 §3: only a policy that declares embedded data accepts a member at all.
+            raise CapturePolicyRefused(
+                "CAPTURE_EMBEDDED_DATA_NOT_DECLARED",
+                "this supplier's capture policy declares no embedded data",
+            )
         _ceiling("EXTENSION_CEILING_HTML_BYTES", measured.html_bytes, policy.bounds.max_html_bytes)
         _ceiling("EXTENSION_CEILING_NODES", measured.nodes, policy.bounds.max_nodes)
         _ceiling("EXTENSION_CEILING_IMAGE_REFS", measured.image_refs, policy.bounds.max_image_refs)
@@ -327,7 +340,9 @@ class ExtensionCaptureService:
                 if item_id is not None:
                     assert self._queue_tickets is not None
                     self._queue_tickets.attach(session, item_id, run_id)
-                self._buffer.put(run_id, BufferedCapture(envelope.html, evidence))
+                self._buffer.put(
+                    run_id, BufferedCapture(envelope.html, evidence, envelope.embedded_data)
+                )
         except BaseException:
             if run_id is not None:
                 self._buffer.discard(run_id)
@@ -558,6 +573,7 @@ class ExtensionCaptureService:
                     "notes": list(gate.notes)[:20],
                 },
             )
+        embedded = self._embedded(record, policy, capture.embedded)
         evidence = capture.evidence
         document = DocumentView(
             kind=ReadKind.PRODUCT_READ,
@@ -568,8 +584,66 @@ class ExtensionCaptureService:
             location=None,
             content_type=evidence.content_type,
             body=capture.html,
+            embedded=embedded,
         )
         return document, policy
+
+    def _embedded(
+        self,
+        record: CollectionRunRecord,
+        policy: BrowserCapturePolicy,
+        member: EmbeddedDataMember | None,
+    ) -> EmbeddedData | None:
+        """ADR-0040 §3: the server's own check of the embedded-data member, after the HTML's.
+
+        The member is re-checked against the policy's allowlist. Anything outside it, of the wrong
+        type or over a bound refuses the member, never the capture: the extractor then has no
+        member, and every field it would have supplied is ``REVIEW_REQUIRED`` (OC-04). The security
+        gate reads every string that arrived, accepted or not; a secret refuses the whole capture,
+        as one in the HTML does. A refusal is logged by its code alone.
+        """
+        rule = policy.embedded_data
+        if rule is None:
+            # A member for a policy that declares none was refused at ingest.
+            return None
+        refusal: str | None
+        if member is None:
+            refusal = EMBEDDED_DATA_ABSENT
+        elif member.projection is None:
+            refusal = member.refused
+        else:
+            refusal = projection_problem(rule, member.projection)
+            strings = (
+                strings_of(rule, member.projection)
+                if refusal is None
+                else [("refused", text) for text in _texts(member.projection)]
+            )
+            gate = embedded_data_gate(strings)
+            if gate.blocking:
+                raise ExtensionCaptureFailed(
+                    EXTENSION_FINAL_SCAN_REFUSED,
+                    "the server's security gate found material that is never collected",
+                    details={
+                        "finding_count": len(gate.blocking),
+                        "findings": list(gate.blocking)[:20],
+                    },
+                )
+            if gate.notes:
+                logger.info(
+                    "collect.extension_gate_notes",
+                    extra={
+                        "collection_run_id": record.collection_run_id,
+                        "note_count": len(gate.notes),
+                        "notes": list(gate.notes)[:20],
+                    },
+                )
+            if refusal is None:
+                return EmbeddedData(data=member.projection, refusal=None)
+        logger.warning(
+            "collect.extension_embedded_refused",
+            extra={"collection_run_id": record.collection_run_id, "error_code": refusal},
+        )
+        return EmbeddedData(data=None, refusal=refusal or EMBEDDED_DATA_ABSENT)
 
     # ------------------------------------------------------------------ common
 
@@ -582,6 +656,24 @@ class ExtensionCaptureService:
             ) from None
         require_collectable(self._collectable, supplier_key)
         return registered
+
+
+def _texts(value: object) -> list[str]:
+    """Every string anywhere in a JSON value, keys included, for the gate over a member the
+    allowlist refused: it was not accepted, and still nothing secret may have arrived."""
+    found: list[str] = []
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            found.append(item)
+        elif isinstance(item, list):
+            pending.extend(item)
+        elif isinstance(item, dict):
+            for key, child in item.items():
+                found.append(str(key))
+                pending.append(child)
+    return found
 
 
 def extension_profile(profile: CollectionProfile) -> CollectionProfile:
