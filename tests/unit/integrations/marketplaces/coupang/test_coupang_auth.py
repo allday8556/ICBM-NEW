@@ -10,9 +10,9 @@ from integrations.marketplaces.coupang.auth import (
     AuthContext,
     Authenticator,
     Credentials,
-    IpAllowlistDeclaration,
     Market,
     Method,
+    ProviderReadProof,
     RequestTarget,
     signature,
     signed_date,
@@ -103,17 +103,19 @@ def test_signing_inputs_are_runtime_validated() -> None:
         AuthContext(_credentials(), "US")  # type: ignore[arg-type]
 
 
-def test_ip_allowlist_declaration_is_generation_bound_and_never_provider_proof() -> None:
-    declaration = IpAllowlistDeclaration.create(
-        "203.0.113.10", credential_generation=3, recorded_at=AT
+def test_provider_read_proof_is_generation_bound_setup_evidence() -> None:
+    proof = ProviderReadProof.create(
+        "COUPANG_AUTO_CATEGORY_AGREEMENT_CANARY",
+        credential_generation=3,
+        verified_at=AT,
     )
-    context = AuthContext(_credentials(), Market.KR, declaration)
+    context = AuthContext(_credentials(), Market.KR, proof)
 
-    assert str(declaration.source_ip) == "203.0.113.10"
+    assert proof.verified_at == AT
     assert context.setup_evidence_current is True
     assert AuthContext(_credentials(), Market.KR).setup_evidence_current is False
     with pytest.raises(ValueError, match="different credential generation"):
-        AuthContext(_credentials(4), Market.KR, declaration)
+        AuthContext(_credentials(4), Market.KR, proof)
 
 
 @pytest.mark.parametrize(

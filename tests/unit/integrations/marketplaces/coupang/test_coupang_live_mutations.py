@@ -12,10 +12,11 @@ import httpx
 import pytest
 
 from integrations.marketplaces.coupang.auth import (
+    PROVIDER_READ_PROOF_ID,
     AuthContext,
     Credentials,
-    IpAllowlistDeclaration,
     Market,
+    ProviderReadProof,
 )
 from integrations.marketplaces.coupang.canary import ClockPreflight
 from integrations.marketplaces.coupang.live_mutations import (
@@ -47,7 +48,14 @@ class Clock:
 
 
 NOW = datetime(2026, 10, 13, 8, 0, tzinfo=UTC)
-SOURCE_IP = "203.0.113.10"
+
+
+def _proof() -> ProviderReadProof:
+    return ProviderReadProof.create(
+        PROVIDER_READ_PROOF_ID,
+        credential_generation=1,
+        verified_at=NOW,
+    )
 
 
 def _create(index: int, source_product_id: str) -> dict[str, object]:
@@ -166,17 +174,12 @@ def _owner(tmp_path: Path, transport: httpx.BaseTransport) -> CoupangTestProduct
     context = AuthContext(
         credentials,
         Market.KR,
-        IpAllowlistDeclaration.create(
-            SOURCE_IP,
-            credential_generation=1,
-            recorded_at=NOW,
-        ),
+        _proof(),
     )
     approval = MutationApproval.create(
         scope_id=SCOPE_ID,
         vendor_id="A0001",
         credential_generation=1,
-        source_ip=SOURCE_IP,
         payload_digest=bundle.payload_digest,
         approved_at=NOW - timedelta(minutes=1),
         expires_at=NOW + timedelta(hours=1),
@@ -201,11 +204,7 @@ def _recovery_owner(
     context = AuthContext(
         credentials,
         Market.KR,
-        IpAllowlistDeclaration.create(
-            SOURCE_IP,
-            credential_generation=1,
-            recorded_at=NOW,
-        ),
+        _proof(),
     )
     return CoupangAmbiguousCreateRecovery(
         context=context,
@@ -226,17 +225,12 @@ def _continuation_owner(
     context = AuthContext(
         credentials,
         Market.KR,
-        IpAllowlistDeclaration.create(
-            SOURCE_IP,
-            credential_generation=1,
-            recorded_at=NOW,
-        ),
+        _proof(),
     )
     approval = MutationApproval.create(
         scope_id=SCOPE_ID,
         vendor_id="A0001",
         credential_generation=1,
-        source_ip=SOURCE_IP,
         payload_digest=bundle.payload_digest,
         approved_at=NOW - timedelta(minutes=1),
         expires_at=NOW + timedelta(hours=1),
@@ -261,17 +255,12 @@ def _corrected_owner(
     context = AuthContext(
         credentials,
         Market.KR,
-        IpAllowlistDeclaration.create(
-            SOURCE_IP,
-            credential_generation=1,
-            recorded_at=NOW,
-        ),
+        _proof(),
     )
     approval = MutationApproval.create(
         scope_id=SCOPE_ID,
         vendor_id="A0001",
         credential_generation=1,
-        source_ip=SOURCE_IP,
         payload_digest=bundle.payload_digest,
         approved_at=NOW - timedelta(minutes=1),
         expires_at=NOW + timedelta(hours=1),
@@ -297,17 +286,12 @@ def _corrected_recovery_owner(
     context = AuthContext(
         credentials,
         Market.KR,
-        IpAllowlistDeclaration.create(
-            SOURCE_IP,
-            credential_generation=1,
-            recorded_at=NOW,
-        ),
+        _proof(),
     )
     approval = MutationApproval.create(
         scope_id=SCOPE_ID,
         vendor_id="A0001",
         credential_generation=1,
-        source_ip=SOURCE_IP,
         payload_digest=bundle.payload_digest,
         approved_at=NOW - timedelta(minutes=1),
         expires_at=NOW + timedelta(hours=1),
@@ -486,13 +470,12 @@ def test_preflight_rejects_body_vendor_mismatch(tmp_path: Path) -> None:
     context = AuthContext(
         credentials,
         Market.KR,
-        IpAllowlistDeclaration.create(SOURCE_IP, credential_generation=1, recorded_at=NOW),
+        _proof(),
     )
     approval = MutationApproval.create(
         scope_id=SCOPE_ID,
         vendor_id="A0001",
         credential_generation=1,
-        source_ip=SOURCE_IP,
         payload_digest=bundle.payload_digest,
         approved_at=NOW - timedelta(minutes=1),
         expires_at=NOW + timedelta(hours=1),
@@ -1364,13 +1347,12 @@ def test_real_transport_never_exists_under_tests(tmp_path: Path) -> None:
     context = AuthContext(
         credentials,
         Market.KR,
-        IpAllowlistDeclaration.create(SOURCE_IP, credential_generation=1, recorded_at=NOW),
+        _proof(),
     )
     approval = MutationApproval.create(
         scope_id=SCOPE_ID,
         vendor_id="A0001",
         credential_generation=1,
-        source_ip=SOURCE_IP,
         payload_digest=bundle.payload_digest,
         approved_at=NOW - timedelta(minutes=1),
         expires_at=NOW + timedelta(hours=1),

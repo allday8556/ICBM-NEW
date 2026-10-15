@@ -18,6 +18,7 @@ LOGISTICS_SELECTION_KEY = "marketplace:coupang:live-logistics-selection-v1"
 ACCOUNT_INPUTS_KEY = "marketplace:coupang:live-account-inputs-v2"
 _CATEGORY_CODE = re.compile(r"^[0-9]+$")
 _ACCOUNT_RECORD_VERSION = 2
+_SHARED_COURIER_CODES = frozenset({"CJGLS", "EPOST", "HANJIN", "HYUNDAI", "ILYANG", "KGB"})
 
 
 @dataclass(frozen=True)
@@ -187,6 +188,43 @@ class CoupangLivePreflightStore:
                 sort_keys=True,
                 separators=(",", ":"),
             ),
+        )
+
+    def bind_legacy_account_values_from_saved_courier(
+        self,
+        *,
+        credentials: Credentials,
+        delivery_company_code: str,
+    ) -> None:
+        """Bind existing WING/logistics inputs using one explicitly selected saved courier.
+
+        The courier is not a credential.  It comes from a revisioned delivery policy selected by
+        the caller, while the remaining account-only values stay inside the OS secret store.  A
+        code is accepted only when both adopted marketplace contracts use the exact same token;
+        no translation, fallback or default is attempted.
+        """
+        courier = delivery_company_code.strip()
+        if courier not in _SHARED_COURIER_CODES:
+            raise ValueError("COUPANG_SAVED_COURIER_UNSUPPORTED")
+        vendor_user_id = self._secrets.get(VENDOR_USER_ID_KEY)
+        raw = self._secrets.get(LOGISTICS_SELECTION_KEY)
+        if not vendor_user_id or not raw:
+            raise ValueError("COUPANG_LEGACY_ACCOUNT_INPUTS_MISSING")
+        try:
+            logistics = json.loads(raw)
+        except ValueError as exc:
+            raise ValueError("COUPANG_LOGISTICS_SELECTION_INVALID") from exc
+        if not isinstance(logistics, dict):
+            raise ValueError("COUPANG_LOGISTICS_SELECTION_INVALID")
+        existing = logistics.get("deliveryCompanyCode")
+        if existing not in (None, "", courier):
+            raise ValueError("COUPANG_SAVED_COURIER_CONFLICT")
+        selected = dict(logistics)
+        selected["deliveryCompanyCode"] = courier
+        self.bind_account_values(
+            credentials=credentials,
+            vendor_user_id=vendor_user_id,
+            logistics=selected,
         )
 
     def vendor_user_id(self, *, credentials: Credentials) -> str:

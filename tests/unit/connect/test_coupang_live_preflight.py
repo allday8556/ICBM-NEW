@@ -170,3 +170,50 @@ def test_legacy_unbound_account_values_are_never_accepted() -> None:
         store.vendor_user_id(credentials=credentials)
     with pytest.raises(ValueError, match="ACCOUNT_INPUTS_MISSING"):
         store.logistics(credentials=credentials)
+
+
+def test_saved_courier_explicitly_completes_legacy_account_inputs() -> None:
+    secrets = MemorySecretStore()
+    logistics = _logistics()
+    logistics["deliveryCompanyCode"] = ""
+    secrets.set(VENDOR_USER_ID_KEY, "wing-user")
+    secrets.set(LOGISTICS_SELECTION_KEY, json.dumps(logistics))
+    store = CoupangLivePreflightStore(secrets)
+    credentials = Credentials("access", "secret", "vendor-1", 3)
+
+    store.bind_legacy_account_values_from_saved_courier(
+        credentials=credentials,
+        delivery_company_code="CJGLS",
+    )
+
+    assert store.vendor_user_id(credentials=credentials) == "wing-user"
+    assert store.logistics(credentials=credentials) == _logistics()
+
+
+@pytest.mark.parametrize("delivery_company_code", ["", "UNKNOWN", "KDEXP"])
+def test_saved_courier_binding_rejects_unreviewed_codes(
+    delivery_company_code: str,
+) -> None:
+    secrets = MemorySecretStore()
+    logistics = _logistics()
+    logistics["deliveryCompanyCode"] = ""
+    secrets.set(VENDOR_USER_ID_KEY, "wing-user")
+    secrets.set(LOGISTICS_SELECTION_KEY, json.dumps(logistics))
+
+    with pytest.raises(ValueError, match="SAVED_COURIER_UNSUPPORTED"):
+        CoupangLivePreflightStore(secrets).bind_legacy_account_values_from_saved_courier(
+            credentials=Credentials("access", "secret", "vendor-1", 3),
+            delivery_company_code=delivery_company_code,
+        )
+
+
+def test_saved_courier_binding_rejects_conflicting_legacy_value() -> None:
+    secrets = MemorySecretStore()
+    secrets.set(VENDOR_USER_ID_KEY, "wing-user")
+    secrets.set(LOGISTICS_SELECTION_KEY, json.dumps(_logistics()))
+
+    with pytest.raises(ValueError, match="SAVED_COURIER_CONFLICT"):
+        CoupangLivePreflightStore(secrets).bind_legacy_account_values_from_saved_courier(
+            credentials=Credentials("access", "secret", "vendor-1", 3),
+            delivery_company_code="HANJIN",
+        )
