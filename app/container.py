@@ -145,6 +145,7 @@ from app.stages.connect.smartstore.keeper import SmartStoreSessionKeeper
 from app.stages.connect.smartstore.service import SmartStoreConnectService
 from app.stages.operate.adoption import CONVENTIONS as ADOPTION_CONVENTIONS
 from app.stages.operate.adoption import AdoptionService, seller_code_of
+from app.stages.operate.catalog.coverage import CatalogCoverage
 from app.stages.operate.catalog.links import ListingLinkService
 from app.stages.operate.catalog.service import StoreCatalogScheduler, StoreCatalogService
 from app.stages.operate.dispatch import DispatchService, dispatch_unit
@@ -367,6 +368,7 @@ class Container:
     listing_sync: ListingSyncService
     listing_sync_scheduler: ListingSyncScheduler
     store_catalog: StoreCatalogService
+    store_coverage: CatalogCoverage
     store_catalog_scheduler: StoreCatalogScheduler
     # ADR-0042 S2a: store listing ↔ common product links.
     store_links: ListingLinkService
@@ -1196,6 +1198,23 @@ def build_container(
     # snapshot, fresh under the target policy's catalog_max_age; a stale or missing one is no
     # evidence and starts the automatic pre-registration sync (a routine read). The first CREATE
     # copy adds the positive-only seller-code spot check through the adopted search.
+    # ADR-0042 §5.2 tightening: the seller's per-status coverage confirmation of the store.
+    store_coverage = CatalogCoverage(catalog=store_catalog, audit=audit)
+
+    def _member_gtins(group_ids: Sequence[str]) -> set[str]:
+        """ADR-0042 §6: the CONFIRMED GTIN facts of the members of these common products."""
+        wanted = set(group_ids)
+        if not wanted:
+            return set()
+        with product_store.reading() as unit:
+            names = unit.member_names()
+        return {
+            member.gtin
+            for group in wanted
+            for member in names.get(group, ())
+            if member.gtin is not None
+        }
+
     duplicate_source = smartstore_duplicate_source(
         catalog=store_catalog,
         refresh=store_catalog_scheduler.refresh_for_registration,
@@ -1205,6 +1224,9 @@ def build_container(
         bearer=committed_bearer,
         # ADR-0042 S2a (§6): a store listing linked to the unit's product is a duplicate.
         linked=store_links.linked_groups,
+        coverage=store_coverage,
+        member_gtins=_member_gtins,
+        different=store_links.different_pairs,
     )
     registration_preparations = RegistrationPreparationService(
         registrations=registrations,
@@ -1562,6 +1584,7 @@ def build_container(
         dispatches=dispatches,
         listing_sync_scheduler=ListingSyncScheduler(listing_sync),
         store_catalog=store_catalog,
+        store_coverage=store_coverage,
         store_catalog_scheduler=store_catalog_scheduler,
         store_links=store_links,
         auto_images=auto_images,

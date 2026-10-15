@@ -1122,9 +1122,7 @@ class RegistrationPreparationService:
             )
         return FrozenUnit(snapshot, intent, revision.preparation_revision_id)
 
-    def execution_copy(
-        self, registration_snapshot_id: str, *, spot_check: bool = False
-    ) -> ExecutionCopy:
+    def execution_copy(self, registration_snapshot_id: str, *, spot_check: bool) -> ExecutionCopy:
         """Build the first job copy from the exact revision that produced this Snapshot.
 
         Current owner truth is evaluated at the Snapshot's pinned generation, then the resulting
@@ -1133,7 +1131,8 @@ class RegistrationPreparationService:
 
         ``spot_check`` is the first CREATE copy's positive seller-code search (ADR-0042 §6): a
         provider listing the snapshot did not show becomes a match, so the copy is not READY and
-        nothing is queued; zero hits change nothing.
+        nothing is queued; zero hits change nothing. It has no default: the queue paths
+        (single and bulk) pass ``True``, and every other reader states ``False`` explicitly.
         """
         snapshot = self._registrations.snapshot(registration_snapshot_id)
         if snapshot is None:

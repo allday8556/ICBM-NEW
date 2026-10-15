@@ -154,6 +154,9 @@ class AuditEventType(StrEnum):
     STORE_LISTING_LINK_CONFIRMED = "STORE_LISTING_LINK_CONFIRMED"
     STORE_LISTING_DECISION_RECORDED = "STORE_LISTING_DECISION_RECORDED"
     STORE_LISTING_UNLINKED = "STORE_LISTING_UNLINKED"
+    # ADR-0042 §5.2 (S3b tightening): the seller confirmed, once per store, that the catalog's
+    # per-status counts equal the seller center's. Account, run, total and per-status counts only.
+    STORE_CATALOG_COVERAGE_CONFIRMED = "STORE_CATALOG_COVERAGE_CONFIRMED"
     # M6.5 (ADR-0025 §3, §4): the supplier order the operator placed by hand was recorded or
     # amended, and its carrier and tracking number captured. By product-order id only.
     SUPPLIER_ORDER_RECORDED = "SUPPLIER_ORDER_RECORDED"

@@ -34,6 +34,7 @@ from app.container import Container
 from app.main import create_app
 from app.platform.core.errors import AppError
 from app.stages.collect.facts import TextValue
+from app.stages.operate.catalog.coverage import CatalogCoverage
 from app.stages.operate.catalog.duplicates import CatalogDuplicateSource
 from app.stages.operate.catalog.facts import (
     COMPLETE,
@@ -452,6 +453,11 @@ def test_the_duplicate_source_matches_a_listing_linked_to_the_units_product(
     group = supplier_group(container, sources, "287", "국산 참기름 300ml")
     source.put("101", fields("전혀 다른 이름", code="KM287"))
     harness.sync()
+    # ADR-0042 §5.2 tightening: a NO_MATCH needs the seller's coverage confirmation.
+    coverage = CatalogCoverage(catalog=harness.catalog, audit=container.audit)
+    view = coverage.view()
+    assert view.current is not None
+    coverage.confirm(run_id=view.current.run_id, actor="operator", correlation_id=CID)
     duplicates = CatalogDuplicateSource(
         marketplace_key=MARKET,
         contract_version="fixture-duplicate/v1",
@@ -461,6 +467,7 @@ def test_the_duplicate_source_matches_a_listing_linked_to_the_units_product(
         mutation_started_at=lambda key, account: None,
         refresh=lambda: False,
         linked=harness.links.linked_groups,
+        coverage=coverage,
     )
     unit = DuplicateUnit(MARKET, ACCOUNT, "unit-1", group_ids=(group,))
     check = duplicates.check(unit)

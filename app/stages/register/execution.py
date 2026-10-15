@@ -134,6 +134,8 @@ SEND_REQUEST_VERSION: Final = "registration-send-request/v1"
 # re-sync through the job's own retry schedule, for at most this long after that mutation began.
 DUPLICATE_RESYNC_WAIT: Final = "REGISTER_DUPLICATE_RESYNC_WAIT"
 DUPLICATE_RESYNC_WAIT_CAP: Final = timedelta(minutes=10)
+# ADR-0042 §6: a CREATE send refuses when no send-time duplicate revalidation is wired.
+DUPLICATE_REVALIDATION_NOT_WIRED: Final = "REGISTER_SEND_DUPLICATE_REVALIDATION_NOT_WIRED"
 EXECUTION_POLICY_VERSION: Final = "registration-execution-policy/v1"
 # The job states in which a CREATE job is still the queued work of its Intent (ADR-0005).
 ACTIVE_JOB_STATES: Final = (
@@ -926,7 +928,13 @@ class RegistrationExecutionService:
         automatic re-sync (a TRANSIENT refusal the job's retry schedule repeats, never an
         attempt), for at most ``DUPLICATE_RESYNC_WAIT_CAP``; anything else is refused as it is.
         """
-        if self._duplicate_check is None or request.duplicate_evidence is None:
+        if self._duplicate_check is None:
+            # Fail closed: a CREATE is never sent without its send-time duplicate revalidation.
+            raise ExecutionRefused(
+                DUPLICATE_REVALIDATION_NOT_WIRED,
+                "no send-time duplicate revalidation is wired; nothing is sent",
+            )
+        if request.duplicate_evidence is None:
             return request
         candidate = self._preflight.candidate(request, identity_generation=identity_generation)
         check = self._duplicate_check(candidate)

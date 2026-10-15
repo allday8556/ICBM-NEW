@@ -497,13 +497,13 @@ def test_a_top_and_a_bottom_notice_reach_the_detail_content_end_to_end(
     assert refused.value.code == "WIRE_GUIDANCE_PLAN_MISMATCH"
 
     # The first CREATE copy reproduces the frozen inputs from the owners, guidance included.
-    copy_ = container.registration_preparations.execution_copy(snapshot_id)
+    copy_ = container.registration_preparations.execution_copy(snapshot_id, spot_check=False)
     assert {a.sha256 for a in copy_.final.prepared_assets} >= {top, bottom}
 
     # After the freeze, the period ends: the frozen Snapshot is stale and is never edited (DG-05).
     clock.advance(2 * 60 * 60)
     with pytest.raises(RegistrationConflictError) as stale:
-        container.registration_preparations.execution_copy(snapshot_id)
+        container.registration_preparations.execution_copy(snapshot_id, spot_check=False)
     assert stale.value.code == "REGISTER_FIRST_CREATE_INPUTS_NOT_READY"
     assert PREPARED_ASSET_NOT_SELECTED in stale.value.details["reasons"]
     later = container.registration_preparations.stage_candidate(unit.preparation_id)

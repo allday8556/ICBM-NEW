@@ -445,7 +445,9 @@ def test_the_grants_are_issued_by_the_authority_and_the_stack_still_refuses(
     )
     assert code == 0 and released["state"] == "RELEASED", err
     intent = frozen.intent
-    copy = served.registration_preparations.execution_copy(intent.registration_snapshot_id)
+    copy = served.registration_preparations.execution_copy(
+        intent.registration_snapshot_id, spot_check=False
+    )
     fence = served.safety_stack.truth_fence()
     with served.registrations.transaction() as unit, pytest.raises(MutationRefused) as refused:
         served.safety_stack.admit_create(

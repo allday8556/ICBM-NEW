@@ -30,6 +30,7 @@ from fastapi.testclient import TestClient
 from app.config import AppConfig
 from app.container import Container
 from app.platform.core.errors import AppError
+from app.stages.operate.catalog.coverage import CatalogCoverage
 from app.stages.operate.catalog.duplicates import CatalogDuplicateSource
 from app.stages.operate.catalog.facts import (
     COMPLETE,
@@ -76,17 +77,22 @@ NAME = "authored listing name"
 # ---------------------------------------------------------------- fakes
 
 
-def _fields(name: str, code: str | None) -> ListingFields:
-    canonical = {"name": name, "seller_keys": {"seller_management_code": code}}
+def _fields(
+    name: str, code: str | None, status: str = "SALE", barcode: str | None = None
+) -> ListingFields:
+    canonical = {
+        "name": name,
+        "seller_keys": {"seller_management_code": code, "seller_barcode": barcode},
+    }
     return ListingFields(
         fields_version="fixture-fields/v1",
-        sale_status="SALE",
+        sale_status=status,
         display_status="ON",
         name=name,
         sale_price=10000,
         stock_quantity=5,
         seller_management_code=code,
-        seller_barcode=None,
+        seller_barcode=barcode,
         leaf_category_id=None,
         canonical=canonical,
     )
@@ -101,6 +107,9 @@ class FakeCatalogSource:
     def __init__(self) -> None:
         self.listings: dict[str, tuple[str, str | None]] = {}
         self.outcome = COMPLETE
+        # Optional per-listing sale status and barcode (default SALE, none).
+        self.statuses: dict[str, str] = {}
+        self.barcodes: dict[str, str] = {}
 
     def put(self, origin: str, name: str, code: str | None = None) -> None:
         self.listings[origin] = (name, code)
@@ -125,7 +134,15 @@ class FakeCatalogSource:
 
     def read(self, origin_product_no: str, *, observe: Any = None) -> ListingRead:
         name, code = self.listings[origin_product_no]
-        return ListingRead(OBSERVED, fields=_fields(name, code))
+        return ListingRead(
+            OBSERVED,
+            fields=_fields(
+                name,
+                code,
+                self.statuses.get(origin_product_no, "SALE"),
+                self.barcodes.get(origin_product_no),
+            ),
+        )
 
 
 class FakeSpot:
@@ -159,6 +176,9 @@ class Store:
         conventions: Iterable[str] = (),
         spot: FakeSpot | None = None,
         mutation: Callable[[str, str], datetime | None] | None = None,
+        confirm_coverage: bool = True,
+        member_gtins: Callable[[Any], Iterable[str]] | None = None,
+        different: Callable[[str, str], Iterable[tuple[str, str]]] | None = None,
     ) -> None:
         self.clock = FakeClock(datetime.now(UTC))
         self.source = FakeCatalogSource()
@@ -171,6 +191,9 @@ class Store:
             pause_s=0.0,
         )
         self.refreshes = 0
+        # ADR-0042 §5.2 tightening: the seller's per-status coverage confirmation.
+        self.coverage = CatalogCoverage(catalog=self.catalog, audit=container.audit)
+        self.confirm_coverage = confirm_coverage
         self.duplicates = CatalogDuplicateSource(
             marketplace_key=MARKET,
             contract_version=CONTRACT,
@@ -180,6 +203,9 @@ class Store:
             mutation_started_at=mutation or container.registrations.last_mutation_started,
             refresh=self._refresh,
             spot=spot,
+            coverage=self.coverage,
+            member_gtins=member_gtins,
+            different=different,
         )
         container.registration_preparations._duplicate_lookup = self.duplicates
 
@@ -187,9 +213,12 @@ class Store:
         self.refreshes += 1
         return True
 
-    def sync(self) -> Any:
-        run = self.catalog.sync(trigger=CONNECT, correlation_id=CID)
+    def sync(self, trigger: str = CONNECT) -> Any:
+        run = self.catalog.sync(trigger=trigger, correlation_id=CID)
         assert run.outcome == COMPLETE, run
+        if self.confirm_coverage and self.coverage.view().state != "CONFIRMED":
+            # The seller looked at 「스토어 상품」 and confirmed its counts.
+            self.coverage.confirm(run_id=run.run_id, actor=OPERATOR, correlation_id=CID)
         return run
 
 
@@ -367,14 +396,14 @@ def test_a_stale_snapshot_is_never_no_match_and_a_resync_keeps_the_fingerprint(
     assert _row(api, other)["duplicate"]["state"] == "RESYNCING"
     # Send time checks freshness again: the first CREATE copy refuses until the store is re-read.
     with pytest.raises(RegistrationConflictError) as refused:
-        container.registration_preparations.execution_copy(snapshot_id)
+        container.registration_preparations.execution_copy(snapshot_id, spot_check=False)
     assert refused.value.code == "REGISTER_DUPLICATE_EVIDENCE_UNAVAILABLE"
     # A re-sync that finds the same thing: the same evidence digest, the same candidate.
     store.sync()
     after = container.registration_preparations.stage_candidate(unit["preparation_id"])
     assert after.request.duplicate_evidence == before.request.duplicate_evidence
     assert after.candidate_fingerprint == before.candidate_fingerprint
-    copy = container.registration_preparations.execution_copy(snapshot_id)
+    copy = container.registration_preparations.execution_copy(snapshot_id, spot_check=False)
     assert copy.final.dependency_fingerprint == frozen.snapshot.preflight_fingerprint
 
 

@@ -7,8 +7,13 @@
 // - 「스토어 다시 확인 중…」 while the automatic re-sync runs, with 「다시 보기」 to read it again;
 // - 「이미 스토어에 있는 상품: …」 with the seller's choices when a store listing matches:
 //   「같은 상품으로 연결」 (ADR-0042 S2a: the store listing becomes this product's listing, and
-//   nothing is registered again), or 「의도적으로 한 번 더 등록」, which records the seller's reason
-//   and can be undone. A listing already linked to this product reads so, with no link button.
+//   nothing is registered again), 「다른 상품」 for a listing only its name resembles (an S2a
+//   decision; that listing no longer matches this product), or 「의도적으로 한 번 더 등록」, which
+//   records the seller's reason and can be undone. A listing already linked to this product reads
+//   so, with no link button;
+// - 「스토어 상품 수 확인이 필요합니다」 until the seller confirms, in 통합DB › 「스토어 상품」, that
+//   the store's per-status counts equal the seller center's (ADR-0042 §5.2): before that the
+//   server never says 「중복 없음」.
 // The last complete sync time is always shown beside any result (SCP-07).
 
 import { ApiError, sendJson } from '../core/api.js';
@@ -18,11 +23,13 @@ import { toast } from '../core/toast.js';
 
 const PREPARATIONS = '/api/v1/register/preparations';
 const LINK = '/api/v1/operate/store-links/confirm';
+const REJECT = '/api/v1/operate/store-links/reject';
 const OPERATOR = 'operator';
 
 const KEY_LABEL = {
   SELLER_CODE: '판매자코드가 같습니다',
-  NORMALIZED_NAME: '상품명이 같습니다',
+  NORMALIZED_NAME: '상품명이 같거나 비슷합니다',
+  GTIN: '바코드가 같습니다',
   LISTING_LINK: '이 상품과 연결된 스토어 상품입니다',
 };
 const LINK_ERROR = {
@@ -162,6 +169,35 @@ function matchLine(match, link) {
   );
 }
 
+async function rejectMatch(unit, match, product, reload, button) {
+  button.disabled = true;
+  try {
+    await sendJson('POST', REJECT, {
+      actor: OPERATOR,
+      marketplace_key: unit.marketplace_key,
+      marketplace_account_id: unit.marketplace_account_id,
+      origin_product_no: match.marketplace_product_id,
+      product_group_id: product,
+    });
+    toast('중복 확인', '다른 상품으로 기록했습니다. 통합DB에서 되돌릴 수 있습니다.');
+    await reload();
+  } catch (error) {
+    const code = error instanceof ApiError ? error.error?.code : null;
+    toast('중복 확인', LINK_ERROR[code] ?? '기록하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    button.disabled = false;
+  }
+}
+
+// 「다른 상품」: only for a listing its name alone resembles (a weak signal the seller decides).
+function rejectButton(unit, match, editable, reload) {
+  const product = unitProduct(unit);
+  if (match.key_kind !== 'NORMALIZED_NAME' || !product) return null;
+  const button = h('button', { type: 'button', class: 'btn', 'data-action': 'duplicate-reject', 'data-product-no': match.marketplace_product_id }, '다른 상품');
+  button.disabled = !editable;
+  button.addEventListener('click', () => rejectMatch(unit, match, product, reload, button));
+  return button;
+}
+
 function linkButton(unit, match, editable, reload) {
   const product = unitProduct(unit);
   if (match.key_kind === 'LISTING_LINK' || !product) return null;
@@ -197,7 +233,7 @@ function matchBlock(unit, duplicate, reload) {
     : '같은 상품을 두 번 등록하지 않도록 등록을 멈췄습니다. 같은 상품이면 스토어 상품과 연결하고, 다른 상품이라면 이유를 적고 한 번 더 등록할 수 있습니다.';
   return [
     h('div', {}, h('b', {}, '이미 스토어에 있는 상품:')),
-    h('ul', { class: 'duplicate-matches' }, ...duplicate.matches.map((match) => matchLine(match, chosen ? null : linkButton(unit, match, editable, reload)))),
+    h('ul', { class: 'duplicate-matches' }, ...duplicate.matches.map((match) => matchLine(match, chosen ? null : [linkButton(unit, match, editable, reload), rejectButton(unit, match, editable, reload)]))),
     chosen ? null : h('div', { class: 'mini' }, why),
     h('div', { class: 'row' }, ...choices),
   ];
@@ -217,6 +253,18 @@ export function duplicateRow(unit, reload) {
   } else if (state === 'RESYNCING') {
     // Never re-read by itself: an automatic reload would drop what the seller is typing elsewhere.
     holder.append(head('스토어 다시 확인 중…', 'info'), h('div', { class: 'row' }, lastSync(duplicate), recheck(reload)));
+  } else if (state === 'COVERAGE_UNCONFIRMED') {
+    holder.append(
+      head('스토어 상품 수 확인이 필요합니다', 'warn'),
+      h('div', { class: 'mini' }, '통합DB › 스토어 상품에서 상태별 상품 수가 판매자센터와 같은지 한 번 확인해 주세요. 확인 전에는 중복 없음으로 판단하지 않습니다.'),
+      h(
+        'div',
+        { class: 'row' },
+        lastSync(duplicate),
+        h('button', { type: 'button', class: 'btn', 'data-action': 'open-store-listings', onclick: () => { window.location.hash = '#/db?view=store'; } }, '스토어 상품 열기'),
+        recheck(reload),
+      ),
+    );
   } else if (state === 'STALE') {
     holder.append(head('스토어 확인이 오래되었습니다', 'warn'), h('div', { class: 'mini' }, '잠시 후 스토어를 다시 확인합니다.'), h('div', { class: 'row' }, lastSync(duplicate), recheck(reload)));
   } else {

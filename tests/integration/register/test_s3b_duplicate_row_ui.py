@@ -70,6 +70,14 @@ def page(browser: Browser, api: TestClient) -> Iterator[tuple[Page, list[dict[st
                 ),
             )
             return
+        if parts.path.endswith("/store-links/reject") and request.method == "POST":
+            posted.append({"path": parts.path, "body": json.loads(request.post_data or "{}")})
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"link": None, "retired_group_id": None, "decision_id": "d-1"}),
+            )
+            return
         if parts.path.endswith("/store-links/confirm") and request.method == "POST":
             posted.append({"path": parts.path, "body": json.loads(request.post_data or "{}")})
             route.fulfill(
@@ -217,7 +225,7 @@ def test_a_recorded_override_can_be_undone(
         ),
     )
     assert "한 번 더 등록하기로 함" in shown["text"]
-    assert "상품명이 같습니다" in shown["text"]
+    assert "상품명이 같거나 비슷합니다" in shown["text"]
     assert "되돌리기" in shown["text"]
     assert "의도적으로 한 번 더 등록" not in shown["text"]
     _plain(shown["text"])
@@ -305,4 +313,85 @@ def test_a_listing_already_linked_to_the_product_reads_so(
     assert "이 상품과 연결된 스토어 상품입니다" in text
     assert "이미 이 스토어에서 판매 중이라 새로 등록하지 않습니다" in text
     assert opened.locator("#probe-MATCH [data-action='duplicate-link']").count() == 0
+    _plain(text)
+
+
+def test_a_name_only_match_offers_another_product(
+    page: tuple[Page, list[dict[str, Any]]],
+) -> None:
+    """ADR-0042 §6: a similar name is a weak match the seller decides: 「같은 상품으로 연결」,
+    「다른 상품」 or 「의도적으로 한 번 더 등록」."""
+    opened, posted = page
+    shown = opened.evaluate(
+        RENDER,
+        _linkable(
+            codes=["PROVIDER_DUPLICATE_WEAK_SIGNAL"],
+            matches=[
+                {
+                    "key_kind": "NORMALIZED_NAME",
+                    "marketplace_product_id": "780",
+                    "name": "이름이 비슷한 상품",
+                    "sale_status": "SALE",
+                }
+            ],
+        ),
+    )
+    text = shown["text"]
+    assert "상품명이 같거나 비슷합니다" in text
+    for choice in ("같은 상품으로 연결", "다른 상품", "의도적으로 한 번 더 등록"):
+        assert choice in text, choice
+    _plain(text)
+    opened.locator("#probe-MATCH [data-action='duplicate-reject']").click()
+    opened.wait_for_function("() => window.__reloads === 1", timeout=10_000)
+    assert posted == [
+        {
+            "path": "/api/v1/operate/store-links/reject",
+            "body": {
+                "actor": "operator",
+                "marketplace_key": "smartstore",
+                "marketplace_account_id": "mpa-1",
+                "origin_product_no": "780",
+                "product_group_id": "g-1",
+            },
+        }
+    ]
+
+
+def test_a_strong_match_offers_no_another_product(
+    page: tuple[Page, list[dict[str, Any]]],
+) -> None:
+    opened, _ = page
+    opened.evaluate(
+        RENDER,
+        _linkable(
+            codes=["PROVIDER_DUPLICATE_FOUND"],
+            matches=[
+                {
+                    "key_kind": "GTIN",
+                    "marketplace_product_id": "781",
+                    "name": "바코드가 같은 상품",
+                    "sale_status": "SALE",
+                }
+            ],
+        ),
+    )
+    assert opened.locator("#probe-MATCH [data-action='duplicate-reject']").count() == 0
+    assert "바코드가 같습니다" in opened.locator("#probe-MATCH").inner_text()
+
+
+def test_an_unconfirmed_coverage_points_to_the_store_tab(
+    page: tuple[Page, list[dict[str, Any]]],
+) -> None:
+    opened, _ = page
+    shown = opened.evaluate(
+        RENDER, _unit("COVERAGE_UNCONFIRMED", codes=["DUPLICATE_EVIDENCE_UNAVAILABLE"])
+    )
+    text = shown["text"]
+    assert "스토어 상품 수 확인이 필요합니다" in text
+    assert "통합DB › 스토어 상품" in text
+    assert "중복 없음 ·" not in text
+    assert (
+        opened.locator("#probe-COVERAGE_UNCONFIRMED [data-action='open-store-listings']").count()
+        == 1
+    )
     _plain(text)

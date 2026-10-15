@@ -23,6 +23,7 @@ import pytest
 from app.capabilities.jobs.models import JobState
 from app.container import Container
 from app.stages.connect.marketplace.capability import RemoteOutcome
+from app.stages.operate.catalog.coverage import CatalogCoverage
 from app.stages.operate.catalog.duplicates import CatalogDuplicateSource
 from app.stages.operate.catalog.service import CONNECT, StoreCatalogService
 from app.stages.products.model import ReadinessStatus
@@ -32,6 +33,7 @@ from app.stages.register.execution import (
     CREATE_JOB_TYPE,
     CREATE_POLICY,
     DUPLICATE_RESYNC_WAIT,
+    DUPLICATE_REVALIDATION_NOT_WIRED,
     RegistrationExecutionService,
     create_job_definition,
     encode_send_request,
@@ -128,6 +130,7 @@ def _catalog(container: Container, account: str, source: FakeCatalogSource) -> A
         pause_s=0.0,
     )
     resyncs: list[int] = []
+    coverage = CatalogCoverage(catalog=catalog, audit=container.audit)
     duplicates = CatalogDuplicateSource(
         marketplace_key=MARKET,
         contract_version="catalog-duplicate-test/v1",
@@ -136,8 +139,23 @@ def _catalog(container: Container, account: str, source: FakeCatalogSource) -> A
         convention_codes=lambda items: (),
         mutation_started_at=container.registrations.last_mutation_started,
         refresh=lambda: resyncs.append(1) is None,
+        coverage=coverage,
     )
-    return catalog, duplicates, resyncs
+    return _Confirming(catalog, coverage), duplicates, resyncs
+
+
+class _Confirming:
+    """The catalog owner, with the seller confirming the coverage after each COMPLETE sync."""
+
+    def __init__(self, catalog: StoreCatalogService, coverage: CatalogCoverage) -> None:
+        self._catalog = catalog
+        self._coverage = coverage
+
+    def sync(self, **kwargs: Any) -> Any:
+        run = self._catalog.sync(**kwargs)
+        if run.outcome == "COMPLETE" and self._coverage.view().state != "CONFIRMED":
+            self._coverage.confirm(run_id=run.run_id, actor=OPERATOR, correlation_id=CID)
+        return run
 
 
 def _frozen(
@@ -327,3 +345,45 @@ def test_a_listing_that_appeared_since_the_freeze_is_never_sent_over(
     assert result is not None and result.state is JobState.DEAD, result
     assert result.error_code == "REGISTER_SEND_PREFLIGHT_NOT_READY"
     assert sender.calls == []
+
+
+def test_a_create_without_send_time_revalidation_is_never_sent(
+    container: Container,
+    sources: Collections,  # noqa: F811
+    store: RegistrationStore,  # noqa: F811
+    account: str,  # noqa: F811
+    prep: Preparation,  # noqa: F811
+) -> None:
+    """ADR-0042 §6: the send-time duplicate revalidation is mandatory. A service built without it
+    refuses every CREATE before any attempt opens; nothing is sent."""
+    source = FakeCatalogSource()
+    catalog, duplicates, _ = _catalog(container, account, source)
+    catalog.sync(trigger=CONNECT, correlation_id=CID)
+    unit = _frozen(container, sources, store, account, prep, duplicates, "s3b-unwired")
+    sender = CountingSender()
+    service = RegistrationExecutionService(
+        registrations=container.registrations,
+        preflight=prep.service,
+        sender=sender,
+        readback=FakeReadback(retained={"originProduct": {"name": "x"}}),
+        lookup=FakeLookup(),
+        capability=prep.capability,
+        compare=FakeComparator(),
+        projection=FakeProjector(),
+        clock=container.clock,
+        authority=AdmittingAuthority(),
+    )
+    container.job_registry._definitions[CREATE_JOB_TYPE] = create_job_definition(
+        service, retry_policy=CREATE_POLICY
+    )
+    enqueue_create(
+        container.jobs,
+        container.registrations,
+        intent_id=unit.intent_id,
+        request=unit.request,
+        frozen=unit.final,
+    )
+    result = container.runner.run_next()
+    assert result is not None and result.state is JobState.DEAD, result
+    assert result.error_code == DUPLICATE_REVALIDATION_NOT_WIRED
+    assert sender.calls == [] and store.attempts(unit.intent_id) == ()

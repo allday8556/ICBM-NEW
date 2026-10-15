@@ -209,6 +209,13 @@ What a `COMPLETE` sync proves:
 - the registration path first runs a **fresh sync automatically**. That is a routine read (ADR-0018 governance clarification), and the UI shows 「스토어 다시 확인 중…」;
 - until that sync is `COMPLETE`, the result is `DUPLICATE_EVIDENCE_STALE`, never `NO_MATCH`.
 
+**Coverage confirmation (tightening, S3b; seller-decides principle `6109102895`).** Whether the paging-only enumeration lists every sale status is not captured (E1 per status). So a `COMPLETE` snapshot is `NO_MATCH` evidence only after the seller has confirmed, once per store, in 통합DB › 「스토어 상품」, that the per-status counts shown there equal the seller center's (「판매자센터 상품 수와 같습니다」).
+- The confirmation is an append-only audit event: who, when, the sync run, its total and its per-status counts.
+- It stops holding for a later `COMPLETE` sync when a status class confirmed with at least one listing has none, or the total moved by more than `max(10, 20 %)` of the confirmed total. The seller then confirms again.
+- Until it holds, the result is `DUPLICATE_EVIDENCE_UNAVAILABLE`, and the duplicate row points to the tab. A positive match needs no confirmation.
+
+This tightens §6 and relaxes nothing: it adds a condition before a `NO_MATCH`.
+
 ### 5.3 What is stored: an allowlist
 
 | group | fields (SmartStore names; paths per E3/E4) |

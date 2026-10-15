@@ -270,7 +270,7 @@ def unit_artifacts(resolved: Any) -> list[Artifact]:
 class CandidateEvaluator(Protocol):
     def evaluate(self, preparation_id: str) -> Any: ...
 
-    def execution_copy(self, registration_snapshot_id: str) -> Any: ...
+    def execution_copy(self, registration_snapshot_id: str, *, spot_check: bool) -> Any: ...
 
 
 class AssetTargets(Protocol):
@@ -406,7 +406,7 @@ class RestoreDrillService:
         )
         if preparation is None:
             raise NotFoundError("DRILL_PREPARATION_NOT_FOUND", "the Snapshot's revision is gone")
-        copy = self._preparations.execution_copy(snapshot_id)
+        copy = self._preparations.execution_copy(snapshot_id, spot_check=False)
         attempts = self._registrations.attempts(intent_id)
         scope = self._registrations.execution_scope(
             intent.marketplace_key, intent.marketplace_account_id, CREATE_ENDPOINT_GROUP

@@ -750,7 +750,9 @@ def test_admission_proves_eligibility_inside_the_unit_that_opens_the_attempt(
         proofs=_EligibilityFromTheOwner(proofs(container)),
         clock=container.clock,
     )
-    copy = container.registration_preparations.execution_copy(intent.registration_snapshot_id)
+    copy = container.registration_preparations.execution_copy(
+        intent.registration_snapshot_id, spot_check=False
+    )
     fence = stack.truth_fence()
 
     def admit(**lineage: Any) -> Any:

@@ -229,6 +229,9 @@ snapshot; `integrations/marketplaces/smartstore/lookup.py` now composes it with 
 check), the editor's duplicate row `ui/web/js/components/duplicate-row.js` and three integration
 suites; `catalog_max_age` moved into the target policy, and a CREATE re-checks the snapshot at
 send time, waiting for the re-sync after ICBM's own change.
+The S3b fail-closed pass added the coverage confirmation owner
+`app/stages/operate/catalog/coverage.py` (the seller's per-status count check in 「스토어 상품」,
+recorded as an audit event) and one integration suite.
 ADR-0042 S2a added the ListingLinks owner in `app/stages/operate/catalog/` (`keys.py`, the
 strong keys and weak signals; `link_models.py`; `links.py`, the post-sync pass that links each
 listing or gives it its own 「도매처 미연결」 common product, the proposals, 「같은 상품」 /
@@ -245,11 +248,11 @@ two integration suites under `tests/integration/operate/`.
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 421 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 422 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 84 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
 | `app/interface/` | 32 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 98 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 202 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/stages/` | 203 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -271,11 +274,11 @@ two integration suites under `tests/integration/operate/`.
 | `integrations/` | 120 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 46 |  |
 | `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 461 | tests |
+| `tests/` | 462 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 194 | integration tests by runtime owner |
+| `tests/integration/` | 195 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
 | `tests/unit/` | 165 | unit tests by runtime owner |
 | `ui/` | 81 | operator clients: the served web client and the capture extension |

@@ -433,10 +433,12 @@ class DuplicateCheckView(BaseModel):
     """The duplicate row of a unit (ADR-0042 §0 a4), as the duplicate-evidence owner answered.
 
     ``state`` is ``NO_MATCH`` or ``MATCH`` only with evidence of a COMPLETE, fresh store snapshot;
-    without one it is ``RESYNCING`` while the automatic re-sync runs, else ``STALE`` or
-    ``UNAVAILABLE``. ``as_of`` is the start of the last COMPLETE sync, shown with any result
-    (SCP-07). ``codes`` are the unit's duplicate-area preflight reasons, and ``override_ids`` the
-    active DuplicateOverrides of its products in this store (「의도적으로 한 번 더 등록」)."""
+    without one it is ``RESYNCING`` while the automatic re-sync runs, ``COVERAGE_UNCONFIRMED``
+    while the seller has not confirmed the store's per-status counts (ADR-0042 §5.2), else
+    ``STALE`` or ``UNAVAILABLE``. ``as_of`` is the start of the last COMPLETE sync, shown with
+    any result (SCP-07). ``codes`` are the unit's duplicate-area preflight reasons, and
+    ``override_ids`` the active DuplicateOverrides of its products in this store
+    (「의도적으로 한 번 더 등록」)."""
 
     state: str
     as_of: datetime | None = None

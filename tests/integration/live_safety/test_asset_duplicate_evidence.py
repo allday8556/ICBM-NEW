@@ -95,7 +95,7 @@ def test_the_asset_stage_binds_the_create_candidate_under_required_duplicate_pro
 
     frozen, _ = frozen_unit(api, container, config, duplicate_proof=True, before_freeze=asset_stage)
     copy = container.registration_preparations.execution_copy(
-        frozen.intent.registration_snapshot_id
+        frozen.intent.registration_snapshot_id, spot_check=False
     )
     create_candidate = copy.final.candidate_fingerprint
     gate = seen["gate"]

@@ -148,6 +148,31 @@ def _category_names(container: ContainerDep, leaves: set[str]) -> dict[str, str]
     return names
 
 
+class StoreCoverageConfirmRequest(BaseModel):
+    """「판매자센터 상품 수와 같습니다」 for exactly the sync the seller looked at."""
+
+    run_id: str = Field(min_length=1, max_length=36)
+    actor: str = Field(min_length=2, max_length=64)
+
+
+@router.get("/store-catalog/coverage")
+def store_catalog_coverage(container: ContainerDep) -> dict[str, Any]:
+    """ADR-0042 §5.2 tightening: the per-status counts of the last COMPLETE sync beside the
+    seller's confirmation that they equal the seller center's, and whether it still holds. Until
+    it does, a duplicate check is never ``NO_MATCH``."""
+    return asdict(container.store_coverage.view())
+
+
+@router.post("/store-catalog/coverage/confirm")
+def confirm_store_catalog_coverage(
+    container: ContainerDep, request: StoreCoverageConfirmRequest
+) -> dict[str, Any]:
+    view = container.store_coverage.confirm(
+        run_id=request.run_id, actor=request.actor, correlation_id=new_correlation_id()
+    )
+    return asdict(view)
+
+
 @router.post("/store-catalog/sync", status_code=202)
 def sync_store_catalog(container: ContainerDep) -> dict[str, Any]:
     """「지금 동기화」: start one read-only catalog sync in the background. A store that is not
@@ -178,9 +203,13 @@ class StoreLinkConfirmRequest(BaseModel):
 
 
 class StoreLinkRejectRequest(BaseModel):
-    """「다른 상품」: this listing is not that product. Revocable."""
+    """「다른 상품」: this listing (by id, or by its store and product number) is not that
+    product. Revocable."""
 
-    listing_id: str = Field(min_length=1, max_length=36)
+    listing_id: str | None = Field(default=None, min_length=1, max_length=36)
+    marketplace_key: str | None = Field(default=None, min_length=1, max_length=40)
+    marketplace_account_id: str | None = Field(default=None, min_length=1, max_length=40)
+    origin_product_no: str | None = Field(default=None, min_length=1, max_length=20)
     product_group_id: str = Field(min_length=1, max_length=36)
     actor: str = Field(min_length=2, max_length=64)
 
@@ -245,8 +274,19 @@ def confirm_store_link(container: ContainerDep, request: StoreLinkConfirmRequest
 
 @router.post("/store-links/reject")
 def reject_store_link(container: ContainerDep, request: StoreLinkRejectRequest) -> dict[str, Any]:
+    listing_id = request.listing_id
+    if listing_id is None:
+        if not (
+            request.marketplace_key and request.marketplace_account_id and request.origin_product_no
+        ):
+            raise InputValidationError(
+                "STORE_LINK_LISTING_REQUIRED", "name the listing by id or by store and product"
+            )
+        listing_id = container.store_links.listing_id_of(
+            request.marketplace_key, request.marketplace_account_id, request.origin_product_no
+        )
     result = container.store_links.reject(
-        request.listing_id,
+        listing_id,
         request.product_group_id,
         actor=request.actor,
         correlation_id=new_correlation_id(),

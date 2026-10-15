@@ -178,7 +178,9 @@ def test_the_application_freeze_consumes_the_owners_evidence_and_prepared_assets
     assert frozen["intent_state"] == "PREPARED"
     # The Snapshot was frozen on the candidate the ASSET stage bound, with exactly the provider
     # assets the upload owner holds for it: the first CREATE copy reproduces it from the owners.
-    copy = container.registration_preparations.execution_copy(frozen["registration_snapshot_id"])
+    copy = container.registration_preparations.execution_copy(
+        frozen["registration_snapshot_id"], spot_check=False
+    )
     assert copy.final.candidate_fingerprint == stage.candidate_fingerprint
     assert copy.request.duplicate_evidence is not None
     assert {

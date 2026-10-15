@@ -12,6 +12,10 @@
 // - Every value is what the store's last successful detail read recorded. A value the catalog
 //   does not keep (the discount, and anything not read) keeps its place and reads 데이터 없음.
 //   Provider tokens appear only in data-* attributes, never as text.
+// - 「판매자센터 상품 수와 같습니다」 (ADR-0042 §5.2, seller decides): the last complete sync's
+//   per-status counts beside the seller-center hint. Until the seller confirms them once, and
+//   again whenever a status class vanishes or the total jumps, a registration's duplicate check
+//   never reads 「중복 없음」.
 
 import { ApiError, getJson, sendJson } from '../../core/api.js';
 import { h } from '../../core/dom.js';
@@ -22,6 +26,14 @@ import { toast } from '../../core/toast.js';
 const LISTINGS = '/api/v1/operate/store-catalog/listings';
 const STATUS = '/api/v1/operate/store-catalog/status';
 const SYNC = '/api/v1/operate/store-catalog/sync';
+const COVERAGE = '/api/v1/operate/store-catalog/coverage';
+const COVERAGE_CONFIRM = '/api/v1/operate/store-catalog/coverage/confirm';
+const OPERATOR = 'operator';
+const COVERAGE_KEYS = ['ON_SALE', 'OUT_OF_STOCK', 'SUSPENDED', 'SALE_CLOSED', 'OTHER_STATUS'];
+const COVERAGE_REASON = {
+  STATUS_CLASS_MISSING: '확인 때 있던 상태의 상품이 이번 동기화에 하나도 없습니다.',
+  TOTAL_JUMPED: '확인 때보다 상품 수가 크게 바뀌었습니다.',
+};
 const PAGE_SIZE = 50;
 // While a sync runs the status line re-reads its progress at this pace.
 const POLL_MS = 3000;
@@ -209,6 +221,58 @@ function notConnected(ctx) {
       h('button', { type: 'button', class: 'btn', 'data-action': 'sync-store-catalog', disabled: true }, '지금 동기화'),
     ),
   );
+}
+
+// ---------------------------------------------------------------- coverage (ADR-0042 §5.2)
+
+function coveragePanel(onConfirmed) {
+  const panel = h('section', { class: 'panel store-coverage', 'data-role': 'store-coverage', hidden: true });
+  const render = (view) => {
+    const current = view.current;
+    if (!current) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    panel.dataset.state = view.state;
+    if (view.reason) panel.dataset.reason = view.reason;
+    const counts = COVERAGE_KEYS.map((key) =>
+      h('span', { class: 'chip', 'data-filter': key }, `${FILTER_LABEL[key]} ${count(current.counts[key] ?? 0)}`),
+    );
+    const confirmed = view.state === 'CONFIRMED';
+    const title = confirmed
+      ? `판매자센터 상품 수 확인됨 · ${dotDateTime(view.confirmed.confirmed_at)}`
+      : view.state === 'INVALIDATED'
+        ? '판매자센터 상품 수를 다시 확인해 주세요'
+        : '판매자센터 상품 수와 같은지 확인해 주세요';
+    const button = h('button', { type: 'button', class: confirmed ? 'btn' : 'btn blue', 'data-action': 'confirm-store-coverage' }, '판매자센터 상품 수와 같습니다');
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        render(await sendJson('POST', COVERAGE_CONFIRM, { run_id: current.run_id, actor: OPERATOR }));
+        toast('스토어 상품', '판매자센터 상품 수와 같다고 기록했습니다.');
+        onConfirmed();
+      } catch (error) {
+        toast('스토어 상품', errorCode(error) === 'STORE_CATALOG_COVERAGE_RUN_MOVED' ? '새 동기화가 끝났습니다. 바뀐 상품 수를 보고 다시 확인해 주세요.' : '기록하지 못했습니다.');
+        button.disabled = false;
+      }
+    });
+    panel.replaceChildren(
+      h('div', { class: 'store-sync-line' }, h('b', {}, title), button),
+      h('div', { class: 'store-filters' }, h('span', { class: 'mini' }, `스토어 상품 ${count(current.total)}개 · 마지막 동기화 ${dotDateTime(current.as_of)}`), ...counts),
+      h('div', { class: 'mini' }, '판매자센터 › 상품관리 › 상품 조회/수정의 상태별 상품 수와 비교해 주세요. 같다고 확인한 뒤에야 등록할 때 「중복 없음」으로 판단합니다.'),
+      view.reason ? h('div', { class: 'mini', 'data-reason': view.reason }, COVERAGE_REASON[view.reason] ?? '') : null,
+    );
+  };
+  const load = async () => {
+    try {
+      render(await getJson(COVERAGE));
+    } catch {
+      panel.hidden = true;
+    }
+  };
+  load();
+  return panel;
 }
 
 // ---------------------------------------------------------------- one listing row
@@ -432,6 +496,7 @@ export async function storeListingsView(ctx) {
     'div',
     { class: 'store-workspace', 'data-role': 'store-workspace' },
     head ? head.element : notConnected(ctx),
+    head ? coveragePanel(() => {}) : null,
     toolbar,
     list,
   );

@@ -1258,6 +1258,27 @@ class ListingLinkService:
             }
         return {str(origins[lid]): group for lid, group in listed.items() if lid in origins}
 
+    def different_pairs(
+        self, marketplace_key: str, marketplace_account_id: str
+    ) -> set[tuple[str, str]]:
+        """(origin product, common product) pairs of the store the seller said 「다른 상품」 about
+        and has not revoked (the catalog duplicate source drops those weak matches)."""
+        store = self._store()
+        if store is None or store != (marketplace_key, marketplace_account_id):
+            return set()
+        with self._db.read() as session:
+            decided = self._decisions(session)
+            origins = {
+                str(listing_id): str(origin)
+                for listing_id, origin in session.execute(
+                    select(CatalogListing.listing_id, CatalogListing.origin_product_no).where(
+                        CatalogListing.marketplace_key == marketplace_key,
+                        CatalogListing.marketplace_account_id == marketplace_account_id,
+                    )
+                ).tuples()
+            }
+        return {(origins[lid], group) for lid, group in decided if lid in origins}
+
     def overview(self) -> LinksOverview:
         """What the 통합DB shows above its list (ADR-0042 §0 b3): the automatic links not yet
         acknowledged, the proposals still open, and the 「다른 상품」 decisions."""

@@ -503,7 +503,7 @@ def test_a_25_mb_description_image_is_uploaded_as_its_upload_fit_variant(
     assert frozen_detail["provider_asset_ref"] in content
     # The first CREATE copy reproduces the frozen inputs from the owners, the variant included.
     copy_ = container.registration_preparations.execution_copy(
-        frozen.snapshot.registration_snapshot_id
+        frozen.snapshot.registration_snapshot_id, spot_check=False
     )
     assert variant_sha in {a.sha256 for a in copy_.final.prepared_assets}
 

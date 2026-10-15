@@ -75,6 +75,9 @@ class DuplicateCheck:
     # after its start (it is otherwise still within its age bound): that mutation's start. The
     # CREATE send path waits for the re-sync then, instead of refusing (ADR-0042 §5.2).
     stale_since_mutation: datetime | None = None
+    # ADR-0042 §5.2 tightening: no NO_MATCH because the seller has not confirmed (or a later sync
+    # invalidated) the store's catalog coverage in 「스토어 상품」.
+    coverage_unconfirmed: bool = False
 
 
 def duplicate_unit(candidate: PreflightResult) -> DuplicateUnit:

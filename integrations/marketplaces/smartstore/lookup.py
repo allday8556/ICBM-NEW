@@ -23,6 +23,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import Any, Final
 
+from app.stages.operate.catalog.coverage import CatalogCoverage
 from app.stages.operate.catalog.duplicates import CatalogDuplicateSource
 from app.stages.operate.catalog.service import StoreCatalogService
 from integrations.marketplaces.smartstore import product
@@ -42,6 +43,9 @@ def smartstore_duplicate_source(
     caller: SmartStoreEndpointCaller,
     bearer: Any,
     linked: Callable[[str, str], Mapping[str, str]] | None = None,
+    coverage: CatalogCoverage | None = None,
+    member_gtins: Callable[[Sequence[str]], Iterable[str]] | None = None,
+    different: Callable[[str, str], Iterable[tuple[str, str]]] | None = None,
 ) -> CatalogDuplicateSource:
     """The production SmartStore duplicate source (composition root). ``linked`` is the
     ListingLinks owner's read (ADR-0042 S2a): a listing linked to the unit's product matches."""
@@ -55,6 +59,9 @@ def smartstore_duplicate_source(
         refresh=refresh,
         spot=SmartStoreReconcileLookup(caller=caller, bearer=bearer),
         linked=linked,
+        coverage=coverage,
+        member_gtins=member_gtins,
+        different=different,
     )
 
 

@@ -1216,7 +1216,10 @@ class RegisterService:
             return SCOPE_PAUSED if budget.paused_by is not None else BUDGET_EXHAUSTED
         if self._send_request(intent.intent_id) is None:
             try:
-                self._require_authoring().execution_copy(intent.registration_snapshot_id)
+                # An availability read, not the first CREATE copy: no provider search here.
+                self._require_authoring().execution_copy(
+                    intent.registration_snapshot_id, spot_check=False
+                )
             except AppError as exc:
                 return exc.code
         return None
@@ -1502,6 +1505,9 @@ class RegisterService:
             state = "MATCH" if check.matched else "NO_MATCH"
         elif check.resyncing:
             state = "RESYNCING"
+        elif check.coverage_unconfirmed:
+            # ADR-0042 §5.2 tightening: the seller confirms the store's counts in 「스토어 상품」.
+            state = "COVERAGE_UNCONFIRMED"
         else:
             state = check.problem or "UNAVAILABLE"
         overrides = self._require_authoring().active_overrides(

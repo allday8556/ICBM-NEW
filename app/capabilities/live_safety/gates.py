@@ -36,7 +36,7 @@ class ExecutionCopySource(Protocol):
     """``RegistrationPreparationService.execution_copy``: the send gate re-evaluated from the exact
     authored revision that produced the Snapshot."""
 
-    def execution_copy(self, registration_snapshot_id: str) -> Any: ...
+    def execution_copy(self, registration_snapshot_id: str, *, spot_check: bool) -> Any: ...
 
 
 def create_stage_gate(
@@ -50,7 +50,7 @@ def create_stage_gate(
     snapshot = registrations.snapshot(intent.registration_snapshot_id)
     eligibility: EligibilityBinding | None = None
     try:
-        copy = preparations.execution_copy(intent.registration_snapshot_id)
+        copy = preparations.execution_copy(intent.registration_snapshot_id, spot_check=False)
     except AppError as refused:
         reasons.append(refused.code)
     else:

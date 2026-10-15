@@ -204,7 +204,8 @@ export const REASON_COPY = {
   DUPLICATE_EVIDENCE_MISSING: '중복 확인 근거가 없습니다.',
   // ADR-0042 S3b: the store's own catalog decides duplicates.
   DUPLICATE_EVIDENCE_STALE: '스토어 다시 확인 중입니다. 확인이 끝나면 중복 여부를 다시 판단합니다.',
-  DUPLICATE_EVIDENCE_UNAVAILABLE: '스토어 상품을 아직 확인하지 못해 중복 여부를 알 수 없습니다.',
+  DUPLICATE_EVIDENCE_UNAVAILABLE: '스토어 상품을 아직 확인하지 못했거나 스토어 상품 수 확인(통합DB › 스토어 상품)이 끝나지 않아 중복 여부를 알 수 없습니다.',
+  REGISTER_SEND_DUPLICATE_REVALIDATION_NOT_WIRED: '보내기 직전 중복 재확인이 연결되어 있지 않아 등록을 보내지 않았습니다.',
   PROVIDER_DUPLICATE_FOUND: '이미 스토어에 같은 판매자코드의 상품이 있습니다.',
   PROVIDER_DUPLICATE_WEAK_SIGNAL: '스토어에 상품명이 같은 상품이 있습니다. 같은 상품인지 확인해 주세요.',
   // ADR-0042 S3b at send time: the store is checked again before a CREATE is sent.
