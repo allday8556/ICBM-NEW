@@ -10,6 +10,7 @@ import { contractPage } from './contract-page.js';
 import { fragment, h } from '../core/dom.js';
 import { dotDateTime } from '../core/format.js';
 import { platformTag } from '../core/platform.js';
+import { supplierName, supplierNames } from '../core/suppliers.js';
 import { reviewCountTable } from '../components/review-counts.js';
 
 const KINDS = ['collect_evidence', 'stock', 'source_change', 'compliance', 'registration_error', 'fulfillment'];
@@ -22,7 +23,7 @@ const MARKETPLACES = ['smartstore', 'coupang', 'gmarket', 'st11', 'auction'];
 const OUTCOME_CHIP = {
   PENDING: ['수집 중', 'info'],
   RECORDED: ['기록됨', 'good'],
-  NO_REVISION: ['기록할 식별자 없음', 'warn'],
+  NO_REVISION: ['상품 번호 못 읽음', 'warn'],
   FAILED: ['실패', 'bad'],
 };
 
@@ -54,7 +55,7 @@ function card(ctx, key, icon, label, page) {
 }
 
 function outcomeChip(outcome) {
-  const [label, tone] = OUTCOME_CHIP[outcome] ?? [outcome, null];
+  const [label, tone] = OUTCOME_CHIP[outcome] ?? ['확인 필요', 'warn'];
   return h('span', { class: tone ? `chip ${tone}` : 'chip' }, label);
 }
 
@@ -87,7 +88,7 @@ function recentPanel(ctx) {
   return { panel, body };
 }
 
-function fillRecent(body, listed) {
+function fillRecent(body, listed, names) {
   if (!listed.runs.length) {
     body.replaceChildren(h('tr', {}, h('td', { class: 'table-empty', colspan: '4' }, '아직 수집 기록이 없습니다.')));
     return;
@@ -106,7 +107,7 @@ function fillRecent(body, listed) {
         { 'data-recent-run': run.collection_run_id },
         h('td', {}, dotDateTime(run.requested_at)),
         h('td', {}, h('div', { class: 'prod' }, h('span', { class: 'thumb', 'aria-hidden': 'true' }, '▣'), name)),
-        h('td', {}, run.supplier_key),
+        h('td', {}, supplierName(names, run.supplier_key)),
         h('td', {}, outcomeChip(run.outcome)),
       );
     }),
@@ -219,10 +220,10 @@ function ready(view, ctx) {
   const recent = recentPanel(ctx);
   const registrations = registrationsPanel(ctx);
   // Reads the server already has: the recent runs with their total, and the registration counts.
-  getJson(`${RUNS}?limit=${RECENT}`).then(
-    (listed) => {
+  Promise.all([getJson(`${RUNS}?limit=${RECENT}`), supplierNames()]).then(
+    ([listed, names]) => {
       count(cards[0].value, listed.total);
-      fillRecent(recent.body, listed);
+      fillRecent(recent.body, listed, names);
     },
     () => recent.body.replaceChildren(h('tr', {}, h('td', { class: 'table-empty', colspan: '4' }, NO_DATA))),
   );
@@ -241,12 +242,7 @@ function ready(view, ctx) {
     h(
       'div',
       { class: 'panel', 'data-role': 'dashboard-review' },
-      h('h2', { class: 'panel-title' }, '검토 항목'),
-      h(
-        'div',
-        { class: 'mini' },
-        '‘최신’인 종류만 건수가 확정입니다. ‘집계 전’·‘최신 아님’은 0건이라는 뜻이 아닙니다.',
-      ),
+      h('h2', { class: 'panel-title' }, '확인할 일'),
       reviewCountTable(KINDS.map((key) => view.review_counts[key])),
     ),
     h(

@@ -132,6 +132,7 @@ from app.stages.connect.coupang.service import CoupangCredentialService
 from app.stages.connect.credentials import SupplierCredentialStore
 from app.stages.connect.marketplace.attestation import ApiGroup
 from app.stages.connect.marketplace.attestation_service import PermissionAttestationService
+from app.stages.connect.marketplace.capability import AuthStatus
 from app.stages.connect.marketplace.revision import EndpointMappingRevisionProvider
 from app.stages.connect.marketplace.service import MarketplaceCapabilityService
 from app.stages.connect.marketplace.sources import ApplicationIdentitySource
@@ -1444,6 +1445,10 @@ def build_container(
         editable_surfaces=editable_surfaces(),
         # ADR-0040 §1: a supplier read only from captured pages takes no submitted URL.
         collection_suppliers=collection.submittable_supplier_keys,
+        # A SmartStore account bound with its auth READY is a connected sales channel.
+        capability_marketplaces_connected=lambda: sum(
+            1 for view in marketplace_capability.capabilities() if view.auth is AuthStatus.READY
+        ),
     )
     return Container(
         listing_sync=listing_sync,

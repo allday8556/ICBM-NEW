@@ -449,6 +449,24 @@ def test_an_unconnected_marketplace_starts_unbound_unverified_and_unrecorded(
     assert missing.json()["error"]["code"] == "MARKETPLACE_CAPABILITY_UNKNOWN"
 
 
+def test_a_bound_smartstore_with_auth_ready_is_a_connected_sales_channel(
+    config: AppConfig, clock: FakeClock
+) -> None:
+    # The dashboard's 연결된 판매 채널 and the orders/inquiry screens count SmartStore once its
+    # account is bound and its auth is READY; before that it is not connected.
+    with _process(config, clock) as process:
+        assert process.screens.dashboard().marketplaces_connected == 0
+        process.marketplace_capability.record_contract_freshness(
+            KEY, ContractFreshness.CURRENT, actor="operator:review"
+        )
+        assert process.marketplace_capability.observe_auth(KEY, _evidence()).auth is (
+            AuthStatus.READY
+        )
+        assert process.screens.dashboard().marketplaces_connected == 1
+        assert process.screens.orders().marketplaces_connected == 1
+        assert process.screens.inquiry().marketplaces_connected == 1
+
+
 def test_every_change_is_audited_with_axis_values_only(config: AppConfig, clock: FakeClock) -> None:
     with _process(config, clock) as process:
         capability = process.marketplace_capability

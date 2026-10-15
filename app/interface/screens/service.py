@@ -75,9 +75,14 @@ class ScreenService:
         execution_mode: ExecutionModeService,
         editable_surfaces: Sequence[EditableSurface] = (),
         collection_suppliers: Sequence[str] | Callable[[], Sequence[str]] = (),
+        capability_marketplaces_connected: Callable[[], int] | None = None,
     ) -> None:
         """``collection_suppliers`` is a fixed list, or a read of the suppliers that can be
-        collected now (ADR-0036 §4: an onboarded site joins it when it becomes ACTIVE)."""
+        collected now (ADR-0036 §4: an onboarded site joins it when it becomes ACTIVE).
+
+        ``capability_marketplaces_connected`` counts the marketplaces whose connection truth is
+        their capability contract (SmartStore): connected once an account is bound and its auth
+        is READY. CONNECT's own summary never reports those, so without it they count as none."""
         self._clock = clock
         self._operator_name = operator_name
         self._marketplaces = tuple(marketplaces)
@@ -90,6 +95,11 @@ class ScreenService:
         self._execution_mode = execution_mode
         self._editable_surfaces = tuple(editable_surfaces)
         self._collection_suppliers = collection_suppliers
+        self._capability_marketplaces_connected = capability_marketplaces_connected
+
+    def _marketplaces_connected(self) -> int:
+        bound = self._capability_marketplaces_connected
+        return self._connect.connected_marketplace_count() + (0 if bound is None else bound())
 
     def _meta(self, screen: ScreenKey, empty_reason: EmptyReason | None) -> ScreenMeta:
         return ScreenMeta(
@@ -121,7 +131,7 @@ class ScreenService:
 
     def dashboard(self) -> DashboardView:
         suppliers = self._connect.connected_supplier_count()
-        marketplaces = self._connect.connected_marketplace_count()
+        marketplaces = self._marketplaces_connected()
         products = self._products.product_count()
         review = self._review.open_counts()
         # ADR-0016 §7: the empty verdict rests on review counts only when every kind is an
@@ -193,7 +203,7 @@ class ScreenService:
             meta=self._meta(ScreenKey.ORDERS, empty),
             orders_total=orders if order_read == "CONNECTED" else None,
             order_read=order_read,
-            marketplaces_connected=self._connect.connected_marketplace_count(),
+            marketplaces_connected=self._marketplaces_connected(),
         )
 
     def inquiry(self) -> InquiryView:
@@ -203,7 +213,7 @@ class ScreenService:
                 ScreenKey.INQUIRY, EmptyReason.NO_INQUIRIES if inquiries == 0 else None
             ),
             inquiries_total=inquiries,
-            marketplaces_connected=self._connect.connected_marketplace_count(),
+            marketplaces_connected=self._marketplaces_connected(),
         )
 
     def soldout(self) -> SoldoutView:
