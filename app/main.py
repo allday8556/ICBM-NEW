@@ -33,6 +33,7 @@ from app.interface.api.routes import (
     operate,
     overseas,
     overseas_costs,
+    pricing,
     product_images,
     products,
     register,
@@ -207,6 +208,7 @@ def create_app(
     app.include_router(onboarding.router)
     app.include_router(synthetic_products.router)
     app.include_router(products.router)
+    app.include_router(pricing.router)
     app.include_router(enrichment.router)
     app.include_router(product_images.router)
     app.include_router(register.router)

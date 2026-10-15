@@ -327,13 +327,14 @@ def test_an_images_field_under_review_is_shown_as_under_review_beside_its_repres
             shown = page.locator(f"{DETAIL} [data-fact='images']")
             assert shown.get_attribute("data-status") == "REVIEW_REQUIRED"
             text = shown.inner_text()
-            assert f"대표 {images.representative_sha256[:8]} · 1/2" in text
+            assert "1/2장" in text
+            assert shown.get_attribute("data-representative") == images.representative_sha256
             assert shown.locator(".chip.warn").inner_text() == "확인 필요"
             # A settled images field shows its representative and no review state.
             _open(page, settled)
             shown = page.locator(f"{DETAIL} [data-fact='images']")
             assert shown.get_attribute("data-status") == "CONFIRMED"
-            assert "대표 " in shown.inner_text()
+            assert shown.get_attribute("data-representative")
             assert shown.locator(".chip").count() == 0
 
 

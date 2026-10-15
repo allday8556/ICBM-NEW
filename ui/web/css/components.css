@@ -1611,6 +1611,14 @@ td.no-data {
   cursor: pointer;
 }
 
+.db-toolbar .db-test-toggle {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
 .db-list .db-row-meta {
   margin-top: 2px;
 }

@@ -33,8 +33,11 @@ def products(
     q: str | None = None,
     cursor: str | None = None,
     limit: int | None = None,
+    include_test: bool = True,
 ) -> ProductPageView:
-    return container.products.page(query=q, cursor=cursor, limit=limit)
+    """``include_test=false`` leaves out synthetic test products (the reserved
+    ``icbm-synthetic`` namespace), as the Product DB screen does by default."""
+    return container.products.page(query=q, cursor=cursor, limit=limit, include_test=include_test)
 
 
 @router.get("/api/v1/products/{product_group_id}")

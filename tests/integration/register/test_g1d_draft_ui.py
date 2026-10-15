@@ -214,7 +214,7 @@ def test_one_click_is_one_command_and_the_draft_opens_in_registration_management
                 for row in result.locator("tr[data-pin-item]").all()
             }
             assert shown == {row.item_id: row.pricing_snapshot_id for row in draft.items}
-            assert policy_revision[:8] in result.inner_text()
+            assert result.get_attribute("data-policy-revision") == policy_revision
             page.locator("[data-action='open-draft']").click()
             unit = page.locator(f".register-unit[data-draft='{draft_id}'][aria-current='true']")
             unit.wait_for(timeout=15_000)
