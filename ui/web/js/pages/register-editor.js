@@ -562,7 +562,7 @@ function overseasBlock(unit, ctx) {
     kv('해외 출고지 번호', overseas.shipping_address_id),
     kv('수입자', overseas.importer),
     kv('배송 소요일', days),
-    h('div', { class: 'mini' }, '원산지(수입)·KC 면제·통관 항목은 아직 보내지 않습니다. 스냅샷 미리보기의 빈 칸에서 확인하세요.'),
+    h('div', { class: 'mini' }, 'KC 구매대행 면제와 사업자 통관 판매 여부는 보냅니다. 원산지 수입 코드와 KC 구매대행 인증 정보는 아직 확인되지 않아 전송할 수 없습니다. 스냅샷 미리보기의 빈 칸에서 확인하세요.'),
     h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => ctx.navigate('settings') }, '설정 › 해외구매대행 열기')),
   );
 }
