@@ -82,12 +82,30 @@ def test_cli_accepts_secrets_only_through_no_echo_prompts() -> None:
     assert '("coupang", "bind-saved-delivery"): _coupang_bind_saved_delivery' in source
     assert '("coupang", "read-canary"): _coupang_read_canary' in source
     assert '("coupang", "read-category-metadata"): _coupang_read_category_metadata' in source
+    assert '"mark-category-metadata-ambiguous"' in source
+    assert "_coupang_mark_category_metadata_ambiguous" in source
+    assert '("coupang", "recover-category-metadata"): _coupang_recover_category_metadata' in source
     assert '("coupang", "mutate-test-products"): _coupang_mutate_test_products' in source
     assert '"complete-rejected-test-products"' in source
     assert "_coupang_complete_rejected_test_products" in source
     assert (
         '("coupang", "recover-test-product-create"): _coupang_recover_test_product_create'
     ) in source
+
+
+def test_category_metadata_recovery_is_single_target_and_explicitly_approved() -> None:
+    source = CLI.read_text(encoding="utf-8")
+    parser = source[source.index('"recover-category-metadata",') :]
+    parser = parser[: parser.index("mutations = coupang_commands.add_parser(")]
+    for option in ("--scope-id", "--approved-at", "--expires-at"):
+        assert f'"{option}", required=True' in parser
+
+    handler = source[source.index("def _coupang_recover_category_metadata(") :]
+    handler = handler[: handler.index("def _coupang_recover_test_product_create(")]
+    assert "category_metadata_recovery_target" in handler
+    assert "begin_category_metadata_recovery" in handler
+    assert "category_codes=(target,)" in handler
+    assert "on_before_attempt=lambda code: store.begin_category_metadata_recovery" in handler
 
 
 def test_corrected_live_mutation_requires_the_reviewed_approval_identity() -> None:

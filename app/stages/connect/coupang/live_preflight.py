@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from app.platform.core.secrets import SecretStore
 from integrations.marketplaces.coupang.auth import Credentials
@@ -13,11 +14,15 @@ from integrations.marketplaces.coupang.live_category_metadata import CategoryMet
 
 CATEGORY_RECOMMENDATION_KEY = "marketplace:coupang:category-preflight-v1"
 CATEGORY_METADATA_KEY = "marketplace:coupang:category-metadata-v1"
+CATEGORY_METADATA_ATTEMPT_KEY = "marketplace:coupang:category-metadata-attempt-v2"
 VENDOR_USER_ID_KEY = "marketplace:coupang:vendor-user-id"
 LOGISTICS_SELECTION_KEY = "marketplace:coupang:live-logistics-selection-v1"
 ACCOUNT_INPUTS_KEY = "marketplace:coupang:live-account-inputs-v2"
 _CATEGORY_CODE = re.compile(r"^[0-9]+$")
 _ACCOUNT_RECORD_VERSION = 2
+_CATEGORY_ATTEMPT_RECORD_VERSION = 2
+_CATEGORY_RECOVERY_SCOPE = "C-LIVE-CATEGORY-RECOVERY-1"
+_CATEGORY_RECOVERY_WINDOW = timedelta(minutes=30)
 _SHARED_COURIER_CODES = frozenset({"CJGLS", "EPOST", "HANJIN", "HYUNDAI", "ILYANG", "KGB"})
 
 
@@ -60,7 +65,17 @@ class CoupangLivePreflightStore:
             codes.append(code)
         return CategoryRecommendationSet(tuple(codes))
 
-    def _metadata_record(self, *, generation: int) -> dict[str, object]:
+    @staticmethod
+    def _category_attempt_key(category_code: str, generation: int) -> str:
+        if _CATEGORY_CODE.fullmatch(category_code) is None or generation < 1:
+            raise ValueError("COUPANG_CATEGORY_METADATA_ATTEMPT_ID_INVALID")
+        return f"{CATEGORY_METADATA_ATTEMPT_KEY}:{generation}:{category_code}"
+
+    @staticmethod
+    def _serialize(record: dict[str, object]) -> str:
+        return json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    def _legacy_metadata_record(self, *, generation: int) -> dict[str, object]:
         raw = self._secrets.get_large(CATEGORY_METADATA_KEY)
         if not raw:
             return {"v": 1, "credential_generation": generation, "results": {}, "failures": {}}
@@ -78,22 +93,190 @@ class CoupangLivePreflightStore:
             raise ValueError("COUPANG_CATEGORY_METADATA_SECRET_INVALID")
         return record
 
+    def _category_attempt_record(
+        self, category_code: str, *, generation: int
+    ) -> dict[str, object] | None:
+        key = self._category_attempt_key(category_code, generation)
+        raw = self._secrets.get_large(key)
+        if not raw:
+            return None
+        try:
+            record = json.loads(raw)
+        except ValueError as exc:
+            raise ValueError("COUPANG_CATEGORY_METADATA_ATTEMPT_SECRET_INVALID") from exc
+        if (
+            not isinstance(record, dict)
+            or record.get("v") != _CATEGORY_ATTEMPT_RECORD_VERSION
+            or record.get("credential_generation") != generation
+            or record.get("category_code") != category_code
+            or record.get("state") not in {"inflight", "succeeded", "failed"}
+            or not isinstance(record.get("attempt_no"), int)
+            or isinstance(record.get("attempt_no"), bool)
+            or record["attempt_no"] not in {1, 2}
+        ):
+            raise ValueError("COUPANG_CATEGORY_METADATA_ATTEMPT_SECRET_INVALID")
+        state = record["state"]
+        if state == "succeeded" and not isinstance(record.get("metadata"), dict):
+            raise ValueError("COUPANG_CATEGORY_METADATA_ATTEMPT_SECRET_INVALID")
+        if state == "failed" and not isinstance(record.get("failure"), dict):
+            raise ValueError("COUPANG_CATEGORY_METADATA_ATTEMPT_SECRET_INVALID")
+        return record
+
+    def begin_category_metadata_attempt(self, category_code: str, *, generation: int) -> None:
+        """Durably consume the one ordinary provider read before transport starts."""
+        key = self._category_attempt_key(category_code, generation)
+        legacy = self._legacy_metadata_record(generation=generation)
+        legacy_results = legacy["results"]
+        legacy_failures = legacy["failures"]
+        assert isinstance(legacy_results, dict) and isinstance(legacy_failures, dict)
+        if self._category_attempt_record(category_code, generation=generation) is not None:
+            raise ValueError("COUPANG_CATEGORY_METADATA_ATTEMPT_ALREADY_RECORDED")
+        if category_code in legacy_results or category_code in legacy_failures:
+            raise ValueError("COUPANG_CATEGORY_METADATA_ATTEMPT_ALREADY_RECORDED")
+        self._secrets.set_large(
+            key,
+            self._serialize(
+                {
+                    "v": _CATEGORY_ATTEMPT_RECORD_VERSION,
+                    "credential_generation": generation,
+                    "category_code": category_code,
+                    "state": "inflight",
+                    "attempt_no": 1,
+                }
+            ),
+        )
+
+    def mark_legacy_category_metadata_ambiguous(
+        self, category_code: str, *, generation: int
+    ) -> None:
+        """Record the known pre-journal provider read without performing another provider call."""
+        key = self._category_attempt_key(category_code, generation)
+        legacy = self._legacy_metadata_record(generation=generation)
+        legacy_results = legacy["results"]
+        legacy_failures = legacy["failures"]
+        assert isinstance(legacy_results, dict) and isinstance(legacy_failures, dict)
+        if self._category_attempt_record(category_code, generation=generation) is not None:
+            raise ValueError("COUPANG_CATEGORY_METADATA_ATTEMPT_ALREADY_RECORDED")
+        if category_code in legacy_results or category_code in legacy_failures:
+            raise ValueError("COUPANG_CATEGORY_METADATA_LEGACY_MARK_NOT_ALLOWED")
+        self._secrets.set_large(
+            key,
+            self._serialize(
+                {
+                    "v": _CATEGORY_ATTEMPT_RECORD_VERSION,
+                    "credential_generation": generation,
+                    "category_code": category_code,
+                    "state": "inflight",
+                    "attempt_no": 1,
+                    "origin": "legacy-unrecorded-provider-response",
+                }
+            ),
+        )
+
+    def category_metadata_recovery_target(
+        self, category_codes: tuple[str, ...], *, generation: int
+    ) -> str:
+        ambiguous = [
+            code
+            for code in category_codes
+            if (
+                (record := self._category_attempt_record(code, generation=generation)) is not None
+                and record["state"] == "inflight"
+                and record["attempt_no"] == 1
+            )
+        ]
+        if len(ambiguous) != 1:
+            raise ValueError("COUPANG_CATEGORY_METADATA_RECOVERY_TARGET_NOT_UNIQUE")
+        return ambiguous[0]
+
+    def begin_category_metadata_recovery(
+        self,
+        category_code: str,
+        *,
+        generation: int,
+        scope_id: str,
+        approved_at: datetime,
+        expires_at: datetime,
+        now: datetime,
+    ) -> None:
+        """Consume one explicit recovery approval before the single recovery transport."""
+        instants = (approved_at, expires_at, now)
+        if any(value.tzinfo is None or value.utcoffset() is None for value in instants):
+            raise ValueError("COUPANG_CATEGORY_METADATA_RECOVERY_TIME_INVALID")
+        approved_at, expires_at, now = (value.astimezone(UTC) for value in instants)
+        if (
+            scope_id != _CATEGORY_RECOVERY_SCOPE
+            or not approved_at <= now <= expires_at
+            or expires_at - approved_at > _CATEGORY_RECOVERY_WINDOW
+        ):
+            raise ValueError("COUPANG_CATEGORY_METADATA_RECOVERY_APPROVAL_INVALID")
+        record = self._category_attempt_record(category_code, generation=generation)
+        if record is None or record["state"] != "inflight" or record["attempt_no"] != 1:
+            raise ValueError("COUPANG_CATEGORY_METADATA_RECOVERY_NOT_ALLOWED")
+        self._secrets.set_large(
+            self._category_attempt_key(category_code, generation),
+            self._serialize(
+                {
+                    "v": _CATEGORY_ATTEMPT_RECORD_VERSION,
+                    "credential_generation": generation,
+                    "category_code": category_code,
+                    "state": "inflight",
+                    "attempt_no": 2,
+                    "recovery_scope_id": scope_id,
+                    "recovery_approved_at": approved_at.isoformat(),
+                    "recovery_expires_at": expires_at.isoformat(),
+                }
+            ),
+        )
+
+    def require_category_metadata_attempt_inflight(
+        self, category_code: str, *, generation: int, attempt_no: int
+    ) -> None:
+        record = self._category_attempt_record(category_code, generation=generation)
+        if record is None or record["state"] != "inflight" or record["attempt_no"] != attempt_no:
+            raise ValueError("COUPANG_CATEGORY_METADATA_ATTEMPT_NOT_INFLIGHT")
+
+    def pending_category_metadata_codes(
+        self, category_codes: tuple[str, ...], *, generation: int
+    ) -> tuple[str, ...]:
+        """Return never-called codes, refusing every ambiguous or failed recorded attempt."""
+        legacy = self._legacy_metadata_record(generation=generation)
+        legacy_results = legacy["results"]
+        legacy_failures = legacy["failures"]
+        assert isinstance(legacy_results, dict) and isinstance(legacy_failures, dict)
+        pending: list[str] = []
+        for code in category_codes:
+            record = self._category_attempt_record(code, generation=generation)
+            if record is not None:
+                if record["state"] == "inflight":
+                    raise ValueError("COUPANG_CATEGORY_METADATA_RECOVERY_REQUIRED")
+                if record["state"] == "failed":
+                    raise ValueError("COUPANG_CATEGORY_METADATA_FAILURE_RECORDED")
+                continue
+            if code in legacy_failures:
+                raise ValueError("COUPANG_CATEGORY_METADATA_FAILURE_RECORDED")
+            if code not in legacy_results:
+                pending.append(code)
+        return tuple(pending)
+
     def save_category_metadata_attempt(
         self, attempt: CategoryMetadataAttempt, *, generation: int
     ) -> None:
-        record = self._metadata_record(generation=generation)
-        results = record["results"]
-        failures = record["failures"]
-        assert isinstance(results, dict) and isinstance(failures, dict)
+        current = self._category_attempt_record(attempt.category_code, generation=generation)
+        if current is None or current["state"] != "inflight":
+            raise ValueError("COUPANG_CATEGORY_METADATA_ATTEMPT_NOT_INFLIGHT")
+        record: dict[str, object] = {
+            "v": _CATEGORY_ATTEMPT_RECORD_VERSION,
+            "credential_generation": generation,
+            "category_code": attempt.category_code,
+            "attempt_no": current["attempt_no"],
+        }
         if attempt.metadata is not None:
-            results[attempt.category_code] = category_metadata_to_mapping(attempt.metadata)
-            failures.pop(attempt.category_code, None)
+            record["state"] = "succeeded"
+            record["metadata"] = category_metadata_to_mapping(attempt.metadata)
         else:
-            # A failed refresh invalidates any earlier success for this category.  Keeping the
-            # stale contract would let a later live bundle pass despite the newest provider read
-            # having failed, so the closed record must become incomplete immediately.
-            results.pop(attempt.category_code, None)
-            failures[attempt.category_code] = {
+            record["state"] = "failed"
+            record["failure"] = {
                 name: value
                 for name, value in {
                     "error_class": None
@@ -105,23 +288,26 @@ class CoupangLivePreflightStore:
                 if value is not None
             }
         self._secrets.set_large(
-            CATEGORY_METADATA_KEY,
-            json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            self._category_attempt_key(attempt.category_code, generation),
+            self._serialize(record),
         )
 
     def require_category_metadata(
         self, category_codes: tuple[str, ...], *, generation: int
     ) -> dict[str, dict[str, object]]:
-        record = self._metadata_record(generation=generation)
-        results = record["results"]
-        assert isinstance(results, dict)
-        if set(category_codes) - set(results):
-            raise ValueError("COUPANG_CATEGORY_METADATA_INCOMPLETE")
+        legacy = self._legacy_metadata_record(generation=generation)
+        legacy_results = legacy["results"]
+        assert isinstance(legacy_results, dict)
         selected: dict[str, dict[str, object]] = {}
         for code in category_codes:
-            value = results[code]
+            record = self._category_attempt_record(code, generation=generation)
+            value = (
+                record.get("metadata")
+                if record is not None and record["state"] == "succeeded"
+                else legacy_results.get(code)
+            )
             if not isinstance(value, dict):
-                raise ValueError("COUPANG_CATEGORY_METADATA_SECRET_INVALID")
+                raise ValueError("COUPANG_CATEGORY_METADATA_INCOMPLETE")
             selected[code] = value
         return selected
 
@@ -259,6 +445,7 @@ class CoupangLivePreflightStore:
 
 __all__ = [
     "ACCOUNT_INPUTS_KEY",
+    "CATEGORY_METADATA_ATTEMPT_KEY",
     "CATEGORY_METADATA_KEY",
     "CATEGORY_RECOMMENDATION_KEY",
     "LOGISTICS_SELECTION_KEY",
