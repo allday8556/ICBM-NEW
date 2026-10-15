@@ -116,7 +116,7 @@ the Host is installed. This keeps V3 and narrows when it is invoked; it is not a
 | `run-lookahead-main-v1.ps1` | next-slice selector | `2091ce4ff46d2827470bae26cc449baf474e3efb2736114ef32a9d5917fc4495` |
 | `run-lookahead-v1.ps1` | lookahead prep (non-authoritative) | `fcbba488f7e3b85501ef824197921234c607552ecbc775f6f5fda1c7d6b722e2` |
 | `orchestrator-v1.2.ps1` | pinned display-only state helper | `1138fd4d21a49595b5bb862098ce04c96195a3af23fd0b506e715583d2ca299c` |
-| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `9adba88f023ea654eace86077570d5cbda05600a7753388f382bbda6233ea83d` |
+| `tests/fx-harness.ps1` | fixture harness (mocked gh/codex/claude) | `adf04a1379eca796402a39a8be7475518cd3cfc683cbaadab67ce2b0023e2e0c` |
 | `tests/fx-run-all.ps1` | fixture runner | `ab0e599049bdbaac9bd87642aaf523e8526a65baafa219b7dd0c14efa27da1eb` |
 | `tests/fx-config.json` | fixture host configuration | `6dc395d640ec1d600d60fc34745147f8a78383133328c511ff490f2f6c2e1af9` |
 
