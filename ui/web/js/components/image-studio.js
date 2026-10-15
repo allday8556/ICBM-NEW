@@ -46,7 +46,7 @@ const ERROR_COPY = {
   IMAGE_TRANSLATE_NOT_CONFIGURED: '이미지 번역이 준비되지 않았습니다.',
   IMAGE_EDIT_MOVED: '다른 곳에서 먼저 저장했습니다. 다시 불러온 뒤 적용하세요.',
   IMAGE_STUDIO_FLAGGED_UNCONFIRMED: '확인이 필요한 영역을 하나씩 확인해야 적용할 수 있습니다.',
-  IMAGE_OCR_NOT_CONFIGURED: 'OCR 엔진이 없어 번역본에 남은 원문 글자를 확인할 수 없습니다.',
+  IMAGE_OCR_NOT_CONFIGURED: '글자 읽기 기능이 설치되지 않아 번역본에 남은 원문 글자를 확인할 수 없습니다.',
   IMAGE_STUDIO_RENDER_INCOMPLETE: '번역문이 칸에 다 들어가지 않았습니다. 문구를 줄이세요.',
   IMAGE_STUDIO_NOTHING_INCLUDED: '번역을 적용할 영역이 없습니다.',
   IMAGE_STUDIO_QA_REQUIRED: '번역본을 확인한 뒤에 사용할 수 있습니다.',
