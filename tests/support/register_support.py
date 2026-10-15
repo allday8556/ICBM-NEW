@@ -77,6 +77,16 @@ TAXONOMY = "taxonomy-test-1"
 CATEGORY = "category-test-1"
 
 
+def choose_category(scope: Any, category_id: str) -> None:
+    """Choose a category in an authoring form's category picker (2026-10-15): its exact leaf id
+    typed into the search and Enter, as an operator who knows the number does. ``scope`` is the
+    page or the unit's locator; the picker shows the choice before this returns."""
+    search = scope.locator("[data-role='category-search']")
+    search.fill(category_id)
+    search.press("Enter")
+    scope.locator(f"[data-role='category-current'][data-category='{category_id}']").wait_for()
+
+
 def bind(config: AppConfig, marketplace_key: str, uid: str | None) -> None:
     """The committed M2 binding unit of ``marketplace_key`` (ACCOUNT_IDENTITY §5), a later explicit
     rebinding to another invented identity, or (``None``) a connection that was never bound."""
