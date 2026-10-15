@@ -136,7 +136,13 @@ from integrations.marketplaces.smartstore.notice_schema import (
 # term (INCLUDED, or EXCLUDED when the user excluded the duties; FX-04). What the captured evidence
 # does not carry — the imported origin's code, the KC exemption and the business customs-clearance
 # flag — stays a named gap. A Snapshot without the section projects exactly as under v10.
-WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v11"
+# v12: ADR-0038 §6 (O3b) — from the 2.90.1 reference captured 2026-10-15
+# (``NAVER-P0-CROSS-BORDER-2901``), a 구매대행 listing also states
+# ``deliveryInfo.businessCustomsClearanceSaleYn = false`` and the KC exemption
+# ``detailAttribute.certificationTargetExcludeContent`` (``KC_EXEMPTION_OBJECT``, ``OVERSEAS``).
+# The import origin code and the 구매대행 certification information stay named gaps. A Snapshot
+# without the section projects exactly as under v11 (and v10), byte for byte.
+WIRE_ENCODING_VERSION: Final = "smartstore-register-wire/v12"
 
 # Architect ruling R1: the provider projection of the internal listing identity.
 SELLER_MANAGEMENT_CODE_PROJECTION: Final = "smartstore-seller-management-code/v1"
@@ -192,6 +198,11 @@ FIELD_ORIGIN_AREA_INFO: Final = "originAreaInfo"
 FIELD_ORIGIN_AREA_CODE: Final = "originAreaCode"
 FIELD_MINOR_PURCHASABLE: Final = "minorPurchasable"
 FIELD_CUSTOMS_TAX_TYPE: Final = "customsTaxType"
+# ADR-0038 §6 (O3b): the cross-border members of the 2.90.1 reference (NAVER-P0-CROSS-BORDER-2901).
+FIELD_BUSINESS_CUSTOMS_CLEARANCE_SALE_YN: Final = "businessCustomsClearanceSaleYn"
+FIELD_CERTIFICATION_TARGET_EXCLUDE_CONTENT: Final = "certificationTargetExcludeContent"
+FIELD_KC_CERTIFIED_PRODUCT_EXCLUSION_YN: Final = "kcCertifiedProductExclusionYn"
+FIELD_KC_EXEMPTION_TYPE: Final = "kcExemptionType"
 FIELD_OPTION_INFO: Final = "optionInfo"
 FIELD_OPTION_GROUP_NAMES: Final = "optionCombinationGroupNames"
 FIELD_OPTION_COMBINATIONS: Final = "optionCombinations"
@@ -226,8 +237,10 @@ ORIGIN_AREA_DETAIL_CODE: Final = "03"
 REGISTRATION_CUSTOMS_TAX_TYPE: Final = "NOT_APPLICABLE"
 # ADR-0038 §6 (O3), FX-04: a 구매대행 listing states what its pinned cost assumed — the duties are
 # included in the price (included above USD 150, or none owed at or under it), or the buyer pays
-# them because the user excluded them. The field and NOT_APPLICABLE are the canary's (wire v9); the
-# two 구매대행 values are ADR-0038 §6's.
+# them because the user excluded them. NOT_APPLICABLE is the canary's (wire v9); the whole enum — a
+# string, required when the 출고지 is overseas, exactly NOT_APPLICABLE, INCLUDED, EXCLUDED — is the
+# 2.90.1 reference's (NAVER-P0-CROSS-BORDER-2901). Its INCLUDED-only rule binds the 해외직구 display
+# channel, which ICBM never targets (only smartstoreChannelProduct is sent).
 CUSTOMS_TAX_TYPE_INCLUDED: Final = "INCLUDED"
 CUSTOMS_TAX_TYPE_EXCLUDED: Final = "EXCLUDED"
 CUSTOMS_TAX_TYPE_VALUES: Final = (
@@ -243,6 +256,17 @@ CUSTOMS_TAX_TYPE_OF_DUTY: Final[Mapping[str, str]] = MappingProxyType(
         "EXCLUDED": CUSTOMS_TAX_TYPE_EXCLUDED,
     }
 )
+# ADR-0038 §6 (O3b): a 구매대행 listing is not a business-cleared sale. The member is a JSON boolean
+# that applies only when the 출고지 is overseas and is stored false when omitted; ICBM states it
+# explicitly, and only for a 구매대행 listing (NAVER-P0-CROSS-BORDER-2901).
+OVERSEAS_BUSINESS_CUSTOMS_CLEARANCE_SALE: Final = False
+# ADR-0038 §6 (O3b), FX-05: the 구매대행 KC exemption, the user's choice the purchase-agency model
+# already states — never ICBM's judgement of a category. Both members are strings; the captured
+# enums are exactly these (NAVER-P0-CROSS-BORDER-2901), and ICBM sends only the 구매대행 pair.
+KC_CERTIFIED_PRODUCT_EXCLUSION_VALUES: Final = ("FALSE", "KC_EXEMPTION_OBJECT", "TRUE")
+KC_EXEMPTION_TYPE_VALUES: Final = ("OVERSEAS", "SAFE_CRITERION", "PARALLEL_IMPORT")
+OVERSEAS_KC_CERTIFIED_PRODUCT_EXCLUSION: Final = "KC_EXEMPTION_OBJECT"
+OVERSEAS_KC_EXEMPTION_TYPE: Final = "OVERSEAS"
 # The frozen section a foreign Snapshot carries (``app.stages.register.overseas``).
 OVERSEAS_SECTION_VERSION: Final = "overseas-listing/v1"
 AFTER_SERVICE_GUIDE_CONTENT: Final = "상품 문의 및 A/S는 고객센터로 연락해 주세요."
@@ -258,27 +282,24 @@ GAP_NOTICE_TYPE_CHILD: Final = (
     " the reviewed notice type has no documented request child in the provider notice schema, so"
     " no notice is emitted and none is ever guessed or taken from another type"
 )
-# ADR-0038 §6 (O3): the cross-border members the captured evidence does not carry. Each blocks a
-# foreign Snapshot only; none is filled from ADR-0038's prose, a default or a guess.
+# ADR-0038 §6 (O3, O3b): the cross-border members the captured evidence does not carry. Each blocks
+# a foreign Snapshot only; none is filled from ADR-0038's prose, a default or a guess.
 GAP_OVERSEAS_ORIGIN_IMPORT: Final = (
     f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DETAIL_ATTRIBUTE}.{FIELD_ORIGIN_AREA_INFO}: an imported"
-    " origin needs the import originAreaCode (02 group) of the source country and the importer;"
-    " the captured evidence names importer but no import code value, so the origin of a"
-    " 구매대행 listing is not projected"
+    " origin needs the import originAreaCode of the source country and the importer; the 2.90.1"
+    " reference names the 02 (수입산) group and importer, but the per-country codes are served only"
+    " by the authenticated origin-area lookup, which is not adopted, so the origin of a 구매대행"
+    " listing is not projected"
 )
-GAP_OVERSEAS_KC_EXEMPTION: Final = (
-    f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DETAIL_ATTRIBUTE} KC certification exemption"
-    " (kcCertifiedProductExclusionYn = KC_EXEMPTION_OBJECT, kcExemptionType = OVERSEAS): the"
-    " enclosing structure and its values are not captured, so no KC exemption is projected"
-)
-GAP_OVERSEAS_CUSTOMS_CLEARANCE: Final = (
-    f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DELIVERY_INFO}.businessCustomsClearanceSaleYn: the field and"
-    " its default are not captured, so the 구매대행 (not business-cleared) term is not projected"
+GAP_OVERSEAS_KC_CERTIFICATION_INFO: Final = (
+    f"{FIELD_ORIGIN_PRODUCT}.{FIELD_DETAIL_ATTRIBUTE}.productCertificationInfos: the 2.90.1"
+    " reference states that choosing 구매대행 (OVERSEAS) requires certification information to be"
+    " registered, and does not state whether the KC exemption alone satisfies it; ICBM owns no"
+    " certificationInfoId, certification body or number, so none is projected or guessed"
 )
 OVERSEAS_GAPS: Final = (
     GAP_OVERSEAS_ORIGIN_IMPORT,
-    GAP_OVERSEAS_KC_EXEMPTION,
-    GAP_OVERSEAS_CUSTOMS_CLEARANCE,
+    GAP_OVERSEAS_KC_CERTIFICATION_INFO,
 )
 GAP_OPTION_PRICE_SEMANTICS: Final = (
     f"{FIELD_OPTION_COMBINATIONS}[].price: whether an option combination price is absolute or a"
@@ -400,7 +421,11 @@ _DETAIL_ATTRIBUTE_KEYS: Final = frozenset(
         FIELD_ORIGIN_AREA_INFO,
         FIELD_MINOR_PURCHASABLE,
         FIELD_CUSTOMS_TAX_TYPE,
+        FIELD_CERTIFICATION_TARGET_EXCLUDE_CONTENT,
     }
+)
+_CERTIFICATION_EXCLUDE_KEYS: Final = frozenset(
+    {FIELD_KC_CERTIFIED_PRODUCT_EXCLUSION_YN, FIELD_KC_EXEMPTION_TYPE}
 )
 _SELLER_CODE_KEYS: Final = frozenset({FIELD_SELLER_MANAGEMENT_CODE})
 _AFTER_SERVICE_KEYS: Final = frozenset(
@@ -417,6 +442,8 @@ _DELIVERY_INFO_KEYS: Final = frozenset(
         FIELD_CLAIM_DELIVERY_INFO,
     }
 )
+# Optional: present exactly when the listing is 구매대행 (O3b).
+_DELIVERY_INFO_OPTIONAL_KEYS: Final = frozenset({FIELD_BUSINESS_CUSTOMS_CLEARANCE_SALE_YN})
 _DELIVERY_FEE_KEYS: Final = frozenset(
     {FIELD_DELIVERY_FEE_TYPE, FIELD_BASE_FEE, FIELD_DELIVERY_FEE_PAY_TYPE}
 )
@@ -491,8 +518,17 @@ def _validate_images(value: Any, path: str) -> None:
 
 
 def _validate_delivery_info(value: Any, path: str) -> None:
-    delivery = _object(value, path, _DELIVERY_INFO_KEYS)
+    delivery = _object(value, path, _DELIVERY_INFO_KEYS | _DELIVERY_INFO_OPTIONAL_KEYS)
     _required(delivery, path, sorted(_DELIVERY_INFO_KEYS))
+    if FIELD_BUSINESS_CUSTOMS_CLEARANCE_SALE_YN in delivery and (
+        delivery[FIELD_BUSINESS_CUSTOMS_CLEARANCE_SALE_YN]
+        is not OVERSEAS_BUSINESS_CUSTOMS_CLEARANCE_SALE
+    ):
+        # A JSON boolean, and exactly the 구매대행 value (ADR-0038 §6).
+        raise WireContractError(
+            "WIRE_DOCUMENT_VALUE_INVALID",
+            f"{path}.{FIELD_BUSINESS_CUSTOMS_CLEARANCE_SALE_YN} is not false",
+        )
     expected = {
         FIELD_DELIVERY_TYPE: "DELIVERY",
         FIELD_DELIVERY_ATTRIBUTE_TYPE: "NORMAL",
@@ -640,6 +676,43 @@ def _validate_notice(value: Any, path: str) -> None:
             raise WireContractError("WIRE_DOCUMENT_FIELD_MISSING", f"{child_path}.{name}")
 
 
+def _validate_kc_exemption(value: Any, path: str) -> None:
+    """The 구매대행 KC exemption, and only it: both captured members, each the 구매대행 value."""
+    exemption = _object(value, path, _CERTIFICATION_EXCLUDE_KEYS)
+    _required(exemption, path, sorted(_CERTIFICATION_EXCLUDE_KEYS))
+    expected = {
+        FIELD_KC_CERTIFIED_PRODUCT_EXCLUSION_YN: OVERSEAS_KC_CERTIFIED_PRODUCT_EXCLUSION,
+        FIELD_KC_EXEMPTION_TYPE: OVERSEAS_KC_EXEMPTION_TYPE,
+    }
+    for name, accepted in expected.items():
+        if exemption[name] != accepted:
+            raise WireContractError(
+                "WIRE_DOCUMENT_VALUE_INVALID", f"{path}.{name} is not {accepted}"
+            )
+
+
+def _validate_cross_border_coherence(
+    origin: Mapping[str, Any], attribute: Mapping[str, Any]
+) -> None:
+    """ADR-0038 §6 (O3b): the cross-border members travel together, and only with a 구매대행 term.
+
+    A listing whose ``customsTaxType`` is a 구매대행 term (``INCLUDED``, ``EXCLUDED``) carries the
+    KC exemption and the business-clearance flag; a listing with ``NOT_APPLICABLE`` carries
+    neither. A document that mixes them was not built by this projection and is refused.
+    """
+    cross_border = attribute[FIELD_CUSTOMS_TAX_TYPE] != REGISTRATION_CUSTOMS_TAX_TYPE
+    delivery = origin.get(FIELD_DELIVERY_INFO)
+    members = (
+        FIELD_CERTIFICATION_TARGET_EXCLUDE_CONTENT in attribute,
+        isinstance(delivery, Mapping) and FIELD_BUSINESS_CUSTOMS_CLEARANCE_SALE_YN in delivery,
+    )
+    if members != (cross_border, cross_border):
+        raise WireContractError(
+            "WIRE_OVERSEAS_MEMBERS_INCOHERENT",
+            "the cross-border members do not match the listing's customs term",
+        )
+
+
 def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
     """Check one projected request body against the adopted CREATE request contract.
 
@@ -752,6 +825,12 @@ def _validate_document(body: Mapping[str, Any], listing_identity: str) -> None:
             "WIRE_DOCUMENT_VALUE_INVALID",
             f"{attribute_path}.{FIELD_CUSTOMS_TAX_TYPE} is not one of {CUSTOMS_TAX_TYPE_VALUES}",
         )
+    if FIELD_CERTIFICATION_TARGET_EXCLUDE_CONTENT in attribute:
+        _validate_kc_exemption(
+            attribute[FIELD_CERTIFICATION_TARGET_EXCLUDE_CONTENT],
+            f"{attribute_path}.{FIELD_CERTIFICATION_TARGET_EXCLUDE_CONTENT}",
+        )
+    _validate_cross_border_coherence(origin, attribute)
     if FIELD_OPTION_INFO in attribute:
         _validate_option_info(attribute[FIELD_OPTION_INFO], f"{attribute_path}.{FIELD_OPTION_INFO}")
     if FIELD_NOTICE in attribute:
@@ -1473,6 +1552,15 @@ def project(payload: Mapping[str, Any]) -> WireProjection:
         delivery_info[FIELD_CLAIM_DELIVERY_INFO][FIELD_SHIPPING_ADDRESS_ID] = overseas[
             "shipping_address_id"
         ]
+        # O3b: not a business-cleared sale, and the 구매대행 KC exemption (FX-05: the user's choice
+        # the purchase-agency model states, never a category judgement).
+        delivery_info[FIELD_BUSINESS_CUSTOMS_CLEARANCE_SALE_YN] = (
+            OVERSEAS_BUSINESS_CUSTOMS_CLEARANCE_SALE
+        )
+        detail_attribute[FIELD_CERTIFICATION_TARGET_EXCLUDE_CONTENT] = {
+            FIELD_KC_CERTIFIED_PRODUCT_EXCLUSION_YN: OVERSEAS_KC_CERTIFIED_PRODUCT_EXCLUSION,
+            FIELD_KC_EXEMPTION_TYPE: OVERSEAS_KC_EXEMPTION_TYPE,
+        }
         gaps.extend(OVERSEAS_GAPS)
     if delivery_info is not None:
         origin_product[FIELD_DELIVERY_INFO] = delivery_info

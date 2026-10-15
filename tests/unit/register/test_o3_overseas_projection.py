@@ -237,10 +237,16 @@ def test_a_foreign_unit_freezes_its_section_and_projects_the_pinned_duty_term(
     assert claim["shippingAddressId"] == int(OVERSEAS_ADDRESS)
     assert claim["returnAddressId"] == DELIVERY.return_address_id
     assert origin["deliveryInfo"]["deliveryFee"]["baseFee"] == DELIVERY.base_fee_krw
+    # O3b: not a business-cleared sale, and the 구매대행 KC exemption (FX-05).
+    assert origin["deliveryInfo"]["businessCustomsClearanceSaleYn"] is False
+    assert origin["detailAttribute"]["certificationTargetExcludeContent"] == {
+        "kcCertifiedProductExclusionYn": "KC_EXEMPTION_OBJECT",
+        "kcExemptionType": "OVERSEAS",
+    }
     # What the captured evidence does not carry is never sent: it is a named gap.
     assert set(product.OVERSEAS_GAPS) <= set(projection.gaps)
     assert projection.sendable is False
-    for never in ("businessCustomsClearanceSaleYn", "kcExemptionType", "importer", "OVERSEAS"):
+    for never in ("importer", "productCertificationInfos", IMPORTER):
         assert never not in projection.document.canonical_json
     assert origin["detailAttribute"]["originAreaInfo"] == {"originAreaCode": "03"}
 

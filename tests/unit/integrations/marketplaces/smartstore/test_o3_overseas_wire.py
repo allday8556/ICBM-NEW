@@ -4,6 +4,10 @@ The input is a frozen payload in the shape ``app.stages.register.payload`` build
 ``overseas`` section (``overseas-listing/v1``). Proven: each projected member, its source and its
 rule; every uncaptured member stays a named gap; a section that is not exactly the frozen one is
 refused, never trimmed; and a Snapshot without the section projects exactly as under v10.
+
+O3b (wire v12): the business-clearance flag and the 구매대행 KC exemption are projected from the
+captured 2.90.1 reference, they travel only together with a 구매대행 customs term, and the import
+origin code and the 구매대행 certification information stay named gaps.
 """
 
 from copy import deepcopy
@@ -63,6 +67,13 @@ def test_a_domestic_snapshot_projects_exactly_as_before() -> None:
     assert origin["detailAttribute"]["customsTaxType"] == product.REGISTRATION_CUSTOMS_TAX_TYPE
     assert origin["deliveryInfo"]["claimDeliveryInfo"]["shippingAddressId"] == 200441202
     assert not set(product.OVERSEAS_GAPS) & set(domestic.gaps)
+    for never in (
+        "businessCustomsClearanceSaleYn",
+        "certificationTargetExcludeContent",
+        "kcCertifiedProductExclusionYn",
+        "kcExemptionType",
+    ):
+        assert never not in domestic.document.canonical_json, never
 
 
 @pytest.mark.parametrize(
@@ -78,7 +89,7 @@ def test_customs_tax_type_is_the_pinned_duty_term(decisions: list[str], term: st
     projected = product.project(foreign(duty_decisions=decisions))
     attribute = projected.document.mapping()["originProduct"]["detailAttribute"]
     assert attribute["customsTaxType"] == term
-    assert projected.encoding_version == "smartstore-register-wire/v11"
+    assert projected.encoding_version == "smartstore-register-wire/v12"
 
 
 def test_the_overseas_address_is_the_shipping_address_and_nothing_else_moves() -> None:
@@ -86,34 +97,167 @@ def test_the_overseas_address_is_the_shipping_address_and_nothing_else_moves() -
     overseas = product.project(foreign()).document.mapping()
     claim = overseas["originProduct"]["deliveryInfo"]["claimDeliveryInfo"]
     assert claim["shippingAddressId"] == 200441299
-    # Only the shipping address and the customs term differ from the domestic projection.
+    # Only the shipping address, the customs term, the business-clearance flag and the KC
+    # exemption differ from the domestic projection.
     domestic["originProduct"]["deliveryInfo"]["claimDeliveryInfo"]["shippingAddressId"] = 200441299
     domestic["originProduct"]["detailAttribute"]["customsTaxType"] = "INCLUDED"
+    domestic["originProduct"]["deliveryInfo"]["businessCustomsClearanceSaleYn"] = False
+    domestic["originProduct"]["detailAttribute"]["certificationTargetExcludeContent"] = {
+        "kcCertifiedProductExclusionYn": "KC_EXEMPTION_OBJECT",
+        "kcExemptionType": "OVERSEAS",
+    }
     assert overseas == domestic
+
+
+def test_the_captured_cross_border_members_are_projected_exactly() -> None:
+    projected = product.project(foreign(duty_decisions=["EXCLUDED"]))
+    origin = projected.document.mapping()["originProduct"]
+    # NAVER-P0-CROSS-BORDER-2901: a JSON boolean under deliveryInfo, false for 구매대행.
+    assert origin["deliveryInfo"][product.FIELD_BUSINESS_CUSTOMS_CLEARANCE_SALE_YN] is False
+    # The 구매대행 pair of the two captured string enums, under certificationTargetExcludeContent.
+    exemption = origin["detailAttribute"][product.FIELD_CERTIFICATION_TARGET_EXCLUDE_CONTENT]
+    assert exemption == {
+        product.FIELD_KC_CERTIFIED_PRODUCT_EXCLUSION_YN: "KC_EXEMPTION_OBJECT",
+        product.FIELD_KC_EXEMPTION_TYPE: "OVERSEAS",
+    }
+    assert exemption[product.FIELD_KC_CERTIFIED_PRODUCT_EXCLUSION_YN] in (
+        product.KC_CERTIFIED_PRODUCT_EXCLUSION_VALUES
+    )
+    assert exemption[product.FIELD_KC_EXEMPTION_TYPE] in product.KC_EXEMPTION_TYPE_VALUES
+    assert origin["detailAttribute"]["customsTaxType"] == "EXCLUDED"
+    # The document is still the validated canonical one.
+    assert product.verified(projected.document) is projected.document
+
+
+@pytest.mark.parametrize(
+    ("where", "member", "value"),
+    [
+        ("deliveryInfo", "businessCustomsClearanceSaleYn", True),
+        ("deliveryInfo", "businessCustomsClearanceSaleYn", "false"),
+        ("deliveryInfo", "businessCustomsClearanceSaleYn", 0),
+        ("deliveryInfo", "businessCustomsClearanceSaleYn", None),
+        (
+            "detailAttribute",
+            "certificationTargetExcludeContent",
+            {"kcCertifiedProductExclusionYn": "TRUE", "kcExemptionType": "OVERSEAS"},
+        ),
+        (
+            "detailAttribute",
+            "certificationTargetExcludeContent",
+            {
+                "kcCertifiedProductExclusionYn": "KC_EXEMPTION_OBJECT",
+                "kcExemptionType": "SAFE_CRITERION",
+            },
+        ),
+        (
+            "detailAttribute",
+            "certificationTargetExcludeContent",
+            {
+                "kcCertifiedProductExclusionYn": "KC_EXEMPTION_OBJECT",
+                "kcExemptionType": "PARALLEL_IMPORT",
+            },
+        ),
+    ],
+)
+def test_only_the_purchase_agency_values_are_accepted(where: str, member: str, value: Any) -> None:
+    body = product.project(foreign()).document.mapping()
+    body["originProduct"][where][member] = value
+    with pytest.raises(product.WireContractError) as refused:
+        product.create_document(IDENTITY, body)
+    assert refused.value.code == "WIRE_DOCUMENT_VALUE_INVALID"
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        {},
+        {"kcCertifiedProductExclusionYn": "KC_EXEMPTION_OBJECT"},
+        {"kcExemptionType": "OVERSEAS"},
+        {
+            "kcCertifiedProductExclusionYn": "KC_EXEMPTION_OBJECT",
+            "kcExemptionType": "OVERSEAS",
+            "childCertifiedProductExclusionYn": False,
+        },
+        "KC_EXEMPTION_OBJECT",
+    ],
+)
+def test_the_kc_exemption_is_exactly_the_pair(broken: Any) -> None:
+    body = product.project(foreign()).document.mapping()
+    body["originProduct"]["detailAttribute"]["certificationTargetExcludeContent"] = broken
+    with pytest.raises(product.WireContractError) as refused:
+        product.create_document(IDENTITY, body)
+    assert refused.value.code in {
+        "WIRE_DOCUMENT_FIELD_MISSING",
+        "WIRE_DOCUMENT_FIELD_UNKNOWN",
+        "WIRE_DOCUMENT_MALFORMED",
+    }
+
+
+@pytest.mark.parametrize(
+    "drop",
+    [
+        ("deliveryInfo", "businessCustomsClearanceSaleYn"),
+        ("detailAttribute", "certificationTargetExcludeContent"),
+    ],
+)
+def test_the_cross_border_members_travel_together(drop: tuple[str, str]) -> None:
+    body = product.project(foreign()).document.mapping()
+    del body["originProduct"][drop[0]][drop[1]]
+    with pytest.raises(product.WireContractError) as refused:
+        product.create_document(IDENTITY, body)
+    assert refused.value.code == "WIRE_OVERSEAS_MEMBERS_INCOHERENT"
+
+
+@pytest.mark.parametrize(
+    ("where", "member", "value"),
+    [
+        ("deliveryInfo", "businessCustomsClearanceSaleYn", False),
+        (
+            "detailAttribute",
+            "certificationTargetExcludeContent",
+            {"kcCertifiedProductExclusionYn": "KC_EXEMPTION_OBJECT", "kcExemptionType": "OVERSEAS"},
+        ),
+    ],
+)
+def test_a_domestic_document_never_carries_a_cross_border_member(
+    where: str, member: str, value: Any
+) -> None:
+    body = product.project(payload(policy=deepcopy(POLICY))).document.mapping()
+    body["originProduct"][where][member] = value
+    with pytest.raises(product.WireContractError) as refused:
+        product.create_document(IDENTITY, body)
+    assert refused.value.code == "WIRE_OVERSEAS_MEMBERS_INCOHERENT"
 
 
 def test_the_uncaptured_cross_border_members_are_named_gaps_never_sent() -> None:
     projected = product.project(foreign())
-    assert projected.gaps[-3:] == product.OVERSEAS_GAPS
+    assert projected.gaps[-2:] == product.OVERSEAS_GAPS
     assert not projected.sendable
     text = projected.document.canonical_json
-    for never in (
-        "businessCustomsClearanceSaleYn",
-        "kcCertifiedProductExclusionYn",
-        "kcExemptionType",
-        "KC_EXEMPTION_OBJECT",
-        "importer",
-        "invented importer",
-    ):
+    for never in ("importer", "invented importer", "productCertificationInfos"):
         assert never not in text, never
     # No import code is guessed: the origin stays the v8 detail-reference code.
     attribute = projected.document.mapping()["originProduct"]["detailAttribute"]
     assert attribute["originAreaInfo"] == {"originAreaCode": product.ORIGIN_AREA_DETAIL_CODE}
 
 
-def test_the_document_carries_no_unknown_member_for_a_foreign_listing() -> None:
+@pytest.mark.parametrize(
+    ("where", "member", "value"),
+    [
+        ("detailAttribute", "productCertificationInfos", []),
+        ("originAreaInfo", "importer", "invented importer"),
+        ("originAreaInfo", "content", "중국"),
+        ("deliveryInfo", "outboundLocationId", "x"),
+    ],
+)
+def test_the_document_carries_no_unknown_member_for_a_foreign_listing(
+    where: str, member: str, value: Any
+) -> None:
     body = product.project(foreign()).document.mapping()
-    body["originProduct"]["deliveryInfo"]["businessCustomsClearanceSaleYn"] = False
+    target = body["originProduct"]
+    if where == "originAreaInfo":
+        target = target["detailAttribute"]
+    target[where][member] = value
     with pytest.raises(product.WireContractError) as refused:
         product.create_document(IDENTITY, body)
     assert refused.value.code == "WIRE_DOCUMENT_FIELD_UNKNOWN"

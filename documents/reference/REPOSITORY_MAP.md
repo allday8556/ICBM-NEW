@@ -218,6 +218,9 @@ ADR-0038 O3 added the SmartStore cross-border projection of a 구매대행 unit:
 `app/stages/register/overseas.py`, the frozen `overseas-listing/v1` payload section, wire
 `smartstore-register-wire/v11`, two unit, one contract and one integration suite; it has no
 migration and changes no endpoint.
+ADR-0038 O3b projects the captured 2.90.1 cross-border members (wire
+`smartstore-register-wire/v12`: the business-clearance flag and the 구매대행 KC exemption) and
+retains their evidence excerpt `smartstore-cross-border-2.90.1-2026-10-15.json`.
 
 | path | files | role |
 | --- | --- | --- |
@@ -235,13 +238,13 @@ migration and changes no endpoint.
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 193 | all canonical and historical documents |
+| `documents/` | 194 | all canonical and historical documents |
 | `documents/acceptance/` | 73 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 12 | platform and UI contracts |
 | `documents/decisions/` | 43 | ADRs and architect review records |
-| `documents/evidence/` | 30 | external provider evidence catalog |
+| `documents/evidence/` | 31 | external provider evidence catalog |
 | `documents/reference/` | 3 | this map and the path migration map |
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |

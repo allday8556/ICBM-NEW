@@ -149,7 +149,7 @@ def test_the_seller_management_code_projection_is_deterministic_and_versioned() 
 
 def test_the_projection_states_only_captured_fields_and_names_its_gaps() -> None:
     projected = product.project(payload())
-    assert projected.encoding_version == "smartstore-register-wire/v11"
+    assert projected.encoding_version == "smartstore-register-wire/v12"
     assert projected.document.mapping() == {
         # Both required channel members, each with the value ICBM owns (5915900049 D1, D2.1).
         "smartstoreChannelProduct": {
@@ -251,11 +251,17 @@ def test_the_customs_tax_type_is_required_and_fixed_to_the_canary_terms() -> Non
     assert product.REGISTRATION_CUSTOMS_TAX_TYPE == "NOT_APPLICABLE"
     # O3 (wire v11): a 구매대행 listing states INCLUDED or EXCLUDED from its pinned duty decision
     # (test_o3_overseas_wire); the document accepts exactly these three values and nothing else.
+    # O3b (wire v12): a 구매대행 term travels only with the cross-border members, so on this
+    # domestic document it is refused as incoherent rather than as an unknown value.
     assert product.CUSTOMS_TAX_TYPE_VALUES == ("NOT_APPLICABLE", "INCLUDED", "EXCLUDED")
-    for accepted in product.CUSTOMS_TAX_TYPE_VALUES:
+    body = projected.document.mapping()
+    assert product.create_document(IDENTITY, body).mapping() == body
+    for cross_border in product.CUSTOMS_TAX_TYPE_VALUES[1:]:
         body = projected.document.mapping()
-        body["originProduct"]["detailAttribute"]["customsTaxType"] = accepted
-        assert product.create_document(IDENTITY, body).mapping() == body
+        body["originProduct"]["detailAttribute"]["customsTaxType"] = cross_border
+        with pytest.raises(product.WireContractError) as incoherent:
+            product.create_document(IDENTITY, body)
+        assert incoherent.value.code == "WIRE_OVERSEAS_MEMBERS_INCOHERENT", cross_border
 
     for other in (None, "INCLUDE", "included", "NOT_OVER_150", ""):
         body = projected.document.mapping()

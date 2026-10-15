@@ -1,0 +1,176 @@
+{
+ "source": {
+  "kind": "OFFICIAL_API_DOC",
+  "document": "(v2) 상품 등록 request schema (원상품 정보 구조체), cross-border members",
+  "url": "https://apicenter.commerce.naver.com/docs/commerce-api/current/create-product-product",
+  "observed": "2026-10-15",
+  "api_version": "2.90.1 (2026-10-07)",
+  "how": "public documentation read with an unauthenticated HTTP GET of the page and of the documentation bundle that carries its OpenAPI operation (the `api` field, base64 + zlib); no sign-in, no API call. The browser pane and the web reader refuse the host, so the page could not be rendered.",
+  "html_sha256": "c133b880f1f060177094dd0660c4f0b248b3c67cbd92b883aa39873181b4296f",
+  "bundle_url": "https://apicenter.commerce.naver.com/docs/assets/js/a1f2b170.b02cec26.js",
+  "bundle_sha256": "7a7f7ffcdbb2ec98a02936481a955a75f907cb3d31e621b50199da9b2e86584d",
+  "operation_sha256": "7e354477c64d120051362a708aa23cbc6771c95275c3671680b107e598c568ab"
+ },
+ "operation": {
+  "method": "POST",
+  "path": "/v2/products"
+ },
+ "members": [
+  {
+   "path": "originProduct.deliveryInfo.businessCustomsClearanceSaleYn",
+   "type": "boolean",
+   "required_badge": false,
+   "title": "사업자 통관 판매 여부",
+   "description": "출고지 주소가 해외인 경우에만 적용됩니다. 미입력 시 false로 입력됩니다."
+  },
+  {
+   "path": "originProduct.detailAttribute.customsTaxType",
+   "type": "string",
+   "required_badge": false,
+   "title": "관부가세 타입 코드",
+   "description": "관부가세 타입 코드입니다. 출고지 주소가 해외 주소인 경우 필수 입력 항목입니다.\n| 코드 | 설명 | 비고 |\n| --- | --- | --- |\n| NOT_APPLICABLE | 부과 대상 아님 | - |\n| INCLUDED | 관부가세 포함 | 노출 채널이 해외직구인 경우 INCLUDED만 허용 |\n| EXCLUDED | 관부가세 미포함 | - |",
+   "enum": [
+    "NOT_APPLICABLE",
+    "INCLUDED",
+    "EXCLUDED"
+   ]
+  },
+  {
+   "path": "originProduct.detailAttribute.certificationTargetExcludeContent",
+   "type": "object",
+   "required_badge": false,
+   "title": "인증 대상 제외 여부 정보",
+   "description": "인증 대상 제외 여부 정보"
+  },
+  {
+   "path": "originProduct.detailAttribute.certificationTargetExcludeContent.kcCertifiedProductExclusionYn",
+   "type": "string",
+   "required_badge": false,
+   "title": "KC 상품 인증 대상 제외 타입",
+   "description": "'KC 인증 대상' 카테고리 상품인 경우 필수. 미입력 시 FALSE로 저장됩니다.\n- TRUE(KC 인증 대상 아님), FALSE(KC 인증 대상), KC_EXEMPTION_OBJECT(안전기준준수, 구매대행, 병행수입인 경우 필수 입력)",
+   "enum": [
+    "FALSE",
+    "KC_EXEMPTION_OBJECT",
+    "TRUE"
+   ]
+  },
+  {
+   "path": "originProduct.detailAttribute.certificationTargetExcludeContent.kcExemptionType",
+   "type": "string",
+   "required_badge": false,
+   "title": "KC 면제 대상 타입 코드",
+   "description": "안전기준준수, 구매대행, 병행수입인 경우 필수 입력\n- SAFE_CRITERION(안전기준준수대상(안전기준준수대상 예외 카테고리가 아닌 경우에도 설정 가능, 식품 카테고리 외)), OVERSEAS(구매대행), PARALLEL_IMPORT(병행수입)",
+   "enum": [
+    "OVERSEAS",
+    "SAFE_CRITERION",
+    "PARALLEL_IMPORT"
+   ]
+  },
+  {
+   "path": "originProduct.detailAttribute.productCertificationInfos",
+   "type": "array",
+   "required_badge": false,
+   "title": "인증 정보 목록",
+   "description": "어린이제품 인증, KC 상품 인증, 친환경 인증, 생활화학/살생물제 인증 대상 카테고리에 해당하고 인증 대상 제외 여부가 false인 경우 필수"
+  },
+  {
+   "path": "originProduct.detailAttribute.productCertificationInfos[].certificationKindType",
+   "type": "string",
+   "required_badge": false,
+   "title": "인증 정보 종류 코드",
+   "description": "인증 정보 종류 필드에 설정 가능한 코드입니다. 미입력 시 ETC로 저장됩니다.\n- KC_CERTIFICATION(KC 인증), CHILD_CERTIFICATION(어린이제품 인증), GREEN_PRODUCTS(친환경 인증), CHEMICAL_CERTIFICATION(생활화학/살생물제 인증), OVERSEAS(구매대행(구매대행 선택 시 인증 정보 필수 등록)), PARALLEL_IMPORT(병행수입(병행수입 선택 시 인증 정보 필수 등록)), ETC(기타 인증)",
+   "enum": [
+    "KC_CERTIFICATION",
+    "CHILD_CERTIFICATION",
+    "GREEN_PRODUCTS",
+    "CHEMICAL_CERTIFICATION",
+    "PARALLEL_IMPORT",
+    "OVERSEAS",
+    "ETC"
+   ]
+  },
+  {
+   "path": "originProduct.detailAttribute.originAreaInfo",
+   "type": "object",
+   "required_badge": true,
+   "title": "원산지 정보",
+   "description": "원산지 정보"
+  },
+  {
+   "path": "originProduct.detailAttribute.originAreaInfo.originAreaCode",
+   "type": "string",
+   "required_badge": true,
+   "title": "원산지 상세 지역 코드",
+   "description": "- 00(국산), 01(원양산), 02(수입산), 03(기타-상세 설명에 표시), 04(기타-직접 입력), 05(원산지 표기 의무 대상 아님)"
+  },
+  {
+   "path": "originProduct.detailAttribute.originAreaInfo.importer",
+   "type": "string",
+   "required_badge": false,
+   "title": "수입사명",
+   "description": "수입산인 경우 필수"
+  },
+  {
+   "path": "originProduct.detailAttribute.originAreaInfo.content",
+   "type": "string",
+   "required_badge": false,
+   "title": "원산지 표시 내용",
+   "description": "originAreaCode가 '기타: 직접 입력'인 경우 필수"
+  }
+ ],
+ "origin_area_lookups": [
+  {
+   "page": "https://apicenter.commerce.naver.com/docs/commerce-api/current/get-all-origin-area-list-product",
+   "method": "GET",
+   "path": "/v1/product-origin-areas",
+   "description": "원산지 코드 전체를 조회합니다.",
+   "parameters": [],
+   "response_members": [
+    "originAreaCodeNames"
+   ],
+   "bundle_sha256": "c82b4402f2465e1e00fe9a2c6a2d820946fe43cc706f5d686a5b15c1ab9f1c7a",
+   "code_values_in_documentation": false
+  },
+  {
+   "page": "https://apicenter.commerce.naver.com/docs/commerce-api/current/get-origin-area-list-product",
+   "method": "GET",
+   "path": "/v1/product-origin-areas/query",
+   "description": "원산지 상세 지역명을 입력하거나 원산지 코드를 입력하여 검색할 수 있습니다. 원산지 코드를 입력한 경우 다른 검색 조건은 무시합니다.",
+   "parameters": [
+    {
+     "name": "name",
+     "in": "query",
+     "description": "원산지 상세 지역명. code를 입력하지 않은 경우 필수.\n아래와 같은 형식으로 입력하면 전체 이름에 매칭되는 원산지가 반환됩니다.\n- 국산: 광역시도 > 시구군\n- 수입산: 대륙 > 국가명\n- 원양산: 해역명\n- 기타: 상세 설명에 표시/직접 입력\n마지막 항목(시구군, 국가명, 해역명)으로 조회하면 LIKE '마지막항목%'으로 검색됩니다."
+    },
+    {
+     "name": "code",
+     "in": "query",
+     "description": "원산지 코드. name을 입력하지 않은 경우 필수."
+    }
+   ],
+   "response_members": [
+    "originAreaCodeNames"
+   ],
+   "bundle_sha256": "8147ff188e984b16c22093fd9c80d00befb6df68bf68b68b851fb8748feea2d5",
+   "code_values_in_documentation": false
+  },
+  {
+   "page": "https://apicenter.commerce.naver.com/docs/commerce-api/current/get-sub-origin-area-list-product",
+   "method": "GET",
+   "path": "/v1/product-origin-areas/sub-origin-areas",
+   "description": "하위 원산지 코드 정보를 조회합니다. 원산지 코드를 입력하지 않으면 최상위 코드 정보를 조회합니다.",
+   "parameters": [
+    {
+     "name": "code",
+     "in": "query",
+     "description": "하위 원산지 코드. 조회하고자 하는 하위 원산지의 원산지 코드를 입력합니다."
+    }
+   ],
+   "response_members": [
+    "subOriginAreaCodeNames"
+   ],
+   "bundle_sha256": "5a09c69bd98054ed2c9b2a0268372a0c4e92a89ba7b9b3acafebabdff0c15846",
+   "code_values_in_documentation": false
+  }
+ ]
+}
