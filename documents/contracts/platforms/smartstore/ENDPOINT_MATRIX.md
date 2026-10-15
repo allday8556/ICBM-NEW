@@ -110,7 +110,7 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | `SMARTSTORE_AUTH_TOKEN` | `ADOPTED` | M2 | `POST` | `/v1/oauth2/token` | Issue/reissue bearer token | `OWN_STORE_SELF` | `N/A` | No marketplace resource mutation |
 | `SMARTSTORE_SELLER_ACCOUNT` | `ADOPTED` | M2 | `GET` | `/v1/seller/account` | Account identity proof | `OWN_STORE_SELF` | `판매자정보` | No |
 | `SMARTSTORE_PRODUCT_CREATE_V2` | `ADOPTED` | M5 CREATE adoption slice | `POST` | `/v2/products` | Product CREATE | `OWN_STORE_SELF` | `상품` | Yes; adoption is not LIVE authority — execution stays `DRY_RUN`, the ADR-0018 send-time stack refuses every mutation, an `UNKNOWN` is never resent, and the adopted request is not sendable while required values stay uncaptured or without an ICBM-owned value (§4.1.1) |
-| `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/origin-products/{originProductNo}` | Origin-product read-back | `OWN_STORE_SELF` | `상품` | No |
+| `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/origin-products/{originProductNo}` | Origin-product read-back; and the ADR-0042 store-catalog listing read (§4.1.2 S1a amendment) | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_CHANNEL_PRODUCT_READ_V2` | `ADOPTED` | M5 PR-D | `GET` | `/v2/products/channel-products/{channelProductNo}` | Channel-product read-back | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_PRODUCT_IMAGE_UPLOAD` | `ADOPTED` | M5 IMAGE UPLOAD amendment | `POST` | `/v1/product-images/upload` | One-artifact image upload (`multipart/form-data`, `imageFiles`) | `OWN_STORE_SELF` | `상품` | Side effect; durable upload-attempt owner provider-zero (ADR-0018 §3.4, migration `0026`); ASSET sender wired (`SmartStoreAssetSender`) to the CONNECT owner's committed bearer (ROADMAP §14 item 4), so unavailable without a proven current committed session; every upload still refused by the send-time stack under `M0_DRY_RUN_ONLY` |
 | `SMARTSTORE_CATEGORY_LIST` | `ADOPTED` | Leaf-category catalog (owner decision 2026-10-04) | `GET` | `/v1/categories` with `last=true` | Current registrable leaf-category discovery | `OWN_STORE_SELF` | `상품` | No; read-only, no LIVE authority |
@@ -124,7 +124,7 @@ ICBM MUST NOT maintain competing base-prefix logic that can omit `/external` or 
 | `SMARTSTORE_STANDARD_OPTIONS` | `NOT_ADOPTED` | M5 candidate | `GET` | `/v1/options/standard-options` | Standard-option discovery | `TBD_AT_ADOPTION` | `TBD_AT_ADOPTION` | No |
 | `SMARTSTORE_NOTICE_TYPES` | `ADOPTED` | Notice coverage S0 (owner directive 2026-10-03) | `GET` | `/v1/products-for-provided-notice` | Official 상품정보제공고시 type list, read only to capture the provider notice schema | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_NOTICE_TYPE_READ` | `ADOPTED` | Notice coverage S0 (owner directive 2026-10-03) | `GET` | `/v1/products-for-provided-notice/{productInfoProvidedNoticeType}` | One type's official content fields (`productInfoProvidedNoticeContents[]`: `fieldType`, `fieldName`, `fieldDescription`, `fieldAddDescription`, `fieldMaxLength`), read only to capture the provider notice schema | `OWN_STORE_SELF` | `상품` | No |
-| `SMARTSTORE_PRODUCT_SEARCH` | `ADOPTED` | M5 SEARCH positive-only reconcile slice | `POST` | `/v1/products/search` | Positive-only reconcile lookup — never duplicate absence, never a CREATE authorization (§4.1.2) | `OWN_STORE_SELF` | `상품` | No |
+| `SMARTSTORE_PRODUCT_SEARCH` | `ADOPTED` | M5 SEARCH positive-only reconcile slice | `POST` | `/v1/products/search` | Positive-only reconcile lookup — never duplicate absence, never a CREATE authorization (§4.1.2); and the ADR-0042 store-catalog enumeration, paging-only (§4.1.2 S1a amendment) | `OWN_STORE_SELF` | `상품` | No |
 | `SMARTSTORE_PRODUCT_DELETE_V2` | `ADOPTED` | DELETE slice (ADR-0018 §3.5) | `DELETE` | `/v2/products/origin-products/{originProductNo}` | Delete one ICBM-confirmed origin product (§4.1.3) | `OWN_STORE_SELF` | `상품` | Yes; destructive. Only an `ACTIVE` ICBM-confirmed registration, under its exact DELETE grant, inside a bounded LIVE window with the brake released; an `UNKNOWN` is never resent |
 | `SMARTSTORE_TAG_RECOMMEND` | `ADOPTED` | ADR-0028 T2 read adoption (owner decision `6072888750`) | `GET` | `/v2/tags/recommend-tags` | Recommended-tag search by one keyword, at most 20 `{code, text}` (§4.3) | `OWN_STORE_SELF` | `상품` (documentation grouping; `R0` at adoption) | No; read-only |
 | `SMARTSTORE_TAG_RESTRICTED` | `ADOPTED` | ADR-0028 T2 read adoption (owner decision `6072888750`) | `GET` | `/v2/tags/restricted-tags` | Restricted-tag check of 1–10 tags, `{tag, restricted}` each (§4.3) | `OWN_STORE_SELF` | `상품` (documentation grouping; `R0` at adoption) | No; read-only |
@@ -403,6 +403,50 @@ duplicate evidence stays fail-closed (`lookup.py`; ADR-0014 §13) — and an `UN
 never resent.
 
 **Amendment note (M6-E, ADR-0024 §3).** The search's request shape also admits an owner-declared adoption code, so OPERATE can find a listing ICBM did not create by its seller code. The endpoint, its response contract, its retention and the mapping revision are unchanged. As for the reconcile lookup, only an exact `STOREFARM` candidate counts, and only an origin read-back carrying the same code and not `DELETE` proves it. An adoption is never a REGISTER registration and never a CREATE authorization.
+
+**Amendment note (ADR-0042 S1a, §5.1 and §13; the store catalog).** Two adoption amendments, neither
+a new endpoint; the mapping revision moves to `s1a-store-catalog-r1` with its own fingerprint.
+Evidence: `SOURCES.md` §5.11 and the `P1` entries `NAVER-P1-SEARCH-ALL-874`, `-ALL-1544`,
+`-MODIFIED-1546` and `-FIELDS-1635`; per task, `PRODUCT_SEARCH.md` and `PRODUCT_READ.md` §
+SmartStore. The official reference itself was refused to the implementing environment on
+2026-10-15 and was not re-read; every item it alone could settle stays `NOT_CAPTURED` and
+fail-closed.
+
+1. **The catalog request shape of `SMARTSTORE_PRODUCT_SEARCH`.** A second request shape, sent only
+   by the StoreCatalog owner (`app/stages/operate/catalog/`) through
+   `integrations/marketplaces/smartstore/catalog.py`:
+
+   | Field | Store-catalog enumeration |
+   | --- | --- |
+   | Request | `application/json` body exactly `{"page": n, "size": 500}`: no `searchKeywordType`, no seller code, no status filter, no sort (E1: a paging-only request lists every product registered in the store, `NAVER-P1-SEARCH-ALL-874`; E2: no status filter or stable sort is documented, so none is sent). `page` runs from 1 to at most 200 (ICBM policy: 200 × 500 is the documented 100,000 limit); anything else is refused before any transport |
+   | Response, predicate, retention, timeouts, redirect | unchanged (`m5-search-r1` predicate, `smartstore-product-search/v1` reading). The search's retention is **not** widened: the items' field names are not documented (E3 `NOT_CAPTURED`), so every catalog field is read from the origin read below |
+   | Enumeration | every page until the provider's `last`, each read by `search.read_page` and the whole by `search.check_enumeration`: page *n* answers as page *n*, the same totals on every page, `last` on the last page only, and exactly `totalElements` distinct origin products, none read twice (ADR-0042 §5.2). Anything else is `INCOMPLETE` |
+   | Size | a readable page reporting more than 100,000 products, or more than 200 pages, is `UNAVAILABLE`, never partial. The provider's own over-100,000 error has no documented code (E6 `NOT_CAPTURED`): it is an `ERROR` and proves nothing |
+   | Failures | a missing session or a `429` rate/quota refusal is `UNAVAILABLE`; any other failure or undocumented page is `ERROR`. Neither proves anything |
+
+2. **The widened retention of `SMARTSTORE_ORIGIN_PRODUCT_READ_V2`.** The origin read additionally
+   retains the store-catalog leaves whose paths this catalog's official evidence records
+   (`PRODUCT_READ.md` § store-catalog field paths, E4): `sellerBarcode`, `sellerCustomCode1`,
+   `sellerCustomCode2`, `leafCategoryId`, `optionGroupName1`–`4`, `id`, `optionName1`–`4`, `price`,
+   `usable`, `deliveryType`, `deliveryAttributeType`, `deliveryFeeType`, `baseFee`,
+   `freeConditionalAmount`, `deliveryFeePayType`, `afterServiceTelephoneNumber` and
+   `afterServiceGuideContent` (the seller's own A/S contact; ADR-0042 §5.3, owner `6190978708` Q6).
+   The store-catalog normalizer (`smartstore-catalog-fields/v1`) reads each at exactly its path and
+   ignores the same name anywhere else. Not retained, because no path is recorded: every
+   `customerBenefit` member (the discount), `modelName`, brand and manufacturer names, the listing's
+   `wholeCategoryName` and any registration or modification time (E4, E5 `NOT_CAPTURED`). Method,
+   path, predicate, timeouts and query keys are unchanged, and the REGISTER read-back normalizer and
+   comparison are unchanged.
+
+What the catalog may conclude, and nothing more: a `COMPLETE` sync proves the presence of what it
+read. A listing the catalog knows that a complete enumeration did not list is read by its origin
+read: `DELETE` or a 404 ends it (ADR-0023 §3), a live one makes the sync `INCOMPLETE` (the
+enumeration did not cover the store), and absence alone is only `NOT_SEEN`. A snapshot is never
+remote absence for ADR-0014 §10/§14/§28, never frees an `UNKNOWN` scope and, until S3b wires it
+under ADR-0042 §6, is no duplicate evidence either: `lookup.py` is unchanged and duplicate evidence
+stays fail-closed. **Adoption is a contract, never a call**: no provider is read until the bound
+store's committed CONNECT session exists, and the first real read of the owner's store waits for
+the owner's go-ahead (ADR-0042 §14).
 
 ### 4.1.3 DELETE adoption (ADR-0018 §3.5; owner decision 2026-10-03)
 

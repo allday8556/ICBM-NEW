@@ -214,16 +214,21 @@ the category auto-matching agreement endpoint, plus their two unit suites. It ad
 provider caller and no mutation surface.
 All other Coupang adapters remain fake-only, retain sensitive provider envelopes without projecting
 customer or financial data, and grant no provider call or LIVE authority.
+ADR-0042 S1a added the StoreCatalog owner `app/stages/operate/catalog/` (its facts, models,
+the read-only sync service and its scheduler), migration `0067_store_catalog`, the SmartStore
+catalog source `integrations/marketplaces/smartstore/catalog.py`, the Settings card
+`ui/web/js/pages/settings/store-catalog.js`, one unit and two integration suites; the adopted
+search and origin read gained the catalog request and retention (`s1a-store-catalog-r1`).
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 410 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 415 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 84 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
 | `app/interface/` | 32 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 96 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 193 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/platform/` | 97 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 197 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -242,16 +247,16 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 119 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 45 |  |
+| `integrations/` | 120 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 46 |  |
 | `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 444 | tests |
+| `tests/` | 447 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 181 | integration tests by runtime owner |
+| `tests/integration/` | 183 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
-| `tests/unit/` | 161 | unit tests by runtime owner |
-| `ui/` | 75 | operator clients: the served web client and the capture extension |
+| `tests/unit/` | 162 | unit tests by runtime owner |
+| `ui/` | 76 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 66 | the served web client |
+| `ui/web/` | 67 | the served web client |

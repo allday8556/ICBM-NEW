@@ -111,7 +111,7 @@ M5_UNPROVEN = frozenset(
         "SMARTSTORE_STANDARD_OPTIONS",
     }
 )
-M5_MAPPING_REVISION = "m65-dispatch-r1"
+M5_MAPPING_REVISION = "s1a-store-catalog-r1"
 
 
 def adoption_problems(adopted: Iterable[str]) -> list[str]:
@@ -287,7 +287,10 @@ IMAGE_STUDIO_TRANSLATION = "0065_image_studio_translation"
 # ADR-0038 O2: the landed-cost pins of a source-currency price and each overseas source product's
 # own inputs. Pricing evidence and product inputs, never registration state.
 LANDED_COST = "0066_landed_cost"
-SCHEMA_HEAD = LANDED_COST
+# ADR-0042 S1a: the StoreCatalog owner. A store's provider catalog as OPERATE observed it,
+# never registration state.
+STORE_CATALOG = "0067_store_catalog"
+SCHEMA_HEAD = STORE_CATALOG
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -335,6 +338,7 @@ AFTER_M5 = (
     FX_SNAPSHOTS,
     IMAGE_STUDIO_TRANSLATION,
     LANDED_COST,
+    STORE_CATALOG,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"

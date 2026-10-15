@@ -105,6 +105,7 @@ _ENV: dict[str, tuple[str, Callable[[str], Any]]] = {
     "smartstore_renewal_margin_s": ("ICBM_SMARTSTORE_RENEWAL_MARGIN_S", int),
     "review_reconcile_interval_s": ("ICBM_REVIEW_RECONCILE_INTERVAL_S", float),
     "operate_listing_sync_interval_s": ("ICBM_OPERATE_LISTING_SYNC_INTERVAL_S", float),
+    "operate_store_catalog_interval_s": ("ICBM_OPERATE_STORE_CATALOG_INTERVAL_S", float),
     "smartstore_auto_renew": ("ICBM_SMARTSTORE_AUTO_RENEW", _parse_bool),
     "operate_stock_recheck_interval_s": ("ICBM_OPERATE_STOCK_RECHECK_INTERVAL_S", float),
     "operate_stock_recheck_cap": ("ICBM_OPERATE_STOCK_RECHECK_CAP", int),
@@ -151,6 +152,10 @@ class AppConfig:
     review_reconcile_interval_s: float = 300.0
     # M6-A (ADR-0023 §3): the listing-state sync cadence; 0 disables the periodic pass.
     operate_listing_sync_interval_s: float = 1800.0
+    # ADR-0042 S1a (§5.4): the store-catalog sync cadence (the ADR-0023 cadence); 0 disables
+    # the periodic sync and the automatic first sync after connecting. 「지금 동기화」 works
+    # either way.
+    operate_store_catalog_interval_s: float = 1800.0
     # Owner decision 2026-10-07: the session keeper renews the SmartStore token automatically
     # (AUTH §15, §17 Case B). It acts only with a configured renewal margin and a bound account.
     smartstore_auto_renew: bool = True

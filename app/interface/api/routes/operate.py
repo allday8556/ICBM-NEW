@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 
 from app.interface.api.deps import ContainerDep
 from app.platform.core.correlation import new_correlation_id
+from app.platform.core.errors import PolicyBlockedError
+from app.stages.operate.catalog.service import OPERATOR as CATALOG_OPERATOR
 from app.stages.operate.listing import OPERATOR
 from app.stages.operate.orders import OPERATOR as ORDER_OPERATOR
 from app.stages.operate.stock import OPERATOR as STOCK_OPERATOR
@@ -44,6 +46,31 @@ async def sync_listings(container: ContainerDep) -> dict[str, Any]:
         container.listing_sync.sync, trigger=OPERATOR, correlation_id=new_correlation_id()
     )
     return asdict(run)
+
+
+@router.get("/store-catalog")
+def store_catalog(container: ContainerDep) -> dict[str, Any]:
+    """The connected store's catalog as the last syncs saw it (ADR-0042 §5.4): the running sync
+    and its progress, the last sync whatever its outcome, the last COMPLETE sync (「마지막
+    동기화」, SCP-07) and every listing with its derived state and latest read fields."""
+    status = container.store_catalog.status()
+    return {
+        "status": asdict(status),
+        "listings": [asdict(listing) for listing in container.store_catalog.listings()],
+    }
+
+
+@router.post("/store-catalog/sync", status_code=202)
+def sync_store_catalog(container: ContainerDep) -> dict[str, Any]:
+    """「지금 동기화」: start one read-only catalog sync in the background. A store that is not
+    connected is refused; a sync already running is the one the operator asked for."""
+    if container.store_catalog.account() is None:
+        raise PolicyBlockedError(
+            "STORE_CATALOG_STORE_NOT_CONNECTED",
+            "connect and bind the store before its catalog can be synced",
+        )
+    started = container.store_catalog_scheduler.request(trigger=CATALOG_OPERATOR)
+    return {"started": started, "status": asdict(container.store_catalog.status())}
 
 
 @router.get("/stock")

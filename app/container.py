@@ -145,6 +145,7 @@ from app.stages.connect.smartstore.keeper import SmartStoreSessionKeeper
 from app.stages.connect.smartstore.service import SmartStoreConnectService
 from app.stages.operate.adoption import CONVENTIONS as ADOPTION_CONVENTIONS
 from app.stages.operate.adoption import AdoptionService
+from app.stages.operate.catalog.service import StoreCatalogScheduler, StoreCatalogService
 from app.stages.operate.dispatch import DispatchService, dispatch_unit
 from app.stages.operate.fulfillment import FulfillmentService
 from app.stages.operate.listing import ListingSyncScheduler, ListingSyncService
@@ -214,6 +215,7 @@ from integrations.marketplaces.smartstore.addressbook import SmartStoreAddressBo
 from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
 from integrations.marketplaces.smartstore.assets import SmartStoreAssetSender
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
+from integrations.marketplaces.smartstore.catalog import SmartStoreCatalogSource
 from integrations.marketplaces.smartstore.category import SmartStoreCategoryCatalogSource
 from integrations.marketplaces.smartstore.deletion import SmartStoreDeleteSender
 from integrations.marketplaces.smartstore.delivery_companies import DELIVERY_COMPANIES
@@ -360,6 +362,8 @@ class Container:
     # M6-A (ADR-0023 §3): the read-only listing-state sync and its periodic pass.
     listing_sync: ListingSyncService
     listing_sync_scheduler: ListingSyncScheduler
+    store_catalog: StoreCatalogService
+    store_catalog_scheduler: StoreCatalogScheduler
     # M6-B (ADR-0023 §4): the supplier stock recheck of listed source products.
     stock_recheck: StockRecheckService
     stock_recheck_scheduler: StockRecheckScheduler
@@ -1380,6 +1384,18 @@ def build_container(
         seller_code=smartstore_product.seller_management_code,
         adoptions=adoptions,
     )
+    # ADR-0042 S1a (§5): the store's whole catalog, read only through the adopted search and
+    # origin read with the CONNECT owner's committed bearer; without a proven current
+    # committed session nothing is read.
+    store_catalog = StoreCatalogService(
+        db=db,
+        clock=clock,
+        source=SmartStoreCatalogSource(
+            smartstore_caller or SmartStoreEndpointCaller(), committed_bearer
+        ),
+        account_of=_bound_account,
+        interval_s=config.operate_store_catalog_interval_s,
+    )
     order_sync = OrderSyncService(
         db=db,
         clock=clock,
@@ -1455,6 +1471,8 @@ def build_container(
         fulfillment=fulfillment,
         dispatches=dispatches,
         listing_sync_scheduler=ListingSyncScheduler(listing_sync),
+        store_catalog=store_catalog,
+        store_catalog_scheduler=StoreCatalogScheduler(store_catalog),
         auto_images=auto_images,
         common_images=common_images,
         config=config,

@@ -24,6 +24,7 @@ import { capabilityProjection } from './settings/capability-projection.js';
 import { permissionAttestationPanel } from './settings/permission-attestation.js';
 import { API_STATUS_LABEL, CONNECTION_LABEL, PLATFORM_TABS, SUBTABS } from './settings/settings-schema.js';
 import { accountPanel, contractReviewPanel, credentialsPanel, workflowActions } from './settings/smartstore-operator.js';
+import { storeCatalogPanel } from './settings/store-catalog.js';
 import { coupangCredentialsPanel } from './settings/coupang-operator.js';
 import { categoryMetadataPanel } from './settings/category-metadata.js';
 import { targetPolicyPanel } from './settings/target-policy.js';
@@ -196,6 +197,7 @@ function renderItem(item, state) {
   if (item.smartstoreCredentials) return credentialsPanel(() => state.truth('smartstore').refresh());
   if (item.coupangCredentials) return coupangCredentialsPanel();
   if (item.smartstoreAccount) return accountPanel(() => state.truth('smartstore').refresh());
+  if (item.storeCatalog) return storeCatalogPanel();
   if (item.contractReview) {
     return contractReviewPanel(item.contractReview, () => state.truth(item.contractReview).refresh());
   }

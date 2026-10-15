@@ -4222,6 +4222,13 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "image_edit_current",
         # ADR-0038 §4, §8: each overseas source product's landed-cost inputs, append-only.
         "overseas_cost_override_revisions",
+        # ADR-0042 S1a: the StoreCatalog owner — a store's provider catalog as OPERATE observed
+        # it, read only. Store listings are never products; no buyer data.
+        "store_catalog_sync_runs",
+        "store_catalog_listings",
+        "store_catalog_field_sets",
+        "store_catalog_observations",
+        "store_catalog_listing_endings",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

@@ -663,6 +663,7 @@ def test_retention_keeps_only_allow_listed_leaves_whatever_the_envelope_is() -> 
             "detailContent": "<p>본문</p>",  # not on the allow-list
             "images": [{"url": REF_MAIN, "order": 1}],
             "sellerCodeInfo": {"sellerManagementCode": SELLER_CODE, "sellerBarcode": "880123"},
+            "customerBenefit": {"immediateDiscountPolicy": {"value": 1000}},
         },
         "traceId": "t-1",
         "accessToken": "Bearer abcdefghijklmnop",
@@ -670,9 +671,14 @@ def test_retention_keeps_only_allow_listed_leaves_whatever_the_envelope_is() -> 
     kept = retain(contract, body)
     text = json.dumps(kept, ensure_ascii=False)
     assert "detailContent" not in text and "본문" not in text
-    assert "sellerBarcode" not in text and "880123" not in text
+    # ADR-0042 S1a: no customerBenefit member has a recorded path, so none is kept.
+    assert "customerBenefit" not in text and "immediateDiscountPolicy" not in text
     assert "accessToken" not in text and "Bearer" not in text and "traceId" not in text
-    assert kept["originProduct"]["sellerCodeInfo"] == {"sellerManagementCode": SELLER_CODE}
+    # ADR-0042 S1a: the barcode is a recorded store-catalog leaf of the origin read.
+    assert kept["originProduct"]["sellerCodeInfo"] == {
+        "sellerManagementCode": SELLER_CODE,
+        "sellerBarcode": "880123",
+    }
     assert kept["originProduct"]["images"] == [{"url": REF_MAIN}]
 
 

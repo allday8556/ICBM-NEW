@@ -222,8 +222,15 @@ CANONICAL_TABLES = (
     "image_edit_current",
     # ADR-0038 §4, §8: each overseas source product's landed-cost inputs.
     "overseas_cost_override_revisions",
+    # ADR-0042 S1a: the StoreCatalog owner — sync runs, store listings, field sets,
+    # observations and endings.
+    "store_catalog_sync_runs",
+    "store_catalog_listings",
+    "store_catalog_field_sets",
+    "store_catalog_observations",
+    "store_catalog_listing_endings",
 )
-HEAD = "0066_landed_cost"
+HEAD = "0067_store_catalog"
 
 
 def _url(path: Path) -> str:

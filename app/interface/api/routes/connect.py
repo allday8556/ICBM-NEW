@@ -289,8 +289,14 @@ def save_smartstore_credentials(
 @router.post(f"{SMARTSTORE}/connect")
 def observe_smartstore_account(container: ContainerDep) -> SmartStoreObservationView:
     """One CONNECT pass: token, durable session commit, seller-account read, capability evidence.
-    It returns the observed account to the operator's screen and never binds a first account."""
-    return SmartStoreObservationView.of(container.smartstore.connect())
+    It returns the observed account to the operator's screen and never binds a first account.
+
+    ADR-0042 S1a (§0 a1, b1): a successful pass wakes the store-catalog scheduler, so a bound
+    store's first catalog sync starts by itself. Waking only looks for a due sync; it reads
+    nothing when none is due."""
+    result = SmartStoreObservationView.of(container.smartstore.connect())
+    container.store_catalog_scheduler.wake()
+    return result
 
 
 @router.post(f"{SMARTSTORE}/notice-catalog/capture")
@@ -339,9 +345,12 @@ def bind_smartstore_account(
 ) -> SmartStoreObservationView:
     """The explicit first binding of the account the operator confirmed. The service reads the
     account again, refuses a different one, and commits the binding only under the freshness
-    decision that authorizes it; a failure leaves nothing bound (PR-A)."""
-    return SmartStoreObservationView.of(
+    decision that authorizes it; a failure leaves nothing bound (PR-A). A committed binding wakes
+    the store-catalog scheduler: the store's first catalog sync starts by itself (ADR-0042 S1a)."""
+    result = SmartStoreObservationView.of(
         container.smartstore.bind_account(
             body.confirmed_account_uid, actor=container.config.operator_actor
         )
     )
+    container.store_catalog_scheduler.wake()
+    return result

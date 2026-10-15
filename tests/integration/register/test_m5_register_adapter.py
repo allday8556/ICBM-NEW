@@ -147,7 +147,7 @@ def _read(body: dict[str, Any]) -> Any:
 
 
 def test_adoption_is_bounded_and_every_gap_is_recorded() -> None:
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m65-dispatch-r1"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "s1a-store-catalog-r1"
     assert SAFE_RETENTION_PROFILE_VERSION == "smartstore-safe-retention/v1"
     # The CREATE adoption slice added the second adopted mutation and the DELETE slice the third
     # (ADR-0018 §3.5), and M6.5-C the dispatch of one product order (ADR-0025 §5.1). Adoption is

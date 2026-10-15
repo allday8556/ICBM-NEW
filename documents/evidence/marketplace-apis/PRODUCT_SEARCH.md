@@ -8,7 +8,7 @@
 
 | Platform | Source authority | Evidence coverage | ICBM adoption | Runtime verification |
 | --- | --- | --- | --- | --- |
-| SmartStore | `OFFICIAL_API_DOC` + `OFFICIAL_SUPPORT` | `PARTIAL` | `ADOPTED` (positive-only reconcile; `ENDPOINT_MATRIX.md` §4.1.2) | `UNVERIFIED` |
+| SmartStore | `OFFICIAL_API_DOC` + `OFFICIAL_SUPPORT` | `PARTIAL` | `ADOPTED` (positive-only reconcile, and the ADR-0042 store-catalog enumeration; `ENDPOINT_MATRIX.md` §4.1.2) | `UNVERIFIED` |
 | Coupang | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
 | 11st | `UNAVAILABLE` | `NOT_CAPTURED` | `NOT_ADOPTED` | `UNVERIFIED` |
 | Kakao Shopping | `OFFICIAL_API_DOC` | `PARTIAL` | `NOT_ADOPTED` | `UNVERIFIED` |
@@ -54,12 +54,44 @@ Below, `SEARCH` = 5904349289.
 - The endpoint-specific status/code of the more-than-100,000-results error (not invented; any undocumented error proves nothing).
 - Any exact-match, uniqueness, completeness or freshness guarantee (documented as absent).
 
+### Store-catalog enumeration evidence (ADR-0042 S1a, tasks E1–E3, E5, E6)
+
+Captured 2026-10-15 for ADR-0042 §4. **The official reference was not re-read**: the
+`apicenter.commerce.naver.com` page was refused to the implementing environment (both the web
+fetcher and the in-app browser: "not allowed due to safety restrictions"), and no other route to it
+was used. Every fact below is a NAVER `P1` official-support answer, read on GitHub on 2026-10-15;
+each line names the discussion, the answer's author role and date, and what exactly was observed.
+The source IDs are in `SOURCES.md` §5.11 and §6.
+
+| Task | Fact | Status | Source |
+| --- | --- | --- | --- |
+| E1 | A request **without** `searchKeywordType`, setting only the paging fields `page` and `size`, returns every product registered in the SmartStore: "요청 데이터 내 페이징 관련 필드(`page`, `size`)만 설정하시면 스마트스토어에 등록된 모든 상품을 조회하실 수 있습니다." In the same answer: `totalElements` is the number of products the request found | `CAPTURED` (`OFFICIAL_SUPPORT`) | api-agency #874, NAVER maintainer answer of 2026-04-07 (`NAVER-P1-SEARCH-ALL-874`) |
+| E1 | The request body is required but its fields are not; leaving `searchKeywordType` unset, or sending `{}`, lists the products as a whole. When `searchKeywordType` is set, the matching identifier list must be set and no other (`originProductNos` with `CHANNEL_PRODUCT_NO` is refused as `BAD_REQUEST` `invalidInputs` `originProductNos` `Exist`) | `CAPTURED` (`OFFICIAL_SUPPORT`) | commerce-api #1544, NAVER maintainer answer of 2024-03-18 (`NAVER-P1-SEARCH-ALL-1544`) |
+| E1 | The list returns every product the request's criteria include, and a `{null}` request lists the products as a whole | `CAPTURED` (`OFFICIAL_SUPPORT`) | commerce-api #1546, NAVER maintainer answer of 2024-03-18 (`NAVER-P1-SEARCH-MODIFIED-1546`) |
+| E1 | Whether that "every registered product" includes each `statusType` by name (`SALE`, `OUTOFSTOCK`, `SUSPENSION`, `CLOSE`, `PROHIBITION`, `WAIT`, `UNADMISSION`, `REJECTION`, `DELETE`): no source lists the statuses. A deleted product's inclusion is not stated | `NOT_CAPTURED` — the reference was refused | — |
+| E2 | A status filter and a sort order. The names `productStatusTypes`, `orderType` (`NAME`, `NO`), `periodType` (`PROD_REG_DAY`), `fromDate`, `toDate` appear **only in users' own requests** in #248 and #1544; no NAVER answer states their meaning, values or defaults. No stable sort is stated anywhere | `NOT_CAPTURED` — the reference was refused; the user-authored names are not evidence | #248, #1544 (user requests only) |
+| E3 | The list's items carry "basic product information (product name, sale status, price, stock, delivery, purchase/benefit and so on)" and nothing more detailed; detail is read through the channel-product or origin-product read. **No field name or JSON path is given** | `PARTIAL` — the existence of the information is captured, its fields are `NOT_CAPTURED` | commerce-api #1635, NAVER maintainer answer of 2024-04-23 (`NAVER-P1-SEARCH-FIELDS-1635`) |
+| E5 | The list returns a product modification date named `modifiedDate`, "the date it was modified, whatever the call date". Its position in the response (item or channel product), its format and time zone are **not given**. A registration time is not mentioned | `PARTIAL` — the name only; position, format and the registration time `NOT_CAPTURED` | commerce-api #1546 (`NAVER-P1-SEARCH-MODIFIED-1546`) |
+| E6 | More than 100,000 found products returns an error; NAVER advises splitting the query by a search period. **No HTTP status or error code is given** | `NOT_CAPTURED` — the code stays undocumented | api-agency #874 (`NAVER-P1-SEARCH-ALL-874`) |
+
+What the S1a code does with each gap (ICBM-side, fail-closed): the catalog request is exactly
+`{"page": n, "size": 500}` (E1), with no status filter and no sort parameter (E2); the search's
+retention is **not** widened, so every §5.3 field is read from the origin read (E3); no provider
+registration or modification time is read or stored (E5); and a provider error at any page,
+including the undocumented over-100,000 one, is `ERROR` and concludes nothing (E6). A
+`totalElements` above 100,000 on a readable page is `UNAVAILABLE`. That a "every registered
+product" enumeration covers every live status is not taken on trust either: a listing the catalog
+already knows that is missing from a complete enumeration is read by its origin read, and a live
+one (any status but `DELETE`) makes the sync `INCOMPLETE` (ADR-0042 §5.2, `ENDPOINT_MATRIX.md`
+§4.1.2 S1a amendment).
+
 ### ICBM adoption and runtime state — ICBM-side, not provider facts
 
 - `SMARTSTORE_PRODUCT_SEARCH` is `ADOPTED` for **positive-only reconcile only** (`ENDPOINT_MATRIX.md` §4, §4.1.2; ADR-0020 §4 order 2; ADR-0014 §28.2–§28.4). Adoption is a contract, never a call: execution stays `DRY_RUN`, the lookup reads the CONNECT owner's committed bearer (ROADMAP §14 item 4), so without a proven current committed session every lookup is `UNAVAILABLE`, and runtime stays `UNVERIFIED`. The deterministic-reconcile review closed `INSUFFICIENT` (ADR-0014 §17.2) and is not overturned.
 - It is read exactly as above and no wider: the seller-code search carries the `smartstore-seller-management-code/v1` projection ([PRODUCT_CREATE](PRODUCT_CREATE.md#icbm-adoption-and-runtime-state--icbm-side-not-provider-facts); ruling R1, Issue #89 comment 5861607665); every page within a bounded read budget is enumerated and checked for consistency; only a `STOREFARM` channel entry whose code is **exactly** the projection is a candidate. A partial or inconsistent enumeration is never a count.
 - What a lookup may conclude: zero exact candidates never prove absence; multiple exact candidates stay `REVIEW_REQUIRED`; a single exact candidate is only an identity-recovery candidate, which becomes presence (`APPLIED_PROVEN`) only when the adopted origin read-back by its `originProductNo` carries the same code. `contents[n].originProductNo` is the read-back identity and the `STOREFARM` `channelProductNo` the channel identity; both are persisted (Issue #89 5904349289 §B). An unavailable, rate- or quota-refused, failed or undocumented answer proves nothing.
 - It is **never** a duplicate lookup and never authorizes a CREATE: duplicate evidence stays fail-closed (ADR-0014 §13, §17.2).
+- **ADR-0042 S1a amendment (`ENDPOINT_MATRIX.md` §4.1.2).** The same endpoint also carries a second request shape, the store-catalog enumeration: `{"page": n, "size": 500}` and nothing else (E1 above), read only by the StoreCatalog owner (`app/stages/operate/catalog/`). Its response contract, predicate, retention and the reconcile use are unchanged. A complete enumeration (ADR-0042 §5.2) proves the presence of what it read; it is never remote absence for ADR-0014 §10/§14/§28 and, until S3b wires it under ADR-0042 §6, it is not duplicate evidence either.
 
 ## Coupang
 

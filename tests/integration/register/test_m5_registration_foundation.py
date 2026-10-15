@@ -575,6 +575,12 @@ ADAPTIVE_TABLES = (
     "image_edit_current",
     # ADR-0038 §4, §8 (0066): each overseas source product's landed-cost inputs.
     "overseas_cost_override_revisions",
+    # ADR-0042 S1a (0067): the StoreCatalog owner.
+    "store_catalog_sync_runs",
+    "store_catalog_listings",
+    "store_catalog_field_sets",
+    "store_catalog_observations",
+    "store_catalog_listing_endings",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

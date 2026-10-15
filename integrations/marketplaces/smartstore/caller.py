@@ -50,9 +50,11 @@ from integrations.marketplaces.smartstore.registry import (
 )
 from integrations.marketplaces.smartstore.retention import retain, retained_query
 from integrations.marketplaces.smartstore.search import (
+    CATALOG_MAX_PAGES,
     FIRST_PAGE,
     INT32_MAX,
     MAX_PAGE_SIZE,
+    catalog_request_body,
     request_body,
 )
 from integrations.marketplaces.smartstore.signing import (
@@ -330,6 +332,22 @@ class ProductSearchRequest:
 
 
 @dataclass(frozen=True)
+class CatalogSearchRequest:
+    """One page of the store-catalog enumeration (ADR-0042 S1a; ``ENDPOINT_MATRIX.md`` §4.1.2).
+
+    The body is exactly the paging-only request (``search.catalog_request_body``): no keyword, no
+    status filter and no sort, because none is documented for it (E1, E2). ``page`` starts at 1
+    and is at most the catalog page budget; ``size`` is at most 500.
+    """
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    page: int
+    size: int
+
+
+@dataclass(frozen=True)
 class ImageUploadRequest:
     """Upload exactly one immutable artifact in exactly one ``imageFiles`` part.
 
@@ -539,6 +557,7 @@ def _generations(request: object) -> tuple[int | None, int | None]:
         | ProductReadRequest
         | ProductCreateRequest
         | ProductSearchRequest
+        | CatalogSearchRequest
         | ImageUploadRequest
         | CategoryListRequest
         | AddressBookListRequest
@@ -804,6 +823,25 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
         assert contract.content_type is not None
         headers["Content-Type"] = contract.content_type
         return _Wire(contract.path, headers, {}, content=_json_body(request.document))
+    if contract.endpoint_id is _PRODUCT_SEARCH and isinstance(request, CatalogSearchRequest):
+        # ADR-0042 S1a: the paging-only catalog request, within the catalog page budget.
+        if (
+            isinstance(request.page, bool)
+            or not isinstance(request.page, int)
+            or not FIRST_PAGE <= request.page <= CATALOG_MAX_PAGES
+            or isinstance(request.size, bool)
+            or not isinstance(request.size, int)
+            or not 1 <= request.size <= MAX_PAGE_SIZE
+        ):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        assert contract.content_type is not None
+        headers["Content-Type"] = contract.content_type
+        body = catalog_request_body(request.page, request.size)
+        content = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return _Wire(contract.path, headers, {}, content=content)
     if contract.endpoint_id is _PRODUCT_SEARCH:
         if (
             not isinstance(request, ProductSearchRequest)
@@ -1028,7 +1066,7 @@ def _result(contract: EndpointContract, request: object, body: object, status: i
             http_status=status,
         )
     if contract.endpoint_id is _PRODUCT_SEARCH:
-        assert isinstance(request, ProductSearchRequest)
+        assert isinstance(request, ProductSearchRequest | CatalogSearchRequest)
         # Only the endpoint's retained-field allow-list crosses this boundary (ADR-0014 §15).
         return ProductSearchPage(
             retained=retain(contract, fields), http_status=status, page=request.page
@@ -1110,7 +1148,7 @@ class SmartStoreEndpointCaller:
     def call(
         self,
         endpoint_id: Literal[EndpointId.SMARTSTORE_PRODUCT_SEARCH],
-        request: ProductSearchRequest,
+        request: ProductSearchRequest | CatalogSearchRequest,
     ) -> ProductSearchPage: ...
 
     @overload
