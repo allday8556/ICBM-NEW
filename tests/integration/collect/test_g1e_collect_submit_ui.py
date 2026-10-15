@@ -564,8 +564,9 @@ def test_the_focused_run_shows_its_revision_fields_and_evidence_as_stored(
             )
         assert "데이터 없음" in preview.locator("[data-role='ai-note']").inner_text()
         row = page.locator(f"[data-role='recent-runs'] tr[data-run='{run_id}']")
-        # v29's 후보수 · 저장수 · 가격확인 have no source on a run, so the list leaves them out.
-        assert row.locator("[data-no-data]").count() == 0
+        # v29's 후보수 · 저장수 · 가격확인 have no source on a run: their place stays, without data.
+        for label in ("후보수", "저장수", "가격확인"):
+            assert row.locator(f"[data-no-data='{label}']").inner_text() == "데이터 없음"
         assert "%" not in preview.inner_text(), "no confidence number is shown"
         # The v29 controls with no contract yet only explain themselves: they send nothing.
         for role in ("revalidate", "ai-correct", "collect-option"):

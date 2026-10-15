@@ -82,6 +82,7 @@ export function tagRecommendation(result) {
       { class: 'row' },
       result.requires_review ? h('span', { class: 'chip warn', 'data-role': 'ai-tags-review' }, '검토 필요') : null,
       result.stale ? staleChip('ai-tags-stale', result) : h('span', { class: 'chip good', 'data-role': 'ai-tags-fresh' }, '최신'),
+      model ? h('span', { class: 'mini', 'data-role': 'ai-tags-model' }, `모델 ${model}`) : null,
     ),
   );
 }

@@ -12,6 +12,7 @@ import { getJson, sendJson } from '../../core/api.js';
 import { h } from '../../core/dom.js';
 import { errorText as plainError } from '../../core/errors.js';
 import { closeModal, openModal } from '../../core/modal.js';
+import { accountLabel } from '../../core/platform.js';
 import { toast } from '../../core/toast.js';
 
 const BASE = '/api/v1/settings/target-policies';
@@ -349,7 +350,7 @@ function feePreset(marketplaceKey, pricing, saved, editable) {
 // One policy revision, shown in two tabs: 'policy' (등록 정책) and 'delivery' (배송 관리). Every
 // field is built from the server's current inputs; a tab shows only its own rows, and a save
 // sends the other tab's fields unchanged, so the revision is always whole.
-function editor(view, onSaved, section, accountLabel = '스마트스토어 판매 계정') {
+function editor(view, onSaved, section) {
   const editable = view.editable === true;
   const inputs = view.inputs;
   const pricing = inputs?.pricing_context;
@@ -643,7 +644,7 @@ function editor(view, onSaved, section, accountLabel = '스마트스토어 판�
           detail_composition_revision: null,
         },
       });
-      toast(TITLE, '등록 정책을 저장했습니다. 이후 등록부터 적용됩니다.');
+      toast(TITLE, `${accountLabel(view.marketplace_key, view.marketplace_account_id)} · 등록 정책을 저장했습니다. 이후 등록부터 적용됩니다.`);
       await onSaved();
     } catch (error) {
       // Nothing was written: the server refuses a save whole. The typed values stay for a fix.
@@ -699,7 +700,12 @@ function editor(view, onSaved, section, accountLabel = '스마트스토어 판�
   return h(
     'div',
     { class: 'target-policy', 'data-account': view.marketplace_account_id, 'data-policy-section': section },
-    h('div', { class: 'kv' }, h('span', {}, '판매 계정'), h('b', {}, accountLabel)),
+    h(
+      'div',
+      { class: 'kv' },
+      h('span', {}, '판매 계정'),
+      h('b', { 'data-role': 'policy-account' }, accountLabel(view.marketplace_key, view.marketplace_account_id)),
+    ),
     h(
       'div',
       { class: 'kv' },
@@ -728,9 +734,7 @@ export function targetPolicyPanel(marketplaceKey, section = 'policy') {
       const view = await getJson(`${BASE}/${marketplaceKey}`);
       host.replaceChildren(
         ...(view.accounts.length
-          ? view.accounts.map((account, index) =>
-              editor(account, load, section, view.accounts.length > 1 ? `스마트스토어 판매 계정 ${index + 1}` : '스마트스토어 판매 계정'),
-            )
+          ? view.accounts.map((account) => editor(account, load, section))
           : [h('div', { class: 'note' }, '연결된 스마트스토어 계정이 없습니다. API 관리에서 계정을 연결한 뒤 저장할 수 있습니다.')]),
       );
     } catch (error) {

@@ -49,6 +49,7 @@ export function categoryRecommendation(result) {
       h('span', { class: 'mini' }, `후보 ${value.candidate_count ?? '—'}개 중 선택`),
       result.requires_review ? h('span', { class: 'chip warn', 'data-role': 'ai-category-review' }, '검토 필요') : null,
       result.stale ? staleChip('ai-category-stale', result) : h('span', { class: 'chip good', 'data-role': 'ai-category-fresh' }, '최신'),
+      model ? h('span', { class: 'mini', 'data-role': 'ai-category-model' }, `모델 ${model}`) : null,
     ),
   );
 }

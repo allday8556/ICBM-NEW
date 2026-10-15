@@ -46,7 +46,8 @@ function familyOf(entry) {
 }
 
 function versionLine(entry) {
-  return entry.modified_fields.length ? '수정됨' : '기본값';
+  // UI_SOURCE_OF_TRUTH 설정 › AI / Prompt: `v{n} · 기본값` or `v{n} · 사용자 수정본`.
+  return `v${entry.current.revision_no} · ${entry.modified_fields.length ? '사용자 수정본' : '기본값'}`;
 }
 
 // ------------------------------------------------------------------ the Settings registry

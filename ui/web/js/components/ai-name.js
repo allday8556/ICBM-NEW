@@ -82,6 +82,7 @@ export function recommendation(result) {
       h('span', { class: 'chip' }, `신뢰도 ${confidence}`),
       result.requires_review ? h('span', { class: 'chip warn', 'data-role': 'ai-name-review' }, '검토 필요') : null,
       result.stale ? staleChip('ai-name-stale', result) : h('span', { class: 'chip good', 'data-role': 'ai-name-fresh' }, '최신'),
+      model ? h('span', { class: 'mini', 'data-role': 'ai-name-model' }, `모델 ${model}`) : null,
     ),
   );
 }

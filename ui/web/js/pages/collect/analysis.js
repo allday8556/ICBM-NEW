@@ -254,8 +254,36 @@ function verdictLine(sample, verify) {
   );
 }
 
+// ADR-0036 §7 (O5): 「값이 맞음」 and 「사용 시작」 confirm the images field itself, not a count, so
+// every product image the sample read is listed — its order, role and address — beside those
+// buttons. The UI loads nothing from another site (CSP img-src 'self') and the analysis downloads no
+// image, so each address is a link that opens the supplier's own image in a new tab.
+function imageList(sample) {
+  const items = sample.summary?.images?.items ?? [];
+  if (!items.length) return null;
+  return h(
+    'div',
+    { class: 'analysis-images', 'data-role': 'image-urls', 'data-count': String(items.length) },
+    h('div', { class: 'mini' }, `찾은 이미지 ${items.length}장 · 주소를 누르면 새 창에서 실제 이미지를 엽니다.`),
+    h(
+      'ol',
+      { class: 'analysis-image-list' },
+      items.map((item) =>
+        h(
+          'li',
+          { 'data-image-rank': String(item.rank), 'data-image-role': item.role },
+          h('span', { class: 'chip' }, IMAGE_ROLE[item.role] ?? '기타'),
+          ' ',
+          /^https?:\/\//.test(item.url ?? '')
+            ? h('a', { href: item.url, target: '_blank', rel: 'noopener noreferrer', title: item.url, 'data-image-url': item.url }, item.url)
+            : h('span', { class: 'mini', 'data-image-url': '' }, '주소를 읽지 못했습니다'),
+        ),
+      ),
+    ),
+  );
+}
+
 function sampleBlock(sample, verify, retire) {
-  const images = sample.summary?.images?.urls ?? [];
   return h(
     'div',
     { class: sample.retired_reason ? 'analysis-sample retired' : 'analysis-sample', 'data-sample': sample.sample_url },
@@ -285,7 +313,7 @@ function sampleBlock(sample, verify, retire) {
       ? h('div', { class: 'note' }, '저장한 화면으로 이 결과를 다시 만들 수 없습니다. 「다시 분석」하거나 다시 읽으세요.')
       : null,
     fieldTable(sample),
-    images.length ? h('div', { class: 'mini analysis-images', 'data-role': 'image-urls', 'data-count': String(images.length) }, `이미지 ${images.length}장을 찾았습니다.`) : null,
+    imageList(sample),
     verdictLine(sample, verify),
     retirementLine(sample, retire),
     unreadTable(sample),

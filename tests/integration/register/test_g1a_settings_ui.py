@@ -284,6 +284,29 @@ def test_the_save_bar_is_server_owned_and_general_settings_stay_read_only(
     assert _counts(config) == dict.fromkeys(TABLES, 0)
 
 
+def test_each_account_editor_names_its_own_stable_account(
+    browser: Browser, config: AppConfig
+) -> None:
+    """With two accounts, each editor reads its own account id — not 「판매 계정 1/2」, a position
+    that moves when the list changes — so the seller knows whose policy a save changes (PR #369
+    audit, DUPLICATE_OR_WRONG_SEND)."""
+    writes: list[tuple[str, str]] = []
+    with _served(config) as client:
+        served: Container = client.app.state.container  # type: ignore[attr-defined]
+        first = establish(served, config, MARKETPLACE, "uid-smartstore-1")
+        second = establish(served, config, MARKETPLACE, "uid-smartstore-2")
+        with _page(browser, client, POLICY_TAB, _editor(second), writes) as page:
+            shown = "[data-role='policy-account']"
+            texts = {
+                account: page.locator(f"{_editor(account)} {shown}").inner_text()
+                for account in (first, second)
+            }
+        assert first in texts[first] and second in texts[second]
+        assert second not in texts[first] and first not in texts[second]
+        assert not any(re.search(r"계정 \d", text) for text in texts.values())
+        assert writes == []
+
+
 def test_a_refused_save_shows_the_server_reason_and_writes_nothing(
     browser: Browser, config: AppConfig
 ) -> None:

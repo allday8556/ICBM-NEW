@@ -868,7 +868,7 @@ function jobsView(view, ctx) {
       h(
         'thead',
         {},
-        h('tr', {}, ...['요청시간', '공급처', 'URL', '상태', '결과', ''].map((label) => h('th', {}, label))),
+        h('tr', {}, ...['요청시간', '공급처', 'URL', '상태', '결과', '후보수', '저장수', '가격확인', ''].map((label) => h('th', {}, label))),
       ),
       listBody,
     ),
@@ -892,8 +892,10 @@ function jobsView(view, ctx) {
       h('td', {}, supplierLabel(run.supplier_key, view.suppliers)),
       h('td', { class: 'run-url', title: run.source_url }, shortUrl(run.source_url)),
       h('td', {}, outcomeChip(run.outcome)),
-      // v29's 후보수 · 저장수 · 가격확인 have no source on a run, so they are not shown.
       h('td', {}, runResult(run)),
+      // UI_SOURCE_OF_TRUTH 수집: v29's 후보수 · 저장수 · 가격확인 have no source on a run, so their
+      // place stays and reads 데이터 없음.
+      ...['후보수', '저장수', '가격확인'].map((label) => h('td', { class: 'no-data', 'data-no-data': label }, '데이터 없음')),
       h(
         'td',
         {},
@@ -1085,12 +1087,12 @@ function jobsView(view, ctx) {
       listBody.replaceChildren(
         ...(listed.runs.length
           ? listed.runs.map(runRow)
-          : [h('tr', {}, h('td', { class: 'table-empty', colspan: '6' }, filterKey === 'all' ? '아직 수집 기록이 없습니다.' : '이 조건에 맞는 수집 기록이 없습니다.'))]),
+          : [h('tr', {}, h('td', { class: 'table-empty', colspan: '9' }, filterKey === 'all' ? '아직 수집 기록이 없습니다.' : '이 조건에 맞는 수집 기록이 없습니다.'))]),
       );
       showPage(listed, listed.runs.length);
       return listed.runs.some((run) => run.outcome === 'PENDING');
     } catch (error) {
-      listBody.replaceChildren(h('tr', {}, h('td', { class: 'table-empty', colspan: '6' }, errorMessage(error))));
+      listBody.replaceChildren(h('tr', {}, h('td', { class: 'table-empty', colspan: '9' }, errorMessage(error))));
       more.hidden = true;
       return false;
     }
@@ -1104,7 +1106,7 @@ function jobsView(view, ctx) {
       listBody.append(...listed.runs.map(runRow));
       showPage(listed, listBody.querySelectorAll('tr[data-run]').length);
     } catch (error) {
-      listBody.append(h('tr', {}, h('td', { class: 'table-empty', colspan: '6' }, errorMessage(error))));
+      listBody.append(h('tr', {}, h('td', { class: 'table-empty', colspan: '9' }, errorMessage(error))));
       more.hidden = true;
     }
     more.disabled = false;

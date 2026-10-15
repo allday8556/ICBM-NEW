@@ -25,7 +25,7 @@ import { dotDate, dotDateTime } from '../core/format.js';
 import { errorCode, errorText } from '../core/errors.js';
 import { withHelp } from '../core/help.js';
 import { markInert } from '../core/inert.js';
-import { marketplaceLabel } from '../core/platform.js';
+import { accountLabel } from '../core/platform.js';
 import { supplierName, supplierNames } from '../core/suppliers.js';
 import { toast } from '../core/toast.js';
 import { aiNamePanel } from '../components/ai-name.js';
@@ -706,12 +706,6 @@ function workspace(initialProduct, navigateTo) {
   let targets = [];
   let drafting = false;
 
-  // Two accounts of one marketplace are told apart by their order, never by an internal id.
-  function accountSuffix(target, index) {
-    const same = targets.filter((other) => other.marketplace_key === target.marketplace_key);
-    return same.length > 1 ? ` 계정 ${same.indexOf(targets[index]) + 1}` : '';
-  }
-
   function renderTargets(listed) {
     targets = listed.targets;
     targetSelect.replaceChildren(
@@ -725,7 +719,7 @@ function workspace(initialProduct, navigateTo) {
             'data-account': target.marketplace_account_id,
             'data-reason': target.unavailable_reason ?? '',
           },
-          `${marketplaceLabel(target.marketplace_key)}${accountSuffix(target, index)}` +
+          accountLabel(target.marketplace_key, target.marketplace_account_id) +
             (target.unavailable_reason ? ` · ${copy(target.unavailable_reason)}` : ''),
         ),
       ),
@@ -783,7 +777,8 @@ function workspace(initialProduct, navigateTo) {
     };
     try {
       const created = await sendJson('POST', DRAFTS, body);
-      toast('등록 대기 목록에 추가', `품목 ${created.items.length}개를 등록관리에 추가했습니다.`);
+      const account = accountLabel(created.marketplace_key, created.marketplace_account_id);
+      toast('등록 대기 목록에 추가', `${account} · 품목 ${created.items.length}개를 등록관리에 추가했습니다.`);
       // The Draft exists either way; only the Product it was made from may show it.
       if (seq !== state.draftSeq || state.productId !== id || created.product_group_id !== id) return;
       const items = new Map(product.items.map((item) => [item.item_id, item]));
@@ -793,7 +788,12 @@ function workspace(initialProduct, navigateTo) {
       draftResult.dataset.membershipRevision = created.membership_revision_id;
       draftResult.replaceChildren(
         h('div', { class: 'supplier-head-row' }, h('b', {}, '등록 대기 목록에 추가됨'), chip(`품목 ${created.items.length}개`, 'good')),
-        kv('판매 채널', marketplaceLabel(created.marketplace_key)),
+        h(
+          'div',
+          { class: 'kv', 'data-role': 'draft-account', 'data-account': created.marketplace_account_id },
+          h('span', {}, '판매 계정'),
+          h('b', {}, account),
+        ),
         kv('등록 방식', SHAPE_LABEL[created.listing_shape] ?? '—'),
         h(
           'table',

@@ -71,7 +71,7 @@ def test_the_registry_edits_one_layer_at_a_time_and_previews_the_composition(
         assert registry.locator(".registry-grid.roles .registry-item").count() == 5
         assert registry.locator(".registry-grid.policies .registry-item").count() == 3
         assert registry.locator(".registry-grid.tasks .registry-item").count() == 6
-        assert _card(page, BUNDLE) == "기본값"
+        assert _card(page, BUNDLE) == "v1 · 기본값"
         # AIF-2: the AI 기본 설정 card reads the ai capability from readiness: no provider.
         chip = page.locator("[data-role='ai-capability']")
         page.wait_for_function(
@@ -110,7 +110,7 @@ def test_the_registry_edits_one_layer_at_a_time_and_previews_the_composition(
             f"() => document.querySelector(\".registry-grid [data-prompt-key='{BUNDLE}'] em\")"
             "?.dataset.revision === '2'"
         )
-        assert _card(page, BUNDLE) == "수정됨"
+        assert _card(page, BUNDLE) == "v2 · 사용자 수정본"
 
         # The preview is the server's composition of the saved layers, runtime data left open.
         editor.locator("[data-layer-tab='preview']").click()
@@ -128,7 +128,7 @@ def test_the_registry_edits_one_layer_at_a_time_and_previews_the_composition(
             f"() => document.querySelector(\".registry-grid [data-prompt-key='{BUNDLE}'] em\")"
             "?.dataset.revision === '3'"
         )
-        assert _card(page, BUNDLE) == "기본값"
+        assert _card(page, BUNDLE) == "v3 · 기본값"
         assert len(writes) == 2
 
 
