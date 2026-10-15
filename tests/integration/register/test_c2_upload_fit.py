@@ -215,9 +215,15 @@ def _unit(
                 category_mapping_revision=stamped["category_mapping_revision"],
                 detail_composition_revision=composition,
                 after_service_telephone="02-000-0000",
-                duplicate_proof_required=False,
             ),
         )
+    )
+    # Owner ruling #219 6190407624: SmartStore duplicate checking stays on; the store answers
+    # "no match" here (synthetic, no provider).
+    from tests.support.register_support import FakeDuplicateLookup
+
+    container.registration_preparations._duplicate_lookup = FakeDuplicateLookup(
+        marketplace_key=marketplace
     )
     served._metadata = StaticRegistrationMetadata((metadata(),), marketplace_key=marketplace)
     served._capability = FakeCapability()

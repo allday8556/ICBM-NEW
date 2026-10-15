@@ -400,7 +400,9 @@ from an operator route on an applied or `UNKNOWN` Intent.)* execution stays `DRY
 prerequisite. The provider-evidence verdict stays `INSUFFICIENT` (ADR-0014 §17.2): this adoption
 needs no deterministic lookup and assumes none. The search is **never** a duplicate lookup —
 duplicate evidence stays fail-closed (`lookup.py`; ADR-0014 §13) — and an `UNKNOWN` CREATE is still
-never resent.
+never resent. *(Amendment note, ADR-0042 S3b: duplicate evidence is now the store-catalog snapshot
+of §4.1.2's S1a amendment, read by the catalog duplicate source `lookup.py` composes; the search
+remains no duplicate lookup and serves only as the positive spot check of the first CREATE copy.)*
 
 **Amendment note (M6-E, ADR-0024 §3).** The search's request shape also admits an owner-declared adoption code, so OPERATE can find a listing ICBM did not create by its seller code. The endpoint, its response contract, its retention and the mapping revision are unchanged. As for the reconcile lookup, only an exact `STOREFARM` candidate counts, and only an origin read-back carrying the same code and not `DELETE` proves it. An adoption is never a REGISTER registration and never a CREATE authorization.
 
@@ -468,9 +470,13 @@ What the catalog may conclude, and nothing more: a `COMPLETE` sync proves the pr
 read. A listing the catalog knows that a complete enumeration did not list is read by its origin
 read: `DELETE` or a 404 ends it (ADR-0023 §3), a live one makes the sync `INCOMPLETE` (the
 enumeration did not cover the store), and absence alone is only `NOT_SEEN`. A snapshot is never
-remote absence for ADR-0014 §10/§14/§28, never frees an `UNKNOWN` scope and, until S3b wires it
-under ADR-0042 §6, is no duplicate evidence either: `lookup.py` is unchanged and duplicate evidence
-stays fail-closed. **Adoption is a contract, never a call**: no provider is read until the bound
+remote absence for ADR-0014 §10/§14/§28 and never frees an `UNKNOWN` scope. Since S3b it is the
+SmartStore duplicate evidence of ADR-0042 §6 (`lookup.py` composes the catalog duplicate source),
+for a new Intent's duplicate preflight only: a `NO_MATCH` holds relative to a `COMPLETE`, fresh
+snapshot whose store coverage the seller has confirmed (§5.2), and a stale, missing or unconfirmed
+one is no evidence. The search itself stays positive-only; its one S3b use is the first CREATE
+copy's spot check, where an exact hit is a match and zero hits change nothing. **Adoption is a
+contract, never a call**: no provider is read until the bound
 store's committed CONNECT session exists, and the first real read of the owner's store waits for
 the owner's go-ahead (ADR-0042 §14).
 

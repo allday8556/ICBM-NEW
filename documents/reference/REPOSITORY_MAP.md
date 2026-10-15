@@ -274,11 +274,11 @@ two integration suites under `tests/integration/operate/`.
 | `integrations/` | 120 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 46 |  |
 | `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 462 | tests |
+| `tests/` | 463 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 195 | integration tests by runtime owner |
+| `tests/integration/` | 196 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
 | `tests/unit/` | 165 | unit tests by runtime owner |
 | `ui/` | 81 | operator clients: the served web client and the capture extension |

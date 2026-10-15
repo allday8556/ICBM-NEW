@@ -140,7 +140,7 @@ class CatalogDuplicateSource:
         mutation_started_at: Callable[[str, str], datetime | None],
         refresh: Callable[[], bool],
         spot: ReconcileLookup | None = None,
-        linked: Callable[[str, str], Mapping[str, str]] | None = None,
+        linked: Callable[[str, str], Mapping[str, str | Sequence[str]]] | None = None,
         coverage: CatalogCoverage | None = None,
         member_gtins: Callable[[Sequence[str]], Iterable[str]] | None = None,
         different: Callable[[str, str], Iterable[tuple[str, str]]] | None = None,
@@ -202,7 +202,9 @@ class CatalogDuplicateSource:
                 "mutation": None if mutation is None else mutation.isoformat(),
                 # A link moves an answer as much as a sync does (ADR-0042 §6, S2a); a failed
                 # read is its own state, never an empty set of links.
-                "links": None if links is None else sorted(links.items()),
+                "links": None
+                if links is None
+                else sorted([origin, sorted(groups)] for origin, groups in links.items()),
                 # The seller's coverage confirmation and 「다른 상품」 decisions move answers too.
                 "coverage": self._coverage_token(account),
                 "different": self._different_token(account),
@@ -245,16 +247,22 @@ class CatalogDuplicateSource:
             return None
         return {key for key in map(gtin_key, found) if key is not None}
 
-    def _links(self, account: str) -> Mapping[str, str] | None:
-        """The store's links (origin product → common product), ``{}`` when no links owner is
-        wired, and ``None`` when the owner failed to answer: a failed read is never "no link"."""
+    def _links(self, account: str) -> Mapping[str, frozenset[str]] | None:
+        """The store's links (origin product → **every** common product it is linked to, the one
+        its registration or adoption holds and any stored link still ACTIVE beside it), ``{}``
+        when no links owner is wired, and ``None`` when the owner failed to answer: a failed read
+        is never "no link"."""
         if self._linked is None:
             return {}
         try:
-            return self._linked(self._marketplace_key, account)
+            found = self._linked(self._marketplace_key, account)
         except Exception:
             logger.warning("operate.catalog_duplicate_links_failed", exc_info=True)
             return None
+        return {
+            origin: frozenset((groups,) if isinstance(groups, str) else groups)
+            for origin, groups in found.items()
+        }
 
     def check(
         self, unit: DuplicateUnit, *, spot_check: bool = False, resync: bool = True
@@ -307,7 +315,7 @@ class CatalogDuplicateSource:
         different = self._different_pairs(account) or set()
         found: dict[str, MatchedListing] = {}
         for listing in index:
-            if links.get(listing.origin_product_no) in groups:
+            if groups & links.get(listing.origin_product_no, frozenset()):
                 kind = DuplicateKeyKind.LISTING_LINK
             elif listing.codes & codes:
                 kind = DuplicateKeyKind.SELLER_CODE

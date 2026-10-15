@@ -42,7 +42,7 @@ def smartstore_duplicate_source(
     mutation_started_at: Callable[[str, str], datetime | None],
     caller: SmartStoreEndpointCaller,
     bearer: Any,
-    linked: Callable[[str, str], Mapping[str, str]] | None = None,
+    linked: Callable[[str, str], Mapping[str, str | Sequence[str]]] | None = None,
     coverage: CatalogCoverage | None = None,
     member_gtins: Callable[[Sequence[str]], Iterable[str]] | None = None,
     different: Callable[[str, str], Iterable[tuple[str, str]]] | None = None,

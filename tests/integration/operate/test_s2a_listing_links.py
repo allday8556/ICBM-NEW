@@ -408,6 +408,50 @@ def test_registrations_and_adoptions_read_as_links(
     assert owned.value.code == "STORE_LINK_LISTING_OWNED"
 
 
+def test_a_derived_link_never_hides_a_stored_link_that_still_holds_evidence(
+    container: Container, harness: Harness, source: FakeSource, sources: Collections
+) -> None:
+    """PR #370 audit: when a registration later holds a listing that is strongly linked to a
+    product with a supplier of its own, ``_supersede`` leaves that stored link ACTIVE (the seller
+    decides). ``linked_groups`` names both products, so the duplicate check of either still sees
+    the listing."""
+    stored_group = supplier_group(container, sources, "287", "국산 참기름 300ml")
+    registered_group = supplier_group(container, sources, "288", "생들기름 350ml")
+    source.put("101", fields("참기름", code="KM287"))
+    harness.sync()
+    assert harness.link_of("101").product_group_id == stored_group
+    harness.registered["101"] = registered_group
+    harness.sync()
+    assert rows(
+        container,
+        "SELECT product_group_id FROM store_listing_links WHERE state = 'ACTIVE'",
+    ) == [(stored_group,)]
+    assert harness.links.linked_groups(MARKET, ACCOUNT)["101"] == tuple(
+        sorted((stored_group, registered_group))
+    )
+    coverage = CatalogCoverage(catalog=harness.catalog, audit=container.audit)
+    view = coverage.view()
+    assert view.current is not None
+    coverage.confirm(run_id=view.current.run_id, actor="operator", correlation_id=CID)
+    duplicates = CatalogDuplicateSource(
+        marketplace_key=MARKET,
+        contract_version="fixture-duplicate/v1",
+        catalog=harness.catalog,
+        seller_code=lambda identity: f"ICBM-{identity}",
+        convention_codes=lambda items: (),
+        mutation_started_at=lambda key, account: None,
+        refresh=lambda: False,
+        linked=harness.links.linked_groups,
+        coverage=coverage,
+    )
+    for group in (stored_group, registered_group):
+        check = duplicates.check(
+            DuplicateUnit(MARKET, ACCOUNT, f"unit-{group}", group_ids=(group,))
+        )
+        assert check.evidence is not None and check.evidence.verdict is DuplicateVerdict.MATCH
+        assert [m.key_kind for m in check.matched] == [DuplicateKeyKind.LISTING_LINK]
+
+
 def test_one_listing_per_product_and_store(
     container: Container, harness: Harness, source: FakeSource, sources: Collections
 ) -> None:

@@ -65,6 +65,12 @@ STRONG_KEYS: frozenset[DuplicateKeyKind] = frozenset(
 CATALOG_MAX_AGE_MINUTES: Final = 60
 CATALOG_MAX_AGE: Final = timedelta(minutes=CATALOG_MAX_AGE_MINUTES)
 
+# Owner ruling (Issue #219 ``6190407624``): duplicate checking stays ON. For these marketplaces a
+# policy can never turn duplicate proof off: a new revision that tries is refused, a stored one
+# that holds ``false`` is read as ``true``, and the CREATE send path revalidates whatever a flag
+# says.
+DUPLICATE_PROOF_MANDATORY: Final = frozenset({"smartstore"})
+
 
 class FieldValueType(StrEnum):
     """The value type of one declared field (notice coverage S2). A value of another type is never
@@ -234,6 +240,11 @@ class TargetPolicy:
     # ADR-0042 §5.2: how long a COMPLETE store-catalog snapshot stays duplicate evidence, from its
     # start. A revision that names none reads the owner-decided 60 minutes.
     catalog_max_age: timedelta = CATALOG_MAX_AGE
+
+    def __post_init__(self) -> None:
+        # A stored revision holding ``false`` is never rewritten; it is only read as ``true``.
+        if self.marketplace_key in DUPLICATE_PROOF_MANDATORY and not self.duplicate_proof_required:
+            object.__setattr__(self, "duplicate_proof_required", True)
 
 
 class RegistrationMetadataSource(Protocol):

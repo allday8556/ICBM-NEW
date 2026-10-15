@@ -77,7 +77,7 @@ from app.stages.register.model import (
     publication_asset_kind,
     sanitized_digest,
 )
-from app.stages.register.policy import DuplicateKeyKind, Provenance
+from app.stages.register.policy import DUPLICATE_PROOF_MANDATORY, DuplicateKeyKind, Provenance
 from app.stages.register.preflight import CapabilityReader, RegistrationPreflightService
 from app.stages.register.preparation import (
     DUPLICATE_EVIDENCE_STALE,
@@ -136,6 +136,8 @@ DUPLICATE_RESYNC_WAIT: Final = "REGISTER_DUPLICATE_RESYNC_WAIT"
 DUPLICATE_RESYNC_WAIT_CAP: Final = timedelta(minutes=10)
 # ADR-0042 §6: a CREATE send refuses when no send-time duplicate revalidation is wired.
 DUPLICATE_REVALIDATION_NOT_WIRED: Final = "REGISTER_SEND_DUPLICATE_REVALIDATION_NOT_WIRED"
+# Owner ruling #219 6190407624: a SmartStore CREATE always has a duplicate check.
+DUPLICATE_CHECK_REQUIRED: Final = "REGISTER_SEND_DUPLICATE_CHECK_REQUIRED"
 EXECUTION_POLICY_VERSION: Final = "registration-execution-policy/v1"
 # The job states in which a CREATE job is still the queued work of its Intent (ADR-0005).
 ACTIVE_JOB_STATES: Final = (
@@ -791,7 +793,7 @@ class RegistrationExecutionService:
         # The owner-write fence, read before the final preflight is re-evaluated: the unit below
         # reads it again first, under the write coordinator, and refuses if any owner wrote in
         # between — so the send gate is still current at the mutation-start boundary (§4.3).
-        request = self._send_time_duplicates(request, generation)
+        request = self._send_time_duplicates(request, generation, intent.marketplace_key)
         truth_fence = self._authority.truth_fence()
         fresh = self._gate(intent, snapshot, request, prepared, generation)
         sanitized_request = self._sanitized_request(snapshot, fresh)
@@ -917,7 +919,7 @@ class RegistrationExecutionService:
     # ------------------------------------------------------------------ the send gate (§3)
 
     def _send_time_duplicates(
-        self, request: PreflightRequest, identity_generation: int
+        self, request: PreflightRequest, identity_generation: int, marketplace_key: str
     ) -> PreflightRequest:
         """ADR-0042 §6: freshness is checked again at send time, before anything is sent.
 
@@ -934,11 +936,19 @@ class RegistrationExecutionService:
                 DUPLICATE_REVALIDATION_NOT_WIRED,
                 "no send-time duplicate revalidation is wired; nothing is sent",
             )
-        if request.duplicate_evidence is None:
+        # Owner ruling #219 6190407624: for SmartStore the check runs whatever a flag says, so a
+        # request frozen without evidence is revalidated too (its fingerprint then refuses it).
+        mandatory = marketplace_key in DUPLICATE_PROOF_MANDATORY
+        if request.duplicate_evidence is None and not mandatory:
             return request
         candidate = self._preflight.candidate(request, identity_generation=identity_generation)
         check = self._duplicate_check(candidate)
         if check is None:
+            if mandatory:
+                raise ExecutionRefused(
+                    DUPLICATE_CHECK_REQUIRED,
+                    "this marketplace's CREATE is never sent without a duplicate check",
+                )
             return request
         if check.evidence is not None:
             return replace(request, duplicate_evidence=check.evidence)

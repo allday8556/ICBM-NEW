@@ -1241,23 +1241,48 @@ class ListingLinkService:
             if link.name is not None and needle in link.name.casefold()
         }
 
-    def linked_groups(self, marketplace_key: str, marketplace_account_id: str) -> dict[str, str]:
-        """origin product → its common product, for every link of the store (the catalog
-        duplicate source, ADR-0042 §6: a listing linked to the unit's product is a duplicate)."""
+    def linked_groups(
+        self, marketplace_key: str, marketplace_account_id: str
+    ) -> dict[str, tuple[str, ...]]:
+        """origin product → **every** common product it is linked to (the catalog duplicate
+        source, ADR-0042 §6: a listing linked to the unit's product is a duplicate).
+
+        A listing its registration or adoption holds keeps that derived link, and a stored link
+        ``_supersede`` could not end (a non-empty product of its own — the seller decides) stays
+        ACTIVE beside it. Both are evidence, so both are named: the derived link never hides a
+        stored one from the duplicate check."""
         store = self._store()
         if store is None or store != (marketplace_key, marketplace_account_id):
             return {}
         with self._db.read() as session:
-            listed = self._store_links(session, store)
+            stored = [
+                (str(listing), str(group))
+                for listing, group in session.execute(
+                    select(StoreListingLink.listing_id, StoreListingLink.product_group_id).where(
+                        StoreListingLink.state == ACTIVE,
+                        StoreListingLink.marketplace_key == store[0],
+                        StoreListingLink.marketplace_account_id == store[1],
+                    )
+                ).tuples()
+            ]
             origins = {
                 str(listing_id): str(origin)
                 for listing_id, origin in session.execute(
                     select(CatalogListing.listing_id, CatalogListing.origin_product_no).where(
-                        CatalogListing.listing_id.in_(sorted(listed))
+                        CatalogListing.listing_id.in_(sorted({lid for lid, _ in stored}))
                     )
                 ).tuples()
             }
-        return {str(origins[lid]): group for lid, group in listed.items() if lid in origins}
+        found: dict[str, set[str]] = {}
+        for listing_id, group in stored:
+            if listing_id in origins:
+                found.setdefault(origins[listing_id], set()).add(group)
+        # Both derived owners, not the one ``_derived`` lets win: neither group is dropped.
+        for origin, group in self._adopted(store[0]).items():
+            found.setdefault(origin, set()).add(group)
+        for origin, group in self._registered(*store).items():
+            found.setdefault(origin, set()).add(group)
+        return {origin: tuple(sorted(groups)) for origin, groups in sorted(found.items())}
 
     def different_pairs(
         self, marketplace_key: str, marketplace_account_id: str

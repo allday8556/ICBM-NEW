@@ -62,6 +62,7 @@ from app.stages.register.model import RegistrationConflictError, canonical_json,
 from app.stages.register.policy import (
     CATALOG_MAX_AGE,
     CATALOG_MAX_AGE_MINUTES,
+    DUPLICATE_PROOF_MANDATORY,
     AssetPolicy,
     DeliveryPolicy,
     DuplicateKeyKind,
@@ -79,6 +80,8 @@ MAX_TEMPLATES: Final = 32
 AFTER_SERVICE_TELEPHONE: Final = re.compile(r"0[0-9]{1,2}-[0-9]{3,4}-[0-9]{4}|1[0-9]{3}-[0-9]{4}")
 
 TARGET_POLICY_INVALID: Final = "TARGET_POLICY_INVALID"
+# Owner ruling #219 6190407624: duplicate checking stays on for SmartStore.
+TARGET_POLICY_DUPLICATE_PROOF_REQUIRED: Final = "TARGET_POLICY_DUPLICATE_PROOF_REQUIRED"
 TARGET_POLICY_PRICING_CONTEXT_INVALID: Final = "TARGET_POLICY_PRICING_CONTEXT_INVALID"
 TARGET_POLICY_UNSAFE_CONTENT: Final = "TARGET_POLICY_UNSAFE_CONTENT"
 TARGET_POLICY_ACCOUNT_UNKNOWN: Final = "TARGET_POLICY_ACCOUNT_UNKNOWN"
@@ -328,6 +331,13 @@ def encode_content(
                     "a positive provider address-book id is required",
                     f"delivery_policy.{name}",
                 )
+    if marketplace_key in DUPLICATE_PROOF_MANDATORY and not inputs.duplicate_proof_required:
+        raise _invalid(
+            TARGET_POLICY_DUPLICATE_PROOF_REQUIRED,
+            "스마트스토어는 중복 확인을 끌 수 없습니다. 이미 스토어에 있는 상품을 다시 등록하지"
+            " 않도록 등록할 때마다 스토어 상품과 비교합니다.",
+            "duplicate_proof_required",
+        )
     keys = [key.value for key in inputs.duplicate_lookup_keys]
     if len(set(keys)) != len(keys):
         raise _invalid(

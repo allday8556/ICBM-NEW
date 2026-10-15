@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 
+from app.platform.db.migrate import head_revision
 from automation.acceptance.common.checkout import Checkout
 from automation.acceptance.m5.harness.root import MARKER, REPORT
 
@@ -192,7 +193,8 @@ def test_a_fresh_root_passes_every_check(accepted: Accepted) -> None:
     assert report["checks_passed"] == report["checks_total"] >= 50
     assert report["mode"] == "OFFLINE_SYNTHETIC" and report["claim"].startswith("HARNESS_RUN")
     assert report["execution_mode"] == "DRY_RUN"
-    assert report["database_revision"] == "0067_store_catalog"
+    # The schema head, never a pinned label: a later migration must not leave this test stale.
+    assert report["database_revision"] == head_revision() == "0068_store_listing_links"
 
 
 @pytest.mark.parametrize("names", REQUIRED_CHECKS.values(), ids=REQUIRED_CHECKS.keys())
