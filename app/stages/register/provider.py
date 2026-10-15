@@ -24,7 +24,7 @@ from typing import Any, Protocol, runtime_checkable
 from app.platform.core.errors import ErrorClass
 from app.stages.connect.marketplace.capability import RemoteOutcome
 from app.stages.register.policy import CATALOG_MAX_AGE, DuplicateKeyKind
-from app.stages.register.preparation import DuplicateEvidence, PreparedAsset
+from app.stages.register.preparation import DuplicateEvidence, PreflightResult, PreparedAsset
 
 
 @dataclass(frozen=True)
@@ -68,6 +68,25 @@ class DuplicateCheck:
     as_of: datetime | None = None
     resyncing: bool = False
     matched: tuple[MatchedListing, ...] = ()
+    # Set only when the snapshot is stale **because** an ICBM mutation of the store started at or
+    # after its start (it is otherwise still within its age bound): that mutation's start. The
+    # CREATE send path waits for the re-sync then, instead of refusing (ADR-0042 §5.2).
+    stale_since_mutation: datetime | None = None
+
+
+def duplicate_unit(candidate: PreflightResult) -> DuplicateUnit:
+    """The duplicate question one evaluated unit asks: its scope, Items, name and the target
+    policy's store-snapshot bound."""
+    unit = candidate.resolved
+    name = candidate.request.listing.name
+    return DuplicateUnit(
+        marketplace_key=unit.marketplace_key,
+        marketplace_account_id=unit.marketplace_account_id,
+        listing_identity=unit.listing_identity,
+        item_ids=tuple(unit.unit_item_ids),
+        listing_name=None if name is None else str(name.value),
+        max_age=unit.target.catalog_max_age,
+    )
 
 
 @runtime_checkable
@@ -79,10 +98,20 @@ class DuplicateLookupSource(Protocol):
         snapshot exists for the bound account. ``False`` keeps the caller fail-closed."""
         ...
 
-    def check(self, unit: DuplicateUnit, *, spot_check: bool = False) -> DuplicateCheck:
+    def check(
+        self, unit: DuplicateUnit, *, spot_check: bool = False, resync: bool = True
+    ) -> DuplicateCheck:
         """The current evidence of one unit, or none with the reason. Never a fabricated
         ``NO_MATCH``. ``spot_check`` adds the positive-only seller-code search of the first
-        CREATE copy (ADR-0042 §6): a hit is a match, zero hits change nothing."""
+        CREATE copy (ADR-0042 §6): a hit is a match, zero hits change nothing. ``resync=False``
+        reads without asking for the automatic re-sync (a background reader such as the review
+        producer)."""
+        ...
+
+    def truth_token(self, marketplace_account_id: str, max_age: timedelta) -> str:
+        """Everything this owner's answers for the account depend on now, besides the unit's own
+        inputs: it moves whenever an answer could (a new COMPLETE sync, a freshness change, an
+        ICBM mutation of the store)."""
         ...
 
 
@@ -265,4 +294,5 @@ __all__ = [
     "ReadbackSource",
     "ReconcileLookup",
     "WireProjector",
+    "duplicate_unit",
 ]

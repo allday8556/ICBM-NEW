@@ -41,7 +41,7 @@ import threading
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Final
 
 from app.stages.operate.catalog.service import FRESH, STALE, CatalogRunView, StoreCatalogService
@@ -143,23 +143,46 @@ class CatalogDuplicateSource:
         )
         return state == FRESH
 
-    def check(self, unit: DuplicateUnit, *, spot_check: bool = False) -> DuplicateCheck:
+    def truth_token(self, marketplace_account_id: str, max_age: timedelta) -> str:
+        account = self._catalog.account()
+        if account is None or account != marketplace_account_id:
+            return sanitized_digest({"account": None})
+        mutation = self._mutation_started_at(self._marketplace_key, account)
+        state, run = self._catalog.freshness(max_age=max_age, mutation_started_at=mutation)
+        return sanitized_digest(
+            {
+                "contract": self._contract_version,
+                "state": state,
+                "run": None if run is None else run.run_id,
+                "mutation": None if mutation is None else mutation.isoformat(),
+            }
+        )
+
+    def check(
+        self, unit: DuplicateUnit, *, spot_check: bool = False, resync: bool = True
+    ) -> DuplicateCheck:
         account = self._catalog.account()
         if unit.marketplace_key != self._marketplace_key or account is None:
             return DuplicateCheck(None, DUPLICATE_EVIDENCE_UNAVAILABLE)
         if account != unit.marketplace_account_id:
             # The catalog is the bound store's; another account's unit has no snapshot here.
             return DuplicateCheck(None, DUPLICATE_EVIDENCE_UNAVAILABLE)
-        state, run = self._catalog.freshness(
-            max_age=unit.max_age,
-            mutation_started_at=self._mutation_started_at(self._marketplace_key, account),
-        )
+        mutation = self._mutation_started_at(self._marketplace_key, account)
+        state, run = self._catalog.freshness(max_age=unit.max_age, mutation_started_at=mutation)
         if state != FRESH or run is None:
+            # Stale only because ICBM itself changed the store since the sync started: the CREATE
+            # send path waits for the re-sync then (ADR-0042 §5.2).
+            by_mutation = (
+                state == STALE
+                and mutation is not None
+                and self._catalog.freshness(max_age=unit.max_age)[0] == FRESH
+            )
             return DuplicateCheck(
                 None,
                 DUPLICATE_EVIDENCE_STALE if state == STALE else DUPLICATE_EVIDENCE_UNAVAILABLE,
                 as_of=None if run is None else run.as_of,
-                resyncing=self._resync(),
+                resyncing=self._resync() if resync else False,
+                stale_since_mutation=mutation if by_mutation else None,
             )
         try:
             own = self._seller_code(unit.listing_identity)

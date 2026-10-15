@@ -4,9 +4,8 @@ The component runs in the installed browser, inside the application page; every 
 is answered in-process, and the override call is answered by a stub. Proven, with synthetic units:
 - 「중복 없음 · <time> 동기화 기준」 for a NO_MATCH;
 - 「스토어 다시 확인 중…」 with the last complete sync time while the automatic re-sync runs;
-- a real match shows 「이미 스토어에 있는 상품: …」 with its listing, 「같은 상품으로 연결」
-  shown but not yet offered, and 「의도적으로 한 번 더 등록」, which asks for a reason and
-  posts it;
+- a real match shows 「이미 스토어에 있는 상품: …」 with its listing and 「의도적으로 한 번
+  더 등록」, which asks for a reason and posts it; 「같은 상품으로 연결」 is not shown before S2a;
 - a recorded override reads 「한 번 더 등록하기로 함」 with 「되돌리기」;
 - the words are plain Korean: every code stays in a data-* attribute.
 """
@@ -172,8 +171,9 @@ def test_a_real_match_blocks_with_the_sellers_choices(
     _plain(text)
     row = "#probe-MATCH"
     assert opened.locator(f"{row} [data-key-kind='SELLER_CODE']").count() == 1
-    link = opened.locator(f"{row} [data-action='duplicate-link']")
-    assert link.inner_text() == "같은 상품으로 연결" and link.is_disabled()
+    # Linking is S2a's: no inert button stands in for it.
+    assert opened.locator(f"{row} [data-action='duplicate-link']").count() == 0
+    assert "같은 상품으로 연결" not in text
     again = opened.locator(f"{row} [data-action='duplicate-override']")
     assert again.inner_text() == "의도적으로 한 번 더 등록" and again.is_enabled()
     again.click()

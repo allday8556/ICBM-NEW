@@ -177,15 +177,18 @@ def test_a_current_preparation_candidate_is_indexed_by_reference(
     made = prepared(api, app_container, config)
     container = app_container
     passes(container)
-    # What the owner derives now, through the one path Registration Management uses.
-    candidate = container.registration_preparations.evaluate(made["preparation_id"])
+    # What the owner derives now, through the one path Registration Management uses (since
+    # ADR-0042 S3b with the duplicate owner's current answer: this store was never synced).
+    candidate, _ = container.registration_preparations.evaluate_current(
+        made["preparation_id"], resync=False
+    )
     review = {r for r in candidate.reasons if r.status is ReadinessStatus.REVIEW_REQUIRED}
     assert any(r.code.startswith("M4_BASE.") for r in review)  # present, and not indexed here
     expected = {
         ("REGISTRATION_ERROR", r.subject or "preflight", r.code) for r in review if indexed(r.code)
     }
     assert UNOWNED in expected
-    assert ("REGISTRATION_ERROR", "duplicate", "DUPLICATE_EVIDENCE_MISSING") in expected
+    assert ("REGISTRATION_ERROR", "duplicate", "DUPLICATE_EVIDENCE_UNAVAILABLE") in expected
     assert keys(config, PREFLIGHT_PRODUCER) == expected
     # Stated independently of the mapping: no verbatim M4 re-emission is indexed a second time.
     assert not [r for _, _, r in keys(config, PREFLIGHT_PRODUCER) if r.startswith("M4_BASE.")]

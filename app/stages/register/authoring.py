@@ -21,6 +21,7 @@ copy of a preparation revision, never the authoring truth, and nothing here need
 import logging
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from datetime import timedelta
 from typing import Any, Final, Protocol
 
 from sqlalchemy.exc import IntegrityError
@@ -80,8 +81,8 @@ from app.stages.register.preparation import (
 from app.stages.register.provider import (
     DuplicateCheck,
     DuplicateLookupSource,
-    DuplicateUnit,
     PreparedAssetSource,
+    duplicate_unit,
 )
 from app.stages.register.sanitize import require_clean
 from app.stages.register.store import (
@@ -865,7 +866,7 @@ class RegistrationPreparationService:
         return self._preflight.candidate(request)
 
     def evaluate_current(
-        self, preparation_id: str
+        self, preparation_id: str, *, resync: bool = True
     ) -> tuple[PreflightResult, DuplicateCheck | None]:
         """The candidate the seller sees (ADR-0042 §0 a4): with a duplicate-proof policy it is
         evaluated with what the duplicate-evidence owner holds now — the evidence of a COMPLETE,
@@ -873,7 +874,7 @@ class RegistrationPreparationService:
         re-sync started). A local read: no provider is called here.
         """
         candidate = self.evaluate(preparation_id)
-        check = self.duplicate_check(candidate)
+        check = self.duplicate_check(candidate, resync=resync)
         if check is None:
             return candidate, None
         return (
@@ -886,26 +887,19 @@ class RegistrationPreparationService:
         )
 
     def duplicate_check(
-        self, candidate: PreflightResult, *, spot_check: bool = False
+        self, candidate: PreflightResult, *, spot_check: bool = False, resync: bool = True
     ) -> DuplicateCheck | None:
         """The duplicate-evidence owner's current answer for one evaluated unit, or ``None`` when
         the policy requires no duplicate proof or no owner is wired."""
         source = self._duplicate_lookup
         if source is None or not candidate.resolved.target.duplicate_proof_required:
             return None
-        unit = candidate.resolved
-        name = candidate.request.listing.name
-        return source.check(
-            DuplicateUnit(
-                marketplace_key=unit.marketplace_key,
-                marketplace_account_id=unit.marketplace_account_id,
-                listing_identity=unit.listing_identity,
-                item_ids=tuple(unit.unit_item_ids),
-                listing_name=None if name is None else str(name.value),
-                max_age=unit.target.catalog_max_age,
-            ),
-            spot_check=spot_check,
-        )
+        return source.check(duplicate_unit(candidate), spot_check=spot_check, resync=resync)
+
+    def duplicate_truth(self, marketplace_account_id: str, max_age: timedelta) -> str | None:
+        """The duplicate owner's truth token for one account, or ``None`` when none is wired."""
+        source = self._duplicate_lookup
+        return None if source is None else source.truth_token(marketplace_account_id, max_age)
 
     # ------------------------------------------------------------------ DuplicateOverride (§13)
 

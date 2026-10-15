@@ -1244,6 +1244,8 @@ def build_container(
         projection=smartstore_product.project,
         clock=clock,
         authority=safety_stack,
+        # ADR-0042 §6: the send-time freshness check reads the same duplicate owner.
+        duplicate_check=registration_preparations.duplicate_check,
     )
     bulk_registration = BulkRegistrationService(db, jobs, clock)
     registry.register(

@@ -223,8 +223,9 @@ search and origin read gained the catalog request and retention (`s1a-store-cata
 ADR-0042 S3b added the catalog duplicate source `app/stages/operate/catalog/duplicates.py`
 (REGISTER's SmartStore duplicate evidence, read from the store's COMPLETE, fresh catalog
 snapshot; `integrations/marketplaces/smartstore/lookup.py` now composes it with the positive spot
-check), the editor's duplicate row `ui/web/js/components/duplicate-row.js` and two integration
-suites; `catalog_max_age` moved into the target policy.
+check), the editor's duplicate row `ui/web/js/components/duplicate-row.js` and three integration
+suites; `catalog_max_age` moved into the target policy, and a CREATE re-checks the snapshot at
+send time, waiting for the re-sync after ICBM's own change.
 
 | path | files | role |
 | --- | --- | --- |
@@ -256,11 +257,11 @@ suites; `catalog_max_age` moved into the target policy.
 | `integrations/` | 120 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 46 |  |
 | `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 450 | tests |
+| `tests/` | 451 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 186 | integration tests by runtime owner |
+| `tests/integration/` | 187 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
 | `tests/unit/` | 162 | unit tests by runtime owner |
 | `ui/` | 77 | operator clients: the served web client and the capture extension |

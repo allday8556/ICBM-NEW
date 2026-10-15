@@ -610,3 +610,45 @@ def test_the_pre_registration_sync_starts_by_itself_but_never_hammers_a_failing_
     clock.advance(61 * 60)
     assert scheduler.refresh_for_registration() is True
     assert requested == [PRE_REGISTRATION] * 3
+
+
+def test_the_review_queue_reads_the_same_duplicate_answer_and_its_token_moves_with_it(
+    api: TestClient,  # noqa: F811
+    container: Container,  # noqa: F811
+    config: AppConfig,
+) -> None:
+    """The queue never shows 「중복 확인 근거 없음」 while the editor shows 「중복 없음」:
+    the review producer evaluates with the duplicate owner's current answer, and its truth token
+    carries that owner's state, so a completed sync or a snapshot going stale re-derives the
+    queue."""
+    from app.capabilities.review.preflight_producer import PreflightReviewProducer
+
+    unit = authored(api, container, config)
+    store = Store(container, unit["account"])
+    producer = PreflightReviewProducer(
+        registrations=container.registrations,
+        preparations=container.registration_preparations,
+        preflight=container.registration_preflight,
+        readiness=container.product_readiness,
+        audit=container.audit,
+    )
+    scope = {"preparation_id": unit["preparation_id"]}
+
+    def codes() -> set[str]:
+        return {condition.reason_code for condition in producer.derive(scope)}
+
+    before = producer.truth_token()
+    refreshes = store.refreshes
+    assert DUPLICATE_EVIDENCE_UNAVAILABLE in codes()
+    assert "DUPLICATE_EVIDENCE_MISSING" not in codes()
+    # A background reader never starts the store re-sync.
+    assert store.refreshes == refreshes
+    store.sync()
+    synced = producer.truth_token()
+    assert synced != before
+    assert not {code for code in codes() if code.startswith("DUPLICATE_EVIDENCE")}
+    assert _row(api, unit)["duplicate"]["state"] == "NO_MATCH"
+    # Going stale moves the token too; a STALE reason is the owner's verdict, never review work.
+    store.clock.advance(61 * 60)
+    assert producer.truth_token() != synced
+    assert not {code for code in codes() if code.startswith("DUPLICATE_EVIDENCE")}

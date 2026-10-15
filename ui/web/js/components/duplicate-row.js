@@ -5,9 +5,9 @@
 //
 // - 「중복 없음 · 14:02 동기화 기준」 when the snapshot shows no matching store listing;
 // - 「스토어 다시 확인 중…」 while the automatic re-sync runs, with 「다시 보기」 to read it again;
-// - 「이미 스토어에 있는 상품: …」 with the seller's choices when a store listing matches:
-//   「같은 상품으로 연결」 (store-listing links arrive with the next step and are shown, not offered)
-//   and 「의도적으로 한 번 더 등록」, which records the seller's reason and can be undone.
+// - 「이미 스토어에 있는 상품: …」 with the seller's choice when a store listing matches:
+//   「의도적으로 한 번 더 등록」, which records the seller's reason and can be undone. Linking
+//   the listing as the same product (「같은 상품으로 연결」) is S2a's and is not shown until then.
 // The last complete sync time is always shown beside any result (SCP-07).
 
 import { ApiError, sendJson } from '../core/api.js';
@@ -124,7 +124,6 @@ function matchBlock(unit, duplicate, reload) {
         }),
       ]
     : [
-        h('button', { type: 'button', class: 'btn', disabled: true, 'data-action': 'duplicate-link', title: '스토어 상품 연결은 다음 업데이트에서 열립니다' }, '같은 상품으로 연결'),
         (() => {
           const again = h('button', { type: 'button', class: 'btn', 'data-action': 'duplicate-override' }, '의도적으로 한 번 더 등록');
           again.disabled = !editable;
@@ -135,7 +134,7 @@ function matchBlock(unit, duplicate, reload) {
   return [
     h('div', {}, h('b', {}, '이미 스토어에 있는 상품:')),
     h('ul', { class: 'duplicate-matches' }, ...duplicate.matches.map(matchLine)),
-    chosen ? null : h('div', { class: 'mini' }, '같은 상품을 두 번 등록하지 않도록 등록을 멈췄습니다. 같은 상품으로 연결하는 기능은 다음 업데이트에서 열립니다.'),
+    chosen ? null : h('div', { class: 'mini' }, '같은 상품을 두 번 등록하지 않도록 등록을 멈췄습니다. 다른 상품이라면 이유를 적고 한 번 더 등록할 수 있습니다.'),
     h('div', { class: 'row' }, ...choices),
   ];
 }

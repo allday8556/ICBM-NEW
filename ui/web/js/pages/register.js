@@ -205,6 +205,10 @@ export const REASON_COPY = {
   DUPLICATE_EVIDENCE_UNAVAILABLE: '스토어 상품을 아직 확인하지 못해 중복 여부를 알 수 없습니다.',
   PROVIDER_DUPLICATE_FOUND: '이미 스토어에 같은 판매자코드의 상품이 있습니다.',
   PROVIDER_DUPLICATE_WEAK_SIGNAL: '스토어에 상품명이 같은 상품이 있습니다. 같은 상품인지 확인해 주세요.',
+  // ADR-0042 S3b at send time: the store is checked again before a CREATE is sent.
+  REGISTER_DUPLICATE_RESYNC_WAIT: '앞 상품 등록 후 스토어를 다시 확인하는 중입니다. 확인이 끝나면 자동으로 이어서 등록합니다.',
+  REGISTER_SEND_DUPLICATE_EVIDENCE_STALE: '스토어 확인이 오래되어 등록을 보내지 않았습니다. 스토어를 다시 확인한 뒤 다시 등록해 주세요.',
+  REGISTER_SEND_DUPLICATE_EVIDENCE_UNAVAILABLE: '스토어 상품을 확인하지 못해 등록을 보내지 않았습니다. 스토어 확인이 끝난 뒤 다시 등록해 주세요.',
   // ADR-0033 §8: a resolved top or bottom notice the unit's composition does not place. Since G5
   // the SmartStore composition (v3) places both; an older composition revision does not.
   PUBLICATION_GUIDANCE_UNPLACED: '이 상품의 상세페이지 구성은 상·하단 공지를 넣지 못합니다. 등록 정책을 다시 저장한 뒤 준비 내용을 저장하면 공지가 들어갑니다. 이 상품에서 그 공지를 끄면 이 사유는 사라집니다.',

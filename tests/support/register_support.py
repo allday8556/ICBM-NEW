@@ -165,7 +165,12 @@ class FakeDuplicateLookup:
     def available(self) -> bool:
         return self.available_result
 
-    def check(self, unit: DuplicateUnit, *, spot_check: bool = False) -> DuplicateCheck:
+    def truth_token(self, marketplace_account_id: str, max_age: Any) -> str:
+        return f"fake:{self.available_result}:{self.return_none}"
+
+    def check(
+        self, unit: DuplicateUnit, *, spot_check: bool = False, resync: bool = True
+    ) -> DuplicateCheck:
         # An unavailable source has nothing to read: it is never asked for a unit's evidence.
         if not self.available_result:
             return DuplicateCheck(None, "DUPLICATE_EVIDENCE_UNAVAILABLE")

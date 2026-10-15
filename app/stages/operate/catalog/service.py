@@ -18,6 +18,9 @@
      cadence). Every listing is then re-read about every 20 hours, inside the 24-hour bound,
      without bursts;
    - 「지금 동기화」 (``OPERATOR``) re-reads every listing, under the same pacing;
+   - the automatic pre-registration re-sync (``PRE_REGISTRATION``, ADR-0042 §5.2) waits on a
+     registration, so it reads the new listings and only those already past the 20-hour refresh
+     period — never the rolling budget;
    - a listing the catalog knows that the enumeration did **not** list is read for provider
      evidence of its end: the sale status ``DELETE`` or a 404 ends it (SCP-08). Absence alone
      never does — it is only ``NOT_SEEN`` (「스토어에서 확인 안 됨」).
@@ -392,7 +395,7 @@ class StoreCatalogService:
             self._shapes = (ShapeRecorder(), ShapeRecorder()) if full else None
             run_id = self._start(account, trigger, correlation_id, full)
             try:
-                return self._pass(run_id, account, full)
+                return self._pass(run_id, account, full, minimal=trigger == PRE_REGISTRATION)
             except BaseException:
                 self._finish(run_id, INTERRUPTED, SYNC_INTERRUPTED)
                 raise
@@ -400,7 +403,9 @@ class StoreCatalogService:
             self._shapes = None
             self._lock.release()
 
-    def _pass(self, run_id: str, account: str, full: bool) -> CatalogRunView:
+    def _pass(
+        self, run_id: str, account: str, full: bool, *, minimal: bool = False
+    ) -> CatalogRunView:
         if not self._source.available():
             return self._finish(run_id, UNAVAILABLE, "SMARTSTORE_SESSION_UNAVAILABLE")
         enumeration = self._source.enumerate(
@@ -424,7 +429,15 @@ class StoreCatalogService:
             ((lid, entry) for lid, entry in listed if lid in read_at),
             key=lambda pair: (read_at[pair[0]], pair[1].origin_product_no),
         )
-        refresh = known if full else known[: refresh_budget(len(listed), self._interval_s)]
+        if full:
+            refresh = known
+        elif minimal:
+            # The pre-registration re-sync (ADR-0042 §5.2) waits on a registration: it reads the
+            # new listings and only those overdue for their rolling refresh, never the budget.
+            overdue = self._clock.now() - REFRESH_PERIOD
+            refresh = [pair for pair in known if read_at[pair[0]] < overdue]
+        else:
+            refresh = known[: refresh_budget(len(listed), self._interval_s)]
         unseen = self._unseen(account, listed_ids)
         targets: list[tuple[str, str, CatalogEntry | None]] = [
             (lid, entry.origin_product_no, entry) for lid, entry in [*new, *refresh]
