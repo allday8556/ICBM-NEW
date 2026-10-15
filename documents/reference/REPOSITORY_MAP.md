@@ -266,11 +266,6 @@ two integration suites under `tests/integration/operate/`.
 | `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 189 | integration tests by runtime owner |
-| `tests/` | 453 | tests |
-| `tests/contracts/` | 21 | repository-rule and document-contract tests |
-| `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
-| `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 189 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
 | `tests/unit/` | 162 | unit tests by runtime owner |
 | `ui/` | 78 | operator clients: the served web client and the capture extension |
