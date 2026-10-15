@@ -53,7 +53,8 @@ export function targetedPanel(options) {
   const host = h('div', { class: role, 'data-role': role, 'data-product': productGroupId }, button, body);
   let account = options.target ?? null;
   let busy = false;
-  const copy = (error) => (error instanceof ApiError ? errorCopy[error.error?.code] ?? error.message : String(error));
+  // Never the server's English message (2026-10-15): its code's wording, or a Korean sentence.
+  const copy = (error) => (error instanceof ApiError ? errorCopy[error.error?.code] : null) ?? '요청을 처리하지 못했습니다. 잠시 뒤 다시 시도하고, 계속되면 화면을 새로 고쳐 주세요.';
 
   function show(view) {
     const ready = view.ai_capability?.status === 'READY' && account !== null;

@@ -30,9 +30,9 @@ const AUTO_STATUS_COPY = {
 // then the detail body, each in the source page order.
 const OUTPUT_ORDER = ['REPRESENTATIVE', 'ADDITIONAL', 'DETAIL'];
 
+// A refusal is never shown as the server's English message or its code (2026-10-15).
 function errorText(error) {
-  if (error instanceof ApiError) return `${error.message} (${error.error?.code ?? error.status})`;
-  return String(error?.message ?? error);
+  return /[가-힣]/.test(error?.message ?? '') && !(error instanceof ApiError) ? error.message : '요청을 처리하지 못했습니다. 잠시 뒤 다시 시도하고, 계속되면 화면을 새로 고쳐 주세요.';
 }
 
 function key(role, ordinal) {

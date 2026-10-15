@@ -49,8 +49,9 @@ export function nameResult(view) {
 }
 
 function errorCopy(error) {
-  if (error instanceof ApiError) return ERROR_COPY[error.error?.code] ?? error.message;
-  return String(error);
+  // Never the server's English message (2026-10-15): its code's wording, or a Korean sentence.
+  if (error instanceof ApiError) return ERROR_COPY[error.error?.code] ?? '요청을 처리하지 못했습니다. 잠시 뒤 다시 시도하고, 계속되면 화면을 새로 고쳐 주세요.';
+  return '요청을 처리하지 못했습니다. 잠시 뒤 다시 시도하고, 계속되면 화면을 새로 고쳐 주세요.';
 }
 
 // One recorded result as the operator reads it: the recommendation and its state chips.

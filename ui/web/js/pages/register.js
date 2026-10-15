@@ -24,6 +24,8 @@ import { KIND_LABEL } from '../components/review-counts.js';
 import { READ_STATE_TONE } from '../components/registration-status.js';
 import { itemImagesEditor } from '../components/item-images.js';
 import { listingSyncPanel } from '../components/listing-sync.js';
+import { categoryPicker } from '../components/category-picker.js';
+import { freshProductFacts, unitFacts, unitProductName } from '../components/product-facts.js';
 import { duplicateRow } from '../components/duplicate-row.js';
 
 const SCREEN = '/api/v1/screens/register';
@@ -249,7 +251,59 @@ export const REASON_COPY = {
   LIVE_ASSET_REPLAY_KEY_UNDETERMINABLE: '업로드 대상을 식별할 수 없습니다.',
   LIVE_ASSET_CANDIDATE_NOT_READY: '이미지 등록 준비가 완료되지 않았습니다.',
   LIVE_ASSET_CANDIDATE_DRIFT: '실행 권한 발급 이후 후보가 바뀌었습니다.',
+  // 2026-10-15 usability check: a category without reviewed requirements (ADR-0042 will prepare
+  // them automatically), and the refusals of the authoring reads.
+  REGISTER_CATEGORY_METADATA_MISSING:
+    '이 카테고리는 아직 등록 정보(필수 항목·고시)가 준비되지 않았습니다. 설정 › 상품/카테고리에서 준비하거나 다른 카테고리를 선택하세요.',
+  CATEGORY_METADATA_MISSING:
+    '이 카테고리는 아직 등록 정보(필수 항목·고시)가 준비되지 않았습니다. 설정 › 상품/카테고리에서 준비하거나 다른 카테고리를 선택하세요.',
+  CATEGORY_METADATA_UNREVIEWED: '이 카테고리의 등록 정보가 아직 검토되지 않았습니다. 설정 › 상품/카테고리에서 검토하세요.',
+  REGISTER_DRAFT_NOT_FOUND: '이 등록 초안을 찾을 수 없습니다. 등록관리에서 다시 열어 주세요.',
+  CATEGORY_CATALOG_MISSING: '카테고리 목록이 아직 없습니다. 설정 › 상품/카테고리에서 카테고리 목록을 동기화하세요.',
+  CATEGORY_TAXONOMY_NOT_CURRENT: '카테고리 목록이 바뀌었습니다. 카테고리를 다시 선택하세요.',
+  CATEGORY_NOT_CURRENT_LEAF: '지금 카테고리 목록에 없는 카테고리입니다. 카테고리를 다시 선택하세요.',
+  // What a CREATE job that stopped says, in the operator's words (the read state stays the server's).
+  REGISTER_SEND_PREFLIGHT_NOT_READY:
+    '보내기 직전에 다시 확인했더니 등록 준비가 더 이상 「등록 가능」이 아닙니다. 등록 준비 확인을 다시 해 주세요.',
+  REGISTER_SEND_FINGERPRINT_DRIFT: '등록 내용을 확정한 뒤 상품 정보가 바뀌었습니다. 준비 내용을 다시 확인하고 확정해 주세요.',
+  REGISTER_SEND_ASSET_DRIFT: '확정한 뒤 이미지가 바뀌었습니다. 준비 내용을 다시 확인하고 확정해 주세요.',
+  REGISTER_WIRE_NOT_SENDABLE: '마켓에 보낼 내용에 빈 칸이 있어 보내지 않았습니다. 미리보기에서 빈 칸을 확인하세요.',
+  REGISTER_SEND_SCOPE_MISMATCH: '이 상품의 판매 계정이 전송 범위와 맞지 않아 보내지 않았습니다.',
+  REGISTER_SEND_REQUEST_VERSION: '전송 요청 형식이 지금 서버와 맞지 않아 보내지 않았습니다. 등록 내용을 다시 확정해 주세요.',
+  REGISTER_SNAPSHOT_MISSING: '확정한 등록 내용을 찾을 수 없어 보내지 않았습니다.',
+  REGISTER_NOT_SENDABLE: '지금 상태에서는 보낼 수 없습니다.',
+  REGISTER_INTENT_RESERVED_BY_BULK: '일괄 등록이 이 상품을 처리하고 있습니다.',
+  REGISTER_UNKNOWN_REQUIRES_RECONCILE: '이전 전송 결과를 모르는 상태라 다시 보내지 않고 등록 여부부터 확인합니다.',
+  REGISTER_UNRESOLVED_CONFLICT: '같은 상품의 다른 등록 요청이 남아 있어 보내지 않았습니다.',
+  REGISTER_CREATE_NOT_ADOPTED: '상품 등록 연동이 아직 준비되지 않았습니다.',
+  REGISTER_CREATE_FAILED: '마켓이 상품 등록을 받지 않았습니다.',
+  REGISTER_OUTCOME_UNKNOWN: '전송 결과를 확인하지 못했습니다. 다시 보내지 않고 등록 여부를 확인합니다.',
+  SMARTSTORE_SESSION_UNAVAILABLE: '스마트스토어 연결(인증)이 준비되지 않았습니다. 설정에서 계정 연결을 확인하세요.',
+  SMARTSTORE_CREATE_WIRE_NOT_SENDABLE: '마켓에 보낼 내용에 빈 칸이 있어 보내지 않았습니다.',
+  LIVE_CREATE_STAGE_GATE_NOT_READY: '상품 등록 단계가 아직 실등록 준비가 되지 않았습니다.',
+  LIVE_CREATE_EXECUTION_SCOPE_NOT_ACTIVE: '실등록 실행 범위가 열려 있지 않습니다.',
+  LIVE_SEND_TIME_TRUTH_MOVED: '보내기 직전에 확인한 내용이 바뀌어 보내지 않았습니다.',
+  LIVE_GRANT_NOT_LIVE: '실행 권한이 실등록 모드가 아닙니다.',
 };
+
+// Anything the server said that has no Korean wording above is never shown as its English
+// message or its code: the operator reads this sentence instead (the code stays an attribute).
+export const GENERIC_ERROR = '요청을 처리하지 못했습니다. 잠시 뒤 다시 시도하고, 계속되면 화면을 새로 고쳐 주세요.';
+const HANGUL = /[가-힣]/;
+
+export function errorCode(error) {
+  return error instanceof ApiError ? error.error?.code ?? null : null;
+}
+
+// The Korean sentence for a failed request: the code's own wording, the page's own Korean
+// message (a check this page made before sending), or the generic sentence.
+export function errorCopy(error, copy = REASON_COPY) {
+  const code = errorCode(error);
+  if (code && copy[code]) return copy[code];
+  if (code && REASON_COPY[code]) return REASON_COPY[code];
+  if (!(error instanceof ApiError) && error instanceof Error && HANGUL.test(error.message)) return error.message;
+  return GENERIC_ERROR;
+}
 
 export function kv(label, value) {
   return h('div', { class: 'kv' }, h('span', {}, label), h('b', {}, value ?? '—'));
@@ -260,7 +314,7 @@ export function chip(text, tone) {
 }
 
 export function reason(code) {
-  return code ? h('div', { class: 'mini' }, REASON_COPY[code] ?? code) : null;
+  return code ? h('div', { class: 'mini', 'data-reason': code }, REASON_COPY[code] ?? '확인이 필요한 항목입니다.') : null;
 }
 
 export function table(headers, rows) {
@@ -593,7 +647,8 @@ function fieldRow(field) {
   return h(
     'li',
     { 'data-field': field.key, 'data-provided': field.provided ? 'true' : 'false' },
-    h('span', {}, field.key),
+    // The marketplace's own Korean name; the wire key stays only as an attribute and a tooltip.
+    h('span', { title: field.key }, fieldName(field)),
     chip(field.provided ? '입력됨' : '없음', field.provided ? 'good' : field.required ? 'bad' : 'warn'),
     field.required ? chip('필수') : null,
   );
@@ -609,10 +664,10 @@ export function categoryBlock(category) {
       ? h(
           'div',
           { class: 'note', 'data-reason': category.metadata_unavailable_reason },
-          REASON_COPY[category.metadata_unavailable_reason] ?? category.metadata_unavailable_reason,
+          REASON_COPY[category.metadata_unavailable_reason] ?? '확인이 필요한 항목입니다.',
         )
       : null,
-    category.notice_type ? kv('정보고시', category.notice_type) : null,
+    category.notice_type ? kv('정보고시', category.notice_type_label ?? category.notice_type) : null,
     category.options_supported === null
       ? null
       : kv('옵션', category.options_supported ? `최대 ${category.max_options}개` : '미지원'),
@@ -626,17 +681,70 @@ function field(label, name, value, type = 'input') {
   return h('label', { class: 'kv' }, h('span', {}, label), control);
 }
 
+// A notice field the collection states exactly (2026-10-15 usability check): the field, the
+// marketplace's own label it must carry, and the collected fact that fills it. Only these exact
+// pairs are offered, and only as an editable value marked 수집값; nothing else is filled in.
+const COLLECTED_NOTICE = [
+  ['manufacturer', null, 'manufacturer'],
+  ['producer', ['제조업소', '생산자'], 'manufacturer'],
+  ['producer', ['제조국', '제조국(원산지, 가공지 등이 다를 경우)'], 'origin'],
+];
+const COLLECTED_ATTRIBUTE = [['brand', null, 'brand']];
+const COLLECTED_KEYS = ['manufacturer', 'origin', 'brand'];
+
+function collectedFact(table, rule) {
+  const row = table.find(([key, labels]) => key === rule.key && (!labels || labels.includes(rule.label)));
+  return row ? row[2] : null;
+}
+
+// A category attribute is recorded by the operator under its own key; no captured provider data
+// names it. The common ones are written out in Korean here; any other keeps its key.
+const ATTRIBUTE_LABEL = {
+  brand: '브랜드',
+  color: '색상',
+  size: '사이즈',
+  material: '소재',
+  modelName: '모델명',
+  manufacturer: '제조사',
+  origin: '원산지',
+};
+
+// The name a field is shown with: the marketplace's own label, else a common attribute's Korean
+// name, else its key.
+function fieldName(rule) {
+  return rule.label ?? ATTRIBUTE_LABEL[rule.key] ?? rule.key;
+}
+
 // The authoring form of one provider-listing unit (§27). It collects the operator's own inputs
 // and sends them; it computes no readiness and stores nothing of its own — the server keeps them.
 export function authoringForm(unit, onDone) {
   const authored = unit.authored;
   const inputs = authored?.inputs ?? {};
-  const categoryInput = field('카테고리', 'category_id', inputs.category?.category_id);
-  const categoryControl = categoryInput.querySelector('input');
+  // 2026-10-15: the category is searched by name; the leaf id is what the form keeps.
+  const picker = categoryPicker({
+    marketplaceKey: unit.marketplace_key,
+    value: inputs.category?.category_id,
+    onChange: () => {
+      loadMetadata().catch(metadataFailed);
+    },
+  });
+  const categoryControl = picker.input;
   const dynamicFields = h('div', { class: 'register-authoring-fields' });
+  // A note only while something is missing (reportMissing); otherwise an empty, hidden holder.
+  const missingNote = h('div', { 'data-role': 'missing-required', role: 'alert', hidden: true });
+  const fieldsPart = h('div', { class: 'register-authoring-fields-part' }, missingNote, dynamicFields);
   const optionFields = h('div', { class: 'register-option-fields' });
   const fieldControls = new Map();
   let metadata = null;
+
+  function metadataFailed(error) {
+    metadata = null;
+    fieldControls.clear();
+    dynamicFields.replaceChildren();
+    const text = errorCopy(error);
+    picker.setProblem(text);
+    toast('카테고리 등록 정보를 불러오지 못했습니다', text);
+  }
 
   // A field the marketplace fills itself when it is omitted ("상품상세 참조", a stated default) is
   // never a field the operator must type, whatever its required badge. A boolean is chosen, not
@@ -644,7 +752,9 @@ export function authoringForm(unit, onDone) {
   function authoredField(rule, kind, current) {
     const mustType = rule.required && !rule.omitted_default;
     const valueType = rule.value_type ?? 'TEXT';
-    const label = mustType ? `${rule.key} (필수)` : rule.key;
+    const name = fieldName(rule);
+    // The marketplace's own Korean label; the wire key is only an attribute and a tooltip.
+    const caption = h('span', { title: rule.key, 'data-field-key': rule.key }, mustType ? `${name} (필수)` : name);
     let control;
     if (valueType === 'BOOLEAN') {
       const select = h('select', { name: `${kind}.${rule.key}` },
@@ -652,15 +762,19 @@ export function authoringForm(unit, onDone) {
         h('option', { value: 'true' }, '예'),
         h('option', { value: 'false' }, '아니오'));
       select.value = current?.value === true ? 'true' : current?.value === false ? 'false' : '';
-      control = h('label', { class: 'kv' }, h('span', {}, label), select);
+      control = h('label', { class: 'kv' }, caption, select);
     } else {
-      control = field(label, `${kind}.${rule.key}`,
-        current?.value === undefined ? undefined : String(current.value));
+      const input = h('input', {
+        name: `${kind}.${rule.key}`,
+        value: current?.value === undefined ? '' : String(current.value),
+      });
+      control = h('label', { class: 'kv' }, caption, input);
       const placeholder = {
         YEAR_MONTH: 'yyyy-MM', DATE: 'yyyy-MM-dd', INTEGER: '정수', LONG: '정수',
       }[valueType];
-      if (placeholder) control.querySelector('input').placeholder = placeholder;
+      if (placeholder) input.placeholder = placeholder;
     }
+    control.setAttribute('data-field-key', rule.key);
     const input = control.querySelector('input, select');
     let reference = null;
     if (rule.detail_page_reference_allowed) {
@@ -668,7 +782,7 @@ export function authoringForm(unit, onDone) {
         type: 'checkbox',
         'data-detail-reference': kind,
         'data-field-key': rule.key,
-        'aria-label': `${rule.key} 상세페이지 참조`,
+        'aria-label': `${name} 상세페이지 참조`,
       });
       reference.checked = current?.detail_page_reference === true;
       const sync = () => {
@@ -682,8 +796,46 @@ export function authoringForm(unit, onDone) {
     } else {
       input.required = mustType;
     }
-    fieldControls.set(`${kind}:${rule.key}`, { input, reference, current, valueType });
+    input.addEventListener('input', () => input.removeAttribute('aria-invalid'));
+    fieldControls.set(`${kind}:${rule.key}`, { input, reference, current, valueType, rule, label: control, prefilled: null });
     return control;
+  }
+
+  // 수집값: an empty field with an exact collected fact is filled with it, visibly marked, and
+  // stays the operator's to change. A changed value is the operator's own again.
+  async function prefill(found) {
+    let facts;
+    try {
+      facts = await unitFacts(unit, COLLECTED_KEYS);
+    } catch {
+      return;
+    }
+    if (metadata !== found) return;
+    const offer = (kind, table) => {
+      for (const rule of kind === 'notice' ? found.notice_fields : found.attributes) {
+        const control = fieldControls.get(`${kind}:${rule.key}`);
+        if (!control || control.current || control.valueType !== 'TEXT') continue;
+        if (control.reference?.checked || control.input.value.trim()) continue;
+        const fact = collectedFact(table, rule);
+        const value = fact ? facts[fact] : null;
+        if (!value) continue;
+        control.input.value = value;
+        control.prefilled = value;
+        const mark = h(
+          'span',
+          { class: 'chip info', 'data-prefill': 'collected', title: '수집한 상품 정보에서 가져온 값입니다. 고칠 수 있습니다.' },
+          '수집값',
+        );
+        control.label.append(mark);
+        control.input.addEventListener('input', () => {
+          if (control.input.value.trim() === control.prefilled) return;
+          control.prefilled = null;
+          mark.remove();
+        });
+      }
+    };
+    offer('notice', COLLECTED_NOTICE);
+    offer('attribute', COLLECTED_ATTRIBUTE);
   }
 
   function optionRow(dimension, values) {
@@ -743,7 +895,11 @@ export function authoringForm(unit, onDone) {
   function renderMetadata(found) {
     metadata = found;
     fieldControls.clear();
+    hideMissing();
     const controls = [];
+    if (found.notice_type) {
+      controls.push(kv('정보고시 유형', found.notice_type_label ?? found.notice_type));
+    }
     for (const rule of found.attributes) {
       controls.push(authoredField(rule, 'attribute', inputs.attributes?.[rule.key]));
     }
@@ -752,8 +908,12 @@ export function authoringForm(unit, onDone) {
     }
     dynamicFields.replaceChildren(...controls);
     renderOptions(found);
+    prefill(found);
   }
 
+  // One read per category: a save pressed while the first read is still in flight waits for that
+  // same read, so the fields are built once and what the operator typed is never rebuilt away.
+  let pending = null;
   async function loadMetadata() {
     const categoryId = categoryControl.value.trim();
     if (!categoryId) {
@@ -762,12 +922,55 @@ export function authoringForm(unit, onDone) {
       return null;
     }
     if (metadata?.category_id === categoryId) return metadata;
-    const found = await getJson(
+    if (pending?.categoryId === categoryId) return pending.read;
+    const read = getJson(
       `/api/v1/register/drafts/${unit.draft_id}/authoring-metadata/${encodeURIComponent(categoryId)}`,
-    );
-    renderMetadata(found);
-    return found;
+    ).then((found) => {
+      // A category chosen meanwhile has its own read; this one no longer owns the fields.
+      if (categoryControl.value.trim() === categoryId) {
+        picker.setProblem(null);
+        renderMetadata(found);
+      }
+      return found;
+    }).finally(() => {
+      if (pending?.read === read) pending = null;
+    });
+    pending = { categoryId, read };
+    return read;
   }
+
+  function hideMissing() {
+    missingNote.hidden = true;
+    missingNote.className = '';
+    missingNote.replaceChildren();
+  }
+
+  // The required fields still empty, in the order they are shown.
+  function missingRequired() {
+    return [...fieldControls.values()].filter(
+      (control) => control.input.required && !control.input.disabled && !control.input.value.trim(),
+    );
+  }
+
+  // 준비 내용 만들기 never does nothing silently: the first empty required field is brought into
+  // view (the editor moves to its step), focused, and every missing one is named in Korean.
+  function reportMissing(missing) {
+    for (const control of fieldControls.values()) control.input.removeAttribute('aria-invalid');
+    for (const control of missing) control.input.setAttribute('aria-invalid', 'true');
+    const names = missing.map((control) => fieldName(control.rule));
+    missingNote.replaceChildren(
+      h('b', {}, `필수 항목 ${names.length}개가 비어 있습니다`),
+      h('ul', {}, ...names.map((name) => h('li', {}, name))),
+    );
+    missingNote.hidden = false;
+    missingNote.className = 'note';
+    const first = missing[0].input;
+    if (form.reveal) form.reveal(first);
+    else first.scrollIntoView({ block: 'center' });
+    first.focus();
+    toast('필수 항목을 채워 주세요', names.join(', '));
+  }
+
   const head = h('div', { class: 'supplier-head-row' }, h('b', {}, '등록 준비 입력'),
     authored ? chip('저장됨', 'good') : chip('저장 필요', 'warn'));
   const nameField = field('상품명', 'name', inputs.name?.value);
@@ -791,95 +994,121 @@ export function authoringForm(unit, onDone) {
   );
   const form = h(
     'form',
-    { class: 'register-authoring', 'data-preparation': authored?.preparation_id ?? '' },
+    // The browser's own validation cannot reach a field on a hidden step; this form names what
+    // is missing itself (reportMissing).
+    { class: 'register-authoring', 'data-preparation': authored?.preparation_id ?? '', novalidate: true },
     head,
-    categoryInput,
+    picker.el,
     nameField,
-    dynamicFields,
+    fieldsPart,
     optionFields,
     detailField,
     submit,
   );
   // The editor page places these by step and binds them back to this form (the `form` attribute);
   // the save reads them through the same references either way.
-  form.parts = { head, category: categoryInput, name: nameField, fields: dynamicFields, options: optionFields, detail: detailField, submit };
-  categoryControl.addEventListener('change', () => {
-    loadMetadata().catch((error) => {
-      const code = error instanceof ApiError ? error.error?.code : null;
-      toast(REASON_COPY[code] ?? (error instanceof ApiError ? error.message : String(error)));
-    });
-  });
-  if (inputs.category?.category_id) loadMetadata().catch(() => {});
+  form.parts = { head, category: picker.el, name: nameField, fields: fieldsPart, options: optionFields, detail: detailField, submit };
+  // What a save sends. `omit` ('category' or 'name') sends that field as not chosen: the AI apply
+  // fills it next (saveForApply).
+  async function saveBody(omit = null) {
+    let metadata = null;
+    try {
+      metadata = await loadMetadata();
+    } catch (error) {
+      if (omit !== 'category') throw error;
+    }
+    const approved = omit === 'category' ? null : metadata;
+    const values = Object.fromEntries(new FormData(form).entries());
+    const collectFields = (kind, rules) => Object.fromEntries(rules.flatMap((rule) => {
+      const control = fieldControls.get(`${kind}:${rule.key}`);
+      if (control?.reference?.checked) {
+        return [[rule.key, {
+          detail_page_reference: true,
+          provenance: control.current?.provenance ?? 'OPERATOR_CONFIRMED',
+        }]];
+      }
+      const raw = control?.input.value.trim() ?? '';
+      let value = raw;
+      if (control?.valueType === 'BOOLEAN') value = raw === 'true';
+      else if (['INTEGER', 'LONG'].includes(control?.valueType) && /^-?[0-9]+$/.test(raw)) {
+        // Only an integer a JavaScript number holds exactly is sent as a number. A larger one
+        // stays the operator's own text, which the server refuses as the wrong type — it is
+        // never rounded into another value.
+        const number = Number(raw);
+        if (Number.isSafeInteger(number) && BigInt(raw) === BigInt(number)) value = number;
+      }
+      // A collected value saved as it was filled is the source's fact; any other is the
+      // operator's own.
+      const provenance = control?.prefilled && raw === control.prefilled
+        ? 'SOURCE_FACT'
+        : control?.current?.provenance ?? 'OPERATOR_CONFIRMED';
+      return raw ? [[rule.key, { value, provenance }]] : [];
+    }));
+    const attributes = collectFields('attribute', approved?.attributes ?? []);
+    const notices = collectFields('notice', approved?.notice_fields ?? []);
+    const options = {};
+    for (const row of optionFields.querySelectorAll('.register-option-row')) {
+      const dimension = row.querySelector('[data-option-dimension]').value.trim();
+      if (!dimension) continue;
+      for (const input of row.querySelectorAll('[data-option-item]')) {
+        const value = input.value.trim();
+        if (!value) continue;
+        const itemId = input.getAttribute('data-option-item');
+        options[itemId] ??= {};
+        options[itemId][dimension] = value;
+      }
+    }
+    return {
+      actor: OPERATOR,
+      item_ids: unit.items.map((item) => item.item_id),
+      inputs: {
+        category: approved
+          ? {
+              category_id: approved.category_id,
+              mapping_revision: approved.mapping_revision,
+              taxonomy_revision: approved.taxonomy_revision,
+              confirmation: 'OPERATOR_CONFIRMED',
+            }
+          : null,
+        name: values.name && omit !== 'name' ? { value: values.name } : null,
+        tags: inputs.tags ?? [],
+        attributes,
+        notices,
+        options,
+        // The composition is the target policy's, whichever category is chosen.
+        detail_composition_revision: metadata?.detail_composition_revision ?? null,
+        // Under a profile that places detail images an empty body is still a composition.
+        detail_body: (metadata?.detail_sections ?? []).includes('DETAIL_IMAGES')
+          ? (values.detail_body ?? '')
+          : (values.detail_body || null),
+        detail_sections: metadata?.detail_sections ?? inputs.detail_sections ?? ['BODY'],
+        // ADR-0033 §5 (G4): the product editor's 상·하단 공지 choice; any other surface sends the
+        // stored choice back unchanged, so a save never resets it.
+        guidance: form.guidanceValue ? form.guidanceValue() : (inputs.guidance ?? null),
+      },
+    };
+  }
+
+  // ADR-0026 §7, ADR-0029 §5 (AIC-04): an AI value is applied to a saved preparation only, as
+  // AI_SUGGESTION naming the result shown. Before anything is saved (2026-10-15 usability check),
+  // the AI apply first saves what the operator has entered — without the field the AI fills — and
+  // then applies to that preparation; the operator's own later save is still what confirms it.
+  if (!authored) {
+    form.saveForApply = async (omit) =>
+      sendJson('POST', '/api/v1/register/preparations', { ...(await saveBody(omit)), draft_id: unit.draft_id });
+  }
+  if (inputs.category?.category_id) loadMetadata().catch(metadataFailed);
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     try {
-      const approved = await loadMetadata();
-      const values = Object.fromEntries(new FormData(form).entries());
-      const collectFields = (kind, rules) => Object.fromEntries(rules.flatMap((rule) => {
-        const control = fieldControls.get(`${kind}:${rule.key}`);
-        if (control?.reference?.checked) {
-          return [[rule.key, {
-            detail_page_reference: true,
-            provenance: control.current?.provenance ?? 'OPERATOR_CONFIRMED',
-          }]];
-        }
-        const raw = control?.input.value.trim() ?? '';
-        let value = raw;
-        if (control?.valueType === 'BOOLEAN') value = raw === 'true';
-        else if (['INTEGER', 'LONG'].includes(control?.valueType) && /^-?[0-9]+$/.test(raw)) {
-          // Only an integer a JavaScript number holds exactly is sent as a number. A larger one
-          // stays the operator's own text, which the server refuses as the wrong type — it is
-          // never rounded into another value.
-          const number = Number(raw);
-          if (Number.isSafeInteger(number) && BigInt(raw) === BigInt(number)) value = number;
-        }
-        return raw ? [[rule.key, {
-          value,
-          provenance: control.current?.provenance ?? 'OPERATOR_CONFIRMED',
-        }]] : [];
-      }));
-      const attributes = collectFields('attribute', approved?.attributes ?? []);
-      const notices = collectFields('notice', approved?.notice_fields ?? []);
-      const options = {};
-      for (const row of optionFields.querySelectorAll('.register-option-row')) {
-        const dimension = row.querySelector('[data-option-dimension]').value.trim();
-        if (!dimension) continue;
-        for (const input of row.querySelectorAll('[data-option-item]')) {
-          const value = input.value.trim();
-          if (!value) continue;
-          const itemId = input.getAttribute('data-option-item');
-          options[itemId] ??= {};
-          options[itemId][dimension] = value;
-        }
+      await loadMetadata();
+      const missing = missingRequired();
+      if (missing.length) {
+        reportMissing(missing);
+        return;
       }
-      const body = {
-        actor: OPERATOR,
-        item_ids: unit.items.map((item) => item.item_id),
-        inputs: {
-          category: approved
-            ? {
-                category_id: approved.category_id,
-                mapping_revision: approved.mapping_revision,
-                taxonomy_revision: approved.taxonomy_revision,
-                confirmation: 'OPERATOR_CONFIRMED',
-              }
-            : null,
-          name: values.name ? { value: values.name } : null,
-          tags: inputs.tags ?? [],
-          attributes,
-          notices,
-          options,
-          detail_composition_revision: approved?.detail_composition_revision ?? null,
-          // Under a profile that places detail images an empty body is still a composition.
-          detail_body: (approved?.detail_sections ?? []).includes('DETAIL_IMAGES')
-            ? (values.detail_body ?? '')
-            : (values.detail_body || null),
-          detail_sections: approved?.detail_sections ?? inputs.detail_sections ?? ['BODY'],
-          // ADR-0033 §5 (G4): the product editor's 상·하단 공지 choice; any other surface sends the
-          // stored choice back unchanged, so a save never resets it.
-          guidance: form.guidanceValue ? form.guidanceValue() : (inputs.guidance ?? null),
-        },
-      };
+      hideMissing();
+      const body = await saveBody();
       if (authored) {
         await sendJson('POST', `/api/v1/register/preparations/${authored.preparation_id}`, body);
       } else {
@@ -888,8 +1117,8 @@ export function authoringForm(unit, onDone) {
       toast('등록 준비 내용을 저장했습니다');
       onDone();
     } catch (error) {
-      const code = error instanceof ApiError ? error.error?.code : null;
-      toast(REASON_COPY[code] ?? (error instanceof Error ? error.message : String(error)));
+      if (errorCode(error) === 'REGISTER_CATEGORY_METADATA_MISSING') picker.setProblem(errorCopy(error));
+      toast('저장하지 못했습니다', errorCopy(error));
     }
   });
   return form;
@@ -952,14 +1181,103 @@ export function scopeBlock(scope) {
 async function run(unit, action, button, onDone) {
   button.disabled = true;
   try {
-    await call(unit, action.action, unit.intent?.intent_id);
-    toast(`${ACTION_LABEL[action.action] ?? action.action} 완료`);
+    const result = await call(unit, action.action, unit.intent?.intent_id);
+    if (action.action === 'CREATE_ENQUEUE') {
+      followSend(result, unit.draft_id, button, onDone);
+      return;
+    }
+    toast(`${ACTION_LABEL[action.action] ?? '요청'} 완료`);
     onDone();
   } catch (error) {
-    const code = error instanceof ApiError ? error.error?.code : null;
-    toast(REASON_COPY[code] ?? (error instanceof ApiError ? error.message : String(error)));
+    toast(`${ACTION_LABEL[action.action] ?? '요청'}: 처리하지 못했습니다`, errorCopy(error));
     button.disabled = false;
   }
+}
+
+// 2026-10-15 usability check: 등록 전송 only queues a CREATE job, so its answer is never shown as
+// done. The page says the request was accepted, follows the job the server named until it stops,
+// and then shows the unit's read state as the server derives it now, with its reason in Korean.
+// It decides nothing: the job state and the read state are the owners' own.
+const JOB = (jobId) => `/api/v1/system/jobs/${encodeURIComponent(jobId)}`;
+const SEND_POLL_MS = 1500;
+const SEND_POLL_LIMIT = 40;
+const JOB_STOPPED = new Set(['SUCCEEDED', 'DEAD', 'RETRY_SCHEDULED']);
+
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function sendOutcome(result, draftId) {
+  let job = null;
+  if (result?.job_id) {
+    for (let attempt = 0; attempt < SEND_POLL_LIMIT; attempt += 1) {
+      try {
+        job = await getJson(JOB(result.job_id));
+      } catch {
+        job = null;
+        break;
+      }
+      if (JOB_STOPPED.has(job.state)) break;
+      await wait(SEND_POLL_MS);
+    }
+  }
+  let read = null;
+  if (draftId && result?.intent_id) {
+    try {
+      const units = await getJson(`/api/v1/register/units/${encodeURIComponent(draftId)}`);
+      read = units.find((unit) => unit.intent?.intent_id === result.intent_id)?.intent?.read_state ?? null;
+    } catch {
+      read = null;
+    }
+  }
+  return { job, read };
+}
+
+function outcomeCopy({ job, read }) {
+  const cause = job?.last_error_code ?? read?.cause_code ?? null;
+  const why = cause ? REASON_COPY[cause] ?? '마켓 응답을 확인해 주세요.' : read ? REASON_COPY[read.reason_code] ?? '' : '';
+  if (!job) {
+    return { tone: 'warn', title: '전송 결과를 아직 확인하지 못했습니다', why: why || '잠시 뒤 등록 상태에서 확인하세요.' };
+  }
+  if (job.state === 'DEAD') return { tone: 'bad', title: '등록 전송이 중단되었습니다', why: why || '전송하지 못했습니다.' };
+  if (job.state === 'RETRY_SCHEDULED') {
+    return { tone: 'warn', title: '자동 재시도가 예약되었습니다', why: why || REASON_COPY.REGISTER_READ_RETRY_SCHEDULED };
+  }
+  if (job.state === 'SUCCEEDED') return { tone: 'info', title: '전송 작업을 마쳤습니다', why };
+  return { tone: 'warn', title: '전송이 아직 진행 중입니다', why: '잠시 뒤 화면을 새로 고쳐 등록 상태를 확인하세요.' };
+}
+
+async function followSend(result, draftId, button, onDone) {
+  toast('전송 요청을 접수했습니다', '전송 결과를 확인하는 중입니다.');
+  const holder = button.closest('.register-action, td') ?? button.parentElement;
+  const note = h(
+    'div',
+    { class: 'note', role: 'status', 'data-role': 'send-outcome', 'data-state': 'PENDING', 'data-job': result?.job_id ?? '' },
+    '전송 요청을 접수했습니다. 결과를 확인하는 중입니다…',
+  );
+  holder?.append(note);
+  const found = await sendOutcome(result, draftId);
+  const copy = outcomeCopy(found);
+  const reasonCode = found.job?.last_error_code ?? found.read?.cause_code ?? found.read?.reason_code ?? '';
+  const body = () =>
+    h(
+      'div',
+      { class: 'send-outcome', 'data-role': 'send-outcome-body' },
+      h('b', {}, copy.title),
+      found.read ? h('div', { class: 'kv' }, h('span', {}, '등록 상태'), readStateChip(found.read)) : null,
+      copy.why ? h('div', { class: 'mini', 'data-reason': reasonCode }, copy.why) : null,
+    );
+  const refresh = () =>
+    h('button', { type: 'button', class: 'btn', 'data-action': 'refresh-after-send', onclick: () => onDone() }, '화면 새로 고침');
+  note.dataset.state = found.job?.state ?? 'UNREAD';
+  note.replaceChildren(body(), refresh());
+  toast(copy.title, copy.why);
+  openModal({
+    eyebrow: '등록 전송',
+    title: copy.title,
+    body: h('div', { 'data-role': 'send-outcome-modal', 'data-state': found.job?.state ?? 'UNREAD' }, body()),
+    footer: [refresh()],
+  });
 }
 
 function call(unit, action, intentId) {
@@ -997,12 +1315,15 @@ export function readStateChip(read, problem) {
 async function runStatus(entry, action, button, onDone) {
   button.disabled = true;
   try {
-    await call({}, action, entry.intent_id);
-    toast(`${ACTION_LABEL[action] ?? action} 완료`);
+    const result = await call({}, action, entry.intent_id);
+    if (action === 'CREATE_ENQUEUE') {
+      followSend(result, entry.draft_id, button, onDone);
+      return;
+    }
+    toast(`${ACTION_LABEL[action] ?? '요청'} 완료`);
     onDone();
   } catch (error) {
-    const code = error instanceof ApiError ? error.error?.code : null;
-    toast(REASON_COPY[code] ?? (error instanceof ApiError ? error.message : String(error)));
+    toast(`${ACTION_LABEL[action] ?? '요청'}: 처리하지 못했습니다`, errorCopy(error));
     button.disabled = false;
   }
 }
@@ -1127,7 +1448,7 @@ export function previewBlock(unit) {
       );
       holder.replaceChildren(previewView(view));
     } catch (error) {
-      toast(error instanceof ApiError ? error.message : String(error));
+      toast('미리보기를 불러오지 못했습니다', errorCopy(error));
       button.disabled = false;
     }
   });
@@ -1257,8 +1578,7 @@ export function repinBlock(unit, onDone) {
       toast(count ? `${count}개 품목의 가격을 다시 고정했습니다.` : 'M4 가격이 그대로라 바뀐 것이 없습니다.');
       onDone();
     } catch (error) {
-      const code = error instanceof ApiError ? error.error?.code : null;
-      toast(REASON_COPY[code] ?? (error instanceof ApiError ? error.message : String(error)));
+      toast('가격을 다시 고정하지 못했습니다', errorCopy(error));
       button.disabled = false;
     }
   });
@@ -1401,7 +1721,7 @@ function reviewPanel(marketplaceKey, accountId) {
   const block = reviewItemsBlock({
     kindLabel: KIND_LABEL,
     emptyCopy: '이 판매 계정에 기록된 등록 검토 항목이 없습니다.',
-    errorCopy: (code, message) => REASON_COPY[code] ?? message ?? code,
+    errorCopy: (code) => REASON_COPY[code] ?? GENERIC_ERROR,
     scopeLabel: reviewScopeLabel,
   });
   const panel = h(
@@ -1457,7 +1777,7 @@ function grantRow(grant) {
         h(
           'ul',
           { class: 'requirement-list' },
-          ...grant.readiness.missing.map((code) => h('li', { 'data-missing': code }, REASON_COPY[code] ?? code)),
+          ...grant.readiness.missing.map((code) => h('li', { 'data-missing': code }, REASON_COPY[code] ?? '확인이 필요한 항목입니다.')),
         ),
       )
     : h('span', { class: 'mini' }, '등록 단계 준비도는 카나리 준비도에서 확인합니다.');
@@ -1536,7 +1856,8 @@ function goTo(section) {
   document.querySelector(`[data-section='${section}']`)?.scrollIntoView({ block: 'start' });
 }
 
-// Each card is a count the server holds, or 데이터 없음 when no read states it.
+// Each card is a count the server holds, or 데이터 없음 when no read states it. A count whose read
+// has not answered yet says so instead (`undefined`), and is replaced when it does.
 function registerCards(screen, status, readiness) {
   const category = (readiness?.areas ?? []).find((area) => area.area === 'CATEGORY');
   const cards = [
@@ -1545,7 +1866,7 @@ function registerCards(screen, status, readiness) {
     // The status's own labels; without a status read the cards keep v29's titles.
     ['failed', '×', status?.labels?.FAILED ?? '실패', status?.counts?.failed, 'failed'],
     ['recheck', '↻', status?.labels?.RECHECK_REQUIRED ?? '재시도 필요', status?.counts?.recheck_required, 'failed'],
-    ['category', '◇', '카테고리 확인', category?.units, 'pending'],
+    ['category', '◇', '카테고리 확인', readiness === undefined ? undefined : category?.units ?? null, 'pending'],
   ];
   return h(
     'div',
@@ -1562,7 +1883,9 @@ function registerCards(screen, status, readiness) {
         h('span', { class: 'kpi-top' }, h('span', { class: 'kicon', 'aria-hidden': 'true' }, icon), label),
         typeof count === 'number'
           ? h('strong', { 'data-total': String(count) }, count.toLocaleString('ko-KR'))
-          : h('strong', { class: 'no-data', 'data-no-data': label }, NO_DATA),
+          : count === undefined
+            ? h('strong', { class: 'no-data', 'data-loading': label }, '…')
+            : h('strong', { class: 'no-data', 'data-no-data': label }, NO_DATA),
       ),
     ),
   );
@@ -1590,10 +1913,23 @@ export function editorHref(unit, mode) {
   return `${window.location.pathname}#/register-editor?${params}`;
 }
 
-function unitDisplayName(unit) {
-  const authored = unit.authored?.inputs?.name?.value?.trim();
-  if (authored) return authored;
+function unitCountName(unit) {
   return unit.items.length === 1 ? '상품 1개' : `상품 ${unit.items.length}개`;
+}
+
+// A unit's name: the authored 상품명, else (2026-10-15) the collected product name the Product DB
+// holds, filled in when its read answers; until then, and without one, how many products it holds.
+export function unitNameNode(unit, tag = 'b') {
+  const authored = unit.authored?.inputs?.name?.value?.trim();
+  const node = h(tag, { 'data-role': 'unit-name', 'data-name-source': authored ? 'authored' : 'count' }, authored || unitCountName(unit));
+  if (!authored) {
+    unitProductName(unit).then((name) => {
+      if (!name) return;
+      node.textContent = name;
+      node.dataset.nameSource = 'collected';
+    });
+  }
+  return node;
 }
 
 function openUnitChoice(unit) {
@@ -1617,7 +1953,7 @@ function openUnitChoice(unit) {
     );
   openModal({
     eyebrow: '등록관리 · 상품 편집기',
-    title: unitDisplayName(unit),
+    title: unitNameNode(unit, 'span'),
     help: '편집기는 새 탭으로 열립니다. 등록관리 화면은 그대로 두고 여러 상품을 나란히 열어 작업할 수 있습니다.',
     body: h(
       'div',
@@ -1655,7 +1991,7 @@ function queueRow(unit) {
         if (event.key === 'Enter') openUnitChoice(unit);
       },
     },
-    h('td', {}, h('b', {}, unitDisplayName(unit))),
+    h('td', {}, unitNameNode(unit)),
     h('td', {}, platformTag(unit.marketplace_key)),
     unit.category ? h('td', {}, h('span', { class: 'mono' }, unit.category.category_id)) : noDataCell('카테고리'),
     h('td', {}, chip(PREPARATION_LABEL[unit.preparation] ?? unit.preparation)),
@@ -1722,6 +2058,31 @@ function sectionWrap(section, title, ...children) {
   );
 }
 
+// 2026-10-15 usability check: the page is drawn as soon as the screen counts and the units
+// arrive. Every slower read (readiness, fixes, canary, live) is its own place that says it is
+// loading and is replaced by what the server answers — or by its error — when that read does.
+function loadingSlot(role, label) {
+  return h('div', { class: 'register-loading', 'data-loading': role, role: 'status' }, chip(`${label} 불러오는 중`));
+}
+
+function fill(slot, read, render) {
+  read
+    .then((value) => {
+      const node = render(value);
+      if (node) slot.replaceWith(node);
+      else slot.remove();
+    })
+    .catch((error) => slot.replaceWith(h('div', { class: 'register-loading', 'data-load-failed': slot.dataset.loading }, errorState(error))));
+}
+
+function summaryRead(path) {
+  // A summary is its own read: when it is refused the page still shows every unit, and says the
+  // summary is unavailable with the server's code.
+  return getJson(path).catch((error) => ({
+    unavailable: error instanceof ApiError ? error.error?.code ?? 'ERROR' : 'ERROR',
+  }));
+}
+
 export default {
   key: 'register',
   title: TITLE,
@@ -1730,43 +2091,38 @@ export default {
   async render(ctx) {
     const head = pageHead({ title: TITLE, help: HELP });
     freshPolicyNotes();
+    freshProductFacts();
     let screen;
     let overview;
-    let canary;
-    let live;
-    let readiness;
-    let fixes;
     try {
-      [screen, overview, canary, live, readiness, fixes] = await Promise.all([
-        getJson(SCREEN),
-        getJson(OVERVIEW),
-        getJson(CANARY),
-        getJson(LIVE),
-        // The summary is its own read: when it is refused the page still shows every unit, and
-        // says the summary is unavailable with the server's code.
-        getJson(READINESS).catch((error) => ({
-          unavailable: error instanceof ApiError ? error.error?.code ?? 'ERROR' : 'ERROR',
-        })),
-        getJson(FIXES).catch((error) => ({
-          unavailable: error instanceof ApiError ? error.error?.code ?? 'ERROR' : 'ERROR',
-        })),
-      ]);
+      [screen, overview] = await Promise.all([getJson(SCREEN), getJson(OVERVIEW)]);
     } catch (error) {
       return fragment(head, errorState(error));
     }
+    // Asked once the units are on screen, all four at once; each fills its own place.
+    const readinessRead = summaryRead(READINESS);
+    const canaryRead = getJson(CANARY);
+    const liveRead = getJson(LIVE);
     const reload = () => ctx.navigate('register');
-    const areaLabels = Object.fromEntries(
-      (readiness?.areas ?? []).map((area) => [area.area, area.label]),
+    const readinessSlot = loadingSlot('readiness', '등록 준비 현황');
+    fill(readinessSlot, readinessRead, (readiness) =>
+      readiness?.unavailable
+        ? h('div', { class: 'register-readiness', 'data-readiness': 'UNAVAILABLE' }, reason(readiness.unavailable))
+        : readinessPanel(readiness),
     );
-    const readinessBlock = readiness?.unavailable
-      ? h('div', { class: 'register-readiness', 'data-readiness': 'UNAVAILABLE' }, reason(readiness.unavailable))
-      : readinessPanel(readiness);
+    const canarySlot = loadingSlot('canary', '실등록 사전 점검');
+    fill(canarySlot, canaryRead, canaryPanel);
+    const liveSlot = loadingSlot('live', '보호 쓰기 · 실행 권한');
+    fill(liveSlot, liveRead, livePanel);
     const statusPanel = registrationStatusPanel(overview.registration_status, reload);
     // Opened from the registration status card: its detail panel is brought into view.
     if (statusPanel && ctx.params.get('status') === 'open') {
       window.setTimeout(() => statusPanel.scrollIntoView({ block: 'start' }), 0);
     }
-    const cards = registerCards(screen, overview.registration_status, readiness?.unavailable ? null : readiness);
+    const cards = registerCards(screen, overview.registration_status, undefined);
+    readinessRead.then((readiness) =>
+      cards.replaceWith(registerCards(screen, overview.registration_status, readiness?.unavailable ? null : readiness)),
+    );
     if (!overview.units.length) {
       return fragment(
         head,
@@ -1777,7 +2133,7 @@ export default {
           { class: 'section-grid register-layout' },
           queuePanel(
             [],
-            readinessBlock,
+            readinessSlot,
             emptyState({
               title: '등록 후보가 없습니다',
               copy: '통합DB에서 등록할 상품을 선택하면 필요한 항목을 확인한 뒤 등록할 수 있습니다.',
@@ -1788,7 +2144,7 @@ export default {
         ),
         sectionWrap('products', '등록상품 관리', listingSyncPanel()),
         sectionWrap('failed', '실패 / 재시도', statusPanel),
-        sectionWrap('safety', '실등록 안전장치', canaryPanel(canary), livePanel(live)),
+        sectionWrap('safety', '실등록 안전장치', canarySlot, liveSlot),
       );
     }
     // Opened from the Product DB with the Draft it just created (Gate 1 G1-D): that Draft's
@@ -1804,29 +2160,41 @@ export default {
       : showInlineWorkspaces
         ? overview.units
         : [];
-    const panels = panelUnits.map((unit) => {
-      const panel = unitPanel(unit, reload, areaLabels);
-      if (focusDraft && unit.draft_id === focusDraft) panel.setAttribute('aria-current', 'true');
-      return panel;
-    });
+    // The workspaces group their reasons under the readiness's area labels, so they are drawn
+    // once that read answers (without it, under the server's codes' generic heading).
+    const panelsSlot = panelUnits.length ? loadingSlot('units', '상품 등록 작업') : null;
+    if (panelsSlot) {
+      readinessRead.then((readiness) => {
+        const areaLabels = Object.fromEntries((readiness?.areas ?? []).map((area) => [area.area, area.label]));
+        const panels = panelUnits.map((unit) => {
+          const panel = unitPanel(unit, reload, areaLabels);
+          if (focusDraft && unit.draft_id === focusDraft) panel.setAttribute('aria-current', 'true');
+          return panel;
+        });
+        panelsSlot.replaceWith(...panels);
+        const focused = panels.find((panel) => panel.getAttribute('aria-current') === 'true');
+        if (focused && ctx.params.get('status') !== 'open') {
+          window.setTimeout(() => focused.scrollIntoView({ block: 'start' }), 0);
+        }
+      });
+    }
     const accounts = new Map(
       overview.units.map((unit) => [`${unit.marketplace_key}|${unit.marketplace_account_id}`, unit]),
     );
     const reviews = [...accounts.values()].map((unit) => reviewPanel(unit.marketplace_key, unit.marketplace_account_id));
-    const focused = panels.find((panel) => panel.getAttribute('aria-current') === 'true');
-    if (focused && ctx.params.get('status') !== 'open') {
-      window.setTimeout(() => focused.scrollIntoView({ block: 'start' }), 0);
-    }
+    const fixesRead = summaryRead(FIXES);
+    const fixesSlot = loadingSlot('fixes', '확인이 필요한 항목');
+    fill(fixesSlot, fixesRead, (fixes) => panelOf(fixesPanel(fixes, ctx)));
     return fragment(
       head,
       cards,
       utilityRow(overview),
-      h('div', { class: 'section-grid register-layout' }, queuePanel(overview.units, readinessBlock, null), settingsPanel(ctx)),
+      h('div', { class: 'section-grid register-layout' }, queuePanel(overview.units, readinessSlot, null), settingsPanel(ctx)),
       sectionWrap('products', '등록상품 관리', listingSyncPanel()),
-      sectionWrap('failed', '실패 / 재시도', panelOf(fixesPanel(fixes, ctx)), statusPanel),
-      sectionWrap('safety', '실등록 안전장치', canaryPanel(canary), livePanel(live)),
+      sectionWrap('failed', '실패 / 재시도', fixesSlot, statusPanel),
+      sectionWrap('safety', '실등록 안전장치', canarySlot, liveSlot),
       sectionWrap('reviews', '검토 항목', ...reviews),
-      sectionWrap('units', '상품 등록 작업', ...panels),
+      sectionWrap('units', '상품 등록 작업', panelsSlot),
     );
   },
 };

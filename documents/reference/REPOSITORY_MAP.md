@@ -166,6 +166,9 @@ detection, the clamped confidence and the background-uniformity score taken from
 `read_background`; the observation key also names the engine's pinned models. Production still
 binds `NoOcrProvider`, so readiness reports `image_ocr` as `NOT_CONFIGURED`, never a core failure.
 One integration and one unit suite; no migration.
+The 2026-10-15 registration usability fixes added the category picker
+`ui/web/js/components/category-picker.js` over the leaf catalog below, the Product DB fact reader
+`ui/web/js/components/product-facts.js`, one unit and three integration suites; no migration.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
@@ -268,13 +271,13 @@ two integration suites under `tests/integration/operate/`.
 | `integrations/` | 120 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 46 |  |
 | `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 457 | tests |
+| `tests/` | 461 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 191 | integration tests by runtime owner |
+| `tests/integration/` | 194 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
-| `tests/unit/` | 164 | unit tests by runtime owner |
-| `ui/` | 79 | operator clients: the served web client and the capture extension |
+| `tests/unit/` | 165 | unit tests by runtime owner |
+| `ui/` | 81 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 70 | the served web client |
+| `ui/web/` | 72 | the served web client |

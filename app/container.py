@@ -230,7 +230,10 @@ from integrations.marketplaces.smartstore.execution import (
 from integrations.marketplaces.smartstore.listing_finder import SmartStoreListingFinder
 from integrations.marketplaces.smartstore.lookup import smartstore_duplicate_source
 from integrations.marketplaces.smartstore.notice_catalog import SmartStoreNoticeCatalog
-from integrations.marketplaces.smartstore.notice_schema import SmartStoreNoticeRules
+from integrations.marketplaces.smartstore.notice_schema import (
+    SmartStoreNoticeRules,
+    notice_labels,
+)
 from integrations.marketplaces.smartstore.orders import SmartStoreOrderSource
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
 from integrations.marketplaces.smartstore.tags import SmartStoreTagSource
@@ -1466,6 +1469,8 @@ def build_container(
         seller_code=smartstore_product.seller_management_code,
         # B-PREVIEW: the frozen-Snapshot preview reads the same wire projection the sender uses.
         preview_projection=smartstore_product.project,
+        # The notice schema's own Korean names of a notice type and its fields, for display only.
+        notice_labels=notice_labels,
     )
     listing_sync = ListingSyncService(
         db=db,
