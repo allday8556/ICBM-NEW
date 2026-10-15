@@ -116,6 +116,28 @@ def test_the_running_first_sync_shows_its_progress_then_the_complete_result(
     assert "스토어 상품 가져오는 중 10 / 1,200 · 마지막 동기화" in again
 
 
+def test_the_card_polls_the_status_alone_never_the_whole_listing_list(
+    browser: Browser,  # noqa: F811
+    client: TestClient,  # noqa: F811
+    config: AppConfig,
+) -> None:
+    # ADR-0042 S1b: the first read and every 3-second poll while a sync runs read only
+    # /store-catalog/status; the store's whole listing list (/store-catalog) is never re-read.
+    _container(client).store_catalog._account_of = lambda key: ACCOUNT  # type: ignore[method-assign]
+    _run(config, "r-running", state="RUNNING", outcome=None, target=1200, done=340)
+    traffic = Traffic()
+    with _no_egress(), _page(browser, client, traffic) as page:
+        _status(page)
+        page.wait_for_function(
+            "() => performance.getEntriesByType('resource')"
+            ".filter((e) => e.name.endsWith('/api/v1/operate/store-catalog/status')).length >= 2",
+            timeout=15_000,
+        )
+    reads = [path for method, path, _, _ in traffic.requests if method == "GET"]
+    assert reads.count("/api/v1/operate/store-catalog/status") >= 2
+    assert "/api/v1/operate/store-catalog" not in reads
+
+
 def test_a_failed_sync_is_shown_as_such_beside_the_last_complete_one(
     browser: Browser,  # noqa: F811
     client: TestClient,  # noqa: F811

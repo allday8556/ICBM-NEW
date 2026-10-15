@@ -12,7 +12,9 @@ import { h } from '../../core/dom.js';
 import { dotDateTime } from '../../core/format.js';
 import { toast } from '../../core/toast.js';
 
-const STATUS = '/api/v1/operate/store-catalog';
+// The sync status alone (ADR-0042 S1b): the first read and every poll while a sync runs never
+// re-read the store's whole listing list.
+const STATUS = '/api/v1/operate/store-catalog/status';
 const SYNC = '/api/v1/operate/store-catalog/sync';
 // While a sync runs the card re-reads its progress at this pace.
 const POLL_MS = 3000;
