@@ -3,23 +3,36 @@
 **One sync** of the connected store:
 
 1. a run row opens (``as_of`` = its start, ADR-0042 §5.2);
-2. the marketplace source enumerates every page of the catalog. Only a full, consistent
-   enumeration is ``COMPLETE``; anything else ends the run with what it was (``INCOMPLETE``,
-   ``UNAVAILABLE`` or ``ERROR``) and concludes nothing (SCP-04);
-3. each enumerated listing gets an identity row the first time it is seen, and each one is read by
-   its origin read, paced at one provider call a second (ADR-0023 §3). The search carries no
-   documented field beyond identities and the seller code (E3 ``NOT_CAPTURED``) and no documented
-   change signal (E5), so every listing is read every sync: none is assumed unchanged;
-4. a listing the catalog knows that the enumeration did **not** list is read too, for provider
-   evidence of its end: the sale status ``DELETE`` or a 404 ends it (SCP-08). Absence alone never
-   does — it is only ``NOT_SEEN`` (「스토어에서 확인 안 됨」). A live listing found there means the
-   enumeration did not cover the whole store, so the run is ``INCOMPLETE``;
-5. the run is ``COMPLETE`` only when the enumeration was complete and every listing read answered
-   (an observation or a provider removal).
+2. the marketplace source enumerates every page of the catalog: the identities and the seller code
+   the search already retains. Only a full, consistent enumeration goes on; anything else ends the
+   run with what it was (``INCOMPLETE``, ``UNAVAILABLE`` or ``ERROR``) and concludes nothing
+   (SCP-04). The enumerated membership is recorded once per distinct content;
+3. **origin reads, only where needed** (ADR-0042 §5.1: "each new or changed listing is read by its
+   origin read"). The search documents no detail field and no change signal (E3, E5
+   ``NOT_CAPTURED``), so "changed" cannot be seen; instead every listing's details are kept no
+   older than 24 hours:
+
+   - a **new** listing (never read successfully) is always read;
+   - a **rolling refresh** reads, oldest successful read first, at most
+     ``ceil(N × interval / 20 h)`` further enumerated listings per sync (``N/40`` at the 30-minute
+     cadence). Every listing is then re-read about every 20 hours, inside the 24-hour bound,
+     without bursts;
+   - 「지금 동기화」 (``OPERATOR``) re-reads every listing, under the same pacing;
+   - a listing the catalog knows that the enumeration did **not** list is read for provider
+     evidence of its end: the sale status ``DELETE`` or a 404 ends it (SCP-08). Absence alone
+     never does — it is only ``NOT_SEEN`` (「스토어에서 확인 안 됨」).
+
+   Every provider call is paced at one a second (ADR-0023 §3);
+4. the run is ``COMPLETE`` only when the enumeration was consistent, every enumerated listing that
+   is not ended has a successful origin read no older than 24 hours (so every new one was read),
+   and every listing outside the enumeration answered with provider evidence of its end. A live
+   listing outside the enumeration means the enumeration did not cover the whole store:
+   ``INCOMPLETE``.
 
 **What is stored** is the §5.3 allowlist the source hands over (SCP-03), as one content-addressed
-field set with its per-group SHA-256 digests, and one append-only observation per listing per
-sync. Nothing is written to any marketplace: the only provider calls are the source's adopted
+field set with its per-group SHA-256 digests, one append-only observation per origin read, and the
+enumerated membership of each sync (content-addressed, so an unchanged catalog adds no rows but
+the run). Nothing is written to any marketplace: the only provider calls are the source's adopted
 reads (M6-01).
 
 **What a sync proves.** A ``COMPLETE`` snapshot proves the presence of what it read. It is never
@@ -33,6 +46,7 @@ One sync per store at a time; a ``429`` or a lost session ends the run as ``UNAV
 import hashlib
 import json
 import logging
+import math
 import threading
 import time
 import uuid
@@ -41,7 +55,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Final
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -65,6 +79,7 @@ from app.stages.operate.catalog.models import (
     CatalogFieldSet,
     CatalogListing,
     CatalogListingEnding,
+    CatalogMembership,
     CatalogObservation,
     CatalogSyncRun,
 )
@@ -83,6 +98,13 @@ INTERRUPTED: Final = "INTERRUPTED"
 # ADR-0042 §5.2 (owner 6190978708 Q1): a COMPLETE snapshot is duplicate evidence for 60 minutes
 # from its as_of. The target policy will hold the audited value when S3b consumes it.
 CATALOG_MAX_AGE: Final = timedelta(minutes=60)
+# ICBM policy: a COMPLETE sync needs every enumerated listing's details read within this bound.
+DETAIL_MAX_AGE: Final = timedelta(hours=24)
+# ICBM policy: the rolling refresh re-reads every listing about this often, inside the bound
+# above with room for a missed sync or two. It sizes the per-sync refresh budget.
+REFRESH_PERIOD: Final = timedelta(hours=20)
+# The cadence the budget assumes when the periodic sync is disabled (the ADR-0023 cadence).
+DEFAULT_INTERVAL_S: Final = 1800.0
 # The pause between two provider calls of one sync (ICBM policy; no rate is documented).
 PROVIDER_PAUSE_S: Final = 1.0
 # A sync that did not complete is tried again after this long, not after a whole interval.
@@ -100,6 +122,7 @@ UNCONFIRMED: Final = "UNCONFIRMED"
 
 # Run error codes of the owner itself.
 DETAIL_READ_FAILED: Final = "STORE_CATALOG_DETAIL_READ_FAILED"
+DETAILS_STALE: Final = "STORE_CATALOG_DETAILS_STALE"
 OUTSIDE_ENUMERATION: Final = "STORE_CATALOG_LISTING_OUTSIDE_ENUMERATION"
 SYNC_INTERRUPTED: Final = "STORE_CATALOG_SYNC_INTERRUPTED"
 UNREADABLE: Final = "STORE_CATALOG_LISTING_UNREADABLE"
@@ -122,6 +145,13 @@ def field_digests(canonical: Mapping[str, Any]) -> dict[str, str]:
     return {str(key): _sha256(_canonical(value)) for key, value in sorted(canonical.items())}
 
 
+def refresh_budget(enumerated: int, interval_s: float) -> int:
+    """How many already-read listings one periodic sync re-reads: ``ceil(N × interval / 20 h)``,
+    so every listing is re-read about every 20 hours (``N/40`` at the 30-minute cadence)."""
+    interval = interval_s if interval_s > 0 else DEFAULT_INTERVAL_S
+    return math.ceil(enumerated * interval / REFRESH_PERIOD.total_seconds())
+
+
 @dataclass(frozen=True)
 class CatalogRunView:
     run_id: str
@@ -131,6 +161,7 @@ class CatalogRunView:
     state: str
     outcome: str | None
     error_code: str | None
+    full_read: bool
     total_elements: int | None
     pages_read: int
     listings_enumerated: int
@@ -145,13 +176,14 @@ class CatalogRunView:
 class CatalogListingView:
     """One store listing as the catalog knows it: its derived state and its latest read fields.
 
-    ``fields`` and ``observed_at`` are from the latest observation that read the listing; they
-    are never filled in from anything else.
+    ``fields`` and ``details_read_at`` are from the latest successful origin read of the listing
+    (the time its details were last read); they are never filled in from anything else.
     """
 
     listing_id: str
     origin_product_no: str
     channel_product_no: str | None
+    listed_seller_code: str | None
     state: str
     last_result: str | None
     sale_status: str | None
@@ -161,7 +193,7 @@ class CatalogListingView:
     seller_management_code: str | None
     seller_barcode: str | None
     fields: Mapping[str, Any] | None
-    observed_at: datetime | None
+    details_read_at: datetime | None
     ended_evidence: str | None
 
 
@@ -202,6 +234,7 @@ def _run_view(row: CatalogSyncRun) -> CatalogRunView:
         state=row.state,
         outcome=row.outcome,
         error_code=row.error_code,
+        full_read=row.full_read,
         total_elements=row.total_elements,
         pages_read=row.pages_read,
         listings_enumerated=row.listings_enumerated,
@@ -211,6 +244,21 @@ def _run_view(row: CatalogSyncRun) -> CatalogRunView:
         as_of=row.started_at,
         finished_at=row.finished_at,
     )
+
+
+def _membership(entries: Iterable[CatalogEntry]) -> list[list[Any]]:
+    """The canonical membership of one enumeration: one row per listed origin product."""
+    return sorted(
+        [e.origin_product_no, e.channel_product_no, _bounded(e.listed_seller_code), e.own_channels]
+        for e in entries
+    )
+
+
+def _entries(content: CatalogMembership | None) -> dict[str, tuple[str | None, str | None]]:
+    """origin product → (own-store channel product, listed seller code) of one membership."""
+    if content is None:
+        return {}
+    return {str(row[0]): (row[1], row[2]) for row in json.loads(content.entries_json)}
 
 
 class StoreCatalogService:
@@ -286,14 +334,18 @@ class StoreCatalogService:
 
     # ------------------------------------------------------------------ the sync
 
-    def sync(self, *, trigger: str, correlation_id: str) -> CatalogRunView:
-        """One read-only sync of the bound store's whole catalog. One at a time.
+    def sync(
+        self, *, trigger: str, correlation_id: str, full_read: bool | None = None
+    ) -> CatalogRunView:
+        """One read-only sync of the bound store's catalog. One at a time.
 
-        A run always ends: anything that escapes the pass finishes it as ``INTERRUPTED`` before it
-        is raised, so the one-running slot is never left held.
+        ``full_read`` re-reads every listing's details; it defaults to the operator's
+        「지금 동기화」 (``OPERATOR``). A run always ends: anything that escapes the pass finishes
+        it as ``INTERRUPTED`` before it is raised, so the one-running slot is never left held.
         """
         if trigger not in TRIGGERS:
             raise ValueError(f"unknown catalog sync trigger {trigger!r}")
+        full = trigger == OPERATOR if full_read is None else full_read
         account = self.account()
         if account is None:
             raise PolicyBlockedError(
@@ -305,16 +357,16 @@ class StoreCatalogService:
                 "STORE_CATALOG_SYNC_RUNNING", "a catalog sync is already running"
             )
         try:
-            run_id = self._start(account, trigger, correlation_id)
+            run_id = self._start(account, trigger, correlation_id, full)
             try:
-                return self._pass(run_id, account)
+                return self._pass(run_id, account, full)
             except BaseException:
                 self._finish(run_id, INTERRUPTED, SYNC_INTERRUPTED)
                 raise
         finally:
             self._lock.release()
 
-    def _pass(self, run_id: str, account: str) -> CatalogRunView:
+    def _pass(self, run_id: str, account: str, full: bool) -> CatalogRunView:
         if not self._source.available():
             return self._finish(run_id, UNAVAILABLE, "SMARTSTORE_SESSION_UNAVAILABLE")
         enumeration = self._source.enumerate(pause=self._pace)
@@ -328,13 +380,23 @@ class StoreCatalogService:
                 run_id, enumeration.outcome, enumeration.error_code or "STORE_CATALOG_ENUMERATION"
             )
         listed = self._identities(run_id, account, enumeration.entries)
-        unseen = self._unseen(account, {listing_id for listing_id, _ in listed})
+        self._record_membership(run_id, enumeration.entries)
+        listed_ids = {listing_id for listing_id, _ in listed}
+        read_at = self._last_reads(account)
+        new = [(lid, entry) for lid, entry in listed if lid not in read_at]
+        known = sorted(
+            ((lid, entry) for lid, entry in listed if lid in read_at),
+            key=lambda pair: (read_at[pair[0]], pair[1].origin_product_no),
+        )
+        refresh = known if full else known[: refresh_budget(len(listed), self._interval_s)]
+        unseen = self._unseen(account, listed_ids)
         targets: list[tuple[str, str, CatalogEntry | None]] = [
-            (listing_id, entry.origin_product_no, entry) for listing_id, entry in listed
+            (lid, entry.origin_product_no, entry) for lid, entry in [*new, *refresh]
         ]
-        targets += [(listing_id, origin, None) for listing_id, origin in unseen]
+        targets += [(lid, origin, None) for lid, origin in unseen]
         self._progress(run_id, listings_enumerated=len(listed), details_target=len(targets))
-        done = failed = outside = 0
+        done = failed = outside = unseen_failed = 0
+        failed_ids: set[str] = set()
         for listing_id, origin, entry in targets:
             self._pace()
             read = self._read(origin)
@@ -343,15 +405,20 @@ class StoreCatalogService:
             self._observe(run_id, listing_id, entry, read)
             if read.result == READ_FAILED:
                 failed += 1
+                failed_ids.add(listing_id)
+                unseen_failed += entry is None
             else:
                 done += 1
-                if entry is None and read.result == OBSERVED:
-                    outside += 1
+                outside += entry is None and read.result == OBSERVED
             self._progress(run_id, details_done=done, details_failed=failed)
-        if failed:
-            return self._finish(run_id, INCOMPLETE, DETAIL_READ_FAILED)
         if outside:
             return self._finish(run_id, INCOMPLETE, OUTSIDE_ENUMERATION)
+        if unseen_failed:
+            return self._finish(run_id, INCOMPLETE, DETAIL_READ_FAILED)
+        missing = self._not_current(account, listed_ids)
+        if missing:
+            code = DETAIL_READ_FAILED if missing & failed_ids else DETAILS_STALE
+            return self._finish(run_id, INCOMPLETE, code)
         return self._finish(run_id, COMPLETE, None)
 
     def _pace(self) -> None:
@@ -376,7 +443,7 @@ class StoreCatalogService:
 
     # ------------------------------------------------------------------ rows
 
-    def _start(self, account: str, trigger: str, correlation_id: str) -> str:
+    def _start(self, account: str, trigger: str, correlation_id: str, full: bool) -> str:
         run_id = str(uuid.uuid4())
         try:
             with self._db.write() as session:
@@ -390,6 +457,8 @@ class StoreCatalogService:
                         outcome=None,
                         error_code=None,
                         contract_version=self._source.contract_version,
+                        full_read=full,
+                        membership_digest=None,
                         total_elements=None,
                         pages_read=0,
                         listings_enumerated=0,
@@ -462,6 +531,50 @@ class StoreCatalogService:
                     known[entry.origin_product_no] = listing_id
                 found.append((listing_id, entry))
         return found
+
+    def _record_membership(self, run_id: str, entries: Iterable[CatalogEntry]) -> None:
+        """What this sync's consistent enumeration listed, content-addressed (ADR-0042 §5.4)."""
+        text = _canonical(_membership(entries))
+        digest = _sha256(text)
+        with self._db.write() as session:
+            if session.get(CatalogMembership, digest) is None:
+                session.add(
+                    CatalogMembership(
+                        digest=digest, entries_json=text, recorded_at=self._clock.now()
+                    )
+                )
+                session.flush()
+            row = session.get(CatalogSyncRun, run_id)
+            assert row is not None
+            row.membership_digest = digest
+
+    def _last_reads(self, account: str) -> dict[str, datetime]:
+        """Each listing's latest successful origin read."""
+        with self._db.read() as session:
+            rows = session.execute(
+                select(CatalogObservation.listing_id, func.max(CatalogObservation.observed_at))
+                .join(CatalogListing, CatalogListing.listing_id == CatalogObservation.listing_id)
+                .where(
+                    CatalogListing.marketplace_key == self.marketplace_key,
+                    CatalogListing.marketplace_account_id == account,
+                    CatalogObservation.result == OBSERVED,
+                )
+                .group_by(CatalogObservation.listing_id)
+            ).all()
+            # ``max`` keeps the column's type, so each value is the stored UTC read time.
+            return {str(listing_id): observed for listing_id, observed in rows}
+
+    def _not_current(self, account: str, listed: set[str]) -> set[str]:
+        """Enumerated listings, not ended, without a successful read in the last 24 hours."""
+        read_at = self._last_reads(account)
+        bound = self._clock.now() - DETAIL_MAX_AGE
+        with self._db.read() as session:
+            ended = set(session.scalars(select(CatalogListingEnding.listing_id)))
+        return {
+            listing_id
+            for listing_id in listed - ended
+            if listing_id not in read_at or read_at[listing_id] < bound
+        }
 
     def _unseen(self, account: str, listed: set[str]) -> list[tuple[str, str]]:
         """Known listings the enumeration did not list and no provider evidence has ended."""
@@ -545,7 +658,12 @@ class StoreCatalogService:
     # ------------------------------------------------------------------ reads
 
     def _last(
-        self, session: Session, account: str, *, outcome: str | None = None
+        self,
+        session: Session,
+        account: str,
+        *,
+        outcome: str | None = None,
+        enumerated: bool = False,
     ) -> CatalogSyncRun | None:
         query = select(CatalogSyncRun).where(
             CatalogSyncRun.marketplace_key == self.marketplace_key,
@@ -553,7 +671,15 @@ class StoreCatalogService:
         )
         if outcome is not None:
             query = query.where(CatalogSyncRun.outcome == outcome)
+        if enumerated:
+            query = query.where(CatalogSyncRun.membership_digest.is_not(None))
         return session.scalars(query.order_by(CatalogSyncRun.started_at.desc()).limit(1)).first()
+
+    @staticmethod
+    def _members(session: Session, run: CatalogSyncRun | None) -> dict[str, Any]:
+        if run is None or run.membership_digest is None:
+            return {}
+        return _entries(session.get(CatalogMembership, run.membership_digest))
 
     def status(self) -> CatalogStatus:
         account = self.account()
@@ -566,15 +692,7 @@ class StoreCatalogService:
             complete = self._last(session, account, outcome=COMPLETE)
             count = None
             if complete is not None:
-                count = len(
-                    session.scalars(
-                        select(CatalogObservation.observation_id).where(
-                            CatalogObservation.run_id == complete.run_id,
-                            CatalogObservation.enumerated.is_(True),
-                            CatalogObservation.result == OBSERVED,
-                        )
-                    ).all()
-                )
+                count = len(self._members(session, complete))
             return CatalogStatus(
                 marketplace_key=self.marketplace_key,
                 marketplace_account_id=account,
@@ -588,17 +706,20 @@ class StoreCatalogService:
     def listings(self) -> tuple[CatalogListingView, ...]:
         """Every listing of the bound store with its derived state and its latest read fields.
 
-        The state is derived from the listing's latest observation, which only a fully enumerated
-        sync records: ``LISTED`` when that enumeration listed it, ``NOT_SEEN`` (「스토어에서 확인
-        안 됨」) when it did not, ``ENDED`` once provider evidence ended it, and ``UNCONFIRMED``
-        for an identity no read has reached yet. Absence alone never ends a listing (SCP-08).
+        The state is derived from the latest sync whose enumeration was consistent: ``LISTED``
+        when it listed the listing, ``NOT_SEEN`` (「스토어에서 확인 안 됨」) when it did not,
+        ``ENDED`` once provider evidence ended it, and ``UNCONFIRMED`` before any consistent
+        enumeration. Absence alone never ends a listing (SCP-08).
         """
         account = self.account()
         if account is None:
             return ()
         with self._db.read() as session:
+            latest = self._last(session, account, enumerated=True)
+            members = self._members(session, latest)
             return tuple(
-                self._listing_view(session, row) for row in self._store_listings(session, account)
+                self._listing_view(session, row, members, enumerated=latest is not None)
+                for row in self._store_listings(session, account)
             )
 
     def snapshot(
@@ -609,8 +730,8 @@ class StoreCatalogService:
     ) -> CatalogSnapshot:
         """The listings of the last COMPLETE sync and whether that sync is still fresh evidence.
 
-        Only what that sync's enumeration listed and read is in it, as that sync read it; an
-        ended listing is not.
+        Only what that sync's enumeration listed is in it, each with its details as last read by
+        the end of that sync; a listing ended by then is not.
         """
         account = self.account()
         if account is None:
@@ -622,22 +743,14 @@ class StoreCatalogService:
             stale = self._clock.now() - complete.started_at > max_age or (
                 mutation_started_at is not None and mutation_started_at >= complete.started_at
             )
-            observed = {
-                row.listing_id: row
-                for row in session.scalars(
-                    select(CatalogObservation).where(
-                        CatalogObservation.run_id == complete.run_id,
-                        CatalogObservation.enumerated.is_(True),
-                        CatalogObservation.result == OBSERVED,
-                    )
-                )
-            }
+            members = self._members(session, complete)
             views = tuple(
-                self._listing_view(session, row, as_read=observed[row.listing_id])
+                self._listing_view(session, row, members, enumerated=True, as_of=complete)
                 for row in self._store_listings(session, account)
-                if row.listing_id in observed
+                if row.origin_product_no in members
             )
-            return CatalogSnapshot(STALE if stale else FRESH, _run_view(complete), views)
+            listed = tuple(view for view in views if view.state == LISTED)
+            return CatalogSnapshot(STALE if stale else FRESH, _run_view(complete), listed)
 
     def _store_listings(self, session: Session, account: str) -> list[CatalogListing]:
         return list(
@@ -652,50 +765,41 @@ class StoreCatalogService:
         )
 
     def _listing_view(
-        self, session: Session, row: CatalogListing, *, as_read: CatalogObservation | None = None
+        self,
+        session: Session,
+        row: CatalogListing,
+        members: Mapping[str, Any],
+        *,
+        enumerated: bool,
+        as_of: CatalogSyncRun | None = None,
     ) -> CatalogListingView:
-        """One listing's view: as one sync read it (``as_read``, a snapshot), or as of now."""
+        """One listing's view: now, or as of the end of one sync (``as_of``, a snapshot)."""
+        until = None if as_of is None else as_of.finished_at
         ending = session.get(CatalogListingEnding, row.listing_id)
-        last = (
-            as_read
-            or session.scalars(
-                select(CatalogObservation)
-                .where(CatalogObservation.listing_id == row.listing_id)
-                .order_by(CatalogObservation.observed_at.desc())
-                .limit(1)
-            ).first()
+        if ending is not None and until is not None and ending.ended_at > until:
+            ending = None
+        observations = select(CatalogObservation).where(
+            CatalogObservation.listing_id == row.listing_id
         )
-        if as_read is None and ending is not None:
+        if until is not None:
+            observations = observations.where(CatalogObservation.observed_at <= until)
+        last = session.scalars(
+            observations.order_by(CatalogObservation.observed_at.desc()).limit(1)
+        ).first()
+        observation = session.scalars(
+            observations.where(CatalogObservation.result == OBSERVED)
+            .order_by(CatalogObservation.observed_at.desc())
+            .limit(1)
+        ).first()
+        if ending is not None:
             state = ENDED
-        elif last is None:
+        elif not enumerated:
             state = UNCONFIRMED
         else:
-            state = LISTED if last.enumerated else NOT_SEEN
-        observation = (
-            as_read
-            or session.scalars(
-                select(CatalogObservation)
-                .where(
-                    CatalogObservation.listing_id == row.listing_id,
-                    CatalogObservation.result == OBSERVED,
-                )
-                .order_by(CatalogObservation.observed_at.desc())
-                .limit(1)
-            ).first()
-        )
-        channel = (
-            as_read.channel_product_no
-            if as_read is not None
-            else session.scalars(
-                select(CatalogObservation.channel_product_no)
-                .where(
-                    CatalogObservation.listing_id == row.listing_id,
-                    CatalogObservation.channel_product_no.is_not(None),
-                )
-                .order_by(CatalogObservation.observed_at.desc())
-                .limit(1)
-            ).first()
-        )
+            state = LISTED if row.origin_product_no in members else NOT_SEEN
+        channel, listed_code = members.get(row.origin_product_no, (None, None))
+        if channel is None and last is not None:
+            channel = last.channel_product_no
         fields: Mapping[str, Any] | None = None
         if observation is not None and observation.field_set_digest is not None:
             content = session.get(CatalogFieldSet, observation.field_set_digest)
@@ -704,6 +808,7 @@ class StoreCatalogService:
             listing_id=row.listing_id,
             origin_product_no=row.origin_product_no,
             channel_product_no=channel,
+            listed_seller_code=listed_code,
             state=state,
             last_result=None if last is None else last.result,
             sale_status=None if observation is None else observation.sale_status,
@@ -715,8 +820,8 @@ class StoreCatalogService:
             ),
             seller_barcode=None if observation is None else observation.seller_barcode,
             fields=fields,
-            observed_at=None if observation is None else observation.observed_at,
-            ended_evidence=None if ending is None or as_read is not None else ending.evidence,
+            details_read_at=None if observation is None else observation.observed_at,
+            ended_evidence=None if ending is None else ending.evidence,
         )
 
 
@@ -729,7 +834,7 @@ class StoreCatalogScheduler:
 
     The loop wakes every ``tick_s`` and whenever :meth:`wake` is called — the CONNECT routes wake
     it after a successful connect, so a store's first sync starts by itself (§0 a1, b1).
-    :meth:`request` runs one requested sync (「지금 동기화」) in the background.
+    :meth:`request` runs one requested sync (「지금 동기화」, a full re-read) in the background.
     """
 
     def __init__(self, service: StoreCatalogService, *, tick_s: float = 60.0) -> None:
@@ -799,6 +904,7 @@ __all__ = [
     "AUTO",
     "CATALOG_MAX_AGE",
     "CONNECT",
+    "DETAIL_MAX_AGE",
     "ENDED",
     "FRESH",
     "LISTED",
@@ -806,6 +912,7 @@ __all__ = [
     "NOT_SEEN",
     "OPERATOR",
     "PRE_REGISTRATION",
+    "REFRESH_PERIOD",
     "STALE",
     "UNCONFIRMED",
     "CatalogListingView",
@@ -816,4 +923,5 @@ __all__ = [
     "StoreCatalogScheduler",
     "StoreCatalogService",
     "field_digests",
+    "refresh_budget",
 ]

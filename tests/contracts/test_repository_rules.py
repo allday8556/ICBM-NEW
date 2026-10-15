@@ -4227,6 +4227,7 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "store_catalog_sync_runs",
         "store_catalog_listings",
         "store_catalog_field_sets",
+        "store_catalog_memberships",
         "store_catalog_observations",
         "store_catalog_listing_endings",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over

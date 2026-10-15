@@ -90,6 +90,7 @@ LATER_TABLES = frozenset(
         "store_catalog_sync_runs",
         "store_catalog_listings",
         "store_catalog_field_sets",
+        "store_catalog_memberships",
         "store_catalog_observations",
         "store_catalog_listing_endings",
     }

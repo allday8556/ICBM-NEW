@@ -7,8 +7,12 @@
 - ``store_catalog_field_sets``: one distinct §5.3 allowlisted field set, content-addressed by the
   SHA-256 of its canonical JSON, with its per-group digests. An unchanged listing's observations
   share one row, so a sync that changes nothing stores no field text again. Append-only.
-- ``store_catalog_observations``: what one sync saw of one listing — the field set it read, a
-  provider removal, or a failure. Append-only, one per listing per sync (ADR-0042 §5.4).
+- ``store_catalog_memberships``: what one consistent enumeration listed — each origin product
+  with its own-store channel product and listed seller code — content-addressed, so syncs that
+  list the same catalog share one row. Append-only.
+- ``store_catalog_observations``: what one origin read of one listing answered — the field set it
+  read, a provider removal, or a failure. Append-only, at most one per listing per sync; a listing
+  is read when new, by the rolling refresh, or on 「지금 동기화」 (ADR-0042 §5.1).
 - ``store_catalog_listing_endings``: the provider evidence that ended a listing (ADR-0023 §3: the
   sale status ``DELETE`` or a 404 of its origin read). Append-only, at most one per listing.
 """
@@ -80,6 +84,12 @@ class CatalogSyncRun(Base):
     outcome: Mapped[str | None] = mapped_column(String(20))
     error_code: Mapped[str | None] = mapped_column(String(64))
     contract_version: Mapped[str] = mapped_column(String(80))
+    # 「지금 동기화」: every listing's details were re-read, not only the new and due ones.
+    full_read: Mapped[bool] = mapped_column(Boolean)
+    # What a consistent enumeration listed; NULL until (and unless) the enumeration completes.
+    membership_digest: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("store_catalog_memberships.digest")
+    )
     total_elements: Mapped[int | None] = mapped_column(Integer)
     pages_read: Mapped[int] = mapped_column(Integer)
     listings_enumerated: Mapped[int] = mapped_column(Integer)
@@ -90,6 +100,20 @@ class CatalogSyncRun(Base):
     # The sync's ``as_of`` (ADR-0042 §5.2): what it proves holds relative to its start.
     started_at: Mapped[datetime] = mapped_column(UTCDateTime)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+
+class CatalogMembership(Base):
+    """One distinct enumerated membership, keyed by the SHA-256 of its canonical JSON."""
+
+    __tablename__ = "store_catalog_memberships"
+    __table_args__ = (
+        CheckConstraint("length(digest) = 64 AND digest NOT GLOB '*[^0-9a-f]*'", name="digest_hex"),
+        CheckConstraint("entries_json <> ''", name="content_present"),
+    )
+
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    entries_json: Mapped[str] = mapped_column(Text)
+    recorded_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
 
 class CatalogListing(Base):
@@ -141,7 +165,8 @@ class CatalogFieldSet(Base):
 
 
 class CatalogObservation(Base):
-    """What one sync saw of one listing. Append-only; one per listing per sync."""
+    """What one origin read of one listing answered. Append-only; at most one per listing per
+    sync."""
 
     __tablename__ = "store_catalog_observations"
     __table_args__ = (

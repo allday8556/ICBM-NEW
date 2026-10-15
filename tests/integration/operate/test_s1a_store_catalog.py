@@ -53,6 +53,7 @@ from app.stages.operate.catalog.service import (
     StoreCatalogBusy,
     StoreCatalogScheduler,
     StoreCatalogService,
+    refresh_budget,
 )
 from tests.support.jobs_support import FakeClock
 
@@ -163,28 +164,94 @@ def test_an_empty_store_is_a_valid_complete_result(
 
 
 def test_listings_are_observed_and_an_unchanged_listing_stores_no_field_text_again(
-    container: Container, source: FakeSource
+    container: Container, source: FakeSource, clock: FakeClock
 ) -> None:
     source.listing("101", "102")
     service = _service(container, source)
     first = service.sync(trigger=OPERATOR, correlation_id=CID)
     assert (first.outcome, first.listings_enumerated, first.details_done) == (COMPLETE, 2, 2)
+    assert first.full_read
     assert source.reads == ["101", "102"]
     views = {view.origin_product_no: view for view in service.listings()}
     assert views["101"].state == LISTED and views["101"].channel_product_no == "9101"
+    assert views["101"].listed_seller_code == "code-101"
     assert views["101"].fields is not None and views["101"].fields["name"] == "101"
     assert (views["101"].sale_status, views["101"].sale_price) == ("SALE", 10000)
-    second = service.sync(trigger=AUTO, correlation_id=CID)
+    assert views["101"].details_read_at == first.as_of
+    clock.advance(1800)
+    second = service.sync(trigger=OPERATOR, correlation_id=CID)
     assert second.outcome == COMPLETE
-    # One identity per listing; one observation per listing per sync; one field set per content.
+    # One identity per listing; one observation per read; one field set per content; one
+    # membership row for an unchanged catalog.
     assert _rows(container, "SELECT COUNT(*) FROM store_catalog_listings") == [(2,)]
     assert _rows(container, "SELECT COUNT(*) FROM store_catalog_observations") == [(4,)]
     assert _rows(container, "SELECT COUNT(*) FROM store_catalog_field_sets") == [(2,)]
+    assert _rows(container, "SELECT COUNT(*) FROM store_catalog_memberships") == [(1,)]
     # A changed listing is a new field set; its per-group digests show which group moved.
     source.answers["101"] = ListingRead(OBSERVED, fields=fields("101", price=9900))
-    service.sync(trigger=AUTO, correlation_id=CID)
+    clock.advance(1800)
+    service.sync(trigger=OPERATOR, correlation_id=CID)
     assert _rows(container, "SELECT COUNT(*) FROM store_catalog_field_sets") == [(3,)]
     assert service.status().listing_count == 2
+
+
+def test_a_periodic_sync_reads_only_new_listings_and_a_rolling_budget(
+    container: Container, source: FakeSource, clock: FakeClock
+) -> None:
+    # ADR-0042 §5.1: only new or due listings are origin-read; 「지금 동기화」 re-reads every one.
+    assert refresh_budget(1200, 1800) == 30  # N/40 at the 30-minute cadence
+    assert refresh_budget(10, 1800) == 1
+    assert refresh_budget(0, 1800) == 0
+    origins = [str(n) for n in range(201, 211)]
+    source.listing(*origins)
+    service = _service(container, source)
+    first = service.sync(trigger=CONNECT, correlation_id=CID)
+    assert (first.outcome, first.full_read, first.details_target) == (COMPLETE, False, 10)
+    assert source.reads == origins  # every listing is new
+    # Each periodic sync enumerates everything but re-reads one listing, the longest unread.
+    source.reads.clear()
+    for _ in range(48):
+        clock.advance(1800)
+        run = service.sync(trigger=AUTO, correlation_id=CID)
+        assert (run.outcome, run.details_target, run.listings_enumerated) == (COMPLETE, 1, 10)
+    assert len(source.reads) == 48
+    # Round robin: every listing was re-read, none more than once in ten syncs.
+    assert set(source.reads) == set(origins)
+    assert all(source.reads[i : i + 10].count(o) <= 1 for i in range(0, 48, 10) for o in origins)
+    # A new listing is read at once, beside the budget.
+    source.listing(*origins, "211")
+    source.reads.clear()
+    clock.advance(1800)
+    run = service.sync(trigger=AUTO, correlation_id=CID)
+    assert run.outcome == COMPLETE and source.reads[0] == "211" and len(source.reads) == 2
+    # 「지금 동기화」 re-reads every listing.
+    source.reads.clear()
+    clock.advance(1800)
+    run = service.sync(trigger=OPERATOR, correlation_id=CID)
+    assert run.full_read and sorted(source.reads) == sorted([*origins, "211"])
+
+
+def test_details_older_than_a_day_make_the_sync_incomplete(
+    container: Container, source: FakeSource, clock: FakeClock
+) -> None:
+    origins = [str(n) for n in range(301, 311)]
+    source.listing(*origins)
+    service = _service(container, source)
+    assert service.sync(trigger=CONNECT, correlation_id=CID).outcome == COMPLETE
+    # After a day without syncs, one periodic sync cannot refresh them all within its budget.
+    clock.advance(25 * 3600)
+    run = service.sync(trigger=AUTO, correlation_id=CID)
+    assert (run.outcome, run.error_code, run.details_target) == (
+        INCOMPLETE,
+        "STORE_CATALOG_DETAILS_STALE",
+        1,
+    )
+    # The snapshot stays the last COMPLETE one, and is stale by now.
+    assert service.snapshot().freshness == STALE
+    # 「지금 동기화」 re-reads every listing and completes.
+    run = service.sync(trigger=OPERATOR, correlation_id=CID)
+    assert run.outcome == COMPLETE
+    assert service.snapshot().freshness == FRESH
 
 
 def test_an_incomplete_enumeration_concludes_nothing(
@@ -203,11 +270,12 @@ def test_an_incomplete_enumeration_concludes_nothing(
 
 @pytest.mark.parametrize("outcome", [UNAVAILABLE, ERROR])
 def test_an_unavailable_or_failed_enumeration_is_shown_as_such(
-    container: Container, source: FakeSource, outcome: str
+    container: Container, source: FakeSource, clock: FakeClock, outcome: str
 ) -> None:
     source.listing("101")
     service = _service(container, source)
     service.sync(trigger=AUTO, correlation_id=CID)
+    clock.advance(1800)
     source.enumeration = Enumeration(outcome, source.contract_version, error_code="GW.RATE_LIMIT")
     run = service.sync(trigger=AUTO, correlation_id=CID)
     status = service.status()
@@ -241,7 +309,7 @@ def test_a_rate_limit_or_a_lost_session_ends_the_sync_unavailable(
 
 
 def test_a_listing_missing_from_the_enumeration_is_not_seen_until_provider_evidence_ends_it(
-    container: Container, source: FakeSource
+    container: Container, source: FakeSource, clock: FakeClock
 ) -> None:
     source.listing("101", "102", "103")
     service = _service(container, source)
@@ -250,6 +318,7 @@ def test_a_listing_missing_from_the_enumeration_is_not_seen_until_provider_evide
     source.listing("101")
     source.answers["102"] = ListingRead(REMOVED, removal_evidence=STATUS_DELETE)
     source.answers["103"] = ListingRead(REMOVED, removal_evidence=HTTP_404)
+    clock.advance(1800)
     run = service.sync(trigger=AUTO, correlation_id=CID)
     assert run.outcome == COMPLETE and run.details_target == 3
     views = {view.origin_product_no: view for view in service.listings()}
@@ -259,18 +328,20 @@ def test_a_listing_missing_from_the_enumeration_is_not_seen_until_provider_evide
     assert views["102"].fields is not None
     # An ended listing is read no more.
     source.reads.clear()
+    clock.advance(1800)
     service.sync(trigger=AUTO, correlation_id=CID)
     assert source.reads == ["101"]
     assert {v.origin_product_no for v in service.snapshot().listings} == {"101"}
 
 
 def test_a_live_listing_outside_the_enumeration_makes_the_sync_incomplete(
-    container: Container, source: FakeSource
+    container: Container, source: FakeSource, clock: FakeClock
 ) -> None:
     source.listing("101", "102")
     service = _service(container, source)
     service.sync(trigger=AUTO, correlation_id=CID)
     source.listing("101")  # 102 is still readable and not DELETE, but the search did not list it
+    clock.advance(1800)
     run = service.sync(trigger=AUTO, correlation_id=CID)
     assert (run.outcome, run.error_code) == (
         INCOMPLETE,
@@ -283,7 +354,9 @@ def test_a_live_listing_outside_the_enumeration_makes_the_sync_incomplete(
     assert {v.origin_product_no for v in service.snapshot().listings} == {"101", "102"}
 
 
-def test_absence_alone_never_ends_a_listing(container: Container, source: FakeSource) -> None:
+def test_absence_alone_never_ends_a_listing(
+    container: Container, source: FakeSource, clock: FakeClock
+) -> None:
     source.listing("101", "102")
     service = _service(container, source)
     service.sync(trigger=AUTO, correlation_id=CID)
@@ -291,6 +364,7 @@ def test_absence_alone_never_ends_a_listing(container: Container, source: FakeSo
     # the sync is not complete.
     source.listing("101")
     source.answers["102"] = ListingRead(READ_FAILED, error_code="SMARTSTORE_SERVER_ERROR")
+    clock.advance(1800)
     run = service.sync(trigger=AUTO, correlation_id=CID)
     assert run.outcome == INCOMPLETE
     views = {view.origin_product_no: view for view in service.listings()}
@@ -299,6 +373,7 @@ def test_absence_alone_never_ends_a_listing(container: Container, source: FakeSo
     assert _rows(container, "SELECT COUNT(*) FROM store_catalog_listing_endings") == [(0,)]
     # Provider evidence ends it.
     source.answers["102"] = ListingRead(REMOVED, removal_evidence=STATUS_DELETE)
+    clock.advance(1800)
     assert service.sync(trigger=AUTO, correlation_id=CID).outcome == COMPLETE
     assert {v.origin_product_no: v.state for v in service.listings()}["102"] == ENDED
 
@@ -391,9 +466,9 @@ def test_an_interrupted_run_is_settled_and_a_finished_run_never_changes(
         # A run an earlier process left RUNNING.
         raw.execute(
             "INSERT INTO store_catalog_sync_runs (run_id, marketplace_key, marketplace_account_id,"
-            " trigger, state, contract_version, pages_read, listings_enumerated, details_target,"
-            " details_done, details_failed, correlation_id, started_at)"
-            " VALUES ('r-left', 'smartstore', ?, 'AUTO', 'RUNNING', 'v1', 0, 0, 0, 0, 0, 'c',"
+            " trigger, state, contract_version, full_read, pages_read, listings_enumerated,"
+            " details_target, details_done, details_failed, correlation_id, started_at)"
+            " VALUES ('r-left', 'smartstore', ?, 'AUTO', 'RUNNING', 'v1', 0, 0, 0, 0, 0, 0, 'c',"
             " '2026-09-13 00:00:00.000000')",
             (ACCOUNT,),
         )
@@ -417,6 +492,8 @@ def test_identities_observations_and_endings_are_append_only(
             "DELETE FROM store_catalog_observations",
             "UPDATE store_catalog_field_sets SET fields_json = '{}'",
             "DELETE FROM store_catalog_field_sets",
+            "UPDATE store_catalog_memberships SET entries_json = '[]'",
+            "DELETE FROM store_catalog_memberships",
         ):
             with pytest.raises(sqlite3.IntegrityError):
                 raw.execute(statement)
@@ -475,6 +552,7 @@ def test_0067_is_additive_and_round_trips(tmp_path: Path) -> None:
         "store_catalog_sync_runs",
         "store_catalog_listings",
         "store_catalog_field_sets",
+        "store_catalog_memberships",
         "store_catalog_observations",
         "store_catalog_listing_endings",
     }

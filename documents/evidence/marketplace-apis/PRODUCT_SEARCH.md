@@ -76,7 +76,9 @@ The source IDs are in `SOURCES.md` §5.11 and §6.
 
 What the S1a code does with each gap (ICBM-side, fail-closed): the catalog request is exactly
 `{"page": n, "size": 500}` (E1), with no status filter and no sort parameter (E2); the search's
-retention is **not** widened, so every §5.3 field is read from the origin read (E3); no provider
+retention is **not** widened, so every §5.3 field is read from the origin read — for new listings,
+a rolling refresh that keeps each listing's details under 24 hours old, and 「지금 동기화」 (E3,
+`ENDPOINT_MATRIX.md` §4.1.2 S1a amendment); no provider
 registration or modification time is read or stored (E5); and a provider error at any page,
 including the undocumented over-100,000 one, is `ERROR` and concludes nothing (E6). A
 `totalElements` above 100,000 on a readable page is `UNAVAILABLE`. That a "every registered

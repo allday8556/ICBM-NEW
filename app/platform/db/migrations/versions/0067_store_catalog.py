@@ -4,7 +4,7 @@ Revision ID: 0067_store_catalog
 Revises: 0066_landed_cost
 Create Date: 2026-10-15
 
-ADR-0042 §5, §12 (SCP-03, SCP-04, SCP-08). Five tables, nothing else changes:
+ADR-0042 §5, §12 (SCP-03, SCP-04, SCP-08). Six tables, nothing else changes:
 
 - **``store_catalog_sync_runs``**: one catalog sync of one store, one running per store. Its
   progress moves while it runs; a finished run never changes (trigger).
@@ -12,8 +12,10 @@ ADR-0042 §5, §12 (SCP-03, SCP-04, SCP-08). Five tables, nothing else changes:
   Immutable: never updated, never deleted (triggers).
 - **``store_catalog_field_sets``**: one distinct §5.3 allowlisted field set with its per-group
   digests, keyed by the SHA-256 of its canonical JSON. Append-only.
-- **``store_catalog_observations``**: what one sync saw of one listing, one per listing per sync —
-  the field set it read, a provider removal, or a failure. Append-only.
+- **``store_catalog_memberships``**: what one consistent enumeration listed, content-addressed.
+  Append-only.
+- **``store_catalog_observations``**: what one origin read of one listing answered, at most one per
+  listing per sync — the field set it read, a provider removal, or a failure. Append-only.
 - **``store_catalog_listing_endings``**: the provider evidence that ended a listing (``DELETE`` or a
   404 of its origin read; ADR-0023 §3), at most one per listing. Append-only.
 
@@ -33,6 +35,7 @@ depends_on: str | Sequence[str] | None = None
 RUNS = "store_catalog_sync_runs"
 LISTINGS = "store_catalog_listings"
 FIELD_SETS = "store_catalog_field_sets"
+MEMBERSHIPS = "store_catalog_memberships"
 OBSERVATIONS = "store_catalog_observations"
 ENDINGS = "store_catalog_listing_endings"
 
@@ -56,6 +59,18 @@ def _append_only(table: str, what: str) -> None:
 
 def upgrade() -> None:
     op.create_table(
+        MEMBERSHIPS,
+        sa.Column("digest", sa.String(length=64), nullable=False),
+        sa.Column("entries_json", sa.Text(), nullable=False),
+        sa.Column("recorded_at", sa.DateTime(), nullable=False),
+        sa.CheckConstraint(
+            "length(digest) = 64 AND digest NOT GLOB '*[^0-9a-f]*'", name="digest_hex"
+        ),
+        sa.CheckConstraint("entries_json <> ''", name="content_present"),
+        sa.PrimaryKeyConstraint("digest"),
+    )
+    _append_only(MEMBERSHIPS, "store catalog memberships")
+    op.create_table(
         RUNS,
         sa.Column("run_id", sa.String(length=36), nullable=False),
         sa.Column("marketplace_key", sa.String(length=40), nullable=False),
@@ -65,6 +80,8 @@ def upgrade() -> None:
         sa.Column("outcome", sa.String(length=20), nullable=True),
         sa.Column("error_code", sa.String(length=64), nullable=True),
         sa.Column("contract_version", sa.String(length=80), nullable=False),
+        sa.Column("full_read", sa.Boolean(), nullable=False),
+        sa.Column("membership_digest", sa.String(length=64), nullable=True),
         sa.Column("total_elements", sa.Integer(), nullable=True),
         sa.Column("pages_read", sa.Integer(), nullable=False),
         sa.Column("listings_enumerated", sa.Integer(), nullable=False),
@@ -103,6 +120,7 @@ def upgrade() -> None:
             name="identity_present",
         ),
         sa.CheckConstraint("error_code IS NULL OR error_code <> ''", name="error_code_present"),
+        sa.ForeignKeyConstraint(["membership_digest"], [f"{MEMBERSHIPS}.digest"]),
         sa.PrimaryKeyConstraint("run_id"),
     )
     op.create_index(
@@ -129,6 +147,7 @@ def upgrade() -> None:
           OR NEW.marketplace_account_id IS NOT OLD.marketplace_account_id
           OR NEW.trigger IS NOT OLD.trigger
           OR NEW.contract_version IS NOT OLD.contract_version
+          OR NEW.full_read IS NOT OLD.full_read
           OR NEW.correlation_id IS NOT OLD.correlation_id
           OR NEW.started_at IS NOT OLD.started_at
         BEGIN SELECT RAISE(ABORT, 'a finished catalog sync run is final'); END;
@@ -270,3 +289,6 @@ def downgrade() -> None:
     op.drop_index("ix_store_catalog_sync_runs_store", table_name=RUNS)
     op.drop_index("ux_store_catalog_sync_runs_one_running", table_name=RUNS)
     op.drop_table(RUNS)
+    op.execute(f"DROP TRIGGER IF EXISTS {MEMBERSHIPS}_no_delete")
+    op.execute(f"DROP TRIGGER IF EXISTS {MEMBERSHIPS}_no_update")
+    op.drop_table(MEMBERSHIPS)

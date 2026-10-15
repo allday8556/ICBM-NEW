@@ -438,6 +438,16 @@ fail-closed.
    path, predicate, timeouts and query keys are unchanged, and the REGISTER read-back normalizer and
    comparison are unchanged.
 
+**When the origin read is called (ADR-0042 §5.1, "each new or changed listing").** No change
+signal is documented (E3, E5), so ICBM keeps every listing's details no older than 24 hours
+instead of reading every listing on every sync. A periodic sync enumerates the whole catalog and
+origin-reads only (a) every new listing, (b) a rolling refresh of at most
+`ceil(N × interval / 20 h)` further listings, oldest successful read first (`N/40` at the 30-minute
+cadence; about `1.2 × N` reads a day), and (c) every known listing the enumeration did not list.
+「지금 동기화」 re-reads every listing. Every call is paced at one a second (ICBM policy). A sync is
+`COMPLETE` only when its enumeration is consistent and every enumerated listing that is not ended
+has a successful origin read no older than 24 hours (`STORE_CATALOG_DETAILS_STALE` otherwise).
+
 What the catalog may conclude, and nothing more: a `COMPLETE` sync proves the presence of what it
 read. A listing the catalog knows that a complete enumeration did not list is read by its origin
 read: `DELETE` or a 404 ends it (ADR-0023 §3), a live one makes the sync `INCOMPLETE` (the

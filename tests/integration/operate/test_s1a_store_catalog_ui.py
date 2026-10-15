@@ -45,10 +45,10 @@ def _run(
     with sqlite3.connect(config.database_path) as raw:
         raw.execute(
             "INSERT INTO store_catalog_sync_runs (run_id, marketplace_key, marketplace_account_id,"
-            " trigger, state, outcome, error_code, contract_version, total_elements, pages_read,"
-            " listings_enumerated, details_target, details_done, details_failed, correlation_id,"
-            " started_at, finished_at) VALUES (?, 'smartstore', ?, 'CONNECT', ?, ?, ?,"
-            " 'fixture/v1', ?, 1, ?, ?, ?, 0, 'cid', ?, ?)",
+            " trigger, state, outcome, error_code, contract_version, full_read, total_elements,"
+            " pages_read, listings_enumerated, details_target, details_done, details_failed,"
+            " correlation_id, started_at, finished_at) VALUES (?, 'smartstore', ?, 'CONNECT', ?,"
+            " ?, ?, 'fixture/v1', 0, ?, 1, ?, ?, ?, 0, 'cid', ?, ?)",
             (
                 run_id,
                 ACCOUNT,

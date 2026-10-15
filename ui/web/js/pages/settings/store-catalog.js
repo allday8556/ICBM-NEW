@@ -28,6 +28,7 @@ const ERROR_LABEL = {
   'GW.QUOTA_LIMIT': '호출 한도로 잠시 멈춤',
   SMARTSTORE_CATALOG_TOO_LARGE: '상품이 100,000개를 넘어 가져올 수 없음',
   STORE_CATALOG_DETAIL_READ_FAILED: '일부 상품을 읽지 못함',
+  STORE_CATALOG_DETAILS_STALE: '하루 넘게 다시 읽지 못한 상품이 있음 · 지금 동기화로 모두 다시 읽기',
   STORE_CATALOG_LISTING_OUTSIDE_ENUMERATION: '목록에 없는 판매 상품이 있음',
   STORE_CATALOG_SYNC_INTERRUPTED: '앱이 중간에 종료됨',
 };
