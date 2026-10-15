@@ -3094,7 +3094,7 @@ def test_ali1688_is_one_extraction_identity_and_a_capture_only_supplier() -> Non
 
     package = REPO_ROOT / "integrations" / "suppliers" / "ali1688"
     manifest = read_manifest(package / "extraction_identity.py")
-    assert EXTRACTION_REVISION == manifest.revision == IMAGE_ROLES.identity == "ali1688-3"
+    assert EXTRACTION_REVISION == manifest.revision == IMAGE_ROLES.identity == "ali1688-4"
     modules = {
         path.relative_to(REPO_ROOT).as_posix() for path in (package / "collect").rglob("*.py")
     }
@@ -3108,6 +3108,47 @@ def test_ali1688_is_one_extraction_identity_and_a_capture_only_supplier() -> Non
     assert profile.storefront_host in PACKAGED_HOSTS
     # ADR-0030 §7: RECON until its acceptance.
     assert repository_active("ali1688") is False
+
+
+def test_no_server_code_reads_the_1688_description_document() -> None:
+    # ADR-0040 §3.2 and OC-09: only the extension reads the description document, inside the
+    # user's capture. The reviewed host is policy data the extension is served; the policy owner
+    # parses it, and no other production module touches it or names the host, so no server path
+    # can read the document. The images it names are fetched by the ordinary image fetch. The
+    # document's URL is a browser-only read (OC-09): no production module names its path, and
+    # the policy owner refuses a policy that would project it.
+    touching = set()
+    naming = set()
+    for path, tree in _production_modules().items():
+        for node in ast.walk(tree):
+            if (
+                (isinstance(node, ast.Attribute) and node.attr == "description_hosts")
+                or (isinstance(node, ast.Name) and node.id == "description_hosts")
+                or (isinstance(node, ast.keyword) and node.arg == "description_hosts")
+            ):
+                touching.add(path)
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and any(word in node.value for word in ("itemcdn", "offer_details", "detailUrl"))
+            ):
+                naming.add(path)
+    assert touching == {"app/stages/collect/extension/policy.py"}
+    assert naming == set()
+    # The transport has no document read for it, and the image fetch judges images only.
+    transport = (REPO_ROOT / "integrations/suppliers/transport/collection.py").read_text("utf-8")
+    assert "description" not in transport.lower()
+    from integrations.suppliers.ali1688.collection import COLLECTION
+
+    assert "itemcdn.tmall.com" not in COLLECTION.profile.hosts
+    from app.stages.collect.extension.policy import CapturePolicySource
+
+    policy = CapturePolicySource(REPO_ROOT / "integrations" / "suppliers").load("ali1688")
+    assert policy.embedded_data is not None and policy.description is not None
+    assert all(
+        not entry.path.startswith("result.data.description")
+        for entry in policy.embedded_data.allowlist
+    )
 
 
 def test_a_platform_template_is_one_extraction_identity() -> None:

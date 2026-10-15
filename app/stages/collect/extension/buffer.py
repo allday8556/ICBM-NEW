@@ -18,7 +18,10 @@ from dataclasses import dataclass, field
 
 from app.platform.core.errors import RateLimitedError
 from app.stages.collect.extension.capture import TransportEvidence
-from app.stages.collect.extension.embedded import EmbeddedDataMember
+from app.stages.collect.extension.embedded import (
+    DescriptionImagesMember,
+    EmbeddedDataMember,
+)
 
 # One capture is accepted per pairing at a time (ruling 5906290729 B-4), so one entry is the normal
 # case. The small margin covers a run that settled through the terminal hook before its job ran.
@@ -37,6 +40,8 @@ class BufferedCapture:
     evidence: TransportEvidence
     # ADR-0040 §3: the embedded-data member, held exactly as long as the capture itself.
     embedded: EmbeddedDataMember | None = field(default=None, repr=False)
+    # ADR-0040 §3.2: the description's image references, held as long as the capture.
+    description_images: DescriptionImagesMember | None = field(default=None, repr=False)
 
 
 class CaptureBuffer:

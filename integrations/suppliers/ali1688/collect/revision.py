@@ -23,6 +23,13 @@ and each configuration's ``sold_out`` are derived from those counts exactly as b
 list it is) on ``prices`` and on ``quantity_tiers``; every SKU's stated ``price``,
 ``discountPrice`` and ``isPromotionSku`` are quoted on ``options``. The purchase price is still the
 first original tier (else the first current tier) or the lowest SKU original price.
+
+``ali1688-4`` (2026-10-15, ADR-0040 §3.2 and OC-09, the owner's decision Issue #219
+``6185408143``): the description's images. The extension reads the description document within
+the user's capture and sends only its image references on ``cbu01.alicdn.com``; each becomes a
+``DETAIL`` candidate (rule ``ali1688.detail.description``) after the page's own references, fetched
+by the ordinary policed image fetch. ``detail_description`` still waits for review (its text is not
+captured, ``DESCRIPTION_TEXT_NOT_CAPTURED``) and records what became of the images.
 """
 
-EXTRACTION_REVISION = "ali1688-3"
+EXTRACTION_REVISION = "ali1688-4"

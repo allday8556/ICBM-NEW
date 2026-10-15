@@ -134,15 +134,44 @@ def test_the_extension_reads_no_cookie_storage_or_header_and_downloads_nothing()
         for word in forbidden:
             assert word not in text, f"{path.name}: {word}"
     # The functions injected into the tab talk to nothing: they return, and the service worker
-    # sends. The cut (E1) and the list discovery (E3, ADR-0019 §8.1) alike.
+    # sends. The cut (E1) and the list discovery (E3, ADR-0019 §8.1) alike. The one exception is
+    # ADR-0040 §3.2 (OC-09): within a 1688 capture, the cut reads the one description document the
+    # page names — once, without cookies, never following a redirect — and sends nothing itself.
     for injected in ("capture.js", "discover.js"):
         body = "\n".join(
             line
             for line in _read(EXTENSION / "lib" / injected).splitlines()
             if not line.lstrip().startswith("//")
         )
-        for word in ("fetch(", "chrome.", "import ", "WebSocket", "sendBeacon", "postMessage"):
+        for word in ("chrome.", "import ", "WebSocket", "sendBeacon", "postMessage", "XMLHttp"):
             assert word not in body, (injected, word)
+        reads = 1 if injected == "capture.js" else 0
+        assert body.count("fetch(") == reads, injected
+        assert body.count('credentials: "omit"') == body.count('redirect: "error"') == reads
+        # The description's HTML is read as text: no document or element is ever built from
+        # markup, so nothing in it can load, run or be inserted into the page.
+        for word in (
+            "DOMParser",
+            "parseFromString",
+            "createHTMLDocument",
+            "document.implementation",
+            "createContextualFragment",
+            "innerHTML",
+            "outerHTML",
+            "insertAdjacentHTML",
+            "document.write",
+            "appendChild",
+            "createElement",
+            "srcdoc",
+            "new Image",
+            "importNode",
+            "cloneNode",
+            "XMLSerializer",
+        ):
+            assert word not in body, (injected, word)
+    capture = _read(EXTENSION / "lib" / "capture.js")
+    assert "for (const written of imageSources(content))" in capture
+    assert "rule.description_hosts.includes(target.hostname)" in capture
     # Every request to ICBM omits credentials and refuses a redirect.
     client = _read(EXTENSION / "lib" / "client.js")
     assert client.count("fetch(") == client.count('credentials: "omit"') == 2
