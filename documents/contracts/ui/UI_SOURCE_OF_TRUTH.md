@@ -391,15 +391,15 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
 - **Edit mode is read-only.** No contract yet edits a registered listing on the marketplace. `상품수정` shows the registered unit's contents and says so. A unit with a Snapshot or an Intent is never authored in the editor.
 - **The register page is unchanged.** Every section the Gate 3 surface reads stays on `#/register`.
 
-### 상품 편집기 › 이미지 자동번역 (ADR-0041 I5, I6)
+### 상품 편집기 › 이미지 자동번역 (ADR-0041 I5, I6, I7)
 
 - **Two buttons, one panel.** `✨ 이미지 자동번역` sits in ② 대표이미지 (the images the operator ticks in the panel, any role, D3) and in ⑤ 상세페이지 (the panel opens with the Item's detail images ticked). Both open the same Image Studio panel (`components/image-studio.js`) for the unit's Items.
 - **Shown only when READY.** The buttons read `GET /api/v1/image-studio/capability`. Each sits in an empty slot (`data-role="studio-slot"`). The button is drawn only when it reads READY and the unit is editable. Otherwise nothing is drawn and nothing is sent. The capability reads `NOT_CONFIGURED` when any of these is missing:
-  - an OCR engine (`NoOcrProvider`, until I7);
+  - an OCR engine: the pinned local RapidOCR engine (I7), bound only where the optional `ocr` extra is installed with its pinned models (otherwise `NoOcrProvider`);
   - the translation task;
   - the AI provider (an approved CLIProxyAPI profile with its data-transfer approval).
 
-  Production reads `NOT_CONFIGURED`. On a unit with a Snapshot or an Intent the buttons are not drawn either.
+  Production reads `NOT_CONFIGURED` until both the engine is installed and the profile is approved; the first live translation stays the owner's go-ahead. No copy changed with I7. On a unit with a Snapshot or an Intent the buttons are not drawn either.
 - **The run.** The panel shows every CONFIRMED source image of the chosen Item with what its selection does now (`원본 사용 · 대표/상세`, `번역본 사용 중`, `사용 안 함`, `쓰임 미정`) and whether its text was read. The operator ticks images (at most 30), picks `중국어 → 한국어` or `일본어 → 한국어` and presses `번역 시작`: one `image.translate` job, read until it ends. Only text is sent; the copy says so.
 - **One image's review.** `검토` opens it:
   - the original and the live preview side by side (a stateless `POST …/preview` PNG; nothing is stored), with `미리보기 · 완전함` or what overflowed;

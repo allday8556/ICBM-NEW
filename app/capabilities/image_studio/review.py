@@ -48,7 +48,6 @@ from PIL import Image
 
 from app.capabilities.audit.models import AuditEventType, AuditOutcome
 from app.capabilities.audit.service import AuditEntry, AuditLog
-from app.capabilities.detail_guidance.renderer import FONT_FILE, FONT_SHA256
 from app.capabilities.image_studio import style as matched
 from app.capabilities.image_studio.checks import (
     CONTACT_DETAIL,
@@ -65,6 +64,7 @@ from app.capabilities.image_studio.contracts import (
 from app.capabilities.image_studio.leftover import LEFTOVER_SOURCE_TEXT, find_leftover
 from app.capabilities.image_studio.renderer import (
     COMPLEX_BACKGROUND,
+    FONT_HASHES,
     LAYOUT_OVERFLOW,
     MISSING_GLYPHS,
     RENDERER_VERSION,
@@ -119,7 +119,6 @@ from app.stages.products.store import ProductFoundationStore
 TRANSFORMATION_VERSION: Final = "image-translate/v1"
 # The one operation of that recipe: the deterministic local rendering of an edit revision.
 RENDER_CAPABILITY: Final = "IMAGE_TEXT_TRANSLATE_RENDER"
-FONT_HASHES: Final = {FONT_FILE.name: FONT_SHA256}
 
 SCRIPT_MISMATCH: Final = "SCRIPT_MISMATCH"
 # A region's flags in the order the panel names them. The first six need the region's own

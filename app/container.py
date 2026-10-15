@@ -25,8 +25,8 @@ from app.capabilities.audit.service import AuditLog
 from app.capabilities.detail_guidance.image_store import GuidanceImageStore
 from app.capabilities.detail_guidance.service import DetailGuidanceService
 from app.capabilities.detail_guidance.store import DetailGuidanceStore
-from app.capabilities.image_studio.contracts import NoOcrProvider
 from app.capabilities.image_studio.ocr import ocr_capability
+from app.capabilities.image_studio.rapid import local_ocr_provider
 from app.capabilities.image_studio.review import ImageStudioReviewService
 from app.capabilities.image_studio.store import ImageStudioStore
 from app.capabilities.image_studio.task import RegistryTranslationComposer
@@ -646,9 +646,10 @@ def build_container(
     detail_guidance = DetailGuidanceService(detail_guidance_store)
     # ADR-0028 §3: the SearchSignal port, provider-zero until a source has its own owner decision.
     search_signal = NoSearchSignal()
-    # ADR-0041 D2, I2: the local OCR port. No engine is installed until I7 (NoOcrProvider), so
-    # the image_ocr capability reads NOT_CONFIGURED; it never fails core readiness.
-    ocr_provider = NoOcrProvider()
+    # ADR-0041 D2, I2, I7: the local OCR port. The pinned RapidOCR engine is bound when it is
+    # installed (the optional ``ocr`` extra) with its pinned models and ``image_ocr_engine`` is on;
+    # otherwise NoOcrProvider is, and image_ocr reads NOT_CONFIGURED. Never a core failure.
+    ocr_provider = local_ocr_provider(config.image_ocr_engine)
     readiness = ReadinessService(
         db=db,
         worker=worker,
@@ -1074,9 +1075,9 @@ def build_container(
     # ADR-0041 I1, I4: the Image Studio translation owner and its job. The registered translation
     # task is composed from the prompt registry and sent only through the profiled provider: with
     # no approved profile (data transfer included) it names no identity, and a call past the daily
-    # cap is refused (AIS-04). No OCR engine is bound (NoOcrProvider, until I7), so the capability
-    # reads NOT_CONFIGURED, every request is refused before anything is written, and nothing is
-    # ever read or sent.
+    # cap is refused (AIS-04). The OCR engine is local (I7); with none bound (NoOcrProvider) the
+    # capability reads NOT_CONFIGURED, every request is refused before anything is written, and
+    # nothing is ever read or sent. An image never leaves the machine (IT-07).
     image_studio = ImageStudioStore(db, clock, audit)
     image_translation = ImageTranslationService(
         clock=clock,

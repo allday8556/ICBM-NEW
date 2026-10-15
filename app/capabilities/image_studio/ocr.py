@@ -1,11 +1,12 @@
 """The local OCR port's engine side (ADR-0041 D1, D2, §3, §4; slice I2).
 
-The job reads a source image through ``contracts.OcrProvider``. Production binds
-``contracts.NoOcrProvider`` until the real engine lands (I7), so the capability ``image_ocr``
-reads ``NOT_CONFIGURED`` (``ocr_capability``), never a core failure, and the job refuses before
-anything is written. ``EngineOcrProvider`` is the provider an engine plugs into: the engine only
-recognises lines in one prepared tile (``OcrEngine.recognise``); everything that makes a reading
-an observation is here, deterministic and pure where it can be:
+The job reads a source image through ``contracts.OcrProvider``. Production binds the pinned
+RapidOCR engine (I7, ``rapid``) over this provider when it is installed, and otherwise
+``contracts.NoOcrProvider``, so the capability ``image_ocr`` reads ``NOT_CONFIGURED``
+(``ocr_capability``), never a core failure, and the job refuses before anything is written.
+``EngineOcrProvider`` is the provider an engine plugs into: the engine only recognises lines in
+one prepared tile (``OcrEngine.recognise``); everything that makes a reading an observation is
+here, deterministic and pure where it can be:
 
 1. **Preprocessing** (``PREPROCESSING_VERSION``, part of the observation key): the source is decoded
    by Pillow with no EXIF orientation applied, an image with alpha is composited over white, and the

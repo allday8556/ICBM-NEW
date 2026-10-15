@@ -54,6 +54,8 @@ def _env(data_dir: Path, **extra: object) -> dict[str, str]:
         "ICBM_PORT": str(_free_port()),
         "ICBM_SECRET_BACKEND": "memory",
         "ICBM_JOB_POLL_INTERVAL_S": "0.05",
+        # As the test harness's AppConfig: no local OCR engine (ADR-0041 I7), installed or not.
+        "ICBM_IMAGE_OCR_ENGINE": "0",
         "PYTHONIOENCODING": "utf-8",
     }
     return env | {key: str(value) for key, value in extra.items()}

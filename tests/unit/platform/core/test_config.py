@@ -45,6 +45,16 @@ def test_from_env_parses_typed_values(tmp_path: Path) -> None:
     assert config.job_backoff_base_s == 1.5
 
 
+def test_the_local_ocr_engine_is_bound_automatically_unless_switched_off(tmp_path: Path) -> None:
+    # ADR-0041 I7: production binds the pinned engine whenever it is installed and verified.
+    assert AppConfig(data_dir=tmp_path).image_ocr_engine is True
+    env = {"ICBM_DATA_DIR": str(tmp_path)}
+    assert AppConfig.from_env(env).image_ocr_engine is True
+    assert AppConfig.from_env(env | {"ICBM_IMAGE_OCR_ENGINE": "0"}).image_ocr_engine is False
+    with pytest.raises(ConfigError, match="ICBM_IMAGE_OCR_ENGINE"):
+        AppConfig.from_env(env | {"ICBM_IMAGE_OCR_ENGINE": "auto"})
+
+
 def test_invalid_environment_value_names_the_variable(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="ICBM_DIAGNOSTICS"):
         AppConfig.from_env({"ICBM_DATA_DIR": str(tmp_path), "ICBM_DIAGNOSTICS": "maybe"})

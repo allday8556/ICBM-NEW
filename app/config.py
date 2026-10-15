@@ -113,6 +113,7 @@ _ENV: dict[str, tuple[str, Callable[[str], Any]]] = {
     "operate_order_shipping_retention_days": ("ICBM_OPERATE_ORDER_SHIPPING_RETENTION_DAYS", int),
     "review_coverage_max_age_s": ("ICBM_REVIEW_COVERAGE_MAX_AGE_S", float),
     "fx_refresh_interval_s": ("ICBM_FX_REFRESH_INTERVAL_S", float),
+    "image_ocr_engine": ("ICBM_IMAGE_OCR_ENGINE", _parse_bool),
 }
 
 
@@ -167,6 +168,10 @@ class AppConfig:
     # reads only on a business day after 11:00 KST, with the key configured and today not yet
     # recorded; 0 disables the periodic pass. 「지금 갱신」 works either way.
     fx_refresh_interval_s: float = 3600.0
+    # ADR-0041 D2, I7: the local OCR engine (RapidOCR on onnxruntime, the optional ``ocr`` extra)
+    # is bound whenever it is installed at its pinned versions with its pinned models; otherwise
+    # ``NoOcrProvider`` is, and ``image_ocr`` reads NOT_CONFIGURED. False never binds it.
+    image_ocr_engine: bool = True
 
     def __post_init__(self) -> None:
         if not is_loopback_host(self.host):

@@ -134,7 +134,7 @@ def _font(size: int, weight: int) -> ImageFont.FreeTypeFont:
     return font
 
 
-def _cmap_codepoints(data: bytes) -> frozenset[int]:
+def cmap_codepoints(data: bytes) -> frozenset[int]:
     """The code points the font maps to a real glyph (``cmap`` format 12, else format 4)."""
     (num_tables,) = struct.unpack_from(">H", data, 4)
     tables = {
@@ -182,7 +182,7 @@ def _cmap_codepoints(data: bytes) -> frozenset[int]:
 @cache
 def drawable_codepoints() -> frozenset[int]:
     """Every code point the bundled font can draw; ``content.guidance_content`` refuses the rest."""
-    return _cmap_codepoints(_font_bytes())
+    return cmap_codepoints(_font_bytes())
 
 
 def _check_widths(content: GuidanceContent) -> None:

@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 from app.capabilities.detail_guidance.renderer import FONT_FILE, FONT_SHA256
 from app.capabilities.image_studio.renderer import (
     COMPLEX_BACKGROUND,
-    FACE_FALLBACK_SANS,
+    FONT_HASHES,
     IMAGE_TRANSLATE_INPUT_INVALID,
     LAYOUT_OVERFLOW,
     MIN_FONT_SIZE,
@@ -23,11 +23,14 @@ from app.capabilities.image_studio.renderer import (
     OVERDRAWN,
     OVERLAPS_KEPT_REGION,
     RENDERER_VERSION,
+    SERIF_FONT_FILE,
+    SERIF_FONT_SHA256,
     CompletenessFailure,
     Placement,
     RegionStatus,
     RenderRegion,
     StyleOverride,
+    drawable_codepoints,
     render,
 )
 from app.capabilities.image_studio.style import (
@@ -42,8 +45,14 @@ from app.platform.core.errors import InputValidationError
 WHITE = (255, 255, 255)
 INK = (34, 34, 34)
 # The decoded pixels of the flat scenario (``_flat_scene`` + ``_FLAT_REGION``), pinned for
-# image-translate-renderer/v1 with the bundled font and the pinned Pillow (constraints.txt).
+# image-translate-renderer/v1 with the bundled font and the pinned Pillow (constraints.txt). v2 (I7)
+# only added the serif face, so a sans region's pixels are unchanged.
 FLAT_PIXELS = "d76640df0092aa8707895c0901a100dabf3d24ee1f9579ab306eb7a119b9d8e7"
+# The same scenario drawn in the serif face (Noto Serif KR), pinned for image-translate-renderer/v2.
+SERIF_PIXELS = "8550e79b305ef1351f1a88f0758a6021035d2e785a2ffaafd2a43aca1dabab6a"
+# A Hanja only Noto Sans KR draws, and one only Noto Serif KR draws.
+SANS_ONLY = "尢"
+SERIF_ONLY = "隙"
 
 
 def _font(size: int, weight: int) -> ImageFont.FreeTypeFont:
@@ -160,8 +169,16 @@ def test_the_pixels_are_pinned_and_the_same_input_gives_the_same_bytes() -> None
     again = render(_png(source), [_region(box, _FLAT_REGION)])
     assert first.png == again.png and first.sha256 == again.sha256
     assert first.sha256 == hashlib.sha256(first.png).hexdigest()
-    assert (first.renderer_version, first.font_sha256s) == (RENDERER_VERSION, (FONT_SHA256,))
-    assert RENDERER_VERSION == "image-translate-renderer/v1"
+    assert (first.renderer_version, first.font_sha256s) == (
+        RENDERER_VERSION,
+        (FONT_SHA256, SERIF_FONT_SHA256),
+    )
+    assert RENDERER_VERSION == "image-translate-renderer/v2"
+    assert FONT_HASHES == {
+        "NotoSansKR-wght.ttf": FONT_SHA256,
+        "NotoSerifKR-wght.ttf": SERIF_FONT_SHA256,
+    }
+    assert hashlib.sha256(SERIF_FONT_FILE.read_bytes()).hexdigest() == SERIF_FONT_SHA256
     image = Image.open(io.BytesIO(first.png))
     assert image.format == "PNG" and image.size == (source.width, source.height)
     assert "tIME" not in image.info and not image.info.get("dpi")
@@ -298,7 +315,7 @@ def test_the_weight_and_the_colour_are_read_from_the_glyph_pixels(
     assert 44 <= measured.size <= 54
 
 
-def test_the_operator_override_wins_and_a_serif_request_falls_back_to_sans() -> None:
+def test_the_operator_override_wins_and_a_serif_request_draws_noto_serif_kr() -> None:
     source, box = _flat_scene()
     override = StyleOverride(weight=Weight.BLACK, face=Face.SERIF, size=20, colour=(0, 90, 200))
     result = render(_png(source), [_region(box, "무료 배송", override=override)])
@@ -310,10 +327,61 @@ def test_the_operator_override_wins_and_a_serif_request_falls_back_to_sans() -> 
         20,
         (0, 90, 200),
     )
-    assert outcome.style.face is Face.SANS and outcome.face_matched is Face.SANS
-    assert FACE_FALLBACK_SANS in outcome.flags
+    # v2 (I7): the serif face is drawn with Noto Serif KR, not flagged and drawn in sans.
+    assert outcome.style.face is Face.SERIF and outcome.face_matched is Face.SERIF
+    assert outcome.flags == () and result.completeness.complete
     assert any("serif" in note for note in outcome.notes)
     assert (0, 90, 200) in set(_decoded(result.png).crop(box.area).get_flattened_data())
+    sans = render(
+        _png(source),
+        [
+            _region(
+                box, "무료 배송", override=StyleOverride(Weight.BLACK, Face.SANS, 20, (0, 90, 200))
+            )
+        ],
+    )
+    (drawn,) = sans.regions
+    assert drawn.style is not None and drawn.style.face is Face.SANS
+    assert _outside(_decoded(sans.png), [box]) == _outside(_decoded(result.png), [box])
+    assert sans.png != result.png
+
+
+def test_the_serif_face_is_pinned_and_deterministic_and_sans_is_unchanged() -> None:
+    source, box = _flat_scene()
+    serif = StyleOverride(face=Face.SERIF)
+    first = render(_png(source), [_region(box, _FLAT_REGION, override=serif)])
+    again = render(_png(source), [_region(box, _FLAT_REGION, override=serif)])
+    assert first.png == again.png
+    (outcome,) = first.regions
+    assert outcome.status is RegionStatus.RENDERED and outcome.face_matched is Face.SERIF
+    assert hashlib.sha256(_decoded(first.png).tobytes()).hexdigest() == SERIF_PIXELS
+    # Naming the matched face (sans) changes nothing: the v1 pixels.
+    sans = render(
+        _png(source), [_region(box, _FLAT_REGION, override=StyleOverride(face=Face.SANS))]
+    )
+    assert hashlib.sha256(_decoded(sans.png).tobytes()).hexdigest() == FLAT_PIXELS
+
+
+def test_each_face_checks_the_glyphs_of_its_own_font() -> None:
+    sans, serif = drawable_codepoints(Face.SANS), drawable_codepoints(Face.SERIF)
+    # Both fonts draw every modern Hangul syllable; they differ by a few Hanja.
+    assert all(c in sans and c in serif for c in range(0xAC00, 0xD7A4))
+    assert ord(SANS_ONLY) in sans - serif and ord(SERIF_ONLY) in serif - sans
+    source, box = _flat_scene()
+    for face, own, other in (
+        (Face.SANS, SANS_ONLY, SERIF_ONLY),
+        (Face.SERIF, SERIF_ONLY, SANS_ONLY),
+    ):
+        override = StyleOverride(face=face)
+        drawn = render(_png(source), [_region(box, f"한{own}", override=override)])
+        assert drawn.regions[0].status is RegionStatus.RENDERED, face
+        assert drawn.completeness.complete, face
+        lacking = render(_png(source), [_region(box, f"한{other}", override=override)])
+        (outcome,) = lacking.regions
+        assert outcome.status is RegionStatus.MISSING_GLYPHS, face
+        assert outcome.missing_glyphs == (other,)
+        assert lacking.completeness.failures == (CompletenessFailure("r1", MISSING_GLYPHS),)
+        assert _decoded(lacking.png).tobytes() == source.tobytes()
 
 
 def test_without_an_erase_request_the_text_goes_on_a_label_even_on_a_clean_background() -> None:

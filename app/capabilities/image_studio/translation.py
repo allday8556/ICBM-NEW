@@ -6,8 +6,8 @@ its confirmed source images (D5), with their source language, the regions the op
 otherwise kept and never sent, §6). It is refused before anything is written while the capability
 reads ``NOT_CONFIGURED``: no OCR engine, no translation task or no AI provider, which includes a
 profile without the owner's data-transfer approval (AIS-04, IT-08). Production binds the
-registered task (I4) but no OCR engine (``NoOcrProvider``, until I7), so nothing is ever read or
-sent.
+registered task (I4) and the local OCR engine only when it is installed (``NoOcrProvider``
+otherwise, I7), so with none nothing is ever read or sent.
 
 **Job.** ``image.translate`` is not idempotent (a provider call may cost money) and has one
 attempt: an interrupted run is never re-run blindly. The batch only coordinates; each image is its

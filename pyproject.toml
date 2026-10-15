@@ -37,6 +37,14 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
 ]
+# ADR-0041 D2 (slice I7): the local OCR engine of Image Studio, RapidOCR on onnxruntime with the
+# models its wheel bundles (pinned by SHA-256 in app/capabilities/image_studio/rapid.py). Optional:
+# without it the application runs and `image_ocr` reads NOT_CONFIGURED. Its exact resolved
+# dependencies are pinned in constraints.txt.
+ocr = [
+    "rapidocr==3.9.2",
+    "onnxruntime==1.30.0",
+]
 
 [project.scripts]
 icbm = "app.interface.cli:main"
@@ -50,6 +58,8 @@ app = [
     "capabilities/ai/seed_v29.json",
     "capabilities/detail_guidance/fonts/NotoSansKR-wght.ttf",
     "capabilities/detail_guidance/fonts/OFL.txt",
+    "capabilities/image_studio/fonts/NotoSerifKR-wght.ttf",
+    "capabilities/image_studio/fonts/OFL.txt",
 ]
 integrations = ["marketplaces/smartstore/notice_schema.json"]
 
@@ -91,6 +101,14 @@ warn_unused_ignores = true
 [[tool.mypy.overrides]]
 module = ["keyring", "keyring.*"]
 ignore_missing_imports = true
+
+# ADR-0041 I7: the optional `ocr` extra. Its modules are imported only inside
+# app/capabilities/image_studio/rapid.py and are read as Any whether they are installed (a local
+# venv) or not (CI), so bare `mypy` gives the same answer in both.
+[[tool.mypy.overrides]]
+module = ["rapidocr", "rapidocr.*", "onnxruntime", "onnxruntime.*", "numpy", "numpy.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 # Issue #151 kept the pre-restructure relative order: the acceptance-harness tests (some of which

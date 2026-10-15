@@ -107,7 +107,7 @@ The derived artifact itself is recorded by the M4 image owner (`ProductImageServ
 
 ## 5. Rendering in the style of the source font (D7)
 
-- **The renderer.** `image-translate-renderer/v1` is deterministic: the same revision, font files and source give the same bytes. It is built on Pillow (ADR-0033 §3).
+- **The renderer.** `image-translate-renderer/v1` is deterministic: the same revision, font files and source give the same bytes. It is built on Pillow (ADR-0033 §3). Since I7 it is `image-translate-renderer/v2`, which adds the serif face (§10, I7 as landed).
 - **The matched style.** Per region, the renderer follows the style measured from the source text:
   - weight (stroke width relative to the glyph height): regular, bold or black;
   - sans or serif;
@@ -167,6 +167,26 @@ Both are drawn only while the capability reads READY. While it reads `NOT_CONFIG
 | I5 | The Studio panel; the ⑤ and ② buttons go live behind the capability; preview, save, apply, QA verdict, select and revert. |
 | I6 | QA: reading the rendered image again for leftover text; a large detail image through the upload-fit chain to the fake SmartStore. |
 | I7 | The real OCR engine (D2, its confirmed download) and any added font; the first live translation, under the owner's go-ahead and an acceptance record on images from both overseas suppliers. |
+
+**I7 as landed (2026-10-15).** The download was approved in `6185598957` (Noto Serif KR included). What landed is the engine and the font; the first live translation has not been run and stays the owner's go-ahead, with its acceptance record.
+
+- **The engine.** `app/capabilities/image_studio/rapid.py`: RapidOCR `3.9.2` on onnxruntime `1.30.0`, the optional `ocr` extra of `pyproject.toml` (the exact resolution, OpenCV and NumPy included, is pinned in `constraints.txt`). The application imports neither unless the extra is installed, so CI runs without it.
+- **The models.** The three the rapidocr wheel bundles, pinned by SHA-256 (equal to the package's own `default_models.yaml`):
+  - `PP-OCRv6_det_small.onnx` `090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f`;
+  - `PP-OCRv6_rec_small.onnx` `6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884`;
+  - `ch_ppocr_mobile_v2.0_cls_mobile.onnx` `e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c`.
+
+  The PP-OCRv6 recognition model is multilingual: it reads Chinese (simplified and traditional) and Japanese, kana included. So D2's "Chinese and Japanese models" are this one pinned model, and no separate Japanese model was installed.
+- **Refusals.** Another rapidocr or onnxruntime version, or a missing or changed model file, binds nothing: `NoOcrProvider` stays bound and `image_ocr` reads `NOT_CONFIGURED`. The models are hashed when the engine is bound and again right before they are loaded.
+- **No download.** Every model is handed to RapidOCR by its verified local path, the recognition model carries its own dictionary, and nothing is visualised, so RapidOCR has nothing to fetch. A test reads with the real engine while every connection is refused.
+- **Determinism.** The tile goes to RapidOCR as a BGR array. The text-score threshold and onnxruntime's threads (at most 4 intra-op, 1 inter-op, CPU only) are pinned.
+- **The engine's identity.** `rapidocr` `3.9.2+onnxruntime-1.30.0` with the three model hashes. Logs carry counts and reasons only (§8).
+- **Binding.** The container binds the engine when it is installed and verified. `AppConfig.image_ocr_engine` (`ICBM_IMAGE_OCR_ENGINE`) is on by default. The test harness switches it off, so a development venv with the extra reads like CI.
+- **The serif face (D7).** Noto Serif KR, the variable-weight file of google/fonts (`ofl/notoserifkr`, SIL OFL 1.1), is in `app/capabilities/image_studio/fonts/`. It is pinned by SHA-256 `11f8d5de6f1b79195efba3828aaa2ec95c1178f5ae976fb23c8d53250a9938f3`.
+  - The renderer is `image-translate-renderer/v2`. A region whose style names serif is drawn in Noto Serif KR, at its weight on the `wght` axis and against that font's own glyph set. The `FACE_FALLBACK_SANS` flag is gone.
+  - A sans region draws the same bytes as in v1.
+  - An edit revision names both fonts, so a revision saved under v1 is refused by 「적용」 until it is saved again.
+  - The style reading still measures every source as sans: serif detection is not attempted yet (§11, style matching). Until it is, the serif face is drawn only for a style that names it.
 
 ## 11. Risks and spikes
 

@@ -8,8 +8,9 @@ Everything here only reads pixels, deterministically, with Pillow and the standa
   ``score`` is the one background-uniformity number an OCR observation records (I2).
 - ``measure_style`` reads the source text against that background: its colour (the median of the
   pixels farthest from the background), its weight (stroke width relative to the line height), its
-  line height and so its size, and its alignment in the box. The face is always sans: no serif
-  detection is attempted, since only Noto Sans KR is bundled (``FACE_NOTE``).
+  line height and so its size, and its alignment in the box. The face it reads is always sans: no
+  serif detection is attempted yet (``FACE_NOTE``). The renderer draws a serif face, with the
+  bundled Noto Serif KR (I7), when a region's style names it.
 
 Boxes are in the pixel grid of the decoded source image, with no EXIF orientation applied.
 """
@@ -45,7 +46,9 @@ BLACK_FROM: Final = 0.128
 # A Hangul line's ink is about 0.93 of the font size, so a source line of ink height H is matched
 # by Korean text of size H / 0.93.
 HANGUL_INK_RATIO: Final = 0.93
-FACE_NOTE: Final = "serif detection is not attempted: only Noto Sans KR is bundled (ADR-0041 §5)"
+FACE_NOTE: Final = (
+    "serif detection is not attempted: the face is sans unless the style names serif (ADR-0041 §5)"
+)
 
 
 class Weight(StrEnum):

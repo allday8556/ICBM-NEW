@@ -1,4 +1,4 @@
-"""The one image-translation renderer ``image-translate-renderer/v1`` (ADR-0041 §4–§6, IT-03/04).
+"""The one image-translation renderer ``image-translate-renderer/v2`` (ADR-0041 §4–§6, IT-03/04).
 
 ``render(source, regions)`` draws the operator's Korean text over a source image and returns a new
 PNG; the source bytes are only read. Per included region, in the given order:
@@ -6,8 +6,8 @@ PNG; the source bytes are only read. Per included region, in the given order:
 1. the background is read (``style.read_background``); the source text is erased — the box filled
    with the ring's median colour — only when the operator asks for it and the erase is clean;
 2. the style is matched (``style.measure_style``), then the operator's override applies field by
-   field; the face is always Noto Sans KR (a serif request falls back to sans and is flagged
-   ``FACE_FALLBACK_SANS``);
+   field; a sans face is drawn with Noto Sans KR and a serif face with Noto Serif KR (D7, I7),
+   each at its own weight on its ``wght`` axis and checked against its own glyph set;
 3. the text is wrapped to the box's width and shrunk from the matched size down to
    ``MIN_FONT_SIZE``; text that still does not fit is ``LAYOUT_OVERFLOW`` and is never cut or drawn;
 4. where the text was not erased, the Korean text is placed on a solid label filling the box: an
@@ -19,10 +19,11 @@ font cannot draw, or that does not fit, is left untouched. The completeness verd
 unless every included region is drawn, within its box, with every glyph in the font, and neither a
 kept region's box nor a later region's fill covers it.
 
-The bytes depend only on the source, the regions, the bundled font (pinned by SHA-256, shared with
-Detail Guidance) and the Pillow pin: BASIC text layout, fixed encoder parameters, no time, metadata
-or randomness (only the source's ICC profile is carried over). A change of the font, the Pillow pin
-or any drawing below bumps ``RENDERER_VERSION``.
+The bytes depend only on the source, the regions, the two bundled fonts (each pinned by SHA-256:
+Noto Sans KR, shared with Detail Guidance, and Noto Serif KR, ``fonts/``) and the Pillow pin:
+BASIC text layout, fixed encoder parameters, no time, metadata or randomness (only the source's
+ICC profile is carried over). A change of a font, the Pillow pin or any drawing below bumps
+``RENDERER_VERSION``. v2 (I7) added the serif face: a sans region draws the same bytes as in v1.
 """
 
 import hashlib
@@ -31,11 +32,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from functools import cache, lru_cache
+from pathlib import Path
 from typing import Final
 
 from PIL import Image, ImageDraw, ImageFont
 
-from app.capabilities.detail_guidance.renderer import FONT_FILE, FONT_SHA256, drawable_codepoints
+from app.capabilities.detail_guidance.renderer import FONT_FILE, FONT_SHA256, cmap_codepoints
 from app.capabilities.image_studio.style import (
     FACE_NOTE,
     Align,
@@ -50,8 +52,12 @@ from app.capabilities.image_studio.style import (
 )
 from app.platform.core.errors import InputValidationError
 
-RENDERER_VERSION: Final = "image-translate-renderer/v1"
-FONT_SHA256S: Final = (FONT_SHA256,)
+RENDERER_VERSION: Final = "image-translate-renderer/v2"
+# Noto Serif KR (SIL OFL 1.1, ``fonts/OFL.txt``), the variable-weight file of google/fonts
+# ``ofl/notoserifkr/NotoSerifKR[wght].ttf`` (git blob cc85b383766708c9291f72baeeab05760774f492).
+SERIF_FONT_FILE: Final = Path(__file__).parent / "fonts" / "NotoSerifKR-wght.ttf"
+SERIF_FONT_SHA256: Final = "11f8d5de6f1b79195efba3828aaa2ec95c1178f5ae976fb23c8d53250a9938f3"
+FONT_SHA256S: Final = (FONT_SHA256, SERIF_FONT_SHA256)
 IMAGE_TRANSLATE_INPUT_INVALID: Final = "IMAGE_TRANSLATE_INPUT_INVALID"
 
 MIN_FONT_SIZE: Final = 10
@@ -64,7 +70,6 @@ LABEL_DARK: Final[Rgb] = (17, 17, 17)
 COMPLEX_BACKGROUND: Final = "COMPLEX_BACKGROUND"
 LAYOUT_OVERFLOW: Final = "LAYOUT_OVERFLOW"
 MISSING_GLYPHS: Final = "MISSING_GLYPHS"
-FACE_FALLBACK_SANS: Final = "FACE_FALLBACK_SANS"
 OVERLAPS_KEPT_REGION: Final = "OVERLAPS_KEPT_REGION"
 OUT_OF_BOX: Final = "OUT_OF_BOX"
 OVERDRAWN: Final = "OVERDRAWN"
@@ -179,18 +184,37 @@ class _Plan:
     label: Rgb | None = None
 
 
+# Each face's bundled font file and its pinned SHA-256.
+FACE_FONTS: Final[dict[Face, tuple[Path, str]]] = {
+    Face.SANS: (FONT_FILE, FONT_SHA256),
+    Face.SERIF: (SERIF_FONT_FILE, SERIF_FONT_SHA256),
+}
+# The font files an edit revision names (IT-03): a revision saved under another set is refused by
+# 「적용」 and saved again.
+FONT_HASHES: Final = {path.name: sha256 for path, sha256 in FACE_FONTS.values()}
+
+
 @cache
-def _font_bytes() -> bytes:
-    data = FONT_FILE.read_bytes()
-    if hashlib.sha256(data).hexdigest() != FONT_SHA256:
-        raise RuntimeError("the bundled Korean font is not the pinned file")
+def _font_bytes(face: Face) -> bytes:
+    path, sha256 = FACE_FONTS[face]
+    data = path.read_bytes()
+    if hashlib.sha256(data).hexdigest() != sha256:
+        raise RuntimeError(f"the bundled Korean {face.value.lower()} font is not the pinned file")
     return data
 
 
+@cache
+def drawable_codepoints(face: Face) -> frozenset[int]:
+    """Every code point the face's bundled font can draw; a region needing any other is
+    ``MISSING_GLYPHS``. The two fonts differ by a few dozen Hanja."""
+    return cmap_codepoints(_font_bytes(face))
+
+
 @lru_cache(maxsize=128)
-def _font(size: int, weight: Weight) -> ImageFont.FreeTypeFont:
+def _font(size: int, weight: Weight, face: Face) -> ImageFont.FreeTypeFont:
     # BASIC layout on every platform, as Detail Guidance: raqm would place glyphs differently.
-    font = ImageFont.truetype(io.BytesIO(_font_bytes()), size, layout_engine=ImageFont.Layout.BASIC)
+    data = io.BytesIO(_font_bytes(face))
+    font = ImageFont.truetype(data, size, layout_engine=ImageFont.Layout.BASIC)
     font.set_variation_by_axes([WEIGHT_AXIS[weight]])
     return font
 
@@ -257,7 +281,7 @@ def _layout(
     text: str, style: TextStyle, align: Align, width: int, height: int, pad: int
 ) -> tuple[_Line, ...] | None:
     """The lines at ``style.size`` in a ``width`` x ``height`` box, or None when they overflow."""
-    font = _font(style.size, style.weight)
+    font = _font(style.size, style.weight, style.face)
     inner_w, inner_h = width - 2 * pad, height - 2 * pad
     if inner_w <= 0 or inner_h <= 0:
         return None
@@ -329,7 +353,10 @@ def _plan(source: Image.Image, region: RenderRegion) -> _Plan:
     base = RegionOutcome(region.region_id, RegionStatus.KEPT, background, measured, ())
     if not region.include:
         return _Plan(region, replace(base, flags=tuple(sorted(flags))))
-    drawable = drawable_codepoints()
+    # The matched face, or the operator's: each face is drawn with its own font, so the glyph
+    # check is that font's.
+    style = _style(measured, region.override)
+    drawable = drawable_codepoints(style.face)
     missing = sorted({c for c in region.korean_text if c != "\n" and ord(c) not in drawable})
     if missing:
         flags.add(MISSING_GLYPHS)
@@ -342,10 +369,6 @@ def _plan(source: Image.Image, region: RenderRegion) -> _Plan:
                 missing_glyphs=tuple(missing),
             ),
         )
-    requested = _style(measured, region.override)
-    if requested.face is Face.SERIF:
-        flags.add(FACE_FALLBACK_SANS)
-    style = replace(requested, face=Face.SANS)
     notes = (FACE_NOTE,)
     erased = region.erase and background.clean
     pad = 0 if erased else max(1, min(region.box.width, region.box.height) // 10)
@@ -381,7 +404,7 @@ def _plan(source: Image.Image, region: RenderRegion) -> _Plan:
         erased=erased,
         placement=Placement.INLINE if erased else Placement.LABEL,
         style=fitted,
-        face_matched=Face.SANS,
+        face_matched=fitted.face,
         lines=tuple(line.text for line in lines),
         ink=ink,
         notes=notes,
@@ -402,7 +425,7 @@ def _draw(canvas: Image.Image, plan: _Plan) -> None:
         draw.rectangle((0, 0, box.width - 1, box.height - 1), fill=outcome.background.colour)
     elif plan.label is not None:
         draw.rectangle((0, 0, box.width - 1, box.height - 1), fill=_fill(canvas, plan.label))
-    font = _font(outcome.style.size, outcome.style.weight)
+    font = _font(outcome.style.size, outcome.style.weight, outcome.style.face)
     for line in plan.lines:
         draw.text(
             (line.x, line.baseline),

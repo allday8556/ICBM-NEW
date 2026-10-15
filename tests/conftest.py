@@ -75,6 +75,9 @@ def make_config(data_dir: Path, **overrides: object) -> AppConfig:
         "operate_stock_recheck_interval_s": 0.0,
         "operate_order_sync_interval_s": 0.0,
         "fx_refresh_interval_s": 0.0,
+        # No local OCR engine either: a suite binds a fake one, or the real one explicitly
+        # (ADR-0041 I7), so a venv with the ``ocr`` extra reads like CI's without it.
+        "image_ocr_engine": False,
     }
     values.update(overrides)
     return AppConfig(**values)  # type: ignore[arg-type]

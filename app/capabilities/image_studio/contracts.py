@@ -17,10 +17,11 @@ out is not part of it). A candidate is reused only on an equal fingerprint; any 
 it (AIF-07).
 
 **Seams.** The OCR engine (``OcrProvider``) and the translation task's composition
-(``TranslationComposer``) are ports. Production binds ``NoOcrProvider``, which names no engine, so
-the capabilities ``image_ocr`` and ``image_translate`` read ``NOT_CONFIGURED`` and nothing is read
-or sent. The engine side of the OCR port, its preprocessing, tiling and scoring are I2's (``ocr``);
-the registered task and its composer are I4's (``task``).
+(``TranslationComposer``) are ports. With no local engine installed production binds
+``NoOcrProvider``, which names no engine, so the capabilities ``image_ocr`` and ``image_translate``
+read ``NOT_CONFIGURED`` and nothing is read or sent. The engine side of the OCR port, its
+preprocessing, tiling and scoring are I2's (``ocr``); the pinned RapidOCR engine is I7's
+(``rapid``); the registered task and its composer are I4's (``task``).
 
 **What is sent.** A region the operator excludes is never sent, and a contact detail
 (``checks.looks_like_contact``) only when the operator includes it (§6).
@@ -315,7 +316,7 @@ class OcrProvider(Protocol):
 
 
 class NoOcrProvider:
-    """The production binding until an engine is installed (D2, I7): nothing is ever read."""
+    """The production binding while no engine is installed (D2, I7): nothing is ever read."""
 
     def identity(self) -> OcrIdentity | None:
         return None
