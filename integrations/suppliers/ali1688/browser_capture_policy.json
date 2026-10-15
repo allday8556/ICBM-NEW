@@ -1,7 +1,7 @@
 {
   "schema": "icbm-browser-capture-policy/v1",
   "supplier_key": "ali1688",
-  "revision": "ali1688-capture-1",
+  "revision": "ali1688-capture-2",
   "host": "detail.1688.com",
   "product_root": {"by": "id", "token": "gallery"},
   "allowed_regions": [
@@ -78,7 +78,18 @@
       {"path": "result.data.Root.fields.dataJson.skuModel.skuInfoMap.*.canBookCount", "type": "integer"},
       {"path": "result.data.Root.fields.dataJson.skuModel.skuInfoMap.*.isPromotionSku", "type": "boolean"},
       {"path": "result.data.shippingServices.fields.freightInfo.location", "type": "string"},
-      {"path": "result.data.shippingServices.fields.freightInfo.totalCost", "type": "number"}
+      {"path": "result.data.shippingServices.fields.freightInfo.totalCost", "type": "number"},
+      {"path": "result.data.description.fields.detailUrl", "type": "string"}
     ]
+  },
+  "description": {
+    "url_path": "result.data.description.fields.detailUrl",
+    "description_hosts": ["itemcdn.tmall.com"],
+    "prefix": "var offer_details=",
+    "terminator": ";",
+    "max_bytes": 1048576,
+    "max_depth": 8,
+    "image_hosts": ["cbu01.alicdn.com"],
+    "max_image_refs": 40
   }
 }

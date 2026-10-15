@@ -24,10 +24,16 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictInt, StrictStr, model_validator
 
-from app.stages.collect.extension.policy import EmbeddedDataRule
+from app.stages.collect.extension.gate import locator_holds_secret
+from app.stages.collect.extension.policy import (
+    MAX_DESCRIPTION_IMAGE_REFS,
+    DescriptionRule,
+    EmbeddedDataRule,
+)
 
 # What the browser sends when it could not make the projection (ui/extension/lib/capture.js).
 BrowserRefusal = Literal[
@@ -197,3 +203,83 @@ def strings_of(rule: EmbeddedDataRule, projection: Mapping[str, Any]) -> list[tu
                 else:
                     pending.append((child, node.keys[key], where))
     return found
+
+
+# ---------------------------------------------------------------- the description images (§3.2)
+
+# What the browser sends when it could not read the description's images (capture.js).
+DescriptionRefusal = Literal[
+    "DESCRIPTION_URL_ABSENT",
+    "DESCRIPTION_URL_NOT_ALLOWED",
+    "DESCRIPTION_FETCH_FAILED",
+    "DESCRIPTION_STATUS",
+    "DESCRIPTION_OVER_BYTES",
+    "DESCRIPTION_NOT_STATEMENT",
+    "DESCRIPTION_NOT_JSON",
+    "DESCRIPTION_OVER_DEPTH",
+    "DESCRIPTION_NO_CONTENT",
+    "DESCRIPTION_IMAGE_NOT_PLAIN",
+]
+# Why the server refused the member it received, or found none where the policy declares one.
+DESCRIPTION_IMAGES_ABSENT = "DESCRIPTION_IMAGES_ABSENT"
+DESCRIPTION_IMAGES_NOT_ALLOWED = "DESCRIPTION_IMAGES_NOT_ALLOWED"
+DESCRIPTION_IMAGES_OVER_BOUND = "DESCRIPTION_IMAGES_OVER_BOUND"
+MAX_IMAGE_URL_LENGTH = 2048
+
+
+class DescriptionImagesMember(BaseModel):
+    """The ``description_images`` member of a capture envelope (ADR-0040 §3.2, OC-09).
+
+    Either the image references the extension read from the description document, in document
+    order, with how many distinct ones it found before the policy's cap, or the browser's refusal.
+    The document itself, its text and its HTML never arrive.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    images: list[StrictStr] | None = Field(
+        default=None, max_length=MAX_DESCRIPTION_IMAGE_REFS, repr=False
+    )
+    total: StrictInt | None = None
+    refused: DescriptionRefusal | None = None
+
+    @model_validator(mode="after")
+    def _one_of(self) -> "DescriptionImagesMember":
+        if (self.images is None) == (self.refused is None):
+            raise ValueError("the member is image references or a refusal, exactly one")
+        if (self.images is None) != (self.total is None):
+            raise ValueError("image references come with their total, and only they do")
+        if self.images is not None and self.total is not None and self.total < len(self.images):
+            raise ValueError("the total counts every reference sent")
+        return self
+
+
+def description_images_problem(rule: DescriptionRule, images: list[str], total: int) -> str | None:
+    """Why the server refuses these references, or ``None`` when every one is a plain https
+    reference on a declared image host, sent once, within the cap.
+
+    Each reference is judged by the same secret rules an image locator is (ADR-0019 §6.1).
+    """
+    if len(images) > rule.max_image_refs or total > 100 * MAX_DESCRIPTION_IMAGE_REFS:
+        return DESCRIPTION_IMAGES_OVER_BOUND
+    if len(set(images)) != len(images):
+        return DESCRIPTION_IMAGES_NOT_ALLOWED
+    for image in images:
+        if len(image) > MAX_IMAGE_URL_LENGTH or any(c.isspace() for c in image):
+            return DESCRIPTION_IMAGES_NOT_ALLOWED
+        try:
+            parts = urlsplit(image)
+        except ValueError:
+            return DESCRIPTION_IMAGES_NOT_ALLOWED
+        if (
+            parts.scheme != "https"
+            or parts.hostname not in rule.image_hosts
+            or parts.netloc != parts.hostname
+            or parts.query
+            or parts.fragment
+            or "?" in image
+            or "#" in image
+            or locator_holds_secret(image)
+        ):
+            return DESCRIPTION_IMAGES_NOT_ALLOWED
+    return None

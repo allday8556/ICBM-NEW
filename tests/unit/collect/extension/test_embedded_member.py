@@ -77,9 +77,9 @@ def test_only_the_1688_policy_declares_embedded_data_and_it_is_digested() -> Non
     assert policy.embedded_data.bare_integer_keys is True
     paths = {entry.path for entry in policy.embedded_data.allowlist}
     assert "result.data.shippingServices.fields.freightInfo.totalCost" in paths
-    # ADR-0040 OC-01: the description document is not the server's to read, so its URL
-    # never leaves the browser either.
-    assert not [path for path in paths if "description" in path]
+    # ADR-0040 §3.2: the description's URL is projected for the extension alone, which reads
+    # the document within the capture (OC-09); the server never reads it.
+    assert "result.data.description.fields.detailUrl" in paths
     assert "result.data.Root.fields.dataJson.skuModel.skuInfoMap.*.price" in paths
     # Nothing of the member's address, identity or account, and no hash-shaped SKU spec id.
     for path in paths:
@@ -153,7 +153,14 @@ def test_an_embedded_entry_that_is_not_exactly_reviewed_refuses_the_policy(chang
 def test_a_policy_without_the_entry_is_unchanged() -> None:
     document = _document()
     del document["embedded_data"]
-    assert _parse(document).embedded_data is None
+    del document["description"]
+    parsed = _parse(document)
+    assert parsed.embedded_data is None and parsed.description is None
+    # A description entry needs the embedded data it reads its URL from.
+    alone = _document()
+    del alone["embedded_data"]
+    with pytest.raises(CapturePolicyRefused):
+        _parse(alone)
 
 
 # ---------------------------------------------------------------- the server's re-check
@@ -206,7 +213,7 @@ def test_the_browsers_projection_is_exactly_allowlisted() -> None:
             EMBEDDED_TYPE_MISMATCH,
         ),
         (
-            lambda d: d.update(description={"fields": {"detailUrl": "https://x.test/a"}}),
+            lambda d: d.update(description={"fields": {"label": "详情描述"}}),
             EMBEDDED_PATH_NOT_ALLOWED,
         ),
     ],

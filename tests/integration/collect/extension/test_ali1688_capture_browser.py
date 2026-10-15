@@ -37,8 +37,9 @@ CUT = """async (policy) => {
 }"""
 CUT_JSON = """async (policy) => {
   const module = await import("/__icbm_extension__/lib/capture.js");
-  return JSON.stringify(module.captureInPage(policy));
+  return JSON.stringify(await module.captureInPage(policy));
 }"""
+DESCRIPTION_URL = "https://itemcdn.tmall.com/1688offer/icoss5072039755d496fa52ec17612"
 PREFIX = 'window.contextPath = "/default";\nwindow.context=(function(b,d){return d})'
 MARKER = "(window.contextPath,"
 
@@ -108,6 +109,7 @@ EXPECTED = {
             "shippingServices": {
                 "fields": {"freightInfo": {"location": "浙江省金华市", "totalCost": 3}}
             },
+            "description": {"fields": {"detailUrl": DESCRIPTION_URL}},
         }
     }
 }
@@ -159,12 +161,50 @@ def policy() -> dict[str, Any]:
     return loaded
 
 
+# The description document the synthetic page names, as itemcdn.tmall.com shapes it: images on the
+# declared host (one twice, one written protocol-relative, one in data-src), on other hosts, and a
+# script and an onerror handler that must never run.
+DESCRIBED = [
+    "https://cbu01.alicdn.com/img/ibank/d1.jpg",
+    "https://cbu01.alicdn.com/img/ibank/d2.jpg",
+    "https://cbu01.alicdn.com/img/ibank/d3.jpg",
+]
+CONTENT = (
+    '<p>商品详情</p><img src="https://cbu01.alicdn.com/img/ibank/d1.jpg">'
+    '<img src="https://img.alicdn.com/tfs/icon-64-64.png">'
+    '<img src="//cbu01.alicdn.com/img/ibank/d2.jpg" usemap="#m">'
+    '<img data-src="https://cbu01.alicdn.com/img/ibank/d3.jpg">'
+    '<img src="https://cbu01.alicdn.com/img/ibank/d1.jpg">'
+    '<img src="https://evil.test/x.jpg">'
+    '<script>window.__pwned = 1</script><img src="x" onerror="window.__pwned = 2">'
+)
+
+
+def _document(content: str = CONTENT) -> str:
+    return "var offer_details=" + json.dumps({"content": content}, ensure_ascii=False) + ";"
+
+
+Answer = tuple[int, str, dict[str, str]]
+
+
 def _cut(
-    browser: Browser, html: str, policy: dict[str, Any], *, script: str = CUT
+    browser: Browser,
+    html: str,
+    policy: dict[str, Any],
+    *,
+    script: str = CUT,
+    description: Answer | None = None,
 ) -> dict[str, Any]:
+    served = description or (200, _document(), {"content-type": "text/plain; charset=UTF-8"})
+
     def answer(route: Route) -> None:
         requested = route.request.url
-        if requested.startswith(MODULE_BASE):
+        if requested == DESCRIPTION_URL:
+            # The description read sends no cookie and no credentials of the page.
+            assert "cookie" not in {name.lower() for name in route.request.headers}
+            status, body, headers = served
+            route.fulfill(status=status, body=body, headers=headers)
+        elif requested.startswith(MODULE_BASE):
             source = EXTENSION_ROOT / requested.removeprefix(MODULE_BASE)
             route.fulfill(
                 status=200, content_type="text/javascript", body=source.read_text("utf-8")
@@ -178,8 +218,11 @@ def _cut(
     try:
         page.route("**/*", answer)
         page.goto(URL)
+        page.context.add_cookies([{"name": "member", "value": "secret", "url": URL}])
         evaluated = page.evaluate(script, policy)
         result: dict[str, Any] = json.loads(evaluated) if isinstance(evaluated, str) else evaluated
+        # Nothing of the description ran in the page: it was parsed into an inert document.
+        assert page.evaluate("window.__pwned") is None
         return result
     finally:
         page.close()
@@ -195,6 +238,7 @@ def test_only_the_allowlisted_projection_leaves_the_page(
     cut = _cut(browser, _page_html([_context_script()]), policy)
     assert cut["ok"] is True
     assert cut["embedded_data"] == {"projection": EXPECTED}
+    assert cut["description_images"] == {"images": DESCRIBED, "total": len(DESCRIBED)}
     server = _server_rule()
     # The server accepts exactly that, and its gate finds nothing.
     assert projection_problem(server.embedded_data, cut["embedded_data"]["projection"]) is None
@@ -219,9 +263,13 @@ def test_only_the_allowlisted_projection_leaves_the_page(
         "近期复购",
         "已加购",
         "video",
-        # The description document is not the server's to read: its URL stays in the page.
-        "itemcdn",
-        "detailUrl",
+        # ADR-0040 §3.2: nothing of the description document leaves the page but its image
+        # references on the declared host: not its text, its HTML or another host's images.
+        "offer_details",
+        "商品详情",
+        "evil.test",
+        "img.alicdn.com",
+        "window.__pwned",
     ):
         assert absent not in sent, absent
     # The DOM capture is the reviewed product scope, and the server finds nothing it disallows.
@@ -315,6 +363,111 @@ def test_a_map_key_is_data_even_when_it_is_named_like_a_property(
 def test_a_policy_without_embedded_data_cuts_no_member(
     browser: Browser, policy: dict[str, Any]
 ) -> None:
-    plain = {key: value for key, value in policy.items() if key != "embedded_data"}
+    plain = {
+        key: value for key, value in policy.items() if key not in ("embedded_data", "description")
+    }
     cut = _cut(browser, _page_html([_context_script()]), plain)
     assert set(cut) == {"ok", "html", "transport"}
+
+
+# ---------------------------------------------------------------- the description images (§3.2)
+
+
+def _with(policy: dict[str, Any], **changes: Any) -> dict[str, Any]:
+    changed = copy.deepcopy(policy)
+    changed["description"].update(changes)
+    return changed
+
+
+@pytest.mark.parametrize(
+    ("description", "code"),
+    [
+        ((404, "", {}), "DESCRIPTION_STATUS"),
+        # A redirect is never followed (redirect: "error"); its target cannot even resolve.
+        ((302, "", {"location": "https://redirected.invalid/doc"}), "DESCRIPTION_FETCH_FAILED"),
+        ((200, '{"content":"<img>"};', {}), "DESCRIPTION_NOT_STATEMENT"),
+        ((200, 'var offer_details={"content":"x"}', {}), "DESCRIPTION_NOT_STATEMENT"),
+        ((200, "var offer_details={content:'x'};", {}), "DESCRIPTION_NOT_JSON"),
+        ((200, 'var offer_details={"content":"x"};alert(1);', {}), "DESCRIPTION_NOT_JSON"),
+        ((200, 'var offer_details={"html":"x"};', {}), "DESCRIPTION_NO_CONTENT"),
+        ((200, 'var offer_details=["x"];', {}), "DESCRIPTION_NO_CONTENT"),
+        (
+            (200, _document('<img src="https://cbu01.alicdn.com/a.jpg?token=abc">'), {}),
+            "DESCRIPTION_IMAGE_NOT_PLAIN",
+        ),
+        (
+            (200, _document('<img src="http://cbu01.alicdn.com/a.jpg">'), {}),
+            "DESCRIPTION_IMAGE_NOT_PLAIN",
+        ),
+    ],
+)
+def test_a_description_that_is_not_exactly_the_statement_sends_only_its_code(
+    browser: Browser, policy: dict[str, Any], description: Answer, code: str
+) -> None:
+    cut = _cut(browser, _page_html([_context_script()]), policy, description=description)
+    # The capture and its embedded data go on; the description member says why it is empty.
+    assert cut["ok"] is True and "projection" in cut["embedded_data"]
+    assert cut["description_images"] == {"refused": code}
+
+
+@pytest.mark.parametrize(
+    ("detail_url", "code"),
+    [
+        ("https://other.test/1688offer/icoss1", "DESCRIPTION_URL_NOT_ALLOWED"),
+        ("http://itemcdn.tmall.com/1688offer/icoss1", "DESCRIPTION_URL_NOT_ALLOWED"),
+        ("https://itemcdn.tmall.com/1688offer/icoss1?token=abc", "DESCRIPTION_URL_NOT_ALLOWED"),
+        ("https://user:pw@itemcdn.tmall.com/1688offer/icoss1", "DESCRIPTION_URL_NOT_ALLOWED"),
+        ("https://itemcdn.tmall.com:8443/1688offer/icoss1", "DESCRIPTION_URL_NOT_ALLOWED"),
+        ("not a url", "DESCRIPTION_URL_NOT_ALLOWED"),
+    ],
+)
+def test_a_description_url_off_the_declared_host_is_never_read(
+    browser: Browser, policy: dict[str, Any], detail_url: str, code: str
+) -> None:
+    context = CONTEXT.replace(DESCRIPTION_URL, detail_url)
+    cut = _cut(browser, _page_html([_context_script(context)]), policy)
+    assert cut["description_images"] == {"refused": code}
+
+
+def test_a_page_whose_member_holds_no_url_reads_nothing(
+    browser: Browser, policy: dict[str, Any]
+) -> None:
+    cut = _cut(browser, _page_html([]), policy)
+    assert cut["embedded_data"] == {"refused": "EMBEDDED_SCRIPT_NOT_EXACTLY_ONE"}
+    assert cut["description_images"] == {"refused": "DESCRIPTION_URL_ABSENT"}
+
+
+@pytest.mark.parametrize(
+    ("changes", "description", "expected"),
+    [
+        ({"max_bytes": 64}, None, {"refused": "DESCRIPTION_OVER_BYTES"}),
+        (
+            {"max_depth": 1},
+            (200, 'var offer_details={"content":"x","a":{"b":1}};', {}),
+            {"refused": "DESCRIPTION_OVER_DEPTH"},
+        ),
+        # The cap keeps the first references in document order and says how many there were.
+        ({"max_image_refs": 2}, None, {"images": DESCRIBED[:2], "total": 3}),
+    ],
+)
+def test_the_bounds_and_the_cap_are_the_policys(
+    browser: Browser,
+    policy: dict[str, Any],
+    changes: dict[str, Any],
+    description: Answer | None,
+    expected: dict[str, Any],
+) -> None:
+    cut = _cut(
+        browser, _page_html([_context_script()]), _with(policy, **changes), description=description
+    )
+    assert cut["description_images"] == expected
+
+
+def test_the_server_accepts_exactly_what_the_extension_sent(
+    browser: Browser, policy: dict[str, Any]
+) -> None:
+    from app.stages.collect.extension.embedded import description_images_problem
+
+    member = _cut(browser, _page_html([_context_script()]), policy)["description_images"]
+    rule = _server_rule().description
+    assert description_images_problem(rule, member["images"], member["total"]) is None

@@ -88,6 +88,24 @@ _EMBEDDED_KEYS = frozenset(
 MAX_EMBEDDED_ARGUMENT_BYTES = 2 * 1024 * 1024
 MAX_EMBEDDED_DEPTH = 64
 MAX_EMBEDDED_PATHS = 64
+# ADR-0040 §3.2 (OC-09): the optional description entry, and its exact keys. It needs the
+# embedded-data entry: the description document's URL is read from the projection.
+DESCRIPTION_KEY = "description"
+_DESCRIPTION_KEYS = frozenset(
+    {
+        "url_path",
+        "description_hosts",
+        "prefix",
+        "terminator",
+        "max_bytes",
+        "max_depth",
+        "image_hosts",
+        "max_image_refs",
+    }
+)
+MAX_DESCRIPTION_BYTES = 2 * 1024 * 1024
+MAX_DESCRIPTION_DEPTH = 16
+MAX_DESCRIPTION_IMAGE_REFS = 60
 EMBEDDED_ROOT = ("result", "data")
 EMBEDDED_TYPES = frozenset({"string", "integer", "number", "boolean"})
 _SEGMENT = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|\*)(?:\[\])?$")
@@ -155,6 +173,24 @@ class EmbeddedDataRule:
 
 
 @dataclass(frozen=True)
+class DescriptionRule:
+    """ADR-0040 §3.2: the one public description document the extension may read in a capture.
+
+    Only the extension reads it, inside the user's capture, from ``description_hosts``; the server
+    never does (OC-09). Only image references on ``image_hosts`` leave the browser.
+    """
+
+    url_path: str
+    description_hosts: frozenset[str]
+    prefix: str
+    terminator: str
+    max_bytes: int
+    max_depth: int
+    image_hosts: frozenset[str]
+    max_image_refs: int
+
+
+@dataclass(frozen=True)
 class BrowserCapturePolicy:
     supplier_key: str
     revision: str
@@ -172,6 +208,8 @@ class BrowserCapturePolicy:
     digest: str
     # ADR-0040 §3: the embedded-data member this supplier's captures carry, if any.
     embedded_data: EmbeddedDataRule | None = None
+    # ADR-0040 §3.2: the description images this supplier's captures carry, if any.
+    description: DescriptionRule | None = None
 
     def keeps_attribute(self, tag: str, name: str) -> bool:
         return name in self.allowed_attributes.get("*", frozenset()) or name in (
@@ -340,6 +378,50 @@ def _embedded_data(value: Any) -> EmbeddedDataRule:
     )
 
 
+def _hosts(value: Any, what: str) -> frozenset[str]:
+    if (
+        not isinstance(value, list)
+        or not value
+        or len(set(value)) != len(value)
+        or not all(isinstance(host, str) and _HOST.fullmatch(host) for host in value)
+    ):
+        raise _policy_refused(
+            "CAPTURE_POLICY_INVALID", f"the description {what} are not exact host names"
+        )
+    return frozenset(value)
+
+
+def _description(value: Any, embedded: EmbeddedDataRule | None) -> DescriptionRule:
+    if not isinstance(value, dict) or set(value) != _DESCRIPTION_KEYS:
+        raise _policy_refused(
+            "CAPTURE_POLICY_INVALID", "the capture policy's description does not have its keys"
+        )
+    url_path = value["url_path"]
+    if embedded is None or not any(
+        entry.path == url_path and entry.type == "string" for entry in embedded.allowlist
+    ):
+        # The document's URL is read from the projection, so it must be an allowlisted string.
+        raise _policy_refused(
+            "CAPTURE_POLICY_INVALID", "the description URL is not an allowlisted string"
+        )
+    description_hosts = _hosts(value["description_hosts"], "hosts")
+    image_hosts = _hosts(value["image_hosts"], "image hosts")
+    if description_hosts & image_hosts:
+        raise _policy_refused("CAPTURE_POLICY_INVALID", "a description host is never an image host")
+    return DescriptionRule(
+        url_path=url_path,
+        description_hosts=description_hosts,
+        prefix=_marker(value["prefix"], "description prefix"),
+        terminator=_marker(value["terminator"], "description terminator"),
+        max_bytes=_bound(value["max_bytes"], MAX_DESCRIPTION_BYTES, "description byte bound"),
+        max_depth=_bound(value["max_depth"], MAX_DESCRIPTION_DEPTH, "description depth bound"),
+        image_hosts=image_hosts,
+        max_image_refs=_bound(
+            value["max_image_refs"], MAX_DESCRIPTION_IMAGE_REFS, "description image bound"
+        ),
+    )
+
+
 def parse_policy(raw: bytes, supplier_key: str) -> BrowserCapturePolicy:
     """Validate one policy document strictly and bind it to its canonical bytes and digest."""
     try:
@@ -348,7 +430,8 @@ def parse_policy(raw: bytes, supplier_key: str) -> BrowserCapturePolicy:
         raise _policy_refused(
             "CAPTURE_POLICY_INVALID", "the capture policy is not UTF-8 JSON"
         ) from None
-    if not isinstance(document, dict) or set(document) - {EMBEDDED_DATA_KEY} != _KEYS:
+    optional = {EMBEDDED_DATA_KEY, DESCRIPTION_KEY}
+    if not isinstance(document, dict) or set(document) - optional != _KEYS:
         raise _policy_refused(
             "CAPTURE_POLICY_INVALID", "the capture policy does not have its exact keys"
         )
@@ -374,6 +457,9 @@ def parse_policy(raw: bytes, supplier_key: str) -> BrowserCapturePolicy:
             "CAPTURE_POLICY_BOUND_INVALID", "the capture policy states no exact bounds"
         )
     canonical = canonical_bytes(document)
+    embedded = (
+        _embedded_data(document[EMBEDDED_DATA_KEY]) if EMBEDDED_DATA_KEY in document else None
+    )
     return BrowserCapturePolicy(
         supplier_key=supplier_key,
         revision=_text(document["revision"], _REVISION, "revision"),
@@ -403,8 +489,11 @@ def parse_policy(raw: bytes, supplier_key: str) -> BrowserCapturePolicy:
         ),
         canonical=canonical,
         digest=policy_digest(canonical),
-        embedded_data=(
-            _embedded_data(document[EMBEDDED_DATA_KEY]) if EMBEDDED_DATA_KEY in document else None
+        embedded_data=embedded,
+        description=(
+            _description(document[DESCRIPTION_KEY], embedded)
+            if DESCRIPTION_KEY in document
+            else None
         ),
     )
 

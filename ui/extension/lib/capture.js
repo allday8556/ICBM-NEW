@@ -16,7 +16,11 @@
 //
 // It reads no cookie, no storage, no form value and no request or response header, and it returns
 // nothing but the capture and what the browser observed of the navigation.
-export function captureInPage(policy) {
+//
+// For a policy that declares them (1688 only, ADR-0040 §3 and §3.2) it then adds the projected
+// embedded data and the description's image references. The one network read it may make is that
+// description document, inside this capture: no cookies, no redirect, a declared host only.
+export async function captureInPage(policy) {
   const refuse = (code) => ({ ok: false, code });
 
   // ---- 1. preconditions -------------------------------------------------------------------
@@ -278,6 +282,126 @@ export function captureInPage(policy) {
     }
   };
   const member = policy.embedded_data ? { embedded_data: embedded(policy.embedded_data) } : {};
+
+  // ---- 6. the description images (ADR-0040 §3.2, OC-09; 1688 only) -----------------------
+  // Only a policy that declares `description` has them. Inside this same user-started capture,
+  // the one description document the page names (its URL, from the projection above) is read
+  // once, from a declared host, with no cookies and no redirect, under the byte bound. Its literal
+  // is cut between the declared prefix and terminator and parsed as data (JSON.parse, never run);
+  // its `content` HTML is parsed into an inert document (DOMParser: nothing runs, nothing loads,
+  // nothing is inserted into the page). Only the image references on the declared image hosts
+  // leave the page, in document order and de-duplicated. Any mismatch sends no images, only the
+  // code that says why.
+  const describe = async (rule, projection) => {
+    const mismatch = (code) => ({ refused: code });
+    let stated = projection;
+    for (const step of rule.url_path.split(".")) {
+      stated = stated !== null && typeof stated === "object" ? stated[step] : undefined;
+    }
+    if (typeof stated !== "string") return mismatch("DESCRIPTION_URL_ABSENT");
+    const plain = (url) =>
+      url.protocol === "https:" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.port === "" &&
+      url.search === "" &&
+      url.hash === "";
+    let target;
+    try {
+      target = new URL(stated);
+    } catch {
+      return mismatch("DESCRIPTION_URL_NOT_ALLOWED");
+    }
+    if (!plain(target) || !rule.description_hosts.includes(target.hostname)) {
+      return mismatch("DESCRIPTION_URL_NOT_ALLOWED");
+    }
+    let response;
+    try {
+      response = await fetch(target.href, {
+        credentials: "omit",
+        redirect: "error",
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+      });
+    } catch {
+      return mismatch("DESCRIPTION_FETCH_FAILED");
+    }
+    if (response.status !== 200 || !response.body) return mismatch("DESCRIPTION_STATUS");
+    // The byte bound, as the body arrives: nothing past it is read.
+    const reader = response.body.getReader();
+    const chunks = [];
+    let size = 0;
+    for (;;) {
+      let step;
+      try {
+        step = await reader.read();
+      } catch {
+        return mismatch("DESCRIPTION_FETCH_FAILED");
+      }
+      if (step.done) break;
+      size += step.value.length;
+      if (size > rule.max_bytes) {
+        reader.cancel();
+        return mismatch("DESCRIPTION_OVER_BYTES");
+      }
+      chunks.push(step.value);
+    }
+    const body = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.length;
+    }
+    const text = new TextDecoder().decode(body).trim();
+    if (
+      !text.startsWith(rule.prefix) ||
+      !text.endsWith(rule.terminator) ||
+      text.length < rule.prefix.length + rule.terminator.length
+    ) {
+      return mismatch("DESCRIPTION_NOT_STATEMENT");
+    }
+    let literal;
+    try {
+      literal = JSON.parse(text.slice(rule.prefix.length, text.length - rule.terminator.length));
+    } catch {
+      return mismatch("DESCRIPTION_NOT_JSON");
+    }
+    const pending = [[literal, 1]];
+    while (pending.length) {
+      const [value, depth] = pending.pop();
+      if (depth > rule.max_depth) return mismatch("DESCRIPTION_OVER_DEPTH");
+      if (value !== null && typeof value === "object") {
+        for (const child of Object.values(value)) pending.push([child, depth + 1]);
+      }
+    }
+    const content =
+      literal !== null && typeof literal === "object" && !Array.isArray(literal)
+        ? literal.content
+        : undefined;
+    if (typeof content !== "string") return mismatch("DESCRIPTION_NO_CONTENT");
+    const inert = new DOMParser().parseFromString(content, "text/html");
+    const found = [];
+    for (const image of Array.from(inert.querySelectorAll("img"))) {
+      for (const name of ["src", "data-src"]) {
+        const written = (image.getAttribute(name) || "").trim();
+        if (!written) continue;
+        let reference;
+        try {
+          reference = new URL(written, target.href);
+        } catch {
+          continue;
+        }
+        if (!rule.image_hosts.includes(reference.hostname)) continue;
+        if (!plain(reference)) return mismatch("DESCRIPTION_IMAGE_NOT_PLAIN");
+        if (!found.includes(reference.href)) found.push(reference.href);
+      }
+    }
+    return { images: found.slice(0, rule.max_image_refs), total: found.length };
+  };
+  if (policy.description) {
+    const projection = member.embedded_data && member.embedded_data.projection;
+    member.description_images = await describe(policy.description, projection);
+  }
 
   return {
     ok: true,

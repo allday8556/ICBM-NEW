@@ -245,9 +245,9 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `integrations/` | 119 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 45 |  |
 | `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 439 | tests |
+| `tests/` | 444 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
-| `tests/fixtures/` | 28 | test fixtures (byte-pinned) |
+| `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 181 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |

@@ -14,7 +14,12 @@ from integrations.suppliers.ali1688.collect.identity import (
     path_number,
     resolve,
 )
-from integrations.suppliers.ali1688.collect.images import IMAGE_HOSTS, IMAGE_ROLES, classify_images
+from integrations.suppliers.ali1688.collect.images import (
+    IMAGE_HOSTS,
+    IMAGE_ROLES,
+    classify_images,
+    description_candidates,
+)
 from integrations.suppliers.ali1688.collect.revision import EXTRACTION_REVISION
 
 __all__ = [
@@ -25,6 +30,7 @@ __all__ = [
     "SourceIdentity",
     "UnresolvedIdentity",
     "classify_images",
+    "description_candidates",
     "parse_fields",
     "path_number",
     "resolve",

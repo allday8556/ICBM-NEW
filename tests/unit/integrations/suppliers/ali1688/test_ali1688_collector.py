@@ -1,10 +1,11 @@
 """1688's collector over the five pinned captures (ADR-0040 §3, §4; slice C2).
 
 Each fixture is exactly what the extension's own ``captureInPage`` cut in the owner's signed-in
-browser on 2026-10-14: the product-scope DOM and the projected embedded-data member. The members
-were re-derived once, exactly, for the policy without ``description.fields.detailUrl``: that member
-was removed from each JSON (nothing else changes; JSON.stringify writes the same bytes). Nothing
-here reaches a network.
+browser on 2026-10-14: the product-scope DOM and the projected embedded-data member (the bytes of
+that capture, which states ``description.fields.detailUrl`` again under ADR-0040 §3.2). The
+``description_images`` members were cut on 2026-10-15 by the same ``captureInPage`` with the
+description step, on the same pages, whose ``detailUrl`` was unchanged (§3.2, OC-09). Nothing here
+reaches a network.
 """
 
 import copy
@@ -16,7 +17,11 @@ from typing import Any
 
 import pytest
 
-from app.stages.collect.extension.embedded import projection_problem, strings_of
+from app.stages.collect.extension.embedded import (
+    description_images_problem,
+    projection_problem,
+    strings_of,
+)
 from app.stages.collect.extension.gate import embedded_data_gate
 from app.stages.collect.extension.policy import CapturePolicySource
 from app.stages.collect.facts import (
@@ -44,6 +49,7 @@ from integrations.suppliers.ali1688.collect.identity import (
 from integrations.suppliers.ali1688.collect.images import classify_images
 from integrations.suppliers.ali1688.collection import COLLECTION
 from integrations.suppliers.collection import (
+    CapturedImages,
     DocumentView,
     EmbeddedData,
     ImageRole,
@@ -57,24 +63,49 @@ NUMBERS = ("990041659965", "970942992948", "959613200255", "1051005117944", "106
 PINNED = {
     "990041659965.html": "895af94fb85893b9b60513a9b2fc0db0148c8810f06320f0c8a891bd21b016e0",
     "990041659965.embedded.json": (
-        "4a2591f9431b355469085962f9c7336ac05d20c4d412a2f561921fe71a056f74"
+        "12f9683ffc272eb9ed58e5d832fe612c4e0601f9836a63e11186b1afe2e00cb6"
     ),
     "970942992948.html": "a98d64304ccab16521f49ecc6f2bee08544a9ee7e3c8e4c83902241954971615",
     "970942992948.embedded.json": (
-        "30c134b488b9cc043089088f7401ff9bbf2490923d6dbe6089bd67746bd4a99b"
+        "1c38c6c1ce9a0ba2bc435dc05eb79211a1fc570db8271ff4b5b09e084fe063f5"
     ),
     "959613200255.html": "f2b3f8ac6b0426f06eb60a5f82bf6851eaaf238e9a997cfb7817178bd01a9ff5",
     "959613200255.embedded.json": (
-        "6aa0350c1a7cf1d51a4cf1397d7a480099e859fc58739c5d830d48916646ba26"
+        "d85074e500effd0549d9ddf8accc336087ce2436d8b573f57eff038fe274d8cd"
     ),
     "1051005117944.html": "36e041d0577fc6a55bf6b78f971194d8641480138bc69f92c441350d1fb12f3f",
     "1051005117944.embedded.json": (
-        "7cb1197804c9517358a24a6aac9faa988dde4bd7bb84103145172a2ddd6a808f"
+        "2ac0c5bfc18d831a4ffa32077dd56ac362c0ae2dfc4d4c01989623150b55f84c"
     ),
     "1066237370938.html": "3000b5ce903957ef4e2d6dd52e839d3763368d04594323a994c92b361be4e03c",
     "1066237370938.embedded.json": (
-        "be7fa5e8aee588e01c45496c7bd5fbd658ed532d02d74cc8655427026698a088"
+        "e5b7b23263c017657f73865de07929bf57ee50a6267100704556ca420d234803"
     ),
+    # ADR-0040 §3.2: the description images the extension read within the capture.
+    "990041659965.description_images.json": (
+        "23d9d08ac6e64635a69565d2f2703bc02dce7b3a2c710e0a81cc26049f4efc80"
+    ),
+    "970942992948.description_images.json": (
+        "d1f0e069db5e4a01601cd34d8084f2ad0966d175c9fcde4097de35c1241c871c"
+    ),
+    "959613200255.description_images.json": (
+        "093e60c44e538a5b2a04e7019c16c64b731f7ccb697a8c7fb1f2b4aa492b5f1f"
+    ),
+    "1051005117944.description_images.json": (
+        "2a415bffad7d6aebe6cacc16c0b296556bac2a95f9580aa06c4690cd0a06db6c"
+    ),
+    "1066237370938.description_images.json": (
+        "41902f314202babf821071a27b50915d981afbd40963cde9279e91512dae6be1"
+    ),
+}
+# How many description images each page states on the declared image host (cbu01.alicdn.com).
+# 990041659965's description images are all on img.alicdn.com, which is not declared.
+DESCRIPTION_IMAGES = {
+    "990041659965": 0,
+    "970942992948": 14,
+    "959613200255": 10,
+    "1051005117944": 13,
+    "1066237370938": 13,
 }
 
 
@@ -91,13 +122,24 @@ def _projection(number: str) -> dict[str, Any]:
     return loaded
 
 
+def _described(number: str) -> dict[str, Any]:
+    loaded: dict[str, Any] = json.loads(
+        (FIXTURES / f"{number}.description_images.json").read_text("utf-8")
+    )
+    return loaded
+
+
 def _document(
     number: str,
     *,
     data: dict[str, Any] | None = None,
     refusal: str | None = None,
     html: str | None = None,
+    captured: CapturedImages | None = None,
 ) -> DocumentView:
+    if captured is None:
+        member = _described(number)
+        captured = CapturedImages(urls=tuple(member["images"]), total=member["total"])
     embedded = (
         EmbeddedData(data=None, refusal=refusal)
         if refusal is not None
@@ -111,6 +153,7 @@ def _document(
         content_type="text/html",
         body=_html(number) if html is None else html,
         embedded=embedded,
+        captured_images=captured,
     )
 
 
@@ -253,7 +296,7 @@ def _evaluated(number: str, fields: dict[str, Any]) -> Any:
             source_product_id=number,
             source_url=_url(number),
             captured_at=datetime(2026, 10, 14, tzinfo=UTC),
-            extractor_revision="ali1688-3",
+            extractor_revision="ali1688-4",
             extractor_fingerprint="0" * 64,
             collection_run_id="run-1",
             correlation_id="corr-1",
@@ -379,7 +422,10 @@ def test_golden_facts(number: str) -> None:
     # The description is a separate document the page names, and it is not captured.
     detail = fields["detail_description"]
     assert detail.status is FieldStatus.REVIEW_REQUIRED and detail.value is None
-    assert detail.evidence[0].normalized == facts.DESCRIPTION_NOT_CAPTURED
+    assert detail.evidence[0].normalized == facts.DESCRIPTION_TEXT_NOT_CAPTURED
+    count = DESCRIPTION_IMAGES[number]
+    assert detail.evidence[1].observed == f"{count} of {count}"
+    assert detail.evidence[1].normalized == "DESCRIPTION_IMAGES"
     for key in ("minimum_sale_price", "sales_channels", "manufacturer", "notice"):
         assert fields[key].status is FieldStatus.ABSENT
     # Every embedded fact cites its JSON path.
@@ -553,15 +599,29 @@ def test_free_and_unstated_freight() -> None:
     assert _fields(number, data=data)["shipping"].status is FieldStatus.REVIEW_REQUIRED
 
 
-def test_no_capture_carries_the_description_or_its_url() -> None:
-    # The description is a separate document; nothing in a capture names or holds it, and the
-    # policy allowlists no path to it, so the server never learns where it is.
+@pytest.mark.parametrize("number", NUMBERS)
+def test_the_description_images_are_detail_candidates_and_nothing_else(number: str) -> None:
+    # ADR-0040 §3.2 (OC-09): the projection states the description's URL, which only the extension
+    # uses; the server holds only the image references, re-checked, and makes each one a DETAIL
+    # candidate after the page's own references. Nothing reads the document here.
     policy = CapturePolicySource(REPO_ROOT / "integrations" / "suppliers").load("ali1688")
-    assert policy.embedded_data is not None
-    assert not [e.path for e in policy.embedded_data.allowlist if "description" in e.path]
-    for number in NUMBERS:
-        assert "itemcdn" not in json.dumps(_projection(number))
-        assert "detailUrl" not in json.dumps(_projection(number))
+    assert policy.description is not None
+    url = _projection(number)["result"]["data"]["description"]["fields"]["detailUrl"]
+    assert url.startswith("https://itemcdn.tmall.com/1688offer/icoss")
+    member = _described(number)
+    assert len(member["images"]) == member["total"] == DESCRIPTION_IMAGES[number]
+    assert description_images_problem(policy.description, member["images"], member["total"]) is None
+    assert COLLECTION.captured_candidates is not None
+    candidates = COLLECTION.captured_candidates(_document(number), _url(number))
+    assert [c.url for c in candidates] == member["images"]
+    assert {c.role for c in candidates} <= {ImageRole.DETAIL}
+    assert {c.rule for c in candidates} <= {"ali1688.detail.description"}
+    assert {c.host for c in candidates} <= {"cbu01.alicdn.com"}
+    # A refused member states no image, and the reason is recorded on detail_description.
+    refused = _document(number, captured=CapturedImages(urls=None, refusal="DESCRIPTION_STATUS"))
+    assert COLLECTION.captured_candidates(refused, _url(number)) == ()
+    detail = COLLECTION.fields(refused)["detail_description"]
+    assert detail.evidence[1].normalized == "DESCRIPTION_IMAGES_REFUSED DESCRIPTION_STATUS"
 
 
 def test_an_unknown_price_display_is_held_for_review() -> None:
