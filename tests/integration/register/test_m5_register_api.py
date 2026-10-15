@@ -724,10 +724,13 @@ def test_an_operator_authors_a_preparation_that_the_server_keeps_and_evaluates(
     assert unit["preflight"]["stage"] == "CANDIDATE"
     assert unit["preflight_unavailable_reason"] is None
     assert container.jobs.count(job_type_prefix="register.create") == 0
-    # The provider duplicate lookup is NOT_ADOPTED, so the preflight is not READY and says why —
-    # and the server refuses the freeze for exactly that reason.
+    # ADR-0042 S3b: the duplicate evidence is the store's COMPLETE catalog snapshot, and this
+    # store has none, so the preflight is not READY and says why — and the server refuses the
+    # freeze for exactly that reason. The duplicate row says the same, in its own words.
     assert unit["preflight"]["status"] != "READY"
-    assert "DUPLICATE_EVIDENCE_MISSING" in unit["preflight"]["reason_codes"]
+    assert "DUPLICATE_EVIDENCE_UNAVAILABLE" in unit["preflight"]["reason_codes"]
+    assert unit["duplicate"]["state"] == "UNAVAILABLE"
+    assert unit["duplicate"]["matches"] == [] and unit["duplicate"]["as_of"] is None
     freeze = _action(unit, RegisterAction.FREEZE)
     assert freeze == {
         "action": "FREEZE",

@@ -1,50 +1,58 @@
-"""Duplicate-lookup evidence for SmartStore — fail-closed in PR-D (ADR-0014 §13; kickoff §6).
+"""SmartStore duplicate evidence — the catalog duplicate source (ADR-0042 S3b, §6; ADR-0014 §13).
 
-``POST /v1/products/search`` is adopted, but **for positive-only reconcile only** (ADR-0014
-§28.2; the SEARCH adoption slice). It is never a duplicate lookup: the provider's seller-code
-match is similar, partial or exact, its codes are not unique, and no result is complete or fresh
-enough to be absence (ADR-0014 §13, §17.2). So this adapter still produces **no evidence at
-all**.
+Until S3b this module produced no evidence at all: ``POST /v1/products/search`` is adopted for
+positive-only reconcile only, a seller-code search is similar, partial or exact, the codes are not
+unique, and no search result is complete or fresh enough to be absence (ADR-0014 §13, §17.2). That
+stays true. What replaces the always-unavailable lookup is not a search: it is the store's own
+**COMPLETE catalog snapshot** (ADR-0042 §5), read by
+:class:`~app.stages.operate.catalog.duplicates.CatalogDuplicateSource`:
 
-That is deliberate. PR-C treats absent evidence as ``DUPLICATE_EVIDENCE_MISSING`` and refuses
-READY wherever the target requires duplicate proof, which is exactly the fail-closed outcome the
-kickoff asks for. Fabricating ``NO_MATCH`` from an unproven lookup would turn an unknown into a
-pass — the one thing §7.3 of CLAUDE.md forbids. An operator's ``DuplicateOverride`` still covers a
-known duplicate, and still never releases an UNKNOWN CREATE conflict.
+- evidence exists only while a COMPLETE snapshot of the bound store is fresh under the target
+  policy's ``catalog_max_age`` (60 minutes) from its start, and no ICBM mutation of the store
+  started since; a stale or missing snapshot is no evidence (``DUPLICATE_EVIDENCE_STALE`` /
+  ``DUPLICATE_EVIDENCE_UNAVAILABLE``) and starts the automatic re-sync;
+- the SmartStore part is the unit's ``smartstore-seller-management-code/v1`` projection
+  (:func:`product.seller_management_code`) and the **positive spot check** of the first CREATE
+  copy, which is the adopted §28.2 seller-code search (:class:`SmartStoreReconcileLookup`): an
+  exact ``STOREFARM`` hit the snapshot did not show is a match, and zero hits change nothing;
+- a ``NO_MATCH`` is duplicate-preflight evidence for a new Intent only. It is never remote absence
+  for ADR-0014 §10/§14/§28 and never frees an ``UNKNOWN`` conflict scope (SCP-05).
 """
 
-from typing import Final
+from collections.abc import Callable, Iterable, Sequence
+from datetime import datetime
+from typing import Any, Final
 
-from app.platform.core.errors import AppError
-from integrations.marketplaces.smartstore.registry import EndpointId
+from app.stages.operate.catalog.duplicates import CatalogDuplicateSource
+from app.stages.operate.catalog.service import StoreCatalogService
+from integrations.marketplaces.smartstore import product
+from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
+from integrations.marketplaces.smartstore.execution import SmartStoreReconcileLookup
 
-LOOKUP_CONTRACT_VERSION: Final = "smartstore-duplicate-lookup/unproven"
-
-
-class DuplicateLookupUnavailableError(AppError):
-    """No duplicate lookup can be performed, so no evidence exists. Never a NO_MATCH."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            "SMARTSTORE_DUPLICATE_LOOKUP_NOT_ADOPTED",
-            "SmartStore duplicate lookup is not adopted: product search is adopted for"
-            " positive-only reconcile only and is never duplicate-absence evidence"
-            " (ADR-0014 §13, §17.2, §28.2)",
-            details={"endpoint_id": EndpointId.SMARTSTORE_PRODUCT_SEARCH.value},
-        )
+MARKETPLACE_KEY: Final = "smartstore"
+LOOKUP_CONTRACT_VERSION: Final = "smartstore-catalog-duplicate/v1"
 
 
-class SmartStoreDuplicateLookup:
-    """The SmartStore duplicate-lookup source. It holds no transport, because it can issue no
-    request: every call raises, and no caller can mistake that for an answer."""
+def smartstore_duplicate_source(
+    *,
+    catalog: StoreCatalogService,
+    refresh: Callable[[], bool],
+    convention_codes: Callable[[Sequence[str]], Iterable[str]],
+    mutation_started_at: Callable[[str, str], datetime | None],
+    caller: SmartStoreEndpointCaller,
+    bearer: Any,
+) -> CatalogDuplicateSource:
+    """The production SmartStore duplicate source (composition root)."""
+    return CatalogDuplicateSource(
+        marketplace_key=MARKETPLACE_KEY,
+        contract_version=LOOKUP_CONTRACT_VERSION,
+        catalog=catalog,
+        seller_code=product.seller_management_code,
+        convention_codes=convention_codes,
+        mutation_started_at=mutation_started_at,
+        refresh=refresh,
+        spot=SmartStoreReconcileLookup(caller=caller, bearer=bearer),
+    )
 
-    marketplace_key: Final = "smartstore"
 
-    def evidence(
-        self, *, marketplace_account_id: str, listing_identity: str
-    ) -> None:  # pragma: no cover - the signature exists so PR-E wires the real shape
-        raise DuplicateLookupUnavailableError()
-
-    def available(self) -> bool:
-        """Whether a lookup can be performed at all. Always ``False`` under this packet."""
-        return False
+__all__ = ["LOOKUP_CONTRACT_VERSION", "MARKETPLACE_KEY", "smartstore_duplicate_source"]

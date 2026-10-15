@@ -17,7 +17,6 @@ import pytest
 
 from app.config import AppConfig
 from app.container import Container
-from app.platform.core.errors import AppError
 from app.stages.products.model import ReadinessStatus
 from app.stages.register import provider as ports
 from app.stages.register.builder import RegistrationSnapshotBuilder
@@ -176,7 +175,17 @@ def test_the_capability_stays_unverified_for_product_write(container: Container)
 
 def test_the_adapter_satisfies_the_register_side_ports() -> None:
     # REGISTER sees the adapter only through Protocols; it imports no provider module itself.
-    assert isinstance(lookup.SmartStoreDuplicateLookup(), ports.DuplicateLookupSource)
+    assert isinstance(
+        lookup.smartstore_duplicate_source(
+            catalog=None,  # type: ignore[arg-type]
+            refresh=lambda: False,
+            convention_codes=lambda items: (),
+            mutation_started_at=lambda key, account: None,
+            caller=None,  # type: ignore[arg-type]
+            bearer=lambda: None,
+        ),
+        ports.DuplicateLookupSource,
+    )
     assert isinstance(assets, ports.ProviderAssetSource)
     assert isinstance(readback, ports.ReadbackComparator)
 
@@ -351,11 +360,13 @@ def test_duplicate_lookup_stays_unavailable_and_preflight_therefore_needs_eviden
     item = ready_item(container, sources, "1234")
     draft_id = draft(store, account, [item])
     req = request(store, draft_id, account, [item])
-    source = lookup.SmartStoreDuplicateLookup()
-    assert not source.available()
-    with pytest.raises(AppError):
-        source.evidence(marketplace_account_id=account, listing_identity="icbm-x")
-    # With no adopted lookup there is no evidence, and PR-C refuses READY rather than assuming.
+    # ADR-0042 S3b: the production source is the store-catalog snapshot; this store was never
+    # synced, so there is no evidence — the reason, never a NO_MATCH.
+    source = container.registration_preparations._duplicate_lookup
+    assert source is not None and not source.available()
+    check = source.check(ports.DuplicateUnit("smartstore", account, "icbm-x"))
+    assert check.evidence is None and check.problem == "DUPLICATE_EVIDENCE_UNAVAILABLE"
+    # With no evidence, PR-C refuses READY rather than assuming.
     result = prep_of(container, account).service.candidate(req)
     assert result.status is ReadinessStatus.REVIEW_REQUIRED
     assert "DUPLICATE_EVIDENCE_MISSING" in set(result.codes)

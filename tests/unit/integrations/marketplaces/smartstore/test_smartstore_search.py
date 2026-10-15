@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 import pytest
 
+from app.stages.register.provider import DuplicateUnit
 from integrations.marketplaces.smartstore import lookup, search
 from integrations.marketplaces.smartstore.caller import (
     ProductSearchRequest,
@@ -396,12 +397,29 @@ def test_a_candidate_is_confirmed_only_by_a_readback_carrying_the_exact_code() -
     assert reads.confirms_candidate(listing_identity=IDENTITY, retained_readback={}) is False
 
 
+class _NoSnapshotCatalog:
+    def account(self) -> str:
+        return "mpa-1"
+
+    def freshness(self, **_: Any) -> tuple[str, None]:
+        return "NONE", None
+
+
 def test_the_search_is_never_duplicate_absence_evidence() -> None:
-    # ADR-0014 §13, §17.2: adopting the search for positive reconcile adopts no duplicate lookup.
-    duplicate = lookup.SmartStoreDuplicateLookup()
+    # ADR-0014 §13, §17.2: the search stays positive only. ADR-0042 S3b's duplicate evidence is
+    # the store-catalog snapshot; without one, even a spot check reads nothing and concludes
+    # nothing — no search answer is ever a NO_MATCH.
+    duplicate = lookup.smartstore_duplicate_source(
+        catalog=_NoSnapshotCatalog(),  # type: ignore[arg-type]
+        refresh=lambda: False,
+        convention_codes=lambda items: (),
+        mutation_started_at=lambda key, account: None,
+        caller=None,  # type: ignore[arg-type]
+        bearer=lambda: None,
+    )
     assert duplicate.available() is False
-    with pytest.raises(lookup.DuplicateLookupUnavailableError):
-        duplicate.evidence(marketplace_account_id="mpa-1", listing_identity=IDENTITY)
+    check = duplicate.check(DuplicateUnit("smartstore", "mpa-1", IDENTITY), spot_check=True)
+    assert check.evidence is None and check.resyncing is False
 
 
 def test_a_product_repeated_across_pages_is_never_a_unique_candidate() -> None:

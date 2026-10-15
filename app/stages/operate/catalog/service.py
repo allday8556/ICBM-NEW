@@ -18,6 +18,9 @@
      cadence). Every listing is then re-read about every 20 hours, inside the 24-hour bound,
      without bursts;
    - 「지금 동기화」 (``OPERATOR``) re-reads every listing, under the same pacing;
+   - the automatic pre-registration re-sync (``PRE_REGISTRATION``, ADR-0042 §5.2) waits on a
+     registration, so it reads the new listings and only those already past the 20-hour refresh
+     period — never the rolling budget;
    - a listing the catalog knows that the enumeration did **not** list is read for provider
      evidence of its end: the sale status ``DELETE`` or a 404 ends it (SCP-08). Absence alone
      never does — it is only ``NOT_SEEN`` (「스토어에서 확인 안 됨」).
@@ -37,8 +40,11 @@ reads (M6-01).
 
 **What a sync proves.** A ``COMPLETE`` snapshot proves the presence of what it read. It is never
 remote absence for ADR-0014 §10/§14/§28 and frees no ``UNKNOWN`` scope (SCP-05); as duplicate
-evidence it is fresh for 60 minutes from ``as_of`` and only until an ICBM mutation of the store
-starts (:meth:`StoreCatalogService.snapshot`; consumed by S3b, ADR-0042 §6).
+evidence it is fresh for the target policy's ``catalog_max_age`` (60 minutes) from ``as_of`` and
+only until an ICBM mutation of the store starts (:meth:`StoreCatalogService.snapshot`). The S3b
+duplicate source reads it (:mod:`app.stages.operate.catalog.duplicates`, ADR-0042 §6) and, when it
+is stale or missing, asks for the automatic pre-registration sync
+(:meth:`StoreCatalogScheduler.refresh_for_registration`).
 
 **The shape-only runtime capture** (ADR-0042 §5.1 item 3). On an operator's 「지금 동기화」
 (``full_read``) the sync also records, with its run, the shape of every raw search page and origin
@@ -95,6 +101,7 @@ from app.stages.operate.catalog.models import (
     CatalogSyncRun,
 )
 from app.stages.operate.catalog.shape import ShapeRecorder
+from app.stages.register.policy import CATALOG_MAX_AGE
 
 logger = logging.getLogger("icbm.operate.catalog")
 
@@ -108,8 +115,8 @@ FINISHED: Final = "FINISHED"
 INTERRUPTED: Final = "INTERRUPTED"
 
 # ADR-0042 §5.2 (owner 6190978708 Q1): a COMPLETE snapshot is duplicate evidence for 60 minutes
-# from its as_of. The target policy will hold the audited value when S3b consumes it.
-CATALOG_MAX_AGE: Final = timedelta(minutes=60)
+# from its as_of. Since S3b the target policy holds the audited value (``catalog_max_age``);
+# ``CATALOG_MAX_AGE`` (imported above) is only the default of a caller that names none.
 # ICBM policy: a COMPLETE sync needs every enumerated listing's details read within this bound.
 DETAIL_MAX_AGE: Final = timedelta(hours=24)
 # ICBM policy: the rolling refresh re-reads every listing about this often, inside the bound
@@ -456,7 +463,7 @@ class StoreCatalogService:
             self._shapes = (ShapeRecorder(), ShapeRecorder()) if full else None
             run_id = self._start(account, trigger, correlation_id, full)
             try:
-                return self._pass(run_id, account, full)
+                return self._pass(run_id, account, full, minimal=trigger == PRE_REGISTRATION)
             except BaseException:
                 self._finish(run_id, INTERRUPTED, SYNC_INTERRUPTED)
                 raise
@@ -464,7 +471,9 @@ class StoreCatalogService:
             self._shapes = None
             self._lock.release()
 
-    def _pass(self, run_id: str, account: str, full: bool) -> CatalogRunView:
+    def _pass(
+        self, run_id: str, account: str, full: bool, *, minimal: bool = False
+    ) -> CatalogRunView:
         if not self._source.available():
             return self._finish(run_id, UNAVAILABLE, "SMARTSTORE_SESSION_UNAVAILABLE")
         enumeration = self._source.enumerate(
@@ -488,7 +497,15 @@ class StoreCatalogService:
             ((lid, entry) for lid, entry in listed if lid in read_at),
             key=lambda pair: (read_at[pair[0]], pair[1].origin_product_no),
         )
-        refresh = known if full else known[: refresh_budget(len(listed), self._interval_s)]
+        if full:
+            refresh = known
+        elif minimal:
+            # The pre-registration re-sync (ADR-0042 §5.2) waits on a registration: it reads the
+            # new listings and only those overdue for their rolling refresh, never the budget.
+            overdue = self._clock.now() - REFRESH_PERIOD
+            refresh = [pair for pair in known if read_at[pair[0]] < overdue]
+        else:
+            refresh = known[: refresh_budget(len(listed), self._interval_s)]
         unseen = self._unseen(account, listed_ids)
         targets: list[tuple[str, str, CatalogEntry | None]] = [
             (lid, entry.origin_product_no, entry) for lid, entry in [*new, *refresh]
@@ -859,6 +876,47 @@ class StoreCatalogService:
                 for row in self._store_listings(session, account)
             )
 
+    def freshness(
+        self,
+        *,
+        max_age: timedelta = CATALOG_MAX_AGE,
+        mutation_started_at: datetime | None = None,
+    ) -> tuple[str, CatalogRunView | None]:
+        """Whether the last COMPLETE sync is still fresh evidence, and that sync — without reading
+        its listings. ``NONE`` without one; ``STALE`` past ``max_age`` from its start, or once an
+        ICBM mutation of the store started at or after that start; else ``FRESH``."""
+        account = self.account()
+        if account is None:
+            return NONE, None
+        with self._db.read() as session:
+            complete = self._last(session, account, outcome=COMPLETE)
+            if complete is None:
+                return NONE, None
+            return self._freshness(complete, max_age, mutation_started_at), _run_view(complete)
+
+    def _freshness(
+        self, complete: CatalogSyncRun, max_age: timedelta, mutation_started_at: datetime | None
+    ) -> str:
+        stale = self._clock.now() - complete.started_at > max_age or (
+            mutation_started_at is not None and mutation_started_at >= complete.started_at
+        )
+        return STALE if stale else FRESH
+
+    def pre_registration_due(self) -> bool:
+        """Whether the automatic pre-registration sync may start now (ADR-0042 §5.2): the
+        snapshot is stale or missing, so a sync is due unless the last sync failed within
+        ``retry_after_s`` — a failing store is not hammered from every registration screen."""
+        account = self.account()
+        if account is None or not self._source.available():
+            return False
+        with self._db.read() as session:
+            last = self._last(session, account)
+            if last is None or last.outcome == COMPLETE:
+                return last is None or last.state != RUNNING
+            if last.state == RUNNING:
+                return False
+            return self._clock.now() - last.started_at >= timedelta(seconds=self._retry_after_s)
+
     def snapshot(
         self,
         *,
@@ -877,9 +935,7 @@ class StoreCatalogService:
             complete = self._last(session, account, outcome=COMPLETE)
             if complete is None:
                 return CatalogSnapshot(NONE, None, ())
-            stale = self._clock.now() - complete.started_at > max_age or (
-                mutation_started_at is not None and mutation_started_at >= complete.started_at
-            )
+            stale = self._freshness(complete, max_age, mutation_started_at) == STALE
             members = self._members(session, complete)
             views = tuple(
                 self._listing_view(session, row, members, enumerated=True, as_of=complete)
@@ -1164,6 +1220,22 @@ class StoreCatalogScheduler:
     def wake(self) -> None:
         """Look for a due sync now instead of at the next tick (after CONNECT)."""
         self._wake.set()
+
+    def refresh_for_registration(self) -> bool:
+        """The automatic re-sync before registration (ADR-0042 §5.2): a routine read, started when
+        the duplicate source finds the snapshot stale or missing. ``True`` while a sync of the
+        store runs — already, or started now — so the screen reads 「스토어 다시 확인 중…」.
+        Nothing starts while the periodic sync is disabled by policy (``interval_s <= 0``)."""
+        if self._service.interval_s <= 0:
+            return False
+        status = self._service.status()
+        if status.marketplace_account_id is None:
+            return False
+        if status.running is not None:
+            return True
+        if not self._service.pre_registration_due():
+            return False
+        return self.request(trigger=PRE_REGISTRATION)
 
     def request(self, *, trigger: str = OPERATOR) -> bool:
         """Start one sync in the background now. ``False`` when none can start: no bound store,

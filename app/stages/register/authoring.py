@@ -19,8 +19,9 @@ copy of a preparation revision, never the authoring truth, and nothing here need
 """
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from datetime import timedelta
 from typing import Any, Final, Protocol
 
 from sqlalchemy.exc import IntegrityError
@@ -59,6 +60,11 @@ from app.stages.register.payload import build_payload
 from app.stages.register.policy import SATISFYING, Provenance
 from app.stages.register.preflight import RegistrationPreflightService
 from app.stages.register.preparation import (
+    ADOPTED_LISTING_EXISTS,
+    DUPLICATE_PROBLEMS,
+    LIVE_REGISTRATION_EXISTS,
+    PROVIDER_DUPLICATE_FOUND,
+    PROVIDER_DUPLICATE_WEAK_SIGNAL,
     CategoryConfirmation,
     CategorySelection,
     DetailComposition,
@@ -72,10 +78,16 @@ from app.stages.register.preparation import (
     resolve_unit,
     selected_artifacts,
 )
-from app.stages.register.provider import DuplicateLookupSource, PreparedAssetSource
+from app.stages.register.provider import (
+    DuplicateCheck,
+    DuplicateLookupSource,
+    PreparedAssetSource,
+    duplicate_unit,
+)
 from app.stages.register.sanitize import require_clean
 from app.stages.register.store import (
     IntentRecord,
+    OverrideRecord,
     PreparationInputs,
     PreparationRecord,
     PreparationRevisionRecord,
@@ -97,6 +109,20 @@ MAPPING_REVISION = "mapping_revision"
 COMPOSITION_REVISION = "detail_composition_revision"
 # B-DETAIL: a composition names a section its owned profile does not hold.
 DETAIL_SECTIONS_NOT_PROFILE = "REGISTER_DETAIL_SECTIONS_NOT_PROFILE"
+# ADR-0014 §13, ADR-0042 §6: a DuplicateOverride is recorded only for a duplicate the unit shows.
+DUPLICATE_OVERRIDE_NOT_NEEDED = "REGISTER_DUPLICATE_OVERRIDE_NOT_NEEDED"
+DUPLICATE_OVERRIDE_REASON_INVALID = "REGISTER_DUPLICATE_OVERRIDE_REASON_INVALID"
+DUPLICATE_OVERRIDE_FOREIGN = "REGISTER_DUPLICATE_OVERRIDE_FOREIGN"
+# The duplicate reasons a DuplicateOverride exists for (ADR-0014 §13): never an UNKNOWN conflict.
+OVERRIDABLE: Final = frozenset(
+    {
+        PROVIDER_DUPLICATE_FOUND,
+        PROVIDER_DUPLICATE_WEAK_SIGNAL,
+        LIVE_REGISTRATION_EXISTS,
+        ADOPTED_LISTING_EXISTS,
+    }
+)
+OVERRIDE_REASON_MAX = 200
 
 
 @dataclass(frozen=True)
@@ -271,6 +297,7 @@ def preflight_request(
     *,
     draft_revision: int | None = None,
     duplicate_evidence: DuplicateEvidence | None = None,
+    duplicate_problem: str | None = None,
 ) -> PreflightRequest:
     """The request one revision states, for the owner that evaluates it.
 
@@ -293,6 +320,7 @@ def preflight_request(
         duplicate_evidence=duplicate_evidence,
         guidance=inputs.guidance,
         preparation_revision_id=revision.preparation_revision_id,
+        duplicate_problem=duplicate_problem,
     )
 
 
@@ -820,6 +848,7 @@ class RegistrationPreparationService:
         preparation_id: str,
         *,
         duplicate_evidence: DuplicateEvidence | None = None,
+        duplicate_problem: str | None = None,
     ) -> PreflightResult:
         """The **candidate** evaluation of what is authored now, against current owner truth.
 
@@ -832,8 +861,135 @@ class RegistrationPreparationService:
             preparation.current,
             draft_revision=self._draft_revision(preparation.draft_id),
             duplicate_evidence=duplicate_evidence,
+            duplicate_problem=duplicate_problem,
         )
         return self._preflight.candidate(request)
+
+    def evaluate_current(
+        self, preparation_id: str, *, resync: bool = True
+    ) -> tuple[PreflightResult, DuplicateCheck | None]:
+        """The candidate the seller sees (ADR-0042 §0 a4): with a duplicate-proof policy it is
+        evaluated with what the duplicate-evidence owner holds now — the evidence of a COMPLETE,
+        fresh store snapshot, or the reason there is none (stale or missing, with the automatic
+        re-sync started). A local read: no provider is called here.
+        """
+        candidate = self.evaluate(preparation_id)
+        check = self.duplicate_check(candidate, resync=resync)
+        if check is None:
+            return candidate, None
+        return (
+            self.evaluate(
+                preparation_id,
+                duplicate_evidence=check.evidence,
+                duplicate_problem=check.problem if check.evidence is None else None,
+            ),
+            check,
+        )
+
+    def duplicate_check(
+        self, candidate: PreflightResult, *, spot_check: bool = False, resync: bool = True
+    ) -> DuplicateCheck | None:
+        """The duplicate-evidence owner's current answer for one evaluated unit, or ``None`` when
+        the policy requires no duplicate proof or no owner is wired."""
+        source = self._duplicate_lookup
+        if source is None or not candidate.resolved.target.duplicate_proof_required:
+            return None
+        return source.check(duplicate_unit(candidate), spot_check=spot_check, resync=resync)
+
+    def duplicate_truth(self, marketplace_account_id: str, max_age: timedelta) -> str | None:
+        """The duplicate owner's truth token for one account, or ``None`` when none is wired."""
+        source = self._duplicate_lookup
+        return None if source is None else source.truth_token(marketplace_account_id, max_age)
+
+    # ------------------------------------------------------------------ DuplicateOverride (§13)
+
+    def record_duplicate_override(
+        self,
+        preparation_id: str,
+        *,
+        reason: str,
+        actor: str,
+        correlation_id: str | None = None,
+    ) -> tuple[OverrideRecord, ...]:
+        """「의도적으로 한 번 더 등록」 (ADR-0042 §0 a4): the seller's explicit, audited and
+        revocable decision to list this unit's products again in this store (ADR-0014 §13).
+
+        One ``marketplace × account × group`` override per group of the unit's Items. It is
+        recorded only while the unit shows a duplicate an override exists for — a store match or a
+        listing ICBM knows — and it never releases an unresolved UNKNOWN (§10) or a stale or
+        missing snapshot: those stay exactly as they are.
+        """
+        text = reason.strip() if isinstance(reason, str) else ""
+        if not 2 <= len(text) <= OVERRIDE_REASON_MAX:
+            raise InputValidationError(
+                DUPLICATE_OVERRIDE_REASON_INVALID,
+                f"a reason of 2 to {OVERRIDE_REASON_MAX} characters is required",
+            )
+        candidate, _ = self.evaluate_current(preparation_id)
+        if not OVERRIDABLE & set(candidate.codes):
+            raise RegistrationConflictError(
+                DUPLICATE_OVERRIDE_NOT_NEEDED,
+                "the unit shows no duplicate an override exists for",
+                details={"reasons": sorted(set(candidate.codes))},
+            )
+        unit = candidate.resolved
+        groups = sorted({item.product_group_id for item in unit.items})
+        cid = self._correlation(correlation_id)
+        with self._registrations.transaction() as work:
+            return tuple(
+                work.record_duplicate_override(
+                    unit.marketplace_key,
+                    unit.marketplace_account_id,
+                    group,
+                    reason=text,
+                    approved_by=actor,
+                    correlation_id=cid,
+                )
+                for group in groups
+            )
+
+    def active_overrides(
+        self, marketplace_key: str, marketplace_account_id: str, groups: Iterable[str]
+    ) -> tuple[OverrideRecord, ...]:
+        """The active DuplicateOverrides of these groups in this account (a read)."""
+        with self._registrations.reading() as unit:
+            return tuple(
+                override
+                for group in sorted(set(groups))
+                for override in unit.active_overrides(
+                    marketplace_key, marketplace_account_id, group
+                )
+            )
+
+    def revoke_duplicate_override(
+        self,
+        preparation_id: str,
+        override_id: str,
+        *,
+        actor: str,
+        correlation_id: str | None = None,
+    ) -> OverrideRecord:
+        """Undo 「의도적으로 한 번 더 등록」: revoke one active override of this unit's groups."""
+        candidate = self.evaluate(preparation_id)
+        unit = candidate.resolved
+        owned = {
+            override.override_id
+            for override in self.active_overrides(
+                unit.marketplace_key,
+                unit.marketplace_account_id,
+                {item.product_group_id for item in unit.items},
+            )
+        }
+        if override_id not in owned:
+            raise RegistrationConflictError(
+                DUPLICATE_OVERRIDE_FOREIGN,
+                "only an active override of this unit's products is revoked here",
+            )
+        cid = self._correlation(correlation_id)
+        with self._registrations.transaction() as work:
+            return work.revoke_duplicate_override(
+                override_id, revoked_by=actor, reason="seller undo", correlation_id=cid
+            )
 
     def stage_candidate(self, preparation_id: str) -> PreflightResult:
         """The candidate a mutation stage binds: what is authored now, evaluated the way the
@@ -875,9 +1031,16 @@ class RegistrationPreparationService:
         except RegistrationConflictError as refused:
             if refused.code != DUPLICATE_EVIDENCE_UNAVAILABLE:
                 raise
-            # No admissible evidence: the final preflight carries DUPLICATE_EVIDENCE_MISSING under
-            # this policy, so it can never be READY, and nothing is frozen.
-            return self.freeze(preparation_id, actor=actor, correlation_id=correlation_id)
+            # No admissible evidence: the final preflight names why (a stale or missing store
+            # snapshot, else DUPLICATE_EVIDENCE_MISSING) under this policy, so it can never be
+            # READY, and nothing is frozen.
+            problem = refused.details.get("problem")
+            return self.freeze(
+                preparation_id,
+                actor=actor,
+                correlation_id=correlation_id,
+                duplicate_problem=problem if problem in DUPLICATE_PROBLEMS else None,
+            )
         prepared: tuple[PreparedAsset, ...] = ()
         if candidate.resolved.target.asset_policy.provider_asset_identity_required:
             source = self._prepared_assets
@@ -912,6 +1075,7 @@ class RegistrationPreparationService:
         duplicate_evidence: DuplicateEvidence | None = None,
         prepared_assets: Sequence[PreparedAsset] = (),
         correlation_id: str | None = None,
+        duplicate_problem: str | None = None,
     ) -> FrozenUnit:
         """Freeze the unit this preparation authored, and open its CREATE Intent.
 
@@ -928,6 +1092,7 @@ class RegistrationPreparationService:
             revision,
             draft_revision=self._draft_revision(preparation.draft_id),
             duplicate_evidence=duplicate_evidence,
+            duplicate_problem=duplicate_problem,
         )
         final = self._preflight.final(request, prepared_assets)
         with self._registrations.transaction() as unit:
@@ -957,12 +1122,18 @@ class RegistrationPreparationService:
             )
         return FrozenUnit(snapshot, intent, revision.preparation_revision_id)
 
-    def execution_copy(self, registration_snapshot_id: str) -> ExecutionCopy:
+    def execution_copy(
+        self, registration_snapshot_id: str, *, spot_check: bool = False
+    ) -> ExecutionCopy:
         """Build the first job copy from the exact revision that produced this Snapshot.
 
         Current owner truth is evaluated at the Snapshot's pinned generation, then the resulting
         fingerprint, listing identity and payload are compared with the immutable Snapshot. A
         later preparation revision is never consulted.
+
+        ``spot_check`` is the first CREATE copy's positive seller-code search (ADR-0042 §6): a
+        provider listing the snapshot did not show becomes a match, so the copy is not READY and
+        nothing is queued; zero hits change nothing.
         """
         snapshot = self._registrations.snapshot(registration_snapshot_id)
         if snapshot is None:
@@ -999,7 +1170,7 @@ class RegistrationPreparationService:
             request, identity_generation=provenance.identity_generation
         )
         if candidate.resolved.target.duplicate_proof_required:
-            evidence = self._current_duplicate_evidence(candidate)
+            evidence = self._current_duplicate_evidence(candidate, spot_check=spot_check)
             request = preflight_request(preparation, revision, duplicate_evidence=evidence)
             candidate = self._preflight.candidate(
                 request, identity_generation=provenance.identity_generation
@@ -1083,31 +1254,29 @@ class RegistrationPreparationService:
             raise NotFoundError("REGISTER_DRAFT_NOT_FOUND", "the draft does not exist")
         return draft.draft_revision
 
-    def _current_duplicate_evidence(self, candidate: PreflightResult) -> DuplicateEvidence:
+    def _current_duplicate_evidence(
+        self, candidate: PreflightResult, *, spot_check: bool = False
+    ) -> DuplicateEvidence:
         """Read current evidence through the provider-neutral owner seam, or fail closed.
 
-        The production SmartStore implementation reports unavailable while no duplicate lookup is
-        adopted, so this method performs no provider call in that state. Preparations never store
-        the outcome; the first CREATE copy and the mutation-stage candidate
+        The production SmartStore source is the store-catalog duplicate source (ADR-0042 §6): it
+        has evidence only for a COMPLETE snapshot under the target policy's bound, and otherwise
+        none, with the reason (stale or missing) and the automatic re-sync started. Preparations
+        never store the outcome; the first CREATE copy and the mutation-stage candidate
         (:meth:`stage_candidate`) only use this current read.
         """
-        source = self._duplicate_lookup
-        if source is None or not source.available():
+        check = (
+            None
+            if self._duplicate_lookup is None
+            else self.duplicate_check(candidate, spot_check=spot_check)
+        )
+        if check is None or check.evidence is None:
             raise RegistrationConflictError(
                 DUPLICATE_EVIDENCE_UNAVAILABLE,
                 "current duplicate evidence is unavailable for the first CREATE copy",
+                details={"problem": None if check is None else check.problem},
             )
-        unit = candidate.resolved
-        evidence = source.evidence(
-            marketplace_account_id=unit.marketplace_account_id,
-            listing_identity=unit.listing_identity,
-        )
-        if evidence is None:
-            raise RegistrationConflictError(
-                DUPLICATE_EVIDENCE_UNAVAILABLE,
-                "the duplicate-evidence owner returned no current evidence",
-            )
-        return evidence
+        return check.evidence
 
     @staticmethod
     def _correlation(correlation_id: str | None) -> str:

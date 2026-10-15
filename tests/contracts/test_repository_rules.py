@@ -1754,9 +1754,9 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     assert "committed_bearer = smartstore.committed_bearer" in container
     # The CREATE, read-back, SEARCH and ASSET seams, and the DELETE slice's sender and read-back
     # (ADR-0018 §3.5), the notice-schema capture (notice coverage S0) and the M6-A listing-state
-    # sync's read-back (ADR-0023 §3) and the M6.5-C dispatch sender (ADR-0025 §5): nine seams,
-    # one source.
-    assert container.count("bearer=committed_bearer") == 9
+    # sync's read-back (ADR-0023 §3), the M6.5-C dispatch sender (ADR-0025 §5) and the S3b
+    # duplicate source's positive spot check (ADR-0042 §6): ten seams, one source.
+    assert container.count("bearer=committed_bearer") == 10
     assert "bearer=lambda: None" not in container
     assert smartstore_readback.proves_published_state() is True
     assert smartstore_readback.reads_published_state() is True
