@@ -128,6 +128,14 @@ cap, secret-store and explicit-egress constraints as C-LIVE-R1. CI and tests can
 in-memory transport. The operator command requires the exclusive data-directory lease and takes a
 reviewed bundle path and digest, never Access Key or Secret Key command-line arguments.
 
+After a provider response explicitly rejects a create, one corrected-payload owner may migrate
+only the exact journal in which `test 1` remains `create_inflight` and `test 2` through `test 11`
+are `create_rejected`. It binds both the prior and corrected payload digests. The corrected bundle
+is rebuilt in memory from the exact local synthetic revisions, current category preflight,
+account logistics and OS-secret-store values; it is never written to disk. Each rejected item gets
+one corrected create attempt. A rejection of one item does not suppress the remaining items, but
+no item is retried automatically and every ambiguous result retains its barrier.
+
 ### Ambiguous create recovery
 
 `icbm coupang recover-test-product-create` is the only recovery surface for a journal with exactly
@@ -141,3 +149,10 @@ An empty, multiple, malformed, unavailable or mismatching answer proves nothing 
 barrier unchanged. In particular, zero results never authorize a repeated create. The recovery
 owner is single-use, KR-only, bound to the exact eleven-product bundle digest and full journal key
 set, uses the same fresh clock/IP/secret/egress guards, and has no caller-selectable product ID.
+
+For the exact corrected journal only, after `test 2` through `test 11` are all verified and deleted,
+the completion owner may apply the same positive-only lookup to `test 1`. It still never sends a
+second create. When exactly one vendor/name/SKU-bound saved product and provider item identity are
+proven, it uses the corrected in-memory payload for the full update, verifies the updated identity,
+and deletes that exact product. Any zero, multiple, mismatching or ambiguous result leaves the
+barrier in place and performs no alternative product lookup, update or delete.

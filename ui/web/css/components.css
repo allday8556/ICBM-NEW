@@ -1121,6 +1121,45 @@ body.has-registration-status .content {
   color: var(--color-text-strong);
 }
 
+.register-safety-details,
+.register-fixes details {
+  margin-top: var(--space-4);
+  overflow: hidden;
+  border: 1px solid var(--color-line-soft);
+  border-radius: var(--radius-md);
+  background: var(--color-input);
+}
+
+.register-safety-details > summary,
+.register-fixes summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  color: var(--color-text-strong);
+  font-weight: 700;
+}
+
+.register-safety-details[open] > summary,
+.register-fixes details[open] > summary {
+  border-bottom: 1px solid var(--color-line-soft);
+}
+
+.register-safety-details > .requirement-list,
+.register-safety-details > [data-role='live-grants'] {
+  margin: 0;
+  padding: 12px;
+}
+
+.register-fixes details > .register-fix {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--color-line-soft);
+  border-radius: 0;
+}
+
+.register-fixes details > summary + .register-fix {
+  border-top: 0;
+}
+
 /* ---------- COLLECT submit and runs (Gate 1 G1-E) ---------- */
 .collect-jobs {
   display: grid;
@@ -1755,13 +1794,6 @@ td.no-data {
   margin-bottom: var(--space-4);
 }
 
-.register-queue .register-queue-tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  margin: var(--space-4) 0;
-}
-
 .register-queue .register-readiness {
   margin-top: var(--space-5);
 }
@@ -1770,8 +1802,8 @@ td.no-data {
   margin-bottom: var(--space-3);
 }
 
-.register-settings .toggle[data-inert] {
-  cursor: pointer;
+.register-settings > .btn {
+  width: 100%;
 }
 
 .register-section {
@@ -2308,7 +2340,10 @@ body.bare-page .content {
   border-bottom: 1px solid var(--color-line);
 }
 
-.register-editor .pf-tabs button {
+.register-editor .pf-tabs button,
+.register-editor .pf-tabs > span {
+  display: inline-flex;
+  align-items: center;
   padding: 9px 14px;
   border: 0;
   border-bottom: 2px solid transparent;
@@ -2317,8 +2352,13 @@ body.bare-page .content {
   cursor: pointer;
 }
 
-.register-editor .pf-tabs button.on {
+.register-editor .pf-tabs button.on,
+.register-editor .pf-tabs > span.on {
   border-bottom-color: var(--color-primary);
+}
+
+.register-editor .pf-tabs > span {
+  cursor: default;
 }
 
 .register-editor .field {

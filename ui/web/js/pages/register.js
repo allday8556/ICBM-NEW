@@ -16,7 +16,6 @@ import { dotDateTime } from '../core/format.js';
 import { withHelp } from '../core/help.js';
 import { toast } from '../core/toast.js';
 import { openModal } from '../core/modal.js';
-import { markInert } from '../core/inert.js';
 import { platformTag } from '../core/platform.js';
 import { pageHead } from '../components/page-head.js';
 import { emptyState, errorState } from '../components/states.js';
@@ -33,27 +32,54 @@ const LIVE = '/api/v1/register/live';
 // B-UX1: the readiness of every pre-send unit, evaluated by the server now.
 const READINESS = '/api/v1/register/readiness';
 const READINESS_STATUSES = ['READY', 'REVIEW_REQUIRED', 'BLOCKED', 'DUPLICATE', 'STALE', 'NOT_EVALUATED'];
+const READINESS_LABEL = {
+  READY: '등록 가능',
+  REVIEW_REQUIRED: '확인 필요',
+  BLOCKED: '등록 불가',
+  DUPLICATE: '중복 확인',
+  STALE: '다시 확인',
+  NOT_EVALUATED: '점검 전',
+};
 // B-UX2: what the operator can fix or re-check now, and where (server-owned).
 const FIXES = '/api/v1/screens/register/fixes';
-const FIX_ACTIONABILITY = ['FIX_AVAILABLE', 'RECHECK', 'WAITING', 'NO_OPERATOR_ACTION', 'NOT_IMPLEMENTED'];
 const TITLE = '등록관리';
 const HELP =
   '수집한 상품을 마켓에 등록하고, 등록 상태를 서버가 판단한 그대로 보여줍니다. 실행 가능 여부는 서버가 결정합니다.';
 const CANARY_HELP =
-  '실제 마켓 쓰기는 별도 승인이 필요한 제한 캠페인입니다. 이 영역은 준비 상태만 보여주며 아무 것도 승인하지 않습니다.';
+  '실제 마켓에 상품을 보내기 전에 계정 연결, 권한, 등록 결과 확인 경로를 한 번에 점검합니다.';
 
 const STATUS_HELP =
   '등록 상태는 서버가 한 가지 기준으로 판정한 등록중 · 등록성공 · 재확인필요 · 등록실패입니다. 결과를 모르는 등록은 실패로 표시하지 않고, 다시 보내지 않은 채 등록 여부를 확인합니다.';
 
 const LIVE_HELP =
-  '보호 쓰기 브레이크와 실행 권한(grant)은 서버가 가진 상태 그대로입니다. 준비도는 서버가 계산한 결과이며, 이 화면에서 아무 것도 승인하거나 기록하지 않습니다.';
+  '실등록 잠금과 실행 권한 상태를 보여줍니다. 상세 기록은 문제를 점검할 때만 펼쳐 보세요.';
 
 const BRAKE_LABEL = { ENGAGED: '잠김', RELEASED: '해제됨' };
 const GRANT_LABEL = { ACTIVE: '유효', EXPIRED: '만료됨', REVOKED: '회수됨', EXHAUSTED: '소진됨' };
 const STAGE_LABEL = { ASSET: '이미지 업로드', CREATE: '상품 등록', DELETE: '상품 삭제', DISPATCH: '발송처리' };
 const PROOF_LABEL = {
-  evidence_retention_ready: '증거 보존 증명',
-  visual_acceptance_recorded: '화면 검수 기록',
+  evidence_retention_ready: '작업 기록 보존',
+  visual_acceptance_recorded: '화면 검수 완료',
+};
+const EXECUTION_MODE_LABEL = { DRY_RUN: '안전 모드', LIVE: '실등록 모드' };
+const WRITE_STATUS_LABEL = { UNVERIFIED: '확인 필요', VERIFIED: '확인됨', BLOCKED: '사용 불가' };
+const CANARY_REQUIREMENT_LABEL = {
+  CLEAN_RUNTIME: '실행 환경 확인',
+  ACCOUNT_BOUND: '판매 계정 연결',
+  AUTH_READY: '마켓 인증',
+  WRITE_SCOPE_PROVEN: '상품 쓰기 권한',
+  UNIT_PREPARED: '등록할 상품 준비',
+  CREATE_ADOPTED: '상품 등록 연결',
+  IMAGE_UPLOAD_ADOPTED: '이미지 등록 연결',
+  RECONCILE_PATH_ADOPTED: '등록 결과 확인 연결',
+  READBACK_ADOPTED: '등록 상품 조회 연결',
+  READBACK_EXECUTABLE: '등록 상품 조회 준비',
+  PUBLISHED_STATE_PROVABLE: '판매 상태 확인',
+  NO_UNRESOLVED_CONFLICT: '미해결 충돌 없음',
+  SCOPE_SENDS_ALLOWED: '전송 가능 상태',
+  SINGLE_UNIT: '검증 상품 1건 선택',
+  ASSET_MUTATION_READY: '이미지 전송 준비',
+  CREATE_MUTATION_READY: '상품 등록 준비',
 };
 
 export const INTENT_LABEL = {
@@ -89,8 +115,8 @@ const PAUSE_LABEL = {
 };
 
 const ACTION_LABEL = {
-  EVALUATE: 'Preflight 평가',
-  FREEZE: '스냅샷 고정',
+  EVALUATE: '등록 준비 확인',
+  FREEZE: '등록 내용 확정',
   CREATE_ENQUEUE: '등록 전송',
   RECONCILE: '등록확인 재시도',
   VERIFY: '읽기 확인',
@@ -174,10 +200,10 @@ export const REASON_COPY = {
   REGISTER_SCOPE_RESUME_NOT_PERMITTED: '인증 중단은 재인증으로만 풀립니다.',
   REGISTER_ACCOUNT_NOT_BOUND: '판매자 계정 연결이 확인되지 않았습니다.',
   REGISTER_PREFLIGHT_INPUTS_NOT_DURABLE:
-    '이 단위의 Preflight 입력이 서버에 남아 있지 않아 지금 평가를 보여줄 수 없습니다.',
+    '저장된 등록 준비 정보가 없어 지금 상태를 확인할 수 없습니다.',
   REGISTER_TARGET_POLICY_MISSING: '이 계정의 등록 정책이 아직 설정되지 않았습니다.',
   REGISTER_PREPARATION_ABSENT: '아직 등록 준비 내용이 저장되지 않았습니다.',
-  REGISTER_PREFLIGHT_NOT_READY: 'Preflight가 READY가 아니어서 스냅샷을 고정할 수 없습니다.',
+  REGISTER_PREFLIGHT_NOT_READY: '등록 준비 확인을 먼저 완료해 주세요.',
   REGISTER_UNIT_ALREADY_FROZEN: '이미 스냅샷이 고정된 단위입니다.',
   REGISTER_FROZEN_METADATA_UNRESOLVED:
     '스냅샷이 고정한 카테고리 메타데이터 리비전을 찾을 수 없어 규칙을 표시하지 않습니다. 현재 리비전으로 대신 표시하지 않습니다.',
@@ -220,7 +246,7 @@ export const REASON_COPY = {
   LIVE_ASSET_REPLAY_UNRESOLVED: '같은 이미지의 미확인 업로드가 남아 있습니다.',
   LIVE_ASSET_REPLAY_APPLIED_REUSE_NOT_ADOPTED: '이미 반영된 이미지의 재사용 경로가 채택되지 않았습니다.',
   LIVE_ASSET_REPLAY_KEY_UNDETERMINABLE: '업로드 대상을 식별할 수 없습니다.',
-  LIVE_ASSET_CANDIDATE_NOT_READY: '후보 Preflight가 READY가 아닙니다.',
+  LIVE_ASSET_CANDIDATE_NOT_READY: '이미지 등록 준비가 완료되지 않았습니다.',
   LIVE_ASSET_CANDIDATE_DRIFT: '실행 권한 발급 이후 후보가 바뀌었습니다.',
 };
 
@@ -259,9 +285,9 @@ function reasonNode(tag, reason) {
       'data-reason': reason.code,
       'data-reason-status': reason.status,
       'data-areas': (reason.areas ?? []).join(' '),
-      title: [reason.status, reason.subject].filter(Boolean).join(' · '),
+      title: REASON_COPY[reason.code] ?? '확인이 필요한 항목입니다.',
     },
-    reason.code,
+    REASON_COPY[reason.code] ?? '확인이 필요한 항목입니다.',
   );
 }
 
@@ -269,10 +295,10 @@ export function statusChip(status, codes, reasons) {
   if (!status) return '—';
   const structured = reasons ?? [];
   return fragment(
-    chip(status, status === 'READY' ? 'good' : status === 'BLOCKED' ? 'bad' : 'warn'),
+    chip(READINESS_LABEL[status] ?? '확인 필요', status === 'READY' ? 'good' : status === 'BLOCKED' ? 'bad' : 'warn'),
     ...(structured.length
       ? structured.map((reason) => reasonNode('span', reason))
-      : (codes ?? []).map((code) => h('span', { class: 'mini', 'data-reason': code }, code))),
+      : (codes ?? []).map((code) => h('span', { class: 'mini', 'data-reason': code }, REASON_COPY[code] ?? '확인이 필요한 항목입니다.'))),
   );
 }
 
@@ -289,7 +315,7 @@ export function reasonGroups(reasons, labels) {
     h(
       'div',
       { class: 'register-reason-area', 'data-area': area },
-      h('span', { class: 'mini' }, labels?.[area] ?? area),
+      h('span', { class: 'mini' }, labels?.[area] ?? '기타 확인사항'),
       ...members.map((reason) => reasonNode('div', reason)),
     ),
   );
@@ -313,18 +339,7 @@ function fixesPanel(found, ctx) {
     const section = row.surface === 'REGISTER_IMAGES' ? unit?.querySelector("[data-editor-section='images']") : null;
     (section ?? unit)?.scrollIntoView({ block: 'start' });
   };
-  return h(
-    'div',
-    { class: 'register-fixes', 'data-fixes': found.projection_version },
-    h('div', { class: 'supplier-head-row' }, h('b', {}, '고칠 것'), chip(`${found.fixes.length}`)),
-    h(
-      'div',
-      { class: 'supplier-head-row' },
-      ...FIX_ACTIONABILITY.map((key) =>
-        h('span', { class: 'mini', 'data-actionability-count': key }, `${key} ${found.counts?.[key] ?? 0}`),
-      ),
-    ),
-    ...found.fixes.map((row) =>
+  const rows = found.fixes.map((row) =>
       h(
         'div',
         {
@@ -335,13 +350,22 @@ function fixesPanel(found, ctx) {
           'data-source': row.source,
         },
         chip(row.actionability_label, row.actionability === 'FIX_AVAILABLE' ? 'warn' : ''),
-        h('span', { class: 'mini', 'data-reason': row.code, title: row.subject ?? '' }, row.code),
+        h('span', { class: 'mini', 'data-reason': row.code }, REASON_COPY[row.code] ?? '확인이 필요한 항목입니다.'),
         h(
           'button',
           { type: 'button', class: 'btn', 'data-action': 'GO_TO_FIX', onclick: () => go(row) },
           row.surface_label,
         ),
       ),
+    );
+  return h(
+    'div',
+    { class: 'register-fixes', 'data-fixes': found.projection_version },
+    h(
+      'details',
+      { open: found.fixes.length <= 5 ? true : null },
+      h('summary', { class: 'supplier-head-row' }, h('b', {}, '확인이 필요한 항목'), chip(`${found.fixes.length}건`)),
+      ...rows,
     ),
   );
 }
@@ -362,11 +386,11 @@ function readinessPanel(readiness) {
     h(
       'div',
       { class: 'supplier-head-row' },
-      ...READINESS_STATUSES.map((status) =>
+      ...READINESS_STATUSES.filter((status) => (readiness.statuses?.[status] ?? 0) > 0).map((status) =>
         h(
           'span',
           { class: 'mini', 'data-status-count': status },
-          `${status} ${readiness.statuses?.[status] ?? 0}`,
+          `${READINESS_LABEL[status]} ${readiness.statuses?.[status] ?? 0}`,
         ),
       ),
     ),
@@ -375,7 +399,7 @@ function readinessPanel(readiness) {
           'div',
           { class: 'supplier-head-row' },
           ...notEvaluated.map(([code, count]) =>
-            h('span', { class: 'mini', 'data-not-evaluated': code }, `${code} ${count}`),
+            h('span', { class: 'mini', 'data-not-evaluated': code }, `${REASON_COPY[code] ?? '점검할 수 없는 항목'} ${count}`),
           ),
         )
       : null,
@@ -410,7 +434,7 @@ export function itemRow(item) {
     h(
       'td',
       {},
-      item.item_id,
+      `품목 ${item.ordinal}`,
       ...(item.option_keys ?? []).map((key) => h('span', { class: 'mini', 'data-option': key }, key)),
     ),
     h(
@@ -436,9 +460,6 @@ export function itemRow(item) {
           )
         : null,
     ),
-    h('td', {}, item.price_basis ?? '—'),
-    // The current M4 price of the same Item: a pin that is no longer current is visible here,
-    // and whether it is current is the server's own verdict.
     h(
       'td',
       {},
@@ -447,15 +468,14 @@ export function itemRow(item) {
     ),
     h('td', {}, statusChip(item.base_status, item.base_reason_codes, item.base_reasons)),
     h('td', {}, statusChip(item.pricing_status, item.pricing_reason_codes, item.pricing_reasons)),
-    h('td', {}, item.registration_item_key ?? '—'),
     h(
       'td',
       { 'data-assets': String(assets.length) },
-      ...assets.map((asset) =>
+      ...assets.map((asset, index) =>
         h(
           'span',
           { class: 'mini', 'data-asset': asset.sha256, 'data-qa': asset.qa_verdict ?? 'NONE' },
-          `${asset.role} ${asset.sha256.slice(0, 8)} ${asset.qa_verdict ?? 'QA 없음'}`,
+          `${asset.role === 'REPRESENTATIVE' ? '대표 이미지' : '이미지'} ${index + 1}`,
           asset.upload_fit ? uploadFitLabel(asset.upload_fit) : null,
         ),
       ),
@@ -489,8 +509,6 @@ export function categoryBlock(category) {
     'div',
     { class: 'register-category', 'data-category': category.category_id },
     kv('카테고리', category.category_id),
-    kv('분류 리비전', category.taxonomy_revision),
-    category.metadata_revision ? kv('메타데이터 리비전 (고정)', category.metadata_revision) : null,
     category.metadata_unavailable_reason
       ? h(
           'div',
@@ -585,7 +603,7 @@ export function authoringForm(unit, onDone) {
       ...unit.items.map((item) => h(
         'label',
         { class: 'kv' },
-        h('span', {}, `Item ${item.item_id}`),
+        h('span', {}, `품목 ${item.ordinal}`),
         h('input', {
           value: values[item.item_id] ?? '',
           'data-option-item': item.item_id,
@@ -610,7 +628,7 @@ export function authoringForm(unit, onDone) {
       ...rows.map((dimension) => optionRow(dimension, valuesFor(dimension))));
     optionFields.append(
       h('div', { class: 'supplier-head-row' }, h('b', {}, '옵션 입력'),
-        chip(`${unit.items.length}/${found.max_options} Items`)),
+        chip(`${unit.items.length}/${found.max_options}개 품목`)),
       rowHost,
     );
     if (found.options_supported) {
@@ -655,7 +673,7 @@ export function authoringForm(unit, onDone) {
     return found;
   }
   const head = h('div', { class: 'supplier-head-row' }, h('b', {}, '등록 준비 입력'),
-    authored ? chip(`리비전 ${authored.revision_no}`) : chip('미저장', 'warn'));
+    authored ? chip('저장됨', 'good') : chip('저장 필요', 'warn'));
   const nameField = field('상품명', 'name', inputs.name?.value);
   // B-DETAIL: the selected detail images come first; the text after them is optional when the
   // unit has detail images (the server decides, never this page).
@@ -786,7 +804,7 @@ export function preflightBlock(unit, labels) {
     return h(
       'div',
       { class: 'register-preflight', 'data-preflight': 'UNAVAILABLE' },
-      kv('Preflight', '평가 없음'),
+      kv('등록 준비 확인', '확인 전'),
       reason(unit.preflight_unavailable_reason),
     );
   }
@@ -797,13 +815,13 @@ export function preflightBlock(unit, labels) {
     h(
       'div',
       { class: 'supplier-head-row' },
-      h('b', {}, 'Preflight'),
-      chip(preflight.status, preflight.status === 'READY' ? 'good' : 'warn'),
-      preflight.fingerprint_matches_snapshot === false ? chip('스냅샷과 다름', 'warn') : null,
+      h('b', {}, '등록 준비 확인'),
+      chip(READINESS_LABEL[preflight.status] ?? '확인 필요', preflight.status === 'READY' ? 'good' : 'warn'),
+      preflight.fingerprint_matches_snapshot === false ? chip('저장 후 내용 변경됨', 'warn') : null,
     ),
     ...((preflight.reasons ?? []).length
       ? reasonGroups(preflight.reasons, labels)
-      : preflight.reason_codes.map((code) => h('div', { class: 'mini', 'data-reason': code }, code))),
+      : preflight.reason_codes.map((code) => h('div', { class: 'mini', 'data-reason': code }, REASON_COPY[code] ?? '확인이 필요한 항목입니다.'))),
   );
 }
 
@@ -813,8 +831,7 @@ export function attemptRow(attempt) {
     {},
     h('td', {}, String(attempt.attempt_no)),
     h('td', {}, OUTCOME_LABEL[attempt.outcome] ?? '진행 중'),
-    h('td', {}, attempt.error_class ?? '—'),
-    h('td', {}, attempt.error_code ?? '—'),
+    h('td', { 'data-error-class': attempt.error_class ?? '', 'data-error-code': attempt.error_code ?? '' }, attempt.error_code ? REASON_COPY[attempt.error_code] ?? '마켓 응답을 확인해 주세요.' : '—'),
     h('td', {}, attempt.started_at ? dotDateTime(attempt.started_at) : '—'),
   );
 }
@@ -831,7 +848,6 @@ export function scopeBlock(scope) {
       chip(paused ? (PAUSE_LABEL[scope.pause_reason] ?? '중단') : '전송 가능', paused ? 'bad' : 'good'),
     ),
     kv('연속 실패', String(scope.consecutive_failures)),
-    kv('재개 세대', String(scope.resume_generation)),
     scope.paused_at ? kv('중단 시각', dotDateTime(scope.paused_at)) : null,
     scope.resumed_at ? kv('마지막 재개', dotDateTime(scope.resumed_at)) : null,
   );
@@ -928,18 +944,17 @@ function statusRow(entry, onDone) {
     : null;
   const causes = [read?.attempt_cause_code, read?.cause_code]
     .filter((code, index, all) => code && all.indexOf(code) === index)
-    .map((code) => h('span', { class: 'mini', 'data-cause': code }, REASON_COPY[code] ?? code));
+    .map((code) => h('span', { class: 'mini', 'data-cause': code }, REASON_COPY[code] ?? '마켓 응답을 확인해 주세요.'));
   return h(
     'tr',
     { 'data-intent': entry.intent_id, 'data-read-row': read?.state ?? 'UNCLASSIFIED' },
     h('td', {}, entry.product_name ?? '—'),
-    h('td', {}, entry.seller_code ?? '—'),
     h('td', {}, readStateChip(read, entry.read_state_problem)),
     h(
       'td',
       {},
       read
-        ? h('span', { class: 'mini', 'data-reason': read.reason_code }, REASON_COPY[read.reason_code] ?? read.reason_code)
+        ? h('span', { class: 'mini', 'data-reason': read.reason_code }, REASON_COPY[read.reason_code] ?? '마켓 응답을 확인해 주세요.')
         : reason(entry.read_state_problem),
       ...causes,
     ),
@@ -978,7 +993,7 @@ function registrationStatusPanel(status, onDone) {
       kv(status.labels.FAILED, String(counts.failed)),
     ),
     table(
-      ['상품명', 'ICBM 판매자코드', '상태', '사유', '요청 시각', '마지막 확인', '확인 시도', '동작'],
+      ['상품명', '상태', '사유', '요청 시각', '마지막 확인', '확인 시도', '동작'],
       status.entries.map((entry) => statusRow(entry, onDone)),
     ),
   );
@@ -1078,15 +1093,15 @@ function previewView(view) {
     view.refusal_code ? reason(view.refusal_code) : null,
     kv('상품명', view.name ?? '—'),
     kv('판매가', view.sale_prices_krw.map((price) => won(price)).join(', ') || '—'),
-    kv('카테고리 ID', view.category_id ?? '—'),
+    kv('카테고리', view.category_id ? '선택됨' : '—'),
     ...view.gaps.map((gap) => h('div', { class: 'mini', 'data-gap': 'true' }, gap)),
     table(
       ['이미지 역할', '순서', '이미지', '마켓 업로드'],
-      view.images.map((image) =>
+      view.images.map((image, index) =>
         h('tr', { 'data-preview-image': image.sha256 },
-          h('td', {}, image.role),
+          h('td', {}, image.role === 'REPRESENTATIVE' ? '대표 이미지' : image.role === 'DETAIL' ? '상세 이미지' : '추가 이미지'),
           h('td', {}, image.position === null ? '—' : String(image.position)),
-          h('td', {}, image.sha256.slice(0, 8)),
+          h('td', {}, `이미지 ${index + 1}`),
           h('td', {}, image.provider_asset_prepared ? '준비됨' : '없음')),
       ),
     ),
@@ -1101,19 +1116,19 @@ function previewView(view) {
     view.document.length
       ? table(
           ['보낼 항목', '값'],
-          view.document.map((field) =>
+          view.document.map((field, index) =>
             h('tr', { 'data-field': field.path },
-              h('td', {}, field.path),
+              h('td', {}, `등록 정보 ${index + 1}`),
               h('td', {}, field.redacted ? '(마켓 참조 · 표시 안 함)' : field.value ?? '—')),
           ),
         )
       : null,
     view.not_sent.length
       ? table(
-          ['보내지 않음', '값'],
-          view.not_sent.map((row) =>
+          ['보내지 않는 항목', '값'],
+          view.not_sent.map((row, index) =>
             h('tr', { 'data-not-sent': row.path },
-              h('td', {}, row.path),
+              h('td', {}, `제외 정보 ${index + 1}`),
               h('td', {}, row.value === 'DETAIL_PAGE_REFERENCE' ? '상세페이지 참조' : row.value)),
           ),
         )
@@ -1204,7 +1219,7 @@ function imagesSection(unit, onDone) {
       h(
         'div',
         { class: 'register-item-images', 'data-item': item.item_id },
-        h('b', {}, `품목 ${item.ordinal} · ${item.item_id}`),
+        h('b', {}, `품목 ${item.ordinal}`),
         itemImagesEditor(item.item_id, { editable, onChanged: onDone }),
       ),
     ),
@@ -1219,23 +1234,19 @@ function unitPanel(unit, onDone, labels) {
       class: 'panel register-unit',
       'data-draft': unit.draft_id,
       'data-unit': unit.unit_ref,
+      'data-account': unit.marketplace_account_id,
+      'data-marketplace': unit.marketplace_key,
       'data-preparation': unit.preparation,
     },
     h(
       'div',
       { class: 'supplier-head-row' },
-      h('h2', { class: 'panel-title' }, unit.unit_ref),
+      h('h2', { class: 'panel-title' }, '등록 상세'),
       chip(PREPARATION_LABEL[unit.preparation] ?? unit.preparation),
       intent ? readStateChip(intent.read_state, intent.read_state_problem) : null,
     ),
     intent ? kv('요청 상태', INTENT_LABEL[intent.state] ?? intent.state) : null,
-    kv('초안', unit.draft_id),
-    kv('리스팅 형태', unit.listing_shape),
-    kv('판매 계정', unit.marketplace_account_id),
-    kv('계정 연결', unit.account_binding),
-    kv('초안 리비전', String(unit.draft_revision)),
-    unit.snapshot ? kv('리스팅 식별자', unit.snapshot.listing_identity) : null,
-    unit.snapshot ? kv('스냅샷 지문', unit.snapshot.preflight_fingerprint.slice(0, 16)) : null,
+    h('div', { class: 'kv' }, h('span', {}, '판매 채널'), platformTag(unit.marketplace_key)),
     intent ? kv('검증 상태', VERIFICATION_LABEL[intent.verification_state] ?? intent.verification_state) : null,
     intent?.marketplace_product_id ? kv('마켓 상품번호', intent.marketplace_product_id) : null,
     unit.published_state ? kv('마켓 노출 상태', unit.published_state) : null,
@@ -1249,7 +1260,6 @@ function unitPanel(unit, onDone, labels) {
       '상품 정보',
       unit.category ? categoryBlock(unit.category) : null,
       unit.snapshot ? null : authoringForm(unit, onDone),
-      unit.authored ? kv('준비 지문', unit.authored.inputs_fingerprint.slice(0, 16)) : null,
     ),
     imagesSection(unit, onDone),
     editorSection(
@@ -1259,7 +1269,7 @@ function unitPanel(unit, onDone, labels) {
       repinBlock(unit, onDone),
       unit.item_facts_unavailable_reason ? reason(unit.item_facts_unavailable_reason) : null,
       table(
-        ['품목', '고정 판매가', '가격 근거', '현재 M4 판매가', '기본 준비', '가격 준비', '등록 품목 키', '이미지'],
+        ['품목', '판매가', '현재 판매가', '기본정보', '가격', '이미지'],
         unit.items.map(itemRow),
       ),
     ),
@@ -1270,7 +1280,7 @@ function unitPanel(unit, onDone, labels) {
       preflightBlock(unit, labels),
       previewBlock(unit),
       intent && intent.attempts.length
-        ? table(['시도', '결과', '오류 분류', '오류 코드', '시작'], intent.attempts.map(attemptRow))
+        ? table(['시도', '결과', '확인 내용', '시작'], intent.attempts.map(attemptRow))
         : null,
       scopeBlock(unit.scope),
       h('div', { class: 'supplier-actions' }, ...unit.actions.map((action) => actionCell(unit, action, onDone))),
@@ -1284,8 +1294,8 @@ function unitPanel(unit, onDone, labels) {
 // every item; a resolution is re-derived by its owner and never changes a REGISTER fact.
 function reviewScopeLabel(item) {
   const scope = item.scope;
-  if (scope.intent_id) return `요청 ${scope.intent_id.slice(0, 8)} · 초안 ${scope.draft_id.slice(0, 8)}`;
-  if (scope.preparation_id) return `준비 ${scope.preparation_id.slice(0, 8)} · 초안 ${scope.draft_id.slice(0, 8)}`;
+  if (scope.intent_id) return '등록 요청';
+  if (scope.preparation_id) return '등록 준비';
   return '계정 범위';
 }
 
@@ -1299,7 +1309,7 @@ function reviewPanel(marketplaceKey, accountId) {
   const panel = h(
     'section',
     { class: 'panel register-review', 'data-role': 'register-review', 'data-account': accountId },
-    h('h2', { class: 'panel-title' }, `검토 항목 · ${accountId}`),
+    h('div', { class: 'supplier-head-row' }, h('h2', { class: 'panel-title' }, '검토 항목'), platformTag(marketplaceKey)),
   );
   block({ marketplace_key: marketplaceKey, marketplace_account_id: accountId }).then((found) => {
     if (found) panel.append(found);
@@ -1309,28 +1319,33 @@ function reviewPanel(marketplaceKey, accountId) {
 
 function canaryPanel(canary) {
   const blocked = canary.verdict === 'BLOCKED';
+  const satisfied = canary.requirements.filter((item) => item.satisfied).length;
   return h(
     'section',
     { class: 'panel register-canary', 'data-canary': canary.verdict },
     h(
       'div',
       { class: 'supplier-head-row' },
-      withHelp(h('h2', { class: 'panel-title' }, '실거래 카나리 준비도'), CANARY_HELP),
+      withHelp(h('h2', { class: 'panel-title' }, '실등록 사전 점검'), CANARY_HELP),
       chip(blocked ? '차단됨' : '준비됨', blocked ? 'bad' : 'good'),
     ),
-    kv('실행 모드', canary.execution_mode),
-    kv('쓰기 권한 상태', canary.write_status),
+    kv('실행 상태', EXECUTION_MODE_LABEL[canary.execution_mode] ?? '확인 필요'),
+    kv('마켓 권한', WRITE_STATUS_LABEL[canary.write_status] ?? '확인 필요'),
     h(
-      'ul',
-      { class: 'requirement-list' },
-      ...canary.requirements.map((item) =>
-        h(
-          'li',
-          { 'data-requirement': item.requirement, 'data-satisfied': item.satisfied ? 'true' : 'false' },
-          h('span', {}, item.requirement),
-          chip(item.satisfied ? '충족' : '미충족', item.satisfied ? 'good' : 'warn'),
-          item.endpoint_id && !item.satisfied ? h('span', { class: 'mini' }, item.endpoint_id) : null,
-          item.satisfied ? null : reason(item.reason_code),
+      'details',
+      { class: 'register-safety-details' },
+      h('summary', {}, `세부 점검 ${satisfied}/${canary.requirements.length} 충족`),
+      h(
+        'ul',
+        { class: 'requirement-list' },
+        ...canary.requirements.map((item) =>
+          h(
+            'li',
+            { 'data-requirement': item.requirement, 'data-satisfied': item.satisfied ? 'true' : 'false' },
+            h('span', {}, CANARY_REQUIREMENT_LABEL[item.requirement] ?? '준비 상태 확인'),
+            chip(item.satisfied ? '충족' : '미충족', item.satisfied ? 'good' : 'warn'),
+            item.satisfied ? null : reason(item.reason_code),
+          ),
         ),
       ),
     ),
@@ -1340,7 +1355,7 @@ function canaryPanel(canary) {
 function grantRow(grant) {
   const readiness = grant.readiness
     ? fragment(
-        chip(grant.readiness.verdict, grant.readiness.verdict === 'READY' ? 'good' : 'bad'),
+        chip(READINESS_LABEL[grant.readiness.verdict] ?? '확인 필요', grant.readiness.verdict === 'READY' ? 'good' : 'bad'),
         h(
           'ul',
           { class: 'requirement-list' },
@@ -1353,7 +1368,7 @@ function grantRow(grant) {
     { 'data-grant': grant.grant_id, 'data-grant-state': grant.state, 'data-stage': grant.stage },
     h('td', {}, STAGE_LABEL[grant.stage] ?? grant.stage),
     h('td', {}, chip(GRANT_LABEL[grant.state] ?? grant.state, grant.state === 'ACTIVE' ? 'good' : 'warn')),
-    h('td', { class: 'mono' }, grant.marketplace_account_id),
+    h('td', {}, '연결됨'),
     h('td', {}, `${grant.budget_used} / ${grant.budget_max}`),
     h('td', {}, dotDateTime(grant.expires_at)),
     h('td', {}, readiness),
@@ -1364,6 +1379,7 @@ function grantRow(grant) {
 // proofs and every grant with the ASSET readiness the server derives for it. Read-only.
 function livePanel(live) {
   const brake = live.brake;
+  const active = live.grants.filter((grant) => grant.state === 'ACTIVE').length;
   return h(
     'section',
     { class: 'panel register-live', 'data-role': 'live-panel' },
@@ -1372,30 +1388,35 @@ function livePanel(live) {
       'div',
       { 'data-role': 'live-brake', 'data-brake-state': brake.state },
       kv('보호 쓰기 브레이크', BRAKE_LABEL[brake.state] ?? brake.state),
-      chip(brake.state, brake.state === 'RELEASED' ? 'good' : 'bad'),
+      chip(BRAKE_LABEL[brake.state] ?? '확인 필요', brake.state === 'RELEASED' ? 'good' : 'bad'),
       brake.recorded
         ? null
         : h('div', { class: 'mini', 'data-reason': 'BRAKE_NOT_RECORDED' }, '기록이 없어 기본값인 잠김으로 판단합니다.'),
-      brake.reason_code ? h('div', { class: 'mini', 'data-reason': brake.reason_code }, brake.reason_code) : null,
+      brake.reason_code ? h('div', { class: 'mini', 'data-reason': brake.reason_code }, REASON_COPY[brake.reason_code] ?? '안전 잠금 사유가 기록되어 있습니다.') : null,
     ),
     h(
-      'ul',
-      { class: 'requirement-list', 'data-role': 'live-proofs' },
-      ...Object.entries(live.proofs).map(([name, proven]) =>
-        h(
-          'li',
-          { 'data-proof': name, 'data-satisfied': proven ? 'true' : 'false' },
-          h('span', {}, PROOF_LABEL[name] ?? name),
-          chip(proven ? '증명됨' : '미증명', proven ? 'good' : 'warn'),
+      'details',
+      { class: 'register-safety-details' },
+      h('summary', {}, `실행 권한 상세 · 사용 가능 ${active}건`),
+      h(
+        'ul',
+        { class: 'requirement-list', 'data-role': 'live-proofs' },
+        ...Object.entries(live.proofs).map(([name, proven]) =>
+          h(
+            'li',
+            { 'data-proof': name, 'data-satisfied': proven ? 'true' : 'false' },
+            h('span', {}, PROOF_LABEL[name] ?? '안전 상태 확인'),
+            chip(proven ? '확인됨' : '확인 필요', proven ? 'good' : 'warn'),
+          ),
         ),
       ),
-    ),
-    h(
-      'div',
-      { 'data-role': 'live-grants' },
-      live.grants.length
-        ? table(['단계', '상태', '계정', '예산', '만료', '준비도'], live.grants.map(grantRow))
-        : h('div', { class: 'mini', 'data-grant-state': 'NONE' }, '발급된 실행 권한이 없습니다.'),
+      h(
+        'div',
+        { 'data-role': 'live-grants' },
+        live.grants.length
+          ? table(['단계', '상태', '계정 연결', '사용량', '만료', '준비도'], live.grants.map(grantRow))
+          : h('div', { class: 'mini', 'data-grant-state': 'NONE' }, '발급된 실행 권한이 없습니다.'),
+      ),
     ),
   );
 }
@@ -1403,19 +1424,14 @@ function livePanel(live) {
 // ---------------------------------------------------------------- v29 layout (2026-10-07)
 //
 // v29's 등록관리 composition: five cards, the 등록 이력 row, the 등록 대기 목록 beside 플랫폼별 등록
-// 설정, then 등록상품 관리, 실패 / 재시도 and the safety panels, each unit's own workspace last.
-// v29 switches these as tabs; here every section stays on screen (the Gate 3 surface reads them on
-// one route) and a card brings its section into view. A v29 slot the system has no source for
-// keeps its place and reads 데이터 없음 (owner decision, option 가); a v29 control with no contract is
-// markInert and sends nothing.
+// 설정, then 등록상품 관리, 실패 / 재시도 and the safety panels. Small queues keep their workspaces
+// inline; large queues stay list-first and open the dedicated editor instead of expanding a long
+// diagnostic page. A count the system has no source for reads 데이터 없음; controls without a real
+// contract are omitted from the operator surface.
 const NO_DATA = '데이터 없음';
 
 function noDataCell(label) {
   return h('td', { class: 'no-data', 'data-no-data': label }, NO_DATA);
-}
-
-function noDataKv(label) {
-  return h('div', { class: 'kv', 'data-no-data': label }, h('span', {}, label), h('b', { class: 'no-data' }, NO_DATA));
 }
 
 function goTo(section) {
@@ -1476,6 +1492,12 @@ export function editorHref(unit, mode) {
   return `${window.location.pathname}#/register-editor?${params}`;
 }
 
+function unitDisplayName(unit) {
+  const authored = unit.authored?.inputs?.name?.value?.trim();
+  if (authored) return authored;
+  return unit.items.length === 1 ? '상품 1개' : `상품 ${unit.items.length}개`;
+}
+
 function openUnitChoice(unit) {
   const registered = unit.intent?.read_state?.state === 'REGISTERED';
   const open = (mode) => {
@@ -1497,7 +1519,7 @@ function openUnitChoice(unit) {
     );
   openModal({
     eyebrow: '등록관리 · 상품 편집기',
-    title: unit.unit_ref,
+    title: unitDisplayName(unit),
     help: '편집기는 새 탭으로 열립니다. 등록관리 화면은 그대로 두고 여러 상품을 나란히 열어 작업할 수 있습니다.',
     body: h(
       'div',
@@ -1519,7 +1541,7 @@ function openUnitChoice(unit) {
   });
 }
 
-// One row per unit, as the server read it; 열기 brings that unit's own workspace into view.
+// One row per unit, as the server read it; 열기 opens the real editor choice.
 function queueRow(unit) {
   const read = unit.intent?.read_state;
   return h(
@@ -1535,13 +1557,10 @@ function queueRow(unit) {
         if (event.key === 'Enter') openUnitChoice(unit);
       },
     },
-    h('td', {}, h('b', {}, unit.unit_ref), h('div', { class: 'mini mono' }, `초안 ${unit.draft_id.slice(0, 8)}`)),
+    h('td', {}, h('b', {}, unitDisplayName(unit))),
     h('td', {}, platformTag(unit.marketplace_key)),
     unit.category ? h('td', {}, h('span', { class: 'mono' }, unit.category.category_id)) : noDataCell('카테고리'),
-    noDataCell('옵션 상태'),
-    noDataCell('이미지 상태'),
     h('td', {}, chip(PREPARATION_LABEL[unit.preparation] ?? unit.preparation)),
-    noDataCell('진행률'),
     h('td', {}, read ? h('span', { class: `chip ${READ_STATE_TONE[read.state] ?? ''}`.trim() }, read.label) : '-'),
     h(
       'td',
@@ -1552,9 +1571,9 @@ function queueRow(unit) {
           type: 'button',
           class: 'btn',
           'data-action': 'open-unit',
-          onclick: () => document.querySelector(`.register-unit[data-unit='${CSS.escape(unit.unit_ref)}']`)?.scrollIntoView({ block: 'start' }),
+          onclick: () => openUnitChoice(unit),
         },
-        '열기',
+        '상품 열기',
       ),
     ),
   );
@@ -1565,49 +1584,27 @@ function queuePanel(units, readinessBlock, empty) {
     'section',
     { class: 'panel register-queue', 'data-role': 'register-queue', 'data-section': 'pending' },
     h('div', { class: 'supplier-head-row' }, h('h3', { class: 'panel-title' }, '등록 대기 목록'), h('span', { class: 'mini' }, `총 ${units.length}건`)),
-    h(
-      'div',
-      { class: 'toolbar register-queue-tools' },
-      markInert(h('button', { type: 'button', class: 'btn dark' }, '▶ 대량 등록'), '대량 등록'),
-      markInert(h('button', { type: 'button', class: 'btn' }, '↻ 선택 재시도'), '선택 재시도'),
-      markInert(h('button', { type: 'button', class: 'btn ai-btn' }, '✨ AI 카테고리 재추천'), 'AI 카테고리 재추천'),
-      markInert(h('button', { type: 'button', class: 'btn' }, '⇩ 엑셀 내보내기'), '엑셀 내보내기'),
-    ),
     units.length
-      ? table(['상품', '대상 플랫폼', '카테고리', '옵션 상태', '이미지 상태', '등록 상태', '진행률', '최종 결과', ''], units.map(queueRow))
+      ? table(['상품', '판매 채널', '카테고리', '준비 상태', '등록 결과', ''], units.map(queueRow))
       : empty,
     readinessBlock,
   );
 }
 
-// v29's 플랫폼별 등록 설정: no read here states these defaults, and its toggles stay a visual shell
-// (UI_SOURCE_OF_TRUTH architect ruling on the registration automation controls: zero writes).
-function settingsPanel() {
+function settingsPanel(ctx) {
   return h(
     'aside',
     { class: 'side-detail register-settings', 'data-role': 'register-settings' },
-    h('h3', {}, '플랫폼별 등록 설정'),
+    h('h3', {}, '판매 채널 설정'),
+    h('p', { class: 'mini' }, '배송·가격·카테고리 기준과 계정 연결 상태를 설정에서 관리합니다.'),
     h(
       'div',
       { class: 'inner-tabs register-platform-tabs' },
-      h('button', { type: 'button', 'aria-selected': 'true', 'aria-label': '스마트스토어' }, platformTag('smartstore')),
-      markInert(h('button', { type: 'button', 'aria-selected': 'false', 'aria-label': '쿠팡' }, platformTag('coupang')), '쿠팡'),
-      markInert(h('button', { type: 'button', 'aria-selected': 'false', 'aria-label': '11번가' }, platformTag('st11')), '11번가'),
-    ),
-    h('div', { class: 'detail-group' }, noDataKv('기본 배송비'), noDataKv('기본 출고일'), noDataKv('상품 상태')),
-    h(
-      'div',
-      { class: 'detail-group' },
-      ...['자동 가격조정', '카테고리 자동매칭', '등록 실패 자동 재시도'].map((label) =>
-        h(
-          'div',
-          { class: 'kv' },
-          h('span', {}, label),
-          markInert(h('span', { class: 'toggle off', role: 'switch', 'aria-checked': 'false', 'aria-label': label }), label),
-        ),
+      ...['smartstore', 'coupang', 'st11'].map((key) =>
+        h('button', { type: 'button', 'aria-label': `${key} 설정 열기`, onclick: () => ctx.navigate('settings') }, platformTag(key)),
       ),
     ),
-    h('div', { class: 'note' }, '수집 → 검증 → 가격확정 → 등록준비 → 등록완료'),
+    h('button', { type: 'button', class: 'btn', onclick: () => ctx.navigate('settings') }, '설정 열기'),
   );
 }
 
@@ -1684,11 +1681,11 @@ export default {
             readinessBlock,
             emptyState({
               title: '등록 후보가 없습니다',
-              copy: '통합DB에서 등록 가능한 상품을 선택하면 Preflight를 거쳐 등록할 수 있습니다.',
+              copy: '통합DB에서 등록할 상품을 선택하면 필요한 항목을 확인한 뒤 등록할 수 있습니다.',
               action: { label: '통합DB 보기', onSelect: () => ctx.navigate('db') },
             }),
           ),
-          settingsPanel(),
+          settingsPanel(ctx),
         ),
         sectionWrap('products', '등록상품 관리', listingSyncPanel()),
         sectionWrap('failed', '실패 / 재시도', statusPanel),
@@ -1699,7 +1696,16 @@ export default {
     // units are marked and brought into view. The route names the Draft only; its units are
     // read from the server like every other unit.
     const focusDraft = ctx.params.get('draft');
-    const panels = overview.units.map((unit) => {
+    // A short queue remains useful inline. Once the queue grows, the old design expanded every
+    // technical workspace into one very long page. Keep the normal operator view list-first and
+    // show an inline workspace only for small queues or a Draft explicitly opened from the DB.
+    const showInlineWorkspaces = Boolean(focusDraft) || overview.units.length <= 3;
+    const panelUnits = focusDraft
+      ? overview.units.filter((unit) => unit.draft_id === focusDraft)
+      : showInlineWorkspaces
+        ? overview.units
+        : [];
+    const panels = panelUnits.map((unit) => {
       const panel = unitPanel(unit, reload, areaLabels);
       if (focusDraft && unit.draft_id === focusDraft) panel.setAttribute('aria-current', 'true');
       return panel;
@@ -1716,12 +1722,12 @@ export default {
       head,
       cards,
       utilityRow(overview),
-      h('div', { class: 'section-grid register-layout' }, queuePanel(overview.units, readinessBlock, null), settingsPanel()),
+      h('div', { class: 'section-grid register-layout' }, queuePanel(overview.units, readinessBlock, null), settingsPanel(ctx)),
       sectionWrap('products', '등록상품 관리', listingSyncPanel()),
       sectionWrap('failed', '실패 / 재시도', panelOf(fixesPanel(fixes, ctx)), statusPanel),
       sectionWrap('safety', '실등록 안전장치', canaryPanel(canary), livePanel(live)),
       sectionWrap('reviews', '검토 항목', ...reviews),
-      sectionWrap('units', '등록 단위 작업 공간', ...panels),
+      sectionWrap('units', '상품 등록 작업', ...panels),
     );
   },
 };
