@@ -24,7 +24,10 @@ from html.parser import HTMLParser
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
-from app.stages.collect.extension.embedded import EmbeddedDataMember
+from app.stages.collect.extension.embedded import (
+    DescriptionImagesMember,
+    EmbeddedDataMember,
+)
 from app.stages.collect.extension.gate import safe_token
 from app.stages.collect.extension.policy import BrowserCapturePolicy
 
@@ -97,6 +100,9 @@ class CaptureEnvelope(BaseModel):
     # ADR-0040 §3: the projected embedded data, or the browser's refusal to make it. Only a policy
     # that declares ``embedded_data`` accepts one; it is never logged or kept.
     embedded_data: EmbeddedDataMember | None = Field(default=None, repr=False)
+    # ADR-0040 §3.2: the description's image references, or the browser's refusal to read
+    # them. Only a policy that declares ``description`` accepts one.
+    description_images: DescriptionImagesMember | None = Field(default=None, repr=False)
 
 
 @dataclass(frozen=True)

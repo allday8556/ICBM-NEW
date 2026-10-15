@@ -181,6 +181,25 @@ class EmbeddedData:
 
 
 @dataclass(frozen=True)
+class CapturedImages:
+    """ADR-0040 §3.2 (OC-09): image references the extension read for the page within the capture.
+
+    For 1688, the references of the description document the page names, read by the extension
+    and re-checked by the server. ``urls`` is ``None`` exactly when the member was refused, by the
+    browser or by the server, and ``refusal`` then names why; ``total`` is how many distinct
+    references the extension found before the policy's cap.
+    """
+
+    urls: tuple[str, ...] | None
+    total: int | None = None
+    refusal: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.urls is None) == (self.refusal is None):
+            raise ValueError("captured images are either references or a refusal")
+
+
+@dataclass(frozen=True)
 class DocumentView:
     """The only thing a collection parser ever sees: an immutable view of one response.
 
@@ -195,6 +214,8 @@ class DocumentView:
     content_type: str
     body: str = field(repr=False)
     embedded: EmbeddedData | None = field(default=None, repr=False, compare=False)
+    # ADR-0040 §3.2: image references the extension read within the capture, if any.
+    captured_images: CapturedImages | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -463,6 +484,10 @@ class SupplierCollection:
     # supplier served and from nothing else; this answers a much smaller question, and answering
     # it wrongly can only make a collection wait, never mislabel a revision.
     url_product_hint: Callable[[str], str | None] = lambda url: None
+    # ADR-0040 §3.2: the candidates a capture's own image references stand for (1688's
+    # description images). Core places them after the page's own references and fetches them
+    # through the same policed image fetch; nothing here reads a document.
+    captured_candidates: Callable[[DocumentView, str], tuple[ImageCandidate, ...]] | None = None
 
     @property
     def supplier_key(self) -> str:

@@ -65,8 +65,11 @@ from app.stages.collect.extension.capture import (
     policy_violations,
 )
 from app.stages.collect.extension.embedded import (
+    DESCRIPTION_IMAGES_ABSENT,
     EMBEDDED_DATA_ABSENT,
+    DescriptionImagesMember,
     EmbeddedDataMember,
+    description_images_problem,
     projection_problem,
     strings_of,
 )
@@ -84,6 +87,7 @@ from app.stages.collect.models import CollectionOutcome, TransportKind
 from app.stages.collect.runs import CollectionRunRecord, CollectionRunStore, RunProvenance
 from integrations.suppliers.base import SupplierTransport
 from integrations.suppliers.collection import (
+    CapturedImages,
     CollectionProfile,
     DocumentView,
     EmbeddedData,
@@ -304,6 +308,12 @@ class ExtensionCaptureService:
                 "CAPTURE_EMBEDDED_DATA_NOT_DECLARED",
                 "this supplier's capture policy declares no embedded data",
             )
+        if envelope.description_images is not None and policy.description is None:
+            # ADR-0040 §3.2: only a policy that declares a description accepts its images.
+            raise CapturePolicyRefused(
+                "CAPTURE_DESCRIPTION_NOT_DECLARED",
+                "this supplier's capture policy declares no description",
+            )
         _ceiling("EXTENSION_CEILING_HTML_BYTES", measured.html_bytes, policy.bounds.max_html_bytes)
         _ceiling("EXTENSION_CEILING_NODES", measured.nodes, policy.bounds.max_nodes)
         _ceiling("EXTENSION_CEILING_IMAGE_REFS", measured.image_refs, policy.bounds.max_image_refs)
@@ -341,7 +351,13 @@ class ExtensionCaptureService:
                     assert self._queue_tickets is not None
                     self._queue_tickets.attach(session, item_id, run_id)
                 self._buffer.put(
-                    run_id, BufferedCapture(envelope.html, evidence, envelope.embedded_data)
+                    run_id,
+                    BufferedCapture(
+                        envelope.html,
+                        evidence,
+                        envelope.embedded_data,
+                        envelope.description_images,
+                    ),
                 )
         except BaseException:
             if run_id is not None:
@@ -574,6 +590,7 @@ class ExtensionCaptureService:
                 },
             )
         embedded = self._embedded(record, policy, capture.embedded)
+        captured_images = self._description_images(record, policy, capture.description_images)
         evidence = capture.evidence
         document = DocumentView(
             kind=ReadKind.PRODUCT_READ,
@@ -585,8 +602,51 @@ class ExtensionCaptureService:
             content_type=evidence.content_type,
             body=capture.html,
             embedded=embedded,
+            captured_images=captured_images,
         )
         return document, policy
+
+    def _description_images(
+        self,
+        record: CollectionRunRecord,
+        policy: BrowserCapturePolicy,
+        member: DescriptionImagesMember | None,
+    ) -> CapturedImages | None:
+        """ADR-0040 §3.2 (OC-09): the server's own check of the description's image references.
+
+        Every reference must be a plain https reference on a declared image host that passes the
+        secret rules; anything else refuses the member, never the capture, and there are no
+        description images. The security gate reads every string that arrived; a secret refuses
+        the whole capture. The server reads no document for them: the images are fetched later by
+        the ordinary policed image fetch, like any other reference.
+        """
+        rule = policy.description
+        if rule is None:
+            # A member for a policy that declares none was refused at ingest.
+            return None
+        if member is None:
+            refusal: str | None = DESCRIPTION_IMAGES_ABSENT
+        elif member.images is None or member.total is None:
+            refusal = member.refused or DESCRIPTION_IMAGES_ABSENT
+        else:
+            gate = embedded_data_gate(("description_images[]", image) for image in member.images)
+            if gate.blocking:
+                raise ExtensionCaptureFailed(
+                    EXTENSION_FINAL_SCAN_REFUSED,
+                    "the server's security gate found material that is never collected",
+                    details={
+                        "finding_count": len(gate.blocking),
+                        "findings": list(gate.blocking)[:20],
+                    },
+                )
+            refusal = description_images_problem(rule, member.images, member.total)
+            if refusal is None:
+                return CapturedImages(urls=tuple(member.images), total=member.total)
+        logger.warning(
+            "collect.extension_description_images_refused",
+            extra={"collection_run_id": record.collection_run_id, "error_code": refusal},
+        )
+        return CapturedImages(urls=None, refusal=refusal)
 
     def _embedded(
         self,

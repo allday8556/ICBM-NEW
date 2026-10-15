@@ -252,9 +252,9 @@ retains their evidence excerpt `smartstore-cross-border-2.90.1-2026-10-15.json`.
 | `integrations/` | 119 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 45 |  |
 | `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 443 | tests |
+| `tests/` | 448 | tests |
 | `tests/contracts/` | 22 | repository-rule and document-contract tests |
-| `tests/fixtures/` | 28 | test fixtures (byte-pinned) |
+| `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
 | `tests/integration/` | 182 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
