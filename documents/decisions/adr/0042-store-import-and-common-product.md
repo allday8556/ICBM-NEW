@@ -146,7 +146,7 @@ These two walkthroughs are the acceptance script of every slice (§14). Each sli
 
 ## 4. Evidence-capture tasks: provider facts not yet verified
 
-Every item below is **unverified** at main `40a73ff3`. Each one is captured from the official NAVER Commerce API reference in the slice named, before any code depends on it. Until then, the dependent behaviour stays fail-closed.
+Every item below is **unverified** at main `40a73ff3`. Each one is captured in the slice named, before any code depends on it, from the official NAVER Commerce API reference, an official support answer, or the shape-only runtime capture of §5.1 item 3. Until then, the dependent behaviour stays fail-closed.
 
 | # | fact | slice |
 | --- | --- | --- |
@@ -168,11 +168,16 @@ Every item below is **unverified** at main `40a73ff3`. Each one is captured from
 | enumerate every origin product of the store | `SMARTSTORE_PRODUCT_SEARCH` `POST /v1/products/search` | `ADOPTED` **for positive-only reconcile only**: a seller-code-only request, and kept fields of identities plus the pagination envelope (`ENDPOINT_MATRIX.md` §4.1.2; `registry.py` `_PRODUCT_SEARCH_FIELDS`) |
 | full fields of one listing | `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` `GET /v2/products/origin-products/{originProductNo}` | `ADOPTED`, keeping `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url`, `statusType`, `channelProductDisplayStatusType` only (`_ORIGIN_READ_FIELDS`) |
 
-**S1a makes two adoption amendments.** Neither is a new endpoint:
+**S1a makes two adoption amendments and one runtime capture.** None is a new endpoint:
 1. **A catalog-enumeration request shape for the search** (E1, E2): no seller-code keyword, `page` from 1, `size` 500, and every-status and stable-sort parameters if they are documented.
    - A catalog over the provider's 100,000-result limit is `UNAVAILABLE`, never partial (E6).
 2. **A widened, deny-by-default retention profile** on the search and the origin read, for the §5.3 fields. Each field must be named in the official schema (E3, E4).
    - If the search does not carry a field, each new or changed listing is read by its origin read, paced at 1 s (ADR-0023 §3).
+3. **A shape-only runtime capture** (owner, 2026-10-15: the official reference site cannot be read from this environment).
+   - On an operator's 「지금 동기화」, the sync records the **shape** of the raw search page and origin-read responses it received: every key path and its JSON type (`string`, `number`, `boolean`, `null`, `object`, `array`).
+   - **No value is recorded.** The one exception is a string at a key whose name ends in `Type`, `Status`, `Unit` or `Method` that matches `^[A-Z][A-Z0-9_]{0,40}$`: it is an enum token and is kept. Product numbers, names, prices, texts, URLs and contacts never are.
+   - The shape is stored with the sync run, never shown on the seller's screens except under 「문제 해결용 정보」, and is runtime evidence (`source documented != runtime verified`, `SOURCES.md`) for E2–E6.
+   - It widens no retention profile. A field is retained only after it is named in an adoption amendment backed by this or official evidence.
 
 The identity fields stay exactly as §4.1.2 reads them. The reconcile use of the search is unchanged.
 
@@ -428,7 +433,7 @@ New review conditions are `NOT_WIRED` kinds until their producer is wired (ADR-0
 | **ROADMAP §1.1** | **Amended, not superseded.** "Clean start" stays entry path (a). A note adds path (b): an existing operator's current store catalog may be imported read-only (S1) and linked to common products (S2a). Legacy ICBM-PROJECT IDs, rows and state are still **not** imported; what is imported is the live provider catalog, read fresh through adopted endpoints | S1a |
 | **ADR-0014 §13** | The adopted provider lookup evidence for SmartStore is the catalog duplicate source of §6. Its `NO_MATCH` holds relative to a `COMPLETE` snapshot under 60 minutes old, and for new Intents only | S3b |
 | **ADR-0014 §17.2** | A note scoping its last paragraph. "No lookup result … becomes remote-absence evidence" stays absolute for §10, §14 and §28. The bounded duplicate-preflight use of §6 is not remote-absence evidence and resolves no ambiguity. The verdict stays `INSUFFICIENT` | S3b |
-| **ADR-0013 §4** | Materialization consults linked groups and members before creating a group (§8). A group may exist with zero `CONFIRMED` members when it is created for an imported listing (§7) | S3a, S2a |
+| **ADR-0013 §4** | Materialization consults linked groups and members before creating a group (§8). A group may exist with zero `CONFIRMED` members when it is created for an imported listing (§7) | S2a, S3a |
 | **ADR-0024** | Adoption becomes one link kind (`ADOPTED`). Its table and M6E-02..06 are unchanged. M6E-01 ("never writes an adopted listing") is lifted only through S2c's per-listing UPDATE grant (owner Q5) | S2a, S2c |
 | **ADR-0023 M6-01** | OPERATE's no-write rule is lifted only for S2c's UPDATE stage, under ADR-0018 | S2c |
 | **ADR-0018 §3** | A fifth mutation stage, `UPDATE`, and the UI-issued batch approval of §11: at most 50 listings, 30 minutes, one exact grant of budget 1 per listing, every brake and check per listing. Today every grant is issued by a protected CLI command (`app/interface/cli.py`) | S2c |
@@ -448,14 +453,16 @@ Tests and CI are necessary and never sufficient.
 | **S1a** | Evidence capture E1–E6. The two adoption amendments (§5.1). StoreCatalog (`0067`), the sync job, completeness, the 60-minute staleness, the allowlist, the automatic first sync after connect | a1–a2, b1: connect, then the first sync's progress and result on the owner's real store (under the owner's go-ahead for the first real read) | read only |
 | **S1b** | 통합DB 「스토어 상품」 tab: every listing, status filters, 「마지막 동기화」 always visible, 「지금 동기화」, 「스토어에서 확인 안 됨」 | a2, b2: filter by each status; the counts match the seller center | none |
 | **S3b** | The catalog duplicate source (§6) replaces `lookup.py`. `DUPLICATE_EVIDENCE_STALE` and the automatic re-sync, the positive spot check, the stable fingerprint digest. The ADR-0014 notes. **This unblocks registration** for both paths | a4: the duplicate row shows 「중복 없음 · 동기화 시각 기준」, the re-sync after 60 minutes, and a real match blocking with its choices | read only |
-| **S3a** | Dedupe on collect (§8): strong automatic attach with notification and undo, weak candidates, per-supplier prices, 「매입처」, 기존 도매처 입력 | a3, b4, b5: collect a product already in ICBM and see it attached, not duplicated; undo it; paste a supplier URL on a 「도매처 미연결」 product | supplier reads as COLLECT does |
 | **S2a** | ListingLinks (`0068`): automatic strong-key links with notification, a common product per imported listing (「도매처 미연결」), weak candidates and confirm, adoptions read as links, unlink, MERGE | b3: after import, every listing is a common product; the automatic-link notice and undo; confirming and rejecting a name-similar pair | none |
+| **S3a** | Dedupe on collect (§8): strong automatic attach with notification and undo, weak candidates, per-supplier prices, 「매입처」, 기존 도매처 입력 | a3, b4, b5: collect a product already in ICBM and see it attached, not duplicated; undo it; paste a supplier URL on a 「도매처 미연결」 product | supplier reads as COLLECT does |
 | **S2b** | CommonContent (`0069`, A1): content revisions, store overrides, projections, preview, baselines, external-change detection; preparation seeded from it | b6, a6 (preview only): an edit made in the seller center is shown with both choices; the preview shows 현재 → 변경 per store | none |
 | **S2c** | E7 and the partial-update adoptions for **price, stock and sale status**. The ADR-0018 amendment (UPDATE stage, batch approval ≤ 50 / 30 min, one grant per listing). StoreUpdate (`0070`): attempts, read-back verification, `UNKNOWN` reconcile (A3). 「한 번에 반영」 | a6, b7: one approval changes price, stock and status of a canary test product and one imported listing; the per-store result; an expired approval refuses (under the owner's go-ahead for the first real update) | **mutation** |
 | **S2d** | E8 and the partial updates for name, images, detail, options, shipping, category and notices, one field group per PR | b7 per field group | **mutation** |
 | **S4** | Coupang in the same frame: catalog sync, links, duplicate source and update stage, through Track C's adoptions (`CATALOG_PRODUCTS.md`; `C-LIVE-MUT-1` stays its own bounded scope) | the §0 steps for a Coupang store | per slice |
 
-Order: S1a → S1b → S3b → S3a → S2a → S2b → S2c → S2d, then S4.
+Order: S1a → S1b → S3b → S2a → S3a → S2b → S2c → S2d, then S4.
+
+S2a comes before S3a. S3a attaches a collected product to a common product, and for an existing operator (path b, steps b4 and b5) those common products and their listing links are created by S2a. Path (a)'s step a3 needs only the groups that registration already creates.
 
 S3b comes early because it unblocks registration. Each slice follows the global merge lane, and rule 14 sets its tier. S1a and S3b are `HIGH_RISK` (adoption, REGISTER safety), S2c and S2d are `HIGH_RISK` (mutation), and the others are `PROVIDER_ZERO`.
 
