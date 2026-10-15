@@ -11,9 +11,8 @@ import hashlib
 import hmac
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from ipaddress import IPv4Address, IPv6Address, ip_address
 from typing import Protocol
 
 COUPANG_PROVIDER_HOST = "api-gateway.coupang.com"
@@ -21,6 +20,8 @@ COUPANG_BASE_URL = f"https://{COUPANG_PROVIDER_HOST}"
 ALGORITHM = "HmacSHA256"
 AUTH_SCHEME = "CEA"
 _SIGNED_DATE = re.compile(r"^\d{6}T\d{6}Z$")
+PROVIDER_READ_PROOF_ID = "COUPANG_AUTO_CATEGORY_AGREEMENT_CANARY"
+PROVIDER_READ_PROOF_TTL = timedelta(hours=24)
 
 
 class Market(StrEnum):
@@ -86,51 +87,58 @@ class Credentials:
 
 
 @dataclass(frozen=True)
-class IpAllowlistDeclaration:
-    """Local setup evidence only; Coupang exposes no allowlist-introspection endpoint.
+class ProviderReadProof:
+    """A successful bounded provider read, used as current network/auth setup evidence.
 
-    This record never proves provider acceptance. It binds the operator-declared outbound IP to
-    the credential generation whose Wing linking information was configured.
+    Coupang itself enforces the Wing source-IP allowlist.  ICBM therefore retains the result of a
+    successful fixed read rather than asking the operator to repeat or disclose the IP address.
     """
 
-    source_ip: IPv4Address | IPv6Address
+    endpoint_id: str
     credential_generation: int
-    recorded_at: datetime
+    verified_at: datetime
 
     @classmethod
     def create(
-        cls, source_ip: str, *, credential_generation: int, recorded_at: datetime
-    ) -> IpAllowlistDeclaration:
-        if recorded_at.tzinfo is None or recorded_at.utcoffset() is None:
-            raise ValueError("recorded_at must be timezone-aware")
+        cls, endpoint_id: str, *, credential_generation: int, verified_at: datetime
+    ) -> ProviderReadProof:
+        if (
+            not isinstance(endpoint_id, str)
+            or not endpoint_id.strip()
+            or not endpoint_id.isprintable()
+        ):
+            raise ValueError("endpoint_id must be a printable non-empty string")
+        if verified_at.tzinfo is None or verified_at.utcoffset() is None:
+            raise ValueError("verified_at must be timezone-aware")
         if (
             not isinstance(credential_generation, int)
             or isinstance(credential_generation, bool)
             or credential_generation < 1
         ):
             raise ValueError("credential_generation must be a positive integer")
-        return cls(ip_address(source_ip), credential_generation, recorded_at.astimezone(UTC))
+        return cls(endpoint_id.strip(), credential_generation, verified_at.astimezone(UTC))
 
 
 @dataclass(frozen=True)
 class AuthContext:
     credentials: Credentials
     market: Market
-    ip_allowlist: IpAllowlistDeclaration | None = None
+    provider_read_proof: ProviderReadProof | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.market, Market):
             raise ValueError("market must be an officially supported Coupang market")
         if (
-            self.ip_allowlist is not None
-            and self.ip_allowlist.credential_generation != self.credentials.credential_generation
+            self.provider_read_proof is not None
+            and self.provider_read_proof.credential_generation
+            != self.credentials.credential_generation
         ):
-            raise ValueError("IP allowlist evidence belongs to a different credential generation")
+            raise ValueError("provider read proof belongs to a different credential generation")
 
     @property
     def setup_evidence_current(self) -> bool:
-        """Auth setup evidence only, not permission to make a provider call."""
-        return self.ip_allowlist is not None
+        """A provider-accepted fixed read exists for this credential generation."""
+        return self.provider_read_proof is not None
 
 
 @dataclass(frozen=True)
