@@ -61,19 +61,20 @@ const TITLE = '설정';
 
 // The display name of each surface the server says it accepts a save for (settings contract).
 const SURFACE_LABEL = {
-  REGISTRATION_TARGET_POLICY: '등록 대상 정책 (마켓 탭 › 등록 정책)',
-  REGISTRATION_CATEGORY_METADATA: '카테고리 메타데이터 (마켓 탭 › 상품 / 카테고리)',
-  AI_PROMPT_REGISTRY: 'AI Prompt Registry (공통 › AI / Prompt)',
+  REGISTRATION_TARGET_POLICY: '등록 정책·배송 관리 (스마트스토어)',
+  REGISTRATION_CATEGORY_METADATA: '카테고리 정보 (스마트스토어 › 상품 / 카테고리)',
+  AI_PROMPT_REGISTRY: 'AI 프롬프트 (공통 › AI)',
   DETAIL_GUIDANCE: '상세페이지 공지 (공통 › 상세페이지 공지)',
   SUPPLIER_SALES_POLICY: '공급처 판매정책 (수집관리 › 공급처 관리)',
   OVERSEAS_SETTINGS: '해외 구매대행 (공통 › 해외구매대행)',
 };
 
+// Which settings can be saved, as the server lists them; each is saved from its own card.
 function saveScope(view) {
   if (view.editable) return '변경 사항을 저장할 수 있습니다';
-  const surfaces = (view.editable_surfaces ?? []).map((surface) => SURFACE_LABEL[surface] ?? surface);
-  if (!surfaces.length) return '읽기 전용 — 저장 계약이 연결된 설정이 없습니다';
-  return `일반 설정은 저장 계약이 없어 읽기 전용입니다 · 저장 가능: ${surfaces.join(', ')}`;
+  const surfaces = (view.editable_surfaces ?? []).map((surface) => SURFACE_LABEL[surface]).filter(Boolean);
+  if (!surfaces.length) return '아직 저장할 수 있는 설정이 없습니다';
+  return `저장할 수 있는 설정: ${surfaces.join(', ')} · 각 카드의 저장 버튼으로 저장합니다. 회색 칸은 아직 설정할 수 없습니다`;
 }
 
 let fieldSequence = 0;
@@ -97,7 +98,7 @@ function fieldRow(item, state) {
       'aria-readonly': 'true',
       autocomplete: 'off',
       value: value ?? '',
-      placeholder: item.placeholder ?? '미설정',
+      placeholder: '아직 설정할 수 없습니다',
       'data-setting': item.id,
     }),
   );
@@ -153,21 +154,12 @@ function aiCapabilityRow() {
   return h('div', { class: 'kv' }, h('span', {}, 'AI 공급자'), chip);
 }
 
-function usersTable() {
-  return h(
-    'table',
-    { class: 'table' },
-    h('thead', {}, h('tr', {}, h('th', {}, '이름'), h('th', {}, '권한'), h('th', {}, '상태'))),
-    h('tbody', {}, h('tr', {}, h('td', { class: 'table-empty', colspan: '3' }, '등록된 사용자가 없습니다 · v1은 로컬 단일 운영자'))),
-  );
-}
-
 function renderItem(item, state) {
   if (item.field) return fieldRow(item, state);
   if (item.toggle) return toggleRow(item, state);
   if (item.status) return statusRow(item, state);
   if (item.kv) {
-    return h('div', { class: 'kv' }, h('span', {}, item.kv), h('b', {}, '미설정', h('em', { class: 'inherit-tag' }, item.tag)));
+    return h('div', { class: 'kv' }, h('span', {}, item.kv), h('b', {}, '아직 설정할 수 없음'));
   }
   if (item.note) return h('div', { class: 'note' }, item.note);
   if (item.flow) {
@@ -204,7 +196,6 @@ function renderItem(item, state) {
   if (item.detailGuidance) return detailGuidancePanel();
   if (item.overseasSettings) return overseasSettingsPanel();
   if (item.fxRates) return fxRatesPanel();
-  if (item.usersTable) return usersTable();
   if (item.aiCapability) return aiCapabilityRow();
   if (item.aiProvider) return aiProviderPanel();
   if (item.registry) return promptRegistry(item.registry);
@@ -219,11 +210,16 @@ function renderItem(item, state) {
   return null;
 }
 
+// A card made only of fields, switches and buttons with no save behind them says so up front.
+const INERT_ITEM = (item) => Boolean(item.field || item.toggle || item.kv || item.actions || item.button);
+
 function renderCard(card, state) {
+  const pending = card.items.length > 0 && card.items.every(INERT_ITEM);
   return h(
     'div',
-    { class: card.full ? 'setting-card full' : 'setting-card' },
+    { class: card.full ? 'setting-card full' : 'setting-card', 'data-pending': pending ? 'true' : null },
     withHelp(h('h3', {}, card.title), card.help),
+    pending ? h('div', { class: 'mini setting-pending' }, '아직 설정할 수 없습니다 · 준비 중인 기능입니다') : null,
     card.items.map((item) => renderItem(item, state)),
   );
 }
@@ -300,7 +296,6 @@ export default {
         'div',
         { class: 'savebar' },
         h('span', { class: 'chip', 'data-save-scope': (view.editable_surfaces ?? []).join(' ') }, saveScope(view)),
-        h('div', { class: 'savebar-actions' }, button('취소'), button('설정 저장', 'blue')),
       ),
     );
   },

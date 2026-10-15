@@ -99,7 +99,7 @@ def test_the_card_shows_and_saves_the_servers_settings(
         card.locator("[data-switch='duties_included_over_usd150']").click()
         card.locator("[data-action='save-overseas-settings']").click()
         page.locator("[data-role='overseas-settings'][data-revision='1']").wait_for(timeout=TIMEOUT)
-        assert "1차 변경" in card.locator("[data-role='overseas-changed']").inner_text()
+        assert "에 변경" in card.locator("[data-role='overseas-changed']").inner_text()
         # A value the server refuses is its verdict: nothing is written.
         field("overseas_delivery_days_min").fill("30")
         card.locator("[data-action='save-overseas-settings']").click()

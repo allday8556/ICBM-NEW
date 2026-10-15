@@ -311,7 +311,7 @@ def test_the_server_refuses_a_url_and_the_save_stays_disabled(
         line.fill("자세한 안내는 naver.com 에서 확인")
         error.wait_for(state="visible", timeout=TIMEOUT)
         assert "URL" in error.inner_text()
-        assert "GUIDANCE_TEXT_INVALID" in error.inner_text()
+        assert error.get_attribute("data-reason") == "GUIDANCE_TEXT_INVALID"
         assert line.get_attribute("aria-invalid") == "true"
         assert top.locator("[data-role='dg-preview'] img").count() == 0
         assert top.locator("[data-role='dg-save']").is_disabled()

@@ -7,8 +7,9 @@
 // read from. The preview is the server's composition of the saved layers. Nothing here calls an
 // AI provider: none exists.
 
-import { ApiError, getJson, sendJson } from '../core/api.js';
+import { getJson, sendJson } from '../core/api.js';
 import { h } from '../core/dom.js';
+import { errorText } from '../core/errors.js';
 import { withHelp } from '../core/help.js';
 import { openModal } from '../core/modal.js';
 import { toast } from '../core/toast.js';
@@ -20,14 +21,14 @@ const COMMON_POLICY = 'POLICY_COMMON_MARKET_V1';
 // tab → which entry of the editor's context it edits, and which field of that entry.
 const TABS = [
   ['global', '공통 규칙', 'global', 'prompt'],
-  ['role', '역할 Role', 'role', 'prompt'],
-  ['policy', '플랫폼 Policy', 'policy', 'prompt'],
-  ['task', '작업 Task', 'task', 'prompt'],
+  ['role', '역할', 'role', 'prompt'],
+  ['policy', '플랫폼 정책', 'policy', 'prompt'],
+  ['task', '작업', 'task', 'prompt'],
   ['output', '출력 형식', 'task', 'output'],
   ['variables', '입력 변수', 'task', 'variables'],
   ['preview', '조립 미리보기', null, null],
 ];
-const SCOPE = { global: 'Global', role: 'Role', policy: 'Policy', task: 'Task', output: 'Output', variables: 'Variables', preview: 'Preview' };
+const SCOPE = { global: '공통', role: '역할', policy: '플랫폼 정책', task: '작업', output: '출력 형식', variables: '입력 변수', preview: '미리보기' };
 
 const ERROR_COPY = {
   AI_PROMPT_CURRENT_MOVED: '다른 곳에서 먼저 저장되었습니다. 편집기를 다시 열어 최신 내용으로 작업하세요.',
@@ -37,8 +38,7 @@ const ERROR_COPY = {
 };
 
 function errorCopy(error) {
-  if (error instanceof ApiError) return ERROR_COPY[error.error?.code] ?? error.message;
-  return String(error);
+  return errorText(error, ERROR_COPY);
 }
 
 function familyOf(entry) {
@@ -46,7 +46,7 @@ function familyOf(entry) {
 }
 
 function versionLine(entry) {
-  return `v${entry.current.revision_no} · ${entry.modified_fields.length ? '사용자 수정본' : '기본값'}`;
+  return entry.modified_fields.length ? '수정됨' : '기본값';
 }
 
 // ------------------------------------------------------------------ the Settings registry
@@ -61,7 +61,7 @@ function card(entry, label, help, context, onSaved, className) {
       onclick: () => openPromptEditor(context, onSaved),
     },
     withHelp(h('b', {}, label), help),
-    entry ? h('em', {}, versionLine(entry)) : null,
+    entry ? h('em', { 'data-revision': String(entry.current.revision_no) }, versionLine(entry)) : null,
   );
 }
 
@@ -89,7 +89,7 @@ export function promptRegistry(layout) {
     const global = entries.get(GLOBAL_KEY);
     host.replaceChildren(
       section(
-        '1. 공통 규칙 · Global Rules',
+        '1. 공통 규칙',
         '모든 AI 기능에 공통 적용되는 사실성·검증·승인 정책',
         h(
           'button',
@@ -104,20 +104,20 @@ export function promptRegistry(layout) {
         null,
       ),
       section(
-        '2. 역할 · Role Profiles',
+        '2. 역할',
         '업무별 AI의 전문 역할과 판단 우선순위',
         null,
         h('div', { class: 'registry-grid roles' }, layout.roles.map((item) => card(entries.get(item.role), item.label, item.help, { role: item.role, task: item.task, layer: 'role' }, draw))),
       ),
       section(
-        '3. 플랫폼 정책 · Platform Policy',
-        '플랫폼 공식 데이터·SEO·추천 API 사용 우선순위',
+        '3. 플랫폼 정책',
+        '마켓별 공식 데이터·검색 최적화·추천 기능 사용 순서',
         null,
         h('div', { class: 'registry-grid policies' }, layout.policies.map((item) => card(entries.get(item.policy), item.label, item.help, { role: item.role, task: item.task, policy: item.policy, layer: 'policy' }, draw))),
       ),
       section(
-        '4. 작업 · Task Prompts',
-        '실행 버튼에 따라 TASK_MODE를 선택',
+        '4. 작업',
+        '화면의 AI 버튼마다 쓰는 작업',
         null,
         h('div', { class: 'registry-grid tasks' }, layout.tasks.map((item) => card(entries.get(item.task), item.label, item.help, { role: item.role, task: item.task, layer: 'task' }, draw))),
       ),
@@ -165,7 +165,7 @@ export async function openPromptEditor({ role, task, policy = COMMON_POLICY, lay
     const taskTitle = entries.get(task)?.title ?? '';
     return {
       global: '모든 ICBM AI 기능에 공통 적용됩니다.',
-      role: `${entry?.title ?? ''} 역할을 사용하는 모든 Task에 적용됩니다.`,
+      role: `${entry?.title ?? ''} 역할을 쓰는 모든 작업에 적용됩니다.`,
       policy: `${entry?.title ?? ''} 플랫폼 정책이 해당 마켓 AI 작업에 적용됩니다.`,
       task: `${taskTitle} 작업을 호출하는 모든 화면에 적용됩니다.`,
       output: `${taskTitle}의 출력 형식에만 적용됩니다.`,
@@ -175,7 +175,7 @@ export async function openPromptEditor({ role, task, policy = COMMON_POLICY, lay
   };
 
   function drawMeta() {
-    const name = (key) => `${entries.get(key)?.title ?? key} v${entries.get(key)?.current.revision_no ?? '?'}`;
+    const name = (key) => entries.get(key)?.title ?? '';
     meta.textContent = `${name(role)} · ${name(policy)} · ${name(task)}`;
   }
 
@@ -255,7 +255,7 @@ export async function openPromptEditor({ role, task, policy = COMMON_POLICY, lay
       const updated = await sendJson('POST', path, payload);
       entries.set(updated.key, updated);
       drafts.delete(active);
-      toast(kind === 'save' ? '저장했습니다' : '기본값으로 되돌렸습니다', `${updated.title} v${updated.current.revision_no}`);
+      toast(kind === 'save' ? '저장했습니다' : '기본값으로 되돌렸습니다', updated.title);
       onSaved();
     } catch (error) {
       toast(kind === 'save' ? '저장하지 못했습니다' : '되돌리지 못했습니다', errorCopy(error));
@@ -267,8 +267,8 @@ export async function openPromptEditor({ role, task, policy = COMMON_POLICY, lay
   reset.addEventListener('click', () => write('reset'));
 
   openModal({
-    eyebrow: 'ICBM Prompt Registry · Layered Prompt System',
-    title: entries.get(task)?.title ?? 'AI Prompt',
+    eyebrow: 'AI 프롬프트',
+    title: entries.get(task)?.title ?? 'AI 프롬프트',
     body: h(
       'div',
       { class: 'prompt-editor', 'data-role': 'prompt-editor', 'data-task': task, 'data-policy': policy, 'data-prompt-role': role },
@@ -278,7 +278,7 @@ export async function openPromptEditor({ role, task, policy = COMMON_POLICY, lay
       h('div', { class: 'prompt-content' }, area),
     ),
     footer: [
-      h('div', { class: 'prompt-foot-left' }, h('span', { class: 'chip good' }, 'Global + Role + Policy + Task'), h('span', { class: 'mini' }, '현재 탭만 독립적으로 저장/초기화됩니다.')),
+      h('div', { class: 'prompt-foot-left' }, h('span', { class: 'mini' }, '지금 보고 있는 탭만 저장하거나 되돌립니다.')),
       h('div', { class: 'prompt-foot-actions' }, reset, save),
     ],
   });
