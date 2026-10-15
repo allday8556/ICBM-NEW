@@ -10,6 +10,14 @@ top of its visible centre once it is scrolled into view) or **overlapping** anot
 it is not nested with. It also records the document's horizontal overflow, the title help icon,
 every help icon's label, the navigation and the populated selectors.
 
+A state inside a closed ``<details>`` is **visible on demand** when that details' own ``<summary>``
+passes the same rules (not hidden, clipped, off-screen or covered): the measurement opens such a
+details before it measures anything and records, per state, the details it was ``revealed`` from;
+every other closed details stays closed, and each state it collapses is hidden
+(``closed-details``). ``judge`` lists the revealed states in the ``state_visible`` and
+``state_not_covered`` outcomes, so a report says which states were judged that way (ADR-0018 §9
+amendment, owner decision Issue #219 ``6185598957``).
+
 Every element is described by its tag, first class and ``data-*`` attributes only, never by its
 text, so a report holds no product text, no URL and no secret. ``judge`` turns one measurement into
 the contract's checks; it is pure and deterministic.
@@ -36,8 +44,8 @@ def _clipped(state: Mapping[str, Any], axis: str) -> bool:
     return str(state.get("clipped", "")).startswith(axis)
 
 
-def _result(failures: Sequence[str]) -> dict[str, Any]:
-    return {"passed": not failures, "failures": sorted(set(failures))}
+def _result(failures: Sequence[str], **evidence: list[str]) -> dict[str, Any]:
+    return {"passed": not failures, "failures": sorted(set(failures)), **evidence}
 
 
 def judge(
@@ -50,6 +58,8 @@ def judge(
     """The contract's checks for one surface at one viewport, from one measurement."""
     states = list(measurement.get("states") or [])
     populated = measurement.get("populated") or {}
+    # States judged after their collapsed <details> was opened, so the report stays honest.
+    revealed = sorted({f"{s['at']} in {s['revealed']}" for s in states if s.get("revealed")})
     checks = {
         "rendered": _result([] if measurement.get("rendered") is True else ["not-rendered"]),
         "populated": _result(
@@ -78,12 +88,14 @@ def judge(
                 f"{s['at']} {s['clipped']}"
                 for s in states
                 if str(s.get("clipped", "")).startswith("y:")
-            ]
+            ],
+            revealed_from_details=revealed,
         ),
         "state_not_truncated": _result([s["at"] for s in states if s.get("truncated")]),
         "state_not_covered": _result(
             [f"{s['at']} under {s['covered']}" for s in states if s.get("covered")]
-            + list(measurement.get("overlaps") or [])
+            + list(measurement.get("overlaps") or []),
+            revealed_from_details=revealed,
         ),
         "title_help_icon": _result(
             ([] if measurement.get("title_help_icons") == 1 else ["title-help-icon-count"])

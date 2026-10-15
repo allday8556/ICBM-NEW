@@ -80,7 +80,7 @@ passes.
 - `no_horizontal_overflow`: nothing on the page or in any state element is horizontally clipped or
   off-screen.
 - `state_visible`: every element carrying server-owned state is visible and not clipped
-  vertically.
+  vertically (inside a closed `<details>`: see below).
 - `state_not_truncated`: no such element is cut off by an overflow clip or ellipsis.
 - `state_not_covered`: no such element is covered by or overlapping another.
 - `title_help_icon`: the page title has exactly one labelled help icon.
@@ -95,6 +95,16 @@ is judged by the `<select>` that shows it. The measured state is every such elem
 `#content` and inside the global registration status card while it is shown; the card is fixed at
 the lower right, so its elements are judged for overlap among themselves, and anything it covers
 in the page fails `state_not_covered`.
+
+**A state inside a closed `<details>`** *(ADR-0018 §9 amendment, owner decision Issue #219
+comment `6185598957`, 2026-10-15)* is visible on demand when that details' own `<summary>` is
+itself visible and uncovered by the same rules (not hidden, clipped, off-screen or covered). The
+measurement opens such a details before it measures anything, then judges every state inside it
+by every check above; `state_visible` and `state_not_covered` list those states under
+`revealed_from_details`. A closed details whose summary is missing, hidden, clipped, off-screen or
+covered stays closed, and each state it collapses fails `state_visible` as `closed-details`. A state
+hidden by any other means still fails. Nothing else on the page is changed, and the full-page
+screenshot, taken after the measurement, shows the opened details.
 
 **What the whole run must show.**
 - No external request.

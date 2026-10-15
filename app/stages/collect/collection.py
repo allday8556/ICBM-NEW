@@ -30,7 +30,7 @@ classes the shared job policy already approves are ever retried.
 
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Protocol
@@ -724,6 +724,19 @@ class ProductCollectionService:
         # from here: another accepted form of this product's URL buys no second read.
         self._runs.note_identity(run_id, source_product_id=identity.source_product_id)
         candidates = tuple(collection.roles.classify(document.body, product_url))
+        if collection.captured_candidates is not None:
+            # ADR-0040 §3.2: references the capture itself carries (1688's description images),
+            # after the page's own references and in their own order. Nothing is read for them.
+            start = max((candidate.order for candidate in candidates), default=-1) + 1
+            candidates = (
+                *candidates,
+                *(
+                    replace(candidate, order=start + index)
+                    for index, candidate in enumerate(
+                        collection.captured_candidates(document, product_url)
+                    )
+                ),
+            )
         images = self._images(
             profile,
             candidates,

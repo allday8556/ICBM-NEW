@@ -24,6 +24,10 @@ from html.parser import HTMLParser
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
+from app.stages.collect.extension.embedded import (
+    DescriptionImagesMember,
+    EmbeddedDataMember,
+)
 from app.stages.collect.extension.gate import safe_token
 from app.stages.collect.extension.policy import BrowserCapturePolicy
 
@@ -93,6 +97,12 @@ class CaptureEnvelope(BaseModel):
     # The single-use ticket of the queue read this capture answers (ADR-0019 §8.1), or nothing for
     # a single click. It is checked against its item's exact URL and never logged.
     queue_ticket: StrictStr | None = Field(default=None, repr=False, pattern=r"^[A-Za-z0-9_-]{43}$")
+    # ADR-0040 §3: the projected embedded data, or the browser's refusal to make it. Only a policy
+    # that declares ``embedded_data`` accepts one; it is never logged or kept.
+    embedded_data: EmbeddedDataMember | None = Field(default=None, repr=False)
+    # ADR-0040 §3.2: the description's image references, or the browser's refusal to read
+    # them. Only a policy that declares ``description`` accepts one.
+    description_images: DescriptionImagesMember | None = Field(default=None, repr=False)
 
 
 @dataclass(frozen=True)

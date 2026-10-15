@@ -77,7 +77,9 @@ def test_cli_accepts_secrets_only_through_no_echo_prompts() -> None:
     assert 'getpass("Coupang Secret Key (hidden): ")' in source
     assert 'add_argument("--access-key"' not in source
     assert 'add_argument("--secret-key"' not in source
+    assert 'add_argument("--source-ip"' not in source
     assert '("coupang", "save-credentials"): _coupang_credentials' in source
+    assert '("coupang", "bind-saved-delivery"): _coupang_bind_saved_delivery' in source
     assert '("coupang", "read-canary"): _coupang_read_canary' in source
     assert '("coupang", "read-category-metadata"): _coupang_read_category_metadata' in source
     assert '("coupang", "mutate-test-products"): _coupang_mutate_test_products' in source

@@ -23,7 +23,10 @@ first-vertical scenario in a
 A passing browser run alone never records anything, and no HTTP route or UI action reaches this
 module: the only caller is the ``icbm live record-visual-acceptance`` command (a repository rule
 keeps it so). A cosmetic difference from the approved prototype is not a failure; a hidden,
-truncated, covered or clipped server-owned state is.
+truncated, covered or clipped server-owned state is. A state inside a closed ``<details>`` whose own
+``<summary>`` is visible and uncovered is visible on demand and is judged with that details open
+(ADR-0018 §9 amendment); a state inside a closed details whose summary is itself hidden or
+covered still fails.
 """
 
 import hashlib
@@ -47,7 +50,9 @@ from app.stages.register.sanitize import problems
 REPORT_VERSION: Final = "g3-visual-report/v1"
 # v2: the global registration status card is measured beside `#content`, and the scenario holds
 # registration outcomes in all four ADR-0014 §28.5 read states.
-HARNESS_VERSION: Final = "g3-visual-acceptance/v2"
+# v3: a state inside a closed <details> whose own <summary> is visible and uncovered is visible on
+# demand: the measurement opens that details first (ADR-0018 §9 amendment, Issue #219 6185598957).
+HARNESS_VERSION: Final = "g3-visual-acceptance/v3"
 SCENARIO: Final = "g3-populated-first-vertical/v2"
 DIGEST_FIELD: Final = "report_digest"
 

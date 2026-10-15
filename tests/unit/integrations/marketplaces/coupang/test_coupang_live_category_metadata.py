@@ -9,8 +9,8 @@ import pytest
 from integrations.marketplaces.coupang.auth import (
     AuthContext,
     Credentials,
-    IpAllowlistDeclaration,
     Market,
+    ProviderReadProof,
 )
 from integrations.marketplaces.coupang.canary import ClockPreflight
 from integrations.marketplaces.coupang.live_category_metadata import (
@@ -33,7 +33,11 @@ def _context() -> AuthContext:
     return AuthContext(
         Credentials("access", "secret", "A0001", 1),
         Market.KR,
-        IpAllowlistDeclaration.create("203.0.113.10", credential_generation=1, recorded_at=NOW),
+        ProviderReadProof.create(
+            "COUPANG_AUTO_CATEGORY_AGREEMENT_CANARY",
+            credential_generation=1,
+            verified_at=NOW,
+        ),
     )
 
 
