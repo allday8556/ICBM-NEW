@@ -15,6 +15,6 @@
     "default_path": "sidepanel.html"
   },
   "permissions": ["scripting", "sidePanel", "storage"],
-  "host_permissions": ["https://kmretail.co.kr/*", "https://www.superdelivery.com/*", "https://upickb2b.com/*", "https://www.ggsan.com/*", "http://127.0.0.1/*"],
+  "host_permissions": ["https://kmretail.co.kr/*", "https://www.superdelivery.com/*", "https://detail.1688.com/*", "https://upickb2b.com/*", "https://www.ggsan.com/*", "http://127.0.0.1/*"],
   "optional_host_permissions": ["https://*/*"]
 }

@@ -33,7 +33,7 @@ of one.
 """
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any
@@ -298,6 +298,30 @@ def security_gate(html: str, *, boundary_of: BoundaryOf) -> GateResult:
     scan.feed(html)
     scan.close()
     return GateResult(blocking=tuple(scan.blocking), notes=tuple(scan.notes))
+
+
+def embedded_data_gate(strings: Iterable[tuple[str, str]]) -> GateResult:
+    """The same security-only gate over every string of an embedded-data member (ADR-0040 §3).
+
+    ``strings`` are (allowlist path, text) pairs: a map's own keys are among them, because a key
+    is data too. A text that is a URL is judged as a locator, exactly as an image reference is (a
+    hash-named path is how a CDN names a document, not a secret); every other text by the secret
+    shapes of §6.1. A secret refuses the capture. A business contact is only noted. A finding
+    quotes the allowlist path, which is the reviewed policy's own words, never the text.
+    """
+    blocking: dict[str, None] = {}
+    notes: dict[str, None] = {}
+    for path, text in strings:
+        where = f"embedded:{path}"
+        if text.startswith("https://"):
+            secret = locator_holds_secret(text)
+        else:
+            secret = _holds_secret(text, _SECRET_VALUE)
+        if secret:
+            blocking.setdefault(f"SECRET_VALUE@{where}")
+        elif _CONTACT.search(text):
+            notes.setdefault(f"CONTACT@{where}")
+    return GateResult(blocking=tuple(blocking), notes=tuple(notes))
 
 
 def locator_holds_secret(url: str) -> bool:

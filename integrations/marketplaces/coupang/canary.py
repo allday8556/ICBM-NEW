@@ -14,7 +14,6 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from ipaddress import IPv4Address, IPv6Address, ip_address
 from typing import Final
 
 import httpx
@@ -100,12 +99,11 @@ class ClockPreflight:
 
 @dataclass(frozen=True)
 class ReadOnlyCanaryApproval:
-    """One bounded approval, bound to the credential identity and declared source IP."""
+    """One bounded approval, bound to the credential identity and fixed read."""
 
     scope_id: str
     vendor_id: str
     credential_generation: int
-    source_ip: IPv4Address | IPv6Address
     approved_at: datetime
     expires_at: datetime
     market: Market = Market.KR
@@ -117,7 +115,6 @@ class ReadOnlyCanaryApproval:
         scope_id: str,
         vendor_id: str,
         credential_generation: int,
-        source_ip: str,
         approved_at: datetime,
         expires_at: datetime,
         market: Market = Market.KR,
@@ -136,7 +133,6 @@ class ReadOnlyCanaryApproval:
             scope_id.strip(),
             vendor_id.strip(),
             _positive_generation(credential_generation),
-            ip_address(source_ip),
             start,
             end,
             market,
@@ -205,25 +201,18 @@ class CoupangReadCanary:
 
     def _preflight(self, now: datetime) -> None:
         credentials = self._context.credentials
-        declaration = self._context.ip_allowlist
         approval = self._approval
         if self._context.market is not Market.KR or approval.market is not Market.KR:
             raise CoupangCanaryError(ErrorClass.POLICY_BLOCKED, "COUPANG_CANARY_KR_ONLY")
         if _VENDOR_ID.fullmatch(credentials.vendor_id) is None:
             raise CoupangCanaryError(ErrorClass.POLICY_BLOCKED, "COUPANG_VENDOR_ID_UNSAFE")
-        if declaration is None:
-            raise CoupangCanaryError(ErrorClass.POLICY_BLOCKED, "COUPANG_IP_EVIDENCE_MISSING")
         if not (
             approval.vendor_id == credentials.vendor_id
             and approval.credential_generation == credentials.credential_generation
-            and approval.credential_generation == declaration.credential_generation
-            and approval.source_ip == declaration.source_ip
         ):
             raise CoupangCanaryError(ErrorClass.POLICY_BLOCKED, "COUPANG_APPROVAL_BINDING_MISMATCH")
         if not (approval.approved_at <= now <= approval.expires_at):
             raise CoupangCanaryError(ErrorClass.POLICY_BLOCKED, "COUPANG_APPROVAL_NOT_CURRENT")
-        if declaration.recorded_at > now:
-            raise CoupangCanaryError(ErrorClass.POLICY_BLOCKED, "COUPANG_IP_EVIDENCE_FROM_FUTURE")
         clock_age = now - self._clock_preflight.checked_at
         if clock_age < timedelta(0) or clock_age > CLOCK_PREFLIGHT_TTL:
             raise CoupangCanaryError(ErrorClass.POLICY_BLOCKED, "COUPANG_CLOCK_PREFLIGHT_STALE")

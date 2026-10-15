@@ -11,7 +11,6 @@ from app.platform.core.errors import ErrorClass
 from integrations.marketplaces.coupang.auth import (
     AuthContext,
     Credentials,
-    IpAllowlistDeclaration,
     Market,
 )
 from integrations.marketplaces.coupang.canary import (
@@ -28,7 +27,6 @@ from integrations.marketplaces.coupang.canary import (
 ACCESS_KEY = "fixture-access-key"
 SECRET_KEY = "fixture-secret-key"
 VENDOR_ID = "A00000000"
-SOURCE_IP = "203.0.113.10"
 AT = datetime(2026, 10, 13, 2, 0, tzinfo=UTC)
 PATH = (
     "/v2/providers/seller_api/apis/api/v1/marketplace/vendors/"
@@ -48,13 +46,8 @@ def _credentials(generation: int = 3) -> Credentials:
     return Credentials(ACCESS_KEY, SECRET_KEY, VENDOR_ID, generation)
 
 
-def _context(*, ip: str | None = SOURCE_IP) -> AuthContext:
-    declaration = (
-        None
-        if ip is None
-        else IpAllowlistDeclaration.create(ip, credential_generation=3, recorded_at=AT)
-    )
-    return AuthContext(_credentials(), Market.KR, declaration)
+def _context() -> AuthContext:
+    return AuthContext(_credentials(), Market.KR)
 
 
 def _approval(**changes: object) -> ReadOnlyCanaryApproval:
@@ -62,7 +55,6 @@ def _approval(**changes: object) -> ReadOnlyCanaryApproval:
         "scope_id": "owner-approval-2026-10-13",
         "vendor_id": VENDOR_ID,
         "credential_generation": 3,
-        "source_ip": SOURCE_IP,
         "approved_at": AT - timedelta(minutes=1),
         "expires_at": AT + timedelta(hours=1),
     }
@@ -142,12 +134,6 @@ def test_exact_get_is_signed_sent_once_and_retains_only_the_boolean() -> None:
     ("context", "approval", "preflight", "code"),
     [
         (
-            _context(ip=None),
-            _approval(),
-            ClockPreflight.create(0, checked_at=AT),
-            "COUPANG_IP_EVIDENCE_MISSING",
-        ),
-        (
             _context(),
             _approval(vendor_id="A11111111"),
             ClockPreflight.create(0, checked_at=AT),
@@ -156,12 +142,6 @@ def test_exact_get_is_signed_sent_once_and_retains_only_the_boolean() -> None:
         (
             _context(),
             _approval(credential_generation=4),
-            ClockPreflight.create(0, checked_at=AT),
-            "COUPANG_APPROVAL_BINDING_MISMATCH",
-        ),
-        (
-            _context(),
-            _approval(source_ip="203.0.113.11"),
             ClockPreflight.create(0, checked_at=AT),
             "COUPANG_APPROVAL_BINDING_MISMATCH",
         ),
@@ -219,11 +199,7 @@ def test_live_transport_never_exists_under_ci_or_pytest() -> None:
 
 def test_vendor_identity_cannot_change_the_fixed_path() -> None:
     credentials = Credentials(ACCESS_KEY, SECRET_KEY, "A000/../seller-products", 3)
-    context = AuthContext(
-        credentials,
-        Market.KR,
-        IpAllowlistDeclaration.create(SOURCE_IP, credential_generation=3, recorded_at=AT),
-    )
+    context = AuthContext(credentials, Market.KR)
     approval = _approval(vendor_id=credentials.vendor_id)
     requests: list[httpx.Request] = []
     canary = _canary(
