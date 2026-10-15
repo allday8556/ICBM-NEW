@@ -252,7 +252,7 @@ def test_one_submit_is_one_post_followed_to_recorded_and_into_the_product_db(
         assert f"run={run_id}" in page.url
         served_container: Container = client.app.state.container  # type: ignore[attr-defined]
         run = served_container.collection.run(run_id)
-        assert page.locator(f"{FOCUS} [data-role='revision-id']").inner_text() == run.revision_id
+        assert page.locator(FOCUS).get_attribute("data-revision") == run.revision_id
         assert run.facts_status is not None
         assert (
             page.locator(f"{FOCUS} [data-facts-status]").get_attribute("data-facts-status")
@@ -312,16 +312,15 @@ def test_no_revision_and_failed_show_the_durable_answer_and_are_never_resubmitte
     with served(config, shop) as client, _page(browser, client, wire) as page:
         _submit(page, NO_REVISION_ID)
         _outcome(page, "NO_REVISION")
-        assert (
-            page.locator(f"{FOCUS} [data-role='run-detail']").inner_text()
-            == "the page declares no product number"
-        )
+        detail = page.locator(f"{FOCUS} [data-role='run-detail']")
+        # The stored reason stays as recorded for support; the seller reads it in Korean.
+        assert detail.get_attribute("data-detail") == "the page declares no product number"
+        assert detail.inner_text() == "상품 번호를 찾지 못해 저장하지 않았습니다."
         _submit(page, FAILED_ID)
         _outcome(page, "FAILED")
-        assert (
-            page.locator(f"{FOCUS} [data-role='run-detail']").inner_text()
-            == "SUPPLIER_SESSION_EXPIRED"
-        )
+        detail = page.locator(f"{FOCUS} [data-role='run-detail']")
+        assert detail.get_attribute("data-detail") == "SUPPLIER_SESSION_EXPIRED"
+        assert detail.inner_text() == "로그인이 만료되었습니다. 다음 확인 때 다시 로그인합니다."
         assert page.locator(f"{FOCUS} [data-role='handoff']").count() == 0
         _no_absent_text(page)
         # The page keeps reading nothing new and submits nothing on its own.
@@ -492,15 +491,18 @@ def test_the_focused_run_shows_its_revision_fields_and_evidence_as_stored(
         assert toggle.get_attribute("aria-expanded") == "true"
         # A CONFIRMED field's whole stored value is there too, never shortened.
         if first["status"] == "CONFIRMED":
-            full = evidence.locator("[data-role='field-value-full']").inner_text()
+            full = evidence.locator("[data-role='field-value-full']").text_content() or ""
             assert json.loads(full) == json.loads(first["value_json"])
         for field in revision["fields"]:
             if field["status"] == "CONFIRMED" and field["key"] != first["key"]:
                 row = facts.locator(f"tr[data-field='{field['key']}']")
                 row.locator("[data-action='toggle-evidence']").click()
-                shown = facts.locator(
-                    f"tr[data-evidence-for='{field['key']}'] [data-role='field-value-full']"
-                ).inner_text()
+                shown = (
+                    facts.locator(
+                        f"tr[data-evidence-for='{field['key']}'] [data-role='field-value-full']"
+                    ).text_content()
+                    or ""
+                )
                 assert json.loads(shown) == json.loads(field["value_json"]), field["key"]
                 row.locator("[data-action='toggle-evidence']").click()
                 assert facts.locator(f"tr[data-evidence-for='{field['key']}']").count() == 0
@@ -562,7 +564,8 @@ def test_the_focused_run_shows_its_revision_fields_and_evidence_as_stored(
             )
         assert "데이터 없음" in preview.locator("[data-role='ai-note']").inner_text()
         row = page.locator(f"[data-role='recent-runs'] tr[data-run='{run_id}']")
-        assert row.locator("[data-no-data]").count() == 3
+        # v29's 후보수 · 저장수 · 가격확인 have no source on a run, so the list leaves them out.
+        assert row.locator("[data-no-data]").count() == 0
         assert "%" not in preview.inner_text(), "no confidence number is shown"
         # The v29 controls with no contract yet only explain themselves: they send nothing.
         for role in ("revalidate", "ai-correct", "collect-option"):
@@ -831,22 +834,25 @@ def test_each_image_reason_is_the_recorded_code_worded_and_nothing_more(
         rows = facts.locator("[data-role='image-refs'] tbody tr")
         shown = {
             rows.nth(i).locator("td").nth(1).inner_text(): (
-                rows.nth(i).locator("td").nth(4).inner_text(),
+                rows.nth(i).locator("td").nth(3).inner_text(),
                 rows.nth(i).locator("[data-role='image-reason']").inner_text()
                 if rows.nth(i).locator("[data-role='image-reason']").count()
                 else "—",
             )
             for i in range(rows.count())
         }
-        assert shown["8"] == ("제외", "원천이 http 주소로 적은 이미지 (보안 연결 아님)")
+        assert shown["8"] == ("제외", "공급처가 http 주소로 올린 이미지 (보안 연결 아님)")
         assert shown["9"] == ("확인 필요", "파일 크기 제한 초과")
-        assert shown["10"] == ("확인 필요", "가져오기 전 거절: 허용되지 않은 이미지 호스트")
-        assert shown["11"] == ("확인 필요", "SOMETHING_NEW")
-        # The codes stay beside the words, exactly as recorded.
+        assert shown["10"] == ("확인 필요", "가져올 수 없는 주소: 허용되지 않은 사이트의 이미지")
+        assert shown["11"] == ("확인 필요", "알 수 없는 사유")
+        # The codes stay with the words, exactly as recorded, for support.
         codes = facts.locator(
-            "[data-role='image-refs'] tr:has-text('원천이 http') [data-role='image-reason-codes']"
+            "[data-role='image-refs'] tr:has-text('공급처가 http') [data-role='image-reason']"
         )
-        assert codes.inner_text() == "SOURCE_AUTHORED_NON_HTTPS · NON_HTTPS · FETCH_FAILED"
+        assert (
+            codes.get_attribute("data-codes")
+            == "SOURCE_AUTHORED_NON_HTTPS · NON_HTTPS · FETCH_FAILED"
+        )
         image_toggle.click()
         assert image_table.count() == 0
         assert image_toggle.get_attribute("aria-expanded") == "false"
@@ -907,7 +913,8 @@ def test_the_run_shows_the_bound_items_common_image_notes_and_nothing_before_it(
             assert preview["source_revision_id"] == run.revision_id
             assert preview["auto_selection"]["blocked"] == "ROLE_RULE_UNKNOWN"
             summary = page.locator("[data-role='common-image-summary']")
-            assert "ROLE_RULE_UNKNOWN" in summary.inner_text()
+            assert summary.get_attribute("data-selection-blocked") == "ROLE_RULE_UNKNOWN"
+            assert "이미지 규칙이 없어" in summary.inner_text()
 
             # The notes an Item would carry are put into the owner's preview as the owner records
             # them, to show how each is worded; the page decides none of them.

@@ -469,6 +469,10 @@ class ProductCollectionService:
             limit=size, outcome=outcome, facts_status=facts_status, before=after
         )
 
+    def last_collected(self) -> dict[str, datetime]:
+        """Each supplier's newest collection request time (the supplier card's 마지막 수집)."""
+        return self._runs.last_requested_by_supplier()
+
     def run_count(
         self,
         *,

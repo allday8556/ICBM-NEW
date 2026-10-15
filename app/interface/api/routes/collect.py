@@ -9,6 +9,8 @@ Gate 1 G1-E adds two reads for the COLLECT screen: the newest runs, so a reload 
 durable runs, and where a RECORDED run's revision stands in the Product DB now.
 """
 
+from datetime import datetime
+
 from fastapi import APIRouter, status
 
 from app.interface.api.deps import ContainerDep
@@ -61,6 +63,12 @@ def submit(request: CollectionRequest, container: ContainerDep) -> SubmittedColl
         job_id=submitted.job_id,
         correlation_id=submitted.correlation_id,
     )
+
+
+@router.get("/api/v1/collect/last-collected")
+def last_collected(container: ContainerDep) -> dict[str, datetime]:
+    """Each supplier's newest collection request time, by supplier key. Read-only."""
+    return container.collection.last_collected()
 
 
 @router.get("/api/v1/collect/collections")
