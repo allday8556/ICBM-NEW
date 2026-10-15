@@ -101,6 +101,31 @@ window.context=(function(b,d){…})(window.contextPath,{ … JSON … });
 - **Evidence.** A fact from the member carries evidence kind `EMBEDDED_DATA` with its JSON path as the locator. This is one new `EvidenceKind`, authorized here.
   - *(Amendment, slice C2: the evidence kind is the existing `EMBEDDED_JSON` (ADR-0010 §8: data embedded in the page, kept as a parsed tree and never as script text), with the locator `embedded:<JSON path>`. That kind already means exactly this. The evidence table constrains its kinds in the database, so a new kind would need a migration and would gain nothing. No `EvidenceKind` is added.)*
 
+### 3.2 1688's description images (amendment, owner decision 2026-10-15, Issue #219 `6185408143`)
+
+The page names its description as a separate public document (`description.fields.detailUrl`, on `itemcdn.tmall.com`), shaped `var offer_details={"content":"<html…>"};`. Its images are the product's `DETAIL` images.
+
+**What the extension does**, within the same user-started capture (OC-01):
+- It reads `detailUrl` from the already parsed embedded argument (§3).
+- It requires the URL to be `https` on a host the policy declares (`description_hosts`, reviewed: `itemcdn.tmall.com`), with no credentials or secret query.
+- It fetches that one document once, with no cookies (`credentials: "omit"`), under the policy's byte bound.
+- It cuts the literal between the declared prefix (`var offer_details=`) and the terminator (`;`), and parses it with `JSON.parse` under the depth bound. It never runs it.
+- From the `content` HTML it collects only `img` references on the declared image hosts (`cbu01.alicdn.com`), in document order, de-duplicated and capped by the policy's `max_image_refs`.
+- It sends only that list, as the capture member `description_images`. It never sends the document, its text or its HTML.
+- **Any mismatch** sends no member and a reason. A mismatch is any of:
+  - a host or scheme off the declared list;
+  - a status other than 200;
+  - an over-bound size or depth;
+  - a bad prefix or terminator;
+  - invalid JSON;
+  - no `content`.
+
+**What the server does:**
+- It re-checks every reference against the declared image hosts and the secret rules (ADR-0019 §6.1). It refuses the member if any reference falls outside them.
+- It never fetches the description document itself: no server read of `itemcdn.tmall.com` exists.
+- The images are fetched by the existing policed image fetch (ADR-0019 §7) as `DETAIL` candidates.
+- `detail_description` stays `REVIEW_REQUIRED`. The description's text is not captured, only its images.
+
 ## 4. 1688 fields
 
 The allowlisted paths are under `result.data`.
@@ -144,6 +169,7 @@ The allowlisted paths are under `result.data`.
 - **OC-06** Only allowlisted paths are read, and only canonical facts and evidence are stored.
 - **OC-07** A price the page does not disclose is `REVIEW_REQUIRED`. The purchase price is what one unit costs at the regular price, in the source currency. Super Delivery adds the consumption tax its page's mark decides, and no discount sets the cost.
 - **OC-08** A company's terms are kept as its words. They are not a gate.
+- **OC-09** 1688's description document is read only by the extension inside a user-started capture, from a declared host, without cookies. Only image references on declared image hosts leave the browser, and the server never reads the document (§3.2).
 
 ## Slices
 
@@ -152,6 +178,7 @@ The allowlisted paths are under `result.data`.
 | C0 | this ADR |
 | C1 | `superdelivery` collector (DOM), after ADR-0038 O1 |
 | C2 | `ali1688` collector, with the embedded-data member: extension, policy, gate and extractor |
+| C2b | 1688 description images by the extension (§3.2) |
 | C3 | the two acceptances, then `ACTIVE` |
 
 Migrations are numbered 0063 or later (0062 is Track A's).
@@ -163,3 +190,4 @@ Migrations are numbered 0063 or later (0062 is Track A's).
   - §3 accepts bare integer object keys when the policy declares them. It records the member's facts under the existing `EMBEDDED_JSON` evidence kind: no new kind and no migration.
   - 1688's description is a separate document the page names. Slice C2 does not capture it: `detail_description` is `REVIEW_REQUIRED` (`DESCRIPTION_NOT_CAPTURED`) and there are no description images. Reading that document, and with it 1688's `DETAIL` images, awaits a separate owner-approved amendment.
   - Quantity tiers are not written as totals (§4 note on `quantity_tiers`).
+- **2026-10-15, 1688's description images (owner, Issue #219 `6185408143`).** §3.2 and OC-09 add them, read by the extension inside the user's capture and sent as image references only. This supersedes the C2 note above that left them to a later amendment. Slice C2b implements it. The server never reads the description document.
