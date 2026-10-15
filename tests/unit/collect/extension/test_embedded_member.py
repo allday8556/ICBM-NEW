@@ -77,9 +77,12 @@ def test_only_the_1688_policy_declares_embedded_data_and_it_is_digested() -> Non
     assert policy.embedded_data.bare_integer_keys is True
     paths = {entry.path for entry in policy.embedded_data.allowlist}
     assert "result.data.shippingServices.fields.freightInfo.totalCost" in paths
-    # ADR-0040 OC-01: the description document is not the server's to read, so its URL
-    # never leaves the browser either.
-    assert not [path for path in paths if "description" in path]
+    # ADR-0040 §3.2, OC-09: the description's URL is read in the browser from the parsed
+    # argument (the description entry's url_path) and is never projected, so it never leaves
+    # the browser and a member that carries it is refused.
+    assert not any(path.startswith("result.data.description") for path in paths)
+    assert policy.description is not None
+    assert policy.description.url_path == "result.data.description.fields.detailUrl"
     assert "result.data.Root.fields.dataJson.skuModel.skuInfoMap.*.price" in paths
     # Nothing of the member's address, identity or account, and no hash-shaped SKU spec id.
     for path in paths:
@@ -153,7 +156,47 @@ def test_an_embedded_entry_that_is_not_exactly_reviewed_refuses_the_policy(chang
 def test_a_policy_without_the_entry_is_unchanged() -> None:
     document = _document()
     del document["embedded_data"]
-    assert _parse(document).embedded_data is None
+    del document["description"]
+    parsed = _parse(document)
+    assert parsed.embedded_data is None and parsed.description is None
+    # A description entry needs the embedded data it reads its URL from.
+    alone = _document()
+    del alone["embedded_data"]
+    with pytest.raises(CapturePolicyRefused):
+        _parse(alone)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        # OC-09: the URL is never projected, so its path may not be on the allowlist, nor be
+        # a prefix of an entry, nor sit under one.
+        lambda d: d["embedded_data"]["allowlist"].append(
+            {"path": "result.data.description.fields.detailUrl", "type": "string"}
+        ),
+        lambda d: d["description"].update(url_path="result.data.mainPrice.fields.unit"),
+        lambda d: d["description"].update(url_path="result.data.mainPrice"),
+        lambda d: d["description"].update(
+            url_path="result.data.mainPrice.fields.priceModel.currentPrices"
+        ),
+        lambda d: d["description"].update(
+            url_path="result.data.Root.fields.dataJson.skuModel.skuInfoMap.anyKey.price"
+        ),
+        lambda d: d["description"].update(url_path="result.data"),
+        lambda d: d["description"].update(url_path="result.global.detailUrl"),
+        lambda d: d["description"].update(url_path="result.data.description.*.detailUrl"),
+        lambda d: d["description"].update(url_path="result.data.description[].detailUrl"),
+        lambda d: d["description"].update(url_path=7),
+    ],
+)
+def test_a_description_url_path_that_could_be_projected_refuses_the_policy(
+    change: Any,
+) -> None:
+    document = _document()
+    change(document)
+    with pytest.raises(CapturePolicyRefused) as refused:
+        _parse(document)
+    assert refused.value.code == "CAPTURE_POLICY_INVALID"
 
 
 # ---------------------------------------------------------------- the server's re-check
@@ -206,7 +249,27 @@ def test_the_browsers_projection_is_exactly_allowlisted() -> None:
             EMBEDDED_TYPE_MISMATCH,
         ),
         (
-            lambda d: d.update(description={"fields": {"detailUrl": "https://x.test/a"}}),
+            lambda d: d.update(description={"fields": {"label": "详情描述"}}),
+            EMBEDDED_PATH_NOT_ALLOWED,
+        ),
+        # OC-09: the description's URL is a browser-only read; a member that carries it,
+        # plain or with a credential or a secret query, is refused.
+        (
+            lambda d: d.update(
+                description={
+                    "fields": {"detailUrl": "https://itemcdn.tmall.com/1688offer/icoss5072039755"}
+                }
+            ),
+            EMBEDDED_PATH_NOT_ALLOWED,
+        ),
+        (
+            lambda d: d.update(
+                description={
+                    "fields": {
+                        "detailUrl": "https://user:pw@itemcdn.tmall.com/1688offer/x?token=abc"
+                    }
+                }
+            ),
             EMBEDDED_PATH_NOT_ALLOWED,
         ),
     ],

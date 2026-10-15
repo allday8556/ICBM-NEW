@@ -59,7 +59,7 @@ def _reference() -> dict[str, str]:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
-    return {"revision": "ali1688-capture-1", "digest": hashlib.sha256(canonical).hexdigest()}
+    return {"revision": "ali1688-capture-3", "digest": hashlib.sha256(canonical).hexdigest()}
 
 
 def _projection() -> dict[str, Any]:
@@ -115,7 +115,7 @@ def test_a_captured_page_is_recorded_as_a_cny_revision(
         config,
         "SELECT source_product_id, source_currency, extractor_revision"
         " FROM product_facts_revisions",
-    ) == [(NUMBER, "CNY", "ali1688-3")]
+    ) == [(NUMBER, "CNY", "ali1688-4")]
     status, prices = _field(config, "prices")
     assert status == "CONFIRMED" and prices is not None
     assert json.loads(prices) == {
@@ -243,6 +243,50 @@ def test_a_member_outside_the_allowlist_is_refused_and_its_fields_wait_for_revie
     assert "某省某市" not in stored
 
 
+@pytest.mark.parametrize(
+    ("detail_url", "outcome"),
+    [
+        # A plain URL reaches the allowlist re-check: the whole member is refused.
+        ("https://itemcdn.tmall.com/1688offer/icoss5072039755", ("RECORDED", None)),
+        # One with a credential or a secret query is refused with the whole capture.
+        (
+            "https://user:pw@itemcdn.tmall.com/1688offer/icoss1?token=abcdefgh12345678",
+            ("FAILED", "EXTENSION_FINAL_SCAN_REFUSED"),
+        ),
+    ],
+)
+def test_a_member_that_carries_the_description_url_is_refused(
+    client: TestClient,
+    config: AppConfig,
+    gateway: FakeGateway,
+    detail_url: str,
+    outcome: tuple[str, str | None],
+) -> None:
+    # OC-09: the description's URL is a browser-only read; the policy never projects it.
+    projection = _projection()
+    projection["result"]["data"]["description"] = {"fields": {"detailUrl": detail_url}}
+    response = post_capture(client, pair(_container(client)), _capture({"projection": projection}))
+    run = wait_for_outcome(client, response.json()["collection_run_id"])
+    assert run["outcome"] == outcome[0]
+    if outcome[1] is None:
+        assert run["facts_status"] == "REVIEW_REQUIRED"
+        reasons = {
+            normalized
+            for (normalized,) in rows(
+                config, "SELECT normalized FROM product_facts_evidence WHERE locator = 'embedded'"
+            )
+        }
+        assert reasons == {"EMBEDDED_PATH_NOT_ALLOWED"}
+    else:
+        assert run["detail"] == outcome[1]
+        assert rows(config, "SELECT COUNT(*) FROM product_facts_revisions") == [(0,)]
+    assert gateway.document_reads == 0
+    assert not any("itemcdn" in url for url in gateway.image_reads)
+    stored = json.dumps(rows(config, "SELECT * FROM product_facts_evidence"), ensure_ascii=False)
+    for never in ("itemcdn", "detailUrl", "token="):
+        assert never not in stored, never
+
+
 def test_a_browser_refusal_is_recorded_as_its_code(
     client: TestClient, config: AppConfig, gateway: FakeGateway
 ) -> None:
@@ -269,6 +313,124 @@ def test_a_secret_in_the_member_refuses_the_capture(
     assert (run["outcome"], run["detail"]) == ("FAILED", "EXTENSION_FINAL_SCAN_REFUSED")
     assert rows(config, "SELECT COUNT(*) FROM product_facts_revisions") == [(0,)]
     assert gateway.image_reads == []
+
+
+DESCRIBED_NUMBER = "1051005117944"
+
+
+def _described_capture(images: dict[str, Any] | None) -> dict[str, Any]:
+    url = f"https://detail.1688.com/offer/{DESCRIBED_NUMBER}.html"
+    body = envelope(
+        (FIXTURES / f"{DESCRIBED_NUMBER}.html").read_text("utf-8"),
+        supplier_key=SUPPLIER,
+        policy=_reference(),
+        transport=transport(url=url, navigation_name=url),
+    )
+    projection = json.loads((FIXTURES / f"{DESCRIBED_NUMBER}.embedded.json").read_text("utf-8"))
+    body["embedded_data"] = {"projection": projection}
+    if images is not None:
+        body["description_images"] = images
+    return body
+
+
+def _described() -> dict[str, Any]:
+    loaded: dict[str, Any] = json.loads(
+        (FIXTURES / f"{DESCRIBED_NUMBER}.description_images.json").read_text("utf-8")
+    )
+    return loaded
+
+
+def test_the_description_images_become_detail_images_fetched_by_the_server(
+    client: TestClient, config: AppConfig, gateway: FakeGateway
+) -> None:
+    # ADR-0040 §3.2 (OC-09): the extension read the description within the capture and sent its
+    # 13 image references; the server re-checked them and fetched each one by the ordinary policed
+    # image fetch, after the gallery's 9. It read no document: no description, no product page.
+    response = post_capture(client, pair(_container(client)), _described_capture(_described()))
+    run = wait_for_outcome(client, response.json()["collection_run_id"])
+    assert (run["outcome"], run["detail"]) == ("RECORDED", None)
+    described = _described()["images"]
+    assert gateway.document_reads == 0
+    assert gateway.image_reads[-len(described) :] == described
+    assert len(gateway.image_reads) == 9 + 13
+    assert {url.split("/")[2] for url in gateway.image_reads} == {"cbu01.alicdn.com"}
+    assert rows(
+        config,
+        "SELECT role, COUNT(*) FROM product_facts_image_refs GROUP BY role ORDER BY role",
+    ) == [("DETAIL", 8 + 13), ("REPRESENTATIVE", 1)]
+    # The description's text is not captured; its images are recorded as what they were.
+    assert _field(config, "detail_description") == ("REVIEW_REQUIRED", None)
+    assert rows(
+        config,
+        "SELECT observed, normalized FROM product_facts_evidence"
+        " WHERE field_key = 'detail_description' ORDER BY ordinal",
+    ) == [(None, "DESCRIPTION_TEXT_NOT_CAPTURED"), ("13 of 13", "DESCRIPTION_IMAGES")]
+    stored = json.dumps(rows(config, "SELECT * FROM product_facts_evidence"), ensure_ascii=False)
+    assert "offer_details" not in stored
+
+
+@pytest.mark.parametrize(
+    ("images", "reason"),
+    [
+        (
+            {"images": ["https://img.alicdn.com/tfs/icon.png"], "total": 1},
+            "DESCRIPTION_IMAGES_REFUSED DESCRIPTION_IMAGES_NOT_ALLOWED",
+        ),
+        (
+            {"images": ["https://cbu01.alicdn.com/a.jpg?x=1"], "total": 1},
+            "DESCRIPTION_IMAGES_REFUSED DESCRIPTION_IMAGES_NOT_ALLOWED",
+        ),
+        (
+            {"images": ["http://cbu01.alicdn.com/a.jpg"], "total": 1},
+            "DESCRIPTION_IMAGES_REFUSED DESCRIPTION_IMAGES_NOT_ALLOWED",
+        ),
+        (
+            {"images": [f"https://cbu01.alicdn.com/{n}.jpg" for n in range(41)], "total": 41},
+            "DESCRIPTION_IMAGES_REFUSED DESCRIPTION_IMAGES_OVER_BOUND",
+        ),
+        ({"refused": "DESCRIPTION_STATUS"}, "DESCRIPTION_IMAGES_REFUSED DESCRIPTION_STATUS"),
+        (None, "DESCRIPTION_IMAGES_REFUSED DESCRIPTION_IMAGES_ABSENT"),
+    ],
+)
+def test_a_refused_description_member_leaves_no_detail_image_and_a_recorded_reason(
+    client: TestClient,
+    config: AppConfig,
+    gateway: FakeGateway,
+    images: dict[str, Any] | None,
+    reason: str,
+) -> None:
+    response = post_capture(client, pair(_container(client)), _described_capture(images))
+    run = wait_for_outcome(client, response.json()["collection_run_id"])
+    assert run["outcome"] == "RECORDED"
+    # Only the gallery's 9 images were fetched; nothing off the declared host ever was.
+    assert len(gateway.image_reads) == 9
+    assert rows(
+        config,
+        "SELECT normalized FROM product_facts_evidence"
+        " WHERE field_key = 'detail_description' AND locator = 'description_images'",
+    ) == [(reason,)]
+
+
+def test_a_secret_in_a_description_image_refuses_the_capture(
+    client: TestClient, config: AppConfig, gateway: FakeGateway
+) -> None:
+    member = {
+        "images": ["https://cbu01.alicdn.com/a.jpg?access_token=abcdef0123456789"],
+        "total": 1,
+    }
+    response = post_capture(client, pair(_container(client)), _described_capture(member))
+    run = wait_for_outcome(client, response.json()["collection_run_id"])
+    assert (run["outcome"], run["detail"]) == ("FAILED", "EXTENSION_FINAL_SCAN_REFUSED")
+    assert gateway.image_reads == []
+
+
+def test_a_description_member_for_a_policy_that_declares_none_refuses_the_capture(
+    client: TestClient, config: AppConfig
+) -> None:
+    km = envelope(description_images={"images": [], "total": 0})
+    response = post_capture(client, pair(_container(client)), km)
+    assert response.json()["error"]["code"] == "CAPTURE_DESCRIPTION_NOT_DECLARED"
+    assert rows(config, "SELECT COUNT(*) FROM collection_runs") == [(0,)]
 
 
 def test_a_member_for_a_policy_that_declares_none_refuses_the_capture(

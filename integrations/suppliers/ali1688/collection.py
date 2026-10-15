@@ -18,7 +18,9 @@ Images are fetched by the server's policed gateway from the image hosts alone (A
 the owner's caps by role (ADR-0037 §1): 5 MB for a representative or additional image, 30 MB for a
 description image, 120 MB per product run. A captured page references at most a few dozen gallery
 images (12 option images and 5 main images on the largest observed). The description is a separate
-document the page names; it is not captured, so 1688 has no description images yet.
+document the page names: the extension reads it within the user's capture and sends only its image
+references on ``cbu01.alicdn.com`` (ADR-0040 §3.2, OC-09; at most 40 of them); they are fetched as
+``DETAIL`` images by the same policed image fetch. The server never reads the document.
 
 This module performs nothing. It holds no client, opens no connection, computes no checksum and
 writes no row; the run, the fetch, the asset store, the revision and the job belong to generic
@@ -32,6 +34,7 @@ from integrations.suppliers.ali1688 import PROFILE, STOREFRONT_HOST
 from integrations.suppliers.ali1688.collect import (
     IMAGE_HOSTS,
     IMAGE_ROLES,
+    description_candidates,
     parse_fields,
     path_number,
     resolve,
@@ -105,4 +108,6 @@ COLLECTION = SupplierCollection(
     identity=_identity,
     fields=_fields,
     url_product_hint=path_number,
+    # ADR-0040 §3.2: the description images the extension read within the capture.
+    captured_candidates=description_candidates,
 )

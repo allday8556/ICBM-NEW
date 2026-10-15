@@ -22,8 +22,9 @@ quantity_tiers         ``rangePrice``: held for review, every tier quoted in its
 shipping               ``freightInfo.totalCost`` as a ``FIXED`` CNY fee (``FREE`` at zero), from
                        the stated ship-from ``location``; never the member's receive address
 brand, origin          the attribute table's 品牌 and 产地
-detail_description     not captured: the description is a separate document the page names,
-                       and no reviewed transport reads it yet (``REVIEW_REQUIRED``)
+detail_description     its text is not captured (the extension sends only the description's
+                       image references, ADR-0040 §3.2): ``REVIEW_REQUIRED``, with what
+                       became of those images in its evidence
 manufacturer, notice   not stated on 1688: ``ABSENT``
 minimum_sale_price,    not stated on 1688: ``ABSENT``
 sales_channels
@@ -105,7 +106,7 @@ FREIGHT_NOT_STATED = "FREIGHT_NOT_STATED"
 # pair. Nothing is multiplied into a total the page never stated.
 TIER_UNIT_PRICE_NOT_TOTAL = "TIER_UNIT_PRICE_NOT_TOTAL"
 # The description is a separate document the page names; nothing captures it yet (ADR-0040 C2).
-DESCRIPTION_NOT_CAPTURED = "DESCRIPTION_NOT_CAPTURED"
+DESCRIPTION_TEXT_NOT_CAPTURED = "DESCRIPTION_TEXT_NOT_CAPTURED"
 
 
 # ---------------------------------------------------------------- small readers
@@ -654,12 +655,36 @@ def _shipping(data: Mapping[str, Any]) -> FieldFact:
     )
 
 
-def _detail_description() -> FieldFact:
-    """The description is a separate document the page names, which this capture does not hold.
+def _detail_description(document: DocumentView) -> FieldFact:
+    """The description's text, which the capture does not hold, and what became of its images.
 
-    The page has a description; ICBM did not capture it. That is never ``ABSENT``: it waits for
-    review, and 1688's detail images wait for an owner-approved amendment of ADR-0040.
+    The page has a description; ICBM captured only its image references (ADR-0040 §3.2). The
+    text is never ``ABSENT``: it waits for review. A second entry records the images: how many
+    were sent out of how many the extension found, or the code that says why there are none.
     """
+    captured = document.captured_images
+    if captured is None:
+        images = Evidence(
+            EvidenceKind.EMBEDDED_JSON,
+            "description_images",
+            FieldStatus.REVIEW_REQUIRED,
+            normalized="DESCRIPTION_IMAGES_NOT_DECLARED",
+        )
+    elif captured.urls is None:
+        images = Evidence(
+            EvidenceKind.EMBEDDED_JSON,
+            "description_images",
+            FieldStatus.REVIEW_REQUIRED,
+            normalized=f"DESCRIPTION_IMAGES_REFUSED {captured.refusal}",
+        )
+    else:
+        images = Evidence(
+            EvidenceKind.EMBEDDED_JSON,
+            "description_images",
+            FieldStatus.CONFIRMED,
+            observed=f"{len(captured.urls)} of {captured.total}",
+            normalized="DESCRIPTION_IMAGES",
+        )
     return FieldFact(
         FieldStatus.REVIEW_REQUIRED,
         None,
@@ -668,8 +693,9 @@ def _detail_description() -> FieldFact:
                 EvidenceKind.DOM_TEXT,
                 "description",
                 FieldStatus.REVIEW_REQUIRED,
-                normalized=DESCRIPTION_NOT_CAPTURED,
+                normalized=DESCRIPTION_TEXT_NOT_CAPTURED,
             ),
+            images,
         ),
     )
 
@@ -687,7 +713,7 @@ def parse_fields(document: DocumentView) -> dict[str, FieldFact]:
         "origin": _attribute(rows, ORIGIN_LABELS),
         "manufacturer": _absent(EvidenceKind.DOM_TEXT, f"div#{ATTRIBUTES} 生产企业"),
         "notice": _absent(EvidenceKind.DOM_TEXT, f"div#{ATTRIBUTES}"),
-        "detail_description": _detail_description(),
+        "detail_description": _detail_description(document),
         # ADR-0040 §4: not stated on 1688.
         "minimum_sale_price": _absent(EvidenceKind.DOM_TEXT, "page"),
         "sales_channels": _absent(EvidenceKind.DOM_TEXT, "page"),
