@@ -144,7 +144,10 @@ from app.stages.connect.sessions import (
 from app.stages.connect.smartstore.keeper import SmartStoreSessionKeeper
 from app.stages.connect.smartstore.service import SmartStoreConnectService
 from app.stages.operate.adoption import CONVENTIONS as ADOPTION_CONVENTIONS
-from app.stages.operate.adoption import AdoptionService
+from app.stages.operate.adoption import AdoptionService, seller_code_of
+from app.stages.operate.catalog.coverage import CatalogCoverage
+from app.stages.operate.catalog.links import ListingLinkService
+from app.stages.operate.catalog.service import StoreCatalogScheduler, StoreCatalogService
 from app.stages.operate.dispatch import DispatchService, dispatch_unit
 from app.stages.operate.fulfillment import FulfillmentService
 from app.stages.operate.listing import ListingSyncScheduler, ListingSyncService
@@ -214,6 +217,7 @@ from integrations.marketplaces.smartstore.addressbook import SmartStoreAddressBo
 from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
 from integrations.marketplaces.smartstore.assets import SmartStoreAssetSender
 from integrations.marketplaces.smartstore.caller import SmartStoreEndpointCaller
+from integrations.marketplaces.smartstore.catalog import SmartStoreCatalogSource
 from integrations.marketplaces.smartstore.category import SmartStoreCategoryCatalogSource
 from integrations.marketplaces.smartstore.deletion import SmartStoreDeleteSender
 from integrations.marketplaces.smartstore.delivery_companies import DELIVERY_COMPANIES
@@ -225,7 +229,7 @@ from integrations.marketplaces.smartstore.execution import (
     SmartStoreReconcileLookup,
 )
 from integrations.marketplaces.smartstore.listing_finder import SmartStoreListingFinder
-from integrations.marketplaces.smartstore.lookup import SmartStoreDuplicateLookup
+from integrations.marketplaces.smartstore.lookup import smartstore_duplicate_source
 from integrations.marketplaces.smartstore.notice_catalog import SmartStoreNoticeCatalog
 from integrations.marketplaces.smartstore.notice_schema import (
     SmartStoreNoticeRules,
@@ -363,6 +367,11 @@ class Container:
     # M6-A (ADR-0023 §3): the read-only listing-state sync and its periodic pass.
     listing_sync: ListingSyncService
     listing_sync_scheduler: ListingSyncScheduler
+    store_catalog: StoreCatalogService
+    store_coverage: CatalogCoverage
+    store_catalog_scheduler: StoreCatalogScheduler
+    # ADR-0042 S2a: store listing ↔ common product links.
+    store_links: ListingLinkService
     # M6-B (ADR-0023 §4): the supplier stock recheck of listed source products.
     stock_recheck: StockRecheckService
     stock_recheck_scheduler: StockRecheckScheduler
@@ -845,7 +854,9 @@ def build_container(
     )
     registry.register(extension_capture.job_definition())
 
-    products = ProductsService(product_store)
+    # ADR-0042 S2a: the 통합DB search also finds a common product by its linked store listing's
+    # name (the ListingLinks owner below, read at search time).
+    products = ProductsService(product_store, listing_search=lambda text: store_links.search(text))
     # M4 PR-D: pricing per Item and explicit context, and derived product readiness. Neither
     # makes a registration candidate: that is M5's preflight.
     pricing = ProductPricingService(
@@ -1097,11 +1108,131 @@ def build_container(
         execution=ai_execution,
     )
     registry.register(image_translation.job_definition())
+
+    def _bound_account(marketplace_key: str) -> str | None:
+        """The one canonical account of the marketplace bound to its committed identity."""
+        for record in accounts.accounts(marketplace_key):
+            if (
+                accounts.binding(marketplace_key, record.marketplace_account_id)
+                is AccountBinding.BOUND
+            ):
+                return record.marketplace_account_id
+        return None
+
+    # ADR-0042 S1a (§5): the store's whole catalog, read only through the adopted search and
+    # origin read with the CONNECT owner's committed bearer; without a proven current
+    # committed session nothing is read.
+    store_catalog = StoreCatalogService(
+        db=db,
+        clock=clock,
+        source=SmartStoreCatalogSource(
+            smartstore_caller or SmartStoreEndpointCaller(), committed_bearer
+        ),
+        account_of=_bound_account,
+        interval_s=config.operate_store_catalog_interval_s,
+    )
+    store_catalog_scheduler = StoreCatalogScheduler(store_catalog)
+    adoption_codes = adoption_conventions()
+
+    def _registered_groups(marketplace_key: str, account: str) -> dict[str, str]:
+        """ADR-0042 §7 REGISTERED_BY_ICBM: origin product → the common product of each ACTIVE,
+        undeleted ICBM registration of the store."""
+        found: dict[str, str] = {}
+        for record in registrations.marketplace_registrations(marketplace_key):
+            if (
+                record.marketplace_account_id != account
+                or record.lifecycle_state is not RegistrationLifecycle.ACTIVE
+                or any(d.deleted for d in registrations.deletions(record.registration_id))
+            ):
+                continue
+            groups = sorted({item.current_group_id for item in record.items})
+            if groups:
+                found[record.marketplace_product_id] = groups[0]
+        return found
+
+    def _adopted_groups(marketplace_key: str) -> dict[str, str]:
+        """ADR-0042 §7 ADOPTED: origin product → its Item's common product, per ACTIVE
+        adoption (ADR-0024), read as a link and never rewritten."""
+        if marketplace_key != "smartstore":
+            return {}
+        found: dict[str, str] = {}
+        with product_store.reading() as unit:
+            for record in adoptions.active():
+                detail = unit.item_detail(record.item_id)
+                if detail is not None:
+                    found[record.marketplace_product_id] = detail.product_group_id
+        return found
+
+    def _overridden(marketplace_key: str, account: str, group: str) -> bool:
+        """Whether an active DuplicateOverride lets the product list twice in the store."""
+        with registrations.reading() as unit:
+            return bool(unit.active_overrides(marketplace_key, account, group))
+
+    # ADR-0042 S2a (§7): which common product each listing of the store is. After each COMPLETE
+    # sync every unlinked listing is linked — strong keys first (with a notice and undo), then a
+    # new 「도매처 미연결」 common product for the rest. Read only towards every marketplace.
+    store_links = ListingLinkService(
+        db=db,
+        clock=clock,
+        audit=audit,
+        catalog=store_catalog,
+        products=product_store,
+        registered=_registered_groups,
+        adopted=_adopted_groups,
+        overridden=_overridden,
+        conventions=adoption_codes,
+    )
+    store_catalog.add_listener(store_links.after_sync)
+
+    def _convention_codes(item_ids: Sequence[str]) -> set[str]:
+        """ADR-0024 §2: the owner-declared seller code of each Item's source, where one exists."""
+        found: set[str] = set()
+        for item_id in item_ids:
+            identity = _item_source(item_id)
+            code = None if identity is None else seller_code_of(*identity, adoption_codes)
+            if code is not None:
+                found.add(code)
+        return found
+
+    # ADR-0042 S3b (§6): REGISTER's duplicate evidence is the bound store's COMPLETE catalog
+    # snapshot, fresh under the target policy's catalog_max_age; a stale or missing one is no
+    # evidence and starts the automatic pre-registration sync (a routine read). The first CREATE
+    # copy adds the positive-only seller-code spot check through the adopted search.
+    # ADR-0042 §5.2 tightening: the seller's per-status coverage confirmation of the store.
+    store_coverage = CatalogCoverage(catalog=store_catalog, audit=audit)
+
+    def _member_gtins(group_ids: Sequence[str]) -> set[str]:
+        """ADR-0042 §6: the CONFIRMED GTIN facts of the members of these common products."""
+        wanted = set(group_ids)
+        if not wanted:
+            return set()
+        with product_store.reading() as unit:
+            names = unit.member_names()
+        return {
+            member.gtin
+            for group in wanted
+            for member in names.get(group, ())
+            if member.gtin is not None
+        }
+
+    duplicate_source = smartstore_duplicate_source(
+        catalog=store_catalog,
+        refresh=store_catalog_scheduler.refresh_for_registration,
+        convention_codes=_convention_codes,
+        mutation_started_at=registrations.last_mutation_started,
+        caller=smartstore_caller or SmartStoreEndpointCaller(),
+        bearer=committed_bearer,
+        # ADR-0042 S2a (§6): a store listing linked to the unit's product is a duplicate.
+        linked=store_links.linked_groups,
+        coverage=store_coverage,
+        member_gtins=_member_gtins,
+        different=store_links.different_pairs,
+    )
     registration_preparations = RegistrationPreparationService(
         registrations=registrations,
         preflight=registration_preflight,
         builder=registration_builder,
-        duplicate_lookup=SmartStoreDuplicateLookup(),
+        duplicate_lookup=duplicate_source,
         prepared_assets=PreparedUploadAssets(live_store),
         # ADR-0026 AIF-4: the current enrichment results an apply reads.
         enrichment=enrichment,
@@ -1156,16 +1287,6 @@ def build_container(
         store=live_store, mode=execution_mode, proofs=stage_proofs, clock=clock
     )
 
-    def _bound_account(marketplace_key: str) -> str | None:
-        """The one canonical account of the marketplace bound to its committed identity."""
-        for record in accounts.accounts(marketplace_key):
-            if (
-                accounts.binding(marketplace_key, record.marketplace_account_id)
-                is AccountBinding.BOUND
-            ):
-                return record.marketplace_account_id
-        return None
-
     def _dispatch_unit(product_order_id: str) -> DispatchUnit:
         with db.read() as session:
             return dispatch_unit(session, product_order_id, account_of=_bound_account)
@@ -1205,6 +1326,8 @@ def build_container(
         projection=smartstore_product.project,
         clock=clock,
         authority=safety_stack,
+        # ADR-0042 §6: the send-time freshness check reads the same duplicate owner.
+        duplicate_check=registration_preparations.duplicate_check,
     )
     bulk_registration = BulkRegistrationService(db, jobs, clock)
     registry.register(
@@ -1460,6 +1583,10 @@ def build_container(
         fulfillment=fulfillment,
         dispatches=dispatches,
         listing_sync_scheduler=ListingSyncScheduler(listing_sync),
+        store_catalog=store_catalog,
+        store_coverage=store_coverage,
+        store_catalog_scheduler=store_catalog_scheduler,
+        store_links=store_links,
         auto_images=auto_images,
         common_images=common_images,
         config=config,

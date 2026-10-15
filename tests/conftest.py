@@ -72,6 +72,7 @@ def make_config(data_dir: Path, **overrides: object) -> AppConfig:
         # No background provider pass in tests: each test drives CONNECT and sync itself.
         "smartstore_auto_renew": False,
         "operate_listing_sync_interval_s": 0.0,
+        "operate_store_catalog_interval_s": 0.0,
         "operate_stock_recheck_interval_s": 0.0,
         "operate_order_sync_interval_s": 0.0,
         "fx_refresh_interval_s": 0.0,

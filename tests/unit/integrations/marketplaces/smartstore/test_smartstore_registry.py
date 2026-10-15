@@ -297,9 +297,39 @@ def test_the_adopted_read_backs_carry_exactly_the_packet_contract(
         "url",
     }
     published = {"statusType", "channelProductDisplayStatusType"}
+    # ADR-0042 S1a: the origin read also keeps the store-catalog leaves whose paths the evidence
+    # records (PRODUCT_READ.md § store-catalog field paths); nothing without a recorded path.
+    catalog = {
+        "sellerBarcode",
+        "sellerCustomCode1",
+        "sellerCustomCode2",
+        "leafCategoryId",
+        "optionGroupName1",
+        "optionGroupName2",
+        "optionGroupName3",
+        "optionGroupName4",
+        "id",
+        "optionName1",
+        "optionName2",
+        "optionName3",
+        "optionName4",
+        "price",
+        "usable",
+        "deliveryType",
+        "deliveryAttributeType",
+        "deliveryFeeType",
+        "baseFee",
+        "freeConditionalAmount",
+        "deliveryFeePayType",
+        "afterServiceTelephoneNumber",
+        "afterServiceGuideContent",
+    }
     assert contract.retained_response_fields == frozenset(
-        packet | published if endpoint is ORIGIN_READ else packet
+        packet | published | catalog if endpoint is ORIGIN_READ else packet
     )
+    # Never a discount, model, brand, manufacturer, time or body leaf: none has a recorded path.
+    for unrecorded in ("customerBenefit", "modelName", "detailContent", "modifiedDate", "regDate"):
+        assert unrecorded not in contract.retained_response_fields
 
 
 @pytest.mark.parametrize(
@@ -404,7 +434,7 @@ def test_em14_8_a_malformed_account_response_fails_closed(status: int, body: obj
 
 def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
     # §5.3: a permission-relevant change without a revision bump fails here, in CI.
-    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "m65-dispatch-r1"
+    assert SMARTSTORE_ENDPOINT_MAPPING_REVISION == "s1a-store-catalog-r1"
     # Superseded revisions stay resolvable, so stored evidence still names a known mapping.
     assert set(MAPPING_FINGERPRINTS) == {
         "m2-connect-r1",
@@ -422,6 +452,7 @@ def test_the_mapping_revision_is_bound_to_the_registry_fingerprint() -> None:
         "m65-delivery-r1",
         "ai-tags-r1",
         "m65-dispatch-r1",
+        "s1a-store-catalog-r1",
     }
     assert MAPPING_FINGERPRINTS[SMARTSTORE_ENDPOINT_MAPPING_REVISION] == mapping_fingerprint()
     # The E1-E3 reconciliation moved no permission-relevant registry content, so m5-create-r2

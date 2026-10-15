@@ -28,6 +28,8 @@ from app.stages.operate import fulfillment_models as _operate_fulfillment_models
 from app.stages.operate import listing_models as _operate_listing_models  # noqa: F401
 from app.stages.operate import order_models as _operate_order_models  # noqa: F401
 from app.stages.operate import stock_models as _operate_stock_models  # noqa: F401
+from app.stages.operate.catalog import link_models as _operate_link_models  # noqa: F401
+from app.stages.operate.catalog import models as _operate_catalog_models  # noqa: F401
 from app.stages.products import (
     atomic_sku_economics_models as _atomic_sku_economics_models,  # noqa: F401
 )

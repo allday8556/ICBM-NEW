@@ -26,6 +26,11 @@ cannot complete within the bounded page budget, or whose pages disagree, is neve
 And no count is ever absence: zero exact candidates leaves an ``UNKNOWN`` CREATE ``UNKNOWN``, more
 than one is ``REVIEW_REQUIRED``, and exactly one is only an identity-recovery candidate until the
 adopted origin read-back proves it carries the same code (``execution.py``, REGISTER §28.2).
+
+**The store-catalog enumeration** (ADR-0042 S1a; ``ENDPOINT_MATRIX.md`` §4.1.2 amendment). The
+same endpoint with a paging-only body lists every product of the store. Its pages are read by the
+same :func:`read_page` and checked by the same :func:`check_enumeration`; only the StoreCatalog
+owner sends it, and a complete enumeration is never remote absence.
 """
 
 from collections.abc import Mapping, Sequence
@@ -77,6 +82,25 @@ def request_body(seller_management_code: str, page: int, size: int) -> dict[str,
         "page": page,
         "size": size,
     }
+
+
+# ---------------------------------------------------------------- the store-catalog enumeration
+
+# ADR-0042 S1a (E1; ``NAVER-P1-SEARCH-ALL-874``, ``-1544``): a request that sets only the paging
+# fields lists every product registered in the store. No status filter and no sort parameter is
+# sent: neither is documented (E2 is NOT_CAPTURED), so the request carries nothing else.
+CATALOG_CONTRACT_VERSION: Final = "smartstore-catalog-enumeration/v1"
+CATALOG_PAGE_SIZE: Final = MAX_PAGE_SIZE
+# E6: more than 100,000 found products is an error whose code is not documented. A readable page
+# that reports more is a catalog this contract cannot enumerate: UNAVAILABLE, never partial.
+CATALOG_MAX_ELEMENTS: Final = 100_000
+# ICBM policy: the page budget that covers exactly that many products at the page size.
+CATALOG_MAX_PAGES: Final = -(-CATALOG_MAX_ELEMENTS // CATALOG_PAGE_SIZE)
+
+
+def catalog_request_body(page: int, size: int) -> dict[str, Any]:
+    """The paging-only catalog body (E1): ``page`` and ``size``, and nothing else."""
+    return {"page": page, "size": size}
 
 
 def _integer(value: object, path: str, low: int, high: int) -> int:
@@ -273,6 +297,10 @@ def check_enumeration(pages: Sequence[SearchPage]) -> None:
 
 
 __all__ = [
+    "CATALOG_CONTRACT_VERSION",
+    "CATALOG_MAX_ELEMENTS",
+    "CATALOG_MAX_PAGES",
+    "CATALOG_PAGE_SIZE",
     "CHANNEL_SERVICE_TYPES",
     "FIRST_PAGE",
     "MAX_PAGES_PER_CHECK",
@@ -285,6 +313,7 @@ __all__ = [
     "SearchContractError",
     "SearchItem",
     "SearchPage",
+    "catalog_request_body",
     "check_enumeration",
     "exact_candidates",
     "read_page",

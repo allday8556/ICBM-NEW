@@ -585,6 +585,17 @@ def test_0032_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "image_edit_current",
         # ADR-0038 §4, §8 (0066): each overseas source product's landed-cost inputs.
         "overseas_cost_override_revisions",
+        # ADR-0042 S1a (0067): the StoreCatalog owner.
+        "store_catalog_sync_runs",
+        "store_catalog_listings",
+        "store_catalog_field_sets",
+        "store_catalog_memberships",
+        "store_catalog_observations",
+        "store_catalog_listing_endings",
+        # ADR-0042 S2a (0068): the ListingLinks owner.
+        "store_listing_links",
+        "store_listing_decisions",
+        "store_link_notices",
     }
     command.upgrade(alembic_config(url), "head")
     assert tables() == before

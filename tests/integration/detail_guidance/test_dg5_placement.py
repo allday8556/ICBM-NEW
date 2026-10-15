@@ -232,9 +232,15 @@ def _unit(container: Container, config: AppConfig) -> Unit:
                 category_mapping_revision=stamped["category_mapping_revision"],
                 detail_composition_revision=composition,
                 after_service_telephone="02-000-0000",
-                duplicate_proof_required=False,
             ),
         )
+    )
+    # Owner ruling #219 6190407624: SmartStore duplicate checking stays on; the store answers
+    # "no match" here (synthetic, no provider).
+    from tests.support.register_support import FakeDuplicateLookup
+
+    container.registration_preparations._duplicate_lookup = FakeDuplicateLookup(
+        marketplace_key=SMARTSTORE
     )
     served._metadata = StaticRegistrationMetadata((metadata(),), marketplace_key=SMARTSTORE)
     served._capability = FakeCapability()
@@ -497,13 +503,13 @@ def test_a_top_and_a_bottom_notice_reach_the_detail_content_end_to_end(
     assert refused.value.code == "WIRE_GUIDANCE_PLAN_MISMATCH"
 
     # The first CREATE copy reproduces the frozen inputs from the owners, guidance included.
-    copy_ = container.registration_preparations.execution_copy(snapshot_id)
+    copy_ = container.registration_preparations.execution_copy(snapshot_id, spot_check=False)
     assert {a.sha256 for a in copy_.final.prepared_assets} >= {top, bottom}
 
     # After the freeze, the period ends: the frozen Snapshot is stale and is never edited (DG-05).
     clock.advance(2 * 60 * 60)
     with pytest.raises(RegistrationConflictError) as stale:
-        container.registration_preparations.execution_copy(snapshot_id)
+        container.registration_preparations.execution_copy(snapshot_id, spot_check=False)
     assert stale.value.code == "REGISTER_FIRST_CREATE_INPUTS_NOT_READY"
     assert PREPARED_ASSET_NOT_SELECTED in stale.value.details["reasons"]
     later = container.registration_preparations.stage_candidate(unit.preparation_id)

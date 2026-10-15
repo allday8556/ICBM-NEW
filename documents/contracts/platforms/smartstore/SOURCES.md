@@ -430,6 +430,27 @@ such a member and never sends the string.
 | --- | --- | --- | --- | --- |
 | `SMARTSTORE-R0-TAG-READS` | Issue #219 comment 6079478595 (the two adopted tag reads run through ICBM's own caller on the operating account for one synthetic test product, structure only, no value recorded) | both reads answer HTTP 200 and pass `ai-tag-recommend-r1` and `ai-tag-restricted-r1`; the 상품 group is granted to the application (no `GW.AUTHN`); the recommendation is an array of `{code: integer, text}`; the restricted check answers each asked tag once with a boolean | `ENDPOINT_MATRIX.md` §4.3; ADR-0028 §1 and the §4 keyword note | a change of either answer's shape, or a group change |
 
+### 5.11 Store-catalog evidence (ADR-0042 S1a, E1–E6; 2026-10-15)
+
+No new `P0` source. The S1a capture tried the official reference pages `상품 목록 조회`
+(https://apicenter.commerce.naver.com/docs/commerce-api/current/search-product) and `(v2) 원상품 조회`
+(https://apicenter.commerce.naver.com/docs/commerce-api/current/read-origin-product-product) on
+2026-10-15. Both the web fetcher and the in-app browser refused the host ("not allowed due to safety
+restrictions"), and no other route was used. What S1a records therefore rests on:
+
+- the `P1` answers `NAVER-P1-SEARCH-ALL-874`, `NAVER-P1-SEARCH-ALL-1544`,
+  `NAVER-P1-SEARCH-MODIFIED-1546` and `NAVER-P1-SEARCH-FIELDS-1635` (§6), for E1, E3, E5 and E6;
+- the already recorded `P0` packets `NAVER-P0-PACKET-289`, `NAVER-P0-FIELDS-CREATE-289`,
+  `NAVER-P0-REQUIRED-CREATE-289`, `NAVER-P0-REGISTRATION-CREATE-289` (§5.1, §5.2) and
+  `NAVER-P0-READ-STATUS-290` (§5.4), for the E4 paths S1a retains.
+
+`NOT_CAPTURED` and fail-closed until a reading of the reference records them: the per-status
+coverage of the paging-only enumeration (E1), a status filter and a stable sort (E2), the search
+items' field names (E3), every `customerBenefit` member, `modelName`, brand, manufacturer and the
+listing's `wholeCategoryName` (E4), the position and format of `modifiedDate` and any registration
+time (E5), and the code of the over-100,000 error (E6). The per-task table is
+`documents/evidence/marketplace-apis/PRODUCT_SEARCH.md` and `PRODUCT_READ.md` § SmartStore.
+
 ## 6. NAVER official technical-support sources (`P1` / `SUPPORT_DISCUSSION`)
 
 These sources are point-in-time official support evidence. They may later be edited, hidden, deleted, or superseded.
@@ -456,6 +477,10 @@ These sources are point-in-time official support evidence. They may later be edi
 | `NAVER-P1-TAGS-RESTRICTED-3711` | https://github.com/commerce-api-naver/commerce-api/discussions/3711 | (2026-08-12, NAVER answer) `restricted: true` means unusable in `sellerTags.text`, so a create or update fails; it concerns registration only, not search exposure. `false` means usable, but category, brand or seller-name rules may still refuse the tag and the create or update result is final. Tags are refreshed periodically, so re-check before each create or update | `SUPPORTING` | ADR-0028 §1, §4, AIT-03, AIT-04; `ENDPOINT_MATRIX.md` §4.3 |
 | `NAVER-P1-TAGS-CATEGORY-END-676` | https://github.com/commerce-api-naver/commerce-api/discussions/676 | (2023-05-04, NAVER notice) `카테고리별 추천 태그 목록 조회` (`GET /v2/tags/category-recommend-tags`) was discontinued on 2023-05-17 | `SUPPORTING` | `ENDPOINT_MATRIX.md` §4.3 |
 | `NAVER-P1-TAGS-CATEGORY-1610` | https://github.com/commerce-api-naver/commerce-api/discussions/1610 | (2024-04-11, NAVER answer) a tag returned by the recommended-tag search may still be unusable depending on the category | `SUPPORTING` | ADR-0028 §1 |
+| `NAVER-P1-SEARCH-ALL-874` | https://github.com/commerce-api-naver/api-agency/discussions/874 | (2026-04-07, NAVER maintainer answer, read 2026-10-15) setting only the paging fields `page` and `size` in the `상품 목록 조회` request lists every product registered in the SmartStore, and `totalElements` is the number of products found; more than 100,000 found products returns an error (no status or code given), and splitting the query by a search period is advised; the per-account registration limit is not returned by the API | `P1_ONLY_FOR_CATALOG_ENUMERATION` | ADR-0042 §5.1 (E1, E6); `ENDPOINT_MATRIX.md` §4.1.2 S1a amendment; `PRODUCT_SEARCH.md` |
+| `NAVER-P1-SEARCH-ALL-1544` | https://github.com/commerce-api-naver/commerce-api/discussions/1544 | (2024-03-18, NAVER maintainer answer) the request body is required but its fields are not: leaving `searchKeywordType` unset, or sending `{}`, lists the products as a whole; a set `searchKeywordType` needs its own identifier list and no other (`originProductNos` beside `CHANNEL_PRODUCT_NO` is `BAD_REQUEST`, `invalidInputs` name `originProductNos`, type `Exist`). The other request members in the thread (`productStatusTypes`, `orderType`, `periodType`, `fromDate`, `toDate`) are the user's own and are not explained | `P1_ONLY_FOR_CATALOG_ENUMERATION` | ADR-0042 §5.1 (E1, E2); `PRODUCT_SEARCH.md` |
+| `NAVER-P1-SEARCH-MODIFIED-1546` | https://github.com/commerce-api-naver/commerce-api/discussions/1546 | (2024-03-18, NAVER maintainer answer) the list returns every product the request's criteria include, and a `{null}` request lists the products as a whole; the product modification date `modifiedDate` is the date the product was modified, whatever the call date (its position and format are not given) | `P1_ONLY_FOR_CATALOG_ENUMERATION` | ADR-0042 §5.1 (E1, E5); `PRODUCT_SEARCH.md` |
+| `NAVER-P1-SEARCH-FIELDS-1635` | https://github.com/commerce-api-naver/commerce-api/discussions/1635 | (2024-04-23, NAVER maintainer answer) the `상품 목록 조회` answer carries basic product information (name, sale status, price, stock, delivery, purchase/benefit) and no detail; detail is read through the channel-product or origin-product read. No field name or path is given | `P1_ONLY_FOR_CATALOG_ENUMERATION` | ADR-0042 §5.1 (E3); `PRODUCT_SEARCH.md` |
 
 ### 6.1 Support-discussion survivability rule
 

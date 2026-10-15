@@ -1754,9 +1754,9 @@ def test_the_standing_authorization_orders_every_missing_pre_canary_prerequisite
     assert "committed_bearer = smartstore.committed_bearer" in container
     # The CREATE, read-back, SEARCH and ASSET seams, and the DELETE slice's sender and read-back
     # (ADR-0018 §3.5), the notice-schema capture (notice coverage S0) and the M6-A listing-state
-    # sync's read-back (ADR-0023 §3) and the M6.5-C dispatch sender (ADR-0025 §5): nine seams,
-    # one source.
-    assert container.count("bearer=committed_bearer") == 9
+    # sync's read-back (ADR-0023 §3), the M6.5-C dispatch sender (ADR-0025 §5) and the S3b
+    # duplicate source's positive spot check (ADR-0042 §6): ten seams, one source.
+    assert container.count("bearer=committed_bearer") == 10
     assert "bearer=lambda: None" not in container
     assert smartstore_readback.proves_published_state() is True
     assert smartstore_readback.reads_published_state() is True
@@ -4222,6 +4222,20 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "image_edit_current",
         # ADR-0038 §4, §8: each overseas source product's landed-cost inputs, append-only.
         "overseas_cost_override_revisions",
+        # ADR-0042 S1a: the StoreCatalog owner — a store's provider catalog as OPERATE observed
+        # it, read only. Store listings are never products; no buyer data.
+        "store_catalog_sync_runs",
+        "store_catalog_listings",
+        "store_catalog_field_sets",
+        "store_catalog_memberships",
+        "store_catalog_observations",
+        "store_catalog_listing_endings",
+        # ADR-0042 S2a: the ListingLinks owner — which common product (ProductGroup) each store
+        # listing is, the seller's 「다른 상품」 decisions and the automatic-link notices. A link
+        # is never a product.
+        "store_listing_links",
+        "store_listing_decisions",
+        "store_link_notices",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

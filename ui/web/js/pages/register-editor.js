@@ -26,6 +26,7 @@ import { NAME_RESULT, NAME_TASK, aiNamePanel } from '../components/ai-name.js';
 import { TAG_RESULT, TAG_TASK, aiTagsPanel } from '../components/ai-tags.js';
 import { CATEGORY_RESULT, CATEGORY_TASK, aiCategoryPanel } from '../components/ai-category.js';
 import { itemImagesEditor } from '../components/item-images.js';
+import { duplicateRow } from '../components/duplicate-row.js';
 import { emptyState } from '../components/states.js';
 import {
   GUIDANCE_BASE,
@@ -666,6 +667,8 @@ function editor(unit, ctx, labels, mode, step) {
       '⑥ 기타 등록정보',
       '배송·반품·A/S는 등록 정책에서 정합니다',
       h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => ctx.navigate('settings') }, '설정 › 등록 정책 열기')),
+      // ADR-0042 S3b (§0 a4): the duplicate row, decided by the store's last complete sync.
+      duplicateRow(unit, reload),
       preflightBlock(unit, labels),
       unit.intent && unit.intent.attempts.length ? table(['시도', '결과', '확인 내용', '시작'], unit.intent.attempts.map(attemptRow)) : null,
       scopeBlock(unit.scope),

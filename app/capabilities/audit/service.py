@@ -142,6 +142,18 @@ class AuditLog:
         with self._db.read() as own:
             return _owner_writes(own)
 
+    def latest(self, event_type: str, target_ref: str) -> AuditEventRecord | None:
+        """The newest event of one type about one target, or ``None`` (a read)."""
+        query = (
+            select(AuditEvent)
+            .where(AuditEvent.event_type == event_type, AuditEvent.target_ref == target_ref)
+            .order_by(AuditEvent.seq.desc())
+            .limit(1)
+        )
+        with self._db.read() as session:
+            found = session.scalars(query).first()
+            return None if found is None else _to_record(found)
+
     def list_events(
         self, *, correlation_id: str | None = None, limit: int = 100
     ) -> list[AuditEventRecord]:

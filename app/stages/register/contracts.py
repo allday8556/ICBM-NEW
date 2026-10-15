@@ -420,6 +420,39 @@ class PreflightView(BaseModel):
     fingerprint_matches_snapshot: bool | None = None
 
 
+class DuplicateMatchView(BaseModel):
+    """One store listing the duplicate check matched (ADR-0042 §6), for the seller's screen."""
+
+    key_kind: str
+    marketplace_product_id: str
+    name: str | None = None
+    sale_status: str | None = None
+
+
+class DuplicateCheckView(BaseModel):
+    """The duplicate row of a unit (ADR-0042 §0 a4), as the duplicate-evidence owner answered.
+
+    ``state`` is ``NO_MATCH`` or ``MATCH`` only with evidence of a COMPLETE, fresh store snapshot;
+    without one it is ``RESYNCING`` while the automatic re-sync runs, ``COVERAGE_UNCONFIRMED``
+    while the seller has not confirmed the store's per-status counts (ADR-0042 §5.2), else
+    ``STALE`` or ``UNAVAILABLE``. ``as_of`` is the start of the last COMPLETE sync, shown with
+    any result (SCP-07). ``codes`` are the unit's duplicate-area preflight reasons, and
+    ``override_ids`` the active DuplicateOverrides of its products in this store
+    (「의도적으로 한 번 더 등록」)."""
+
+    state: str
+    as_of: datetime | None = None
+    matches: tuple[DuplicateMatchView, ...] = ()
+    codes: tuple[str, ...] = ()
+    override_ids: tuple[str, ...] = ()
+
+
+class DuplicateOverrideResult(BaseModel):
+    preparation_id: str
+    override_ids: tuple[str, ...]
+    active: bool
+
+
 class ReadStateView(BaseModel):
     """One Intent's user-facing registration read state (ADR-0014 §28.5), as the server derived
     it. The screen renders it; it never recalculates a state from the Intent's own fields."""
@@ -490,6 +523,8 @@ class UnitView(BaseModel):
     preflight_unavailable_reason: str | None = None
     # Why the per-Item M4 facts are absent, as the owner that refused them named it.
     item_facts_unavailable_reason: str | None = None
+    # ADR-0042 S3b: the duplicate row of a unit not yet frozen, when its policy requires proof.
+    duplicate: DuplicateCheckView | None = None
     snapshot: SnapshotView | None
     intent: IntentView | None
     registration_id: str | None

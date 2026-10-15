@@ -304,8 +304,21 @@ def execution(container: Container, prep: Preparation, **overrides: Any) -> Exec
         clock=container.clock,
         authority=overrides.get("authority") or AdmittingAuthority(),
         policy=overrides.get("policy") or ExecutionPolicy(),
+        # ADR-0042 §6: the send-time duplicate revalidation is mandatory; these tests' frozen
+        # evidence is FakeDuplicateLookup's own NO_MATCH, so it revalidates unchanged.
+        duplicate_check=overrides.get("duplicate_check") or revalidate_unchanged,
     )
     return Execution(service, sender, readback, lookup, comparator, projector)
+
+
+def revalidate_unchanged(candidate: PreflightResult) -> Any:
+    """The send-time duplicate revalidation of a store that still shows no match."""
+    from app.stages.register.provider import duplicate_unit
+    from tests.support.register_support import FakeDuplicateLookup
+
+    if not candidate.resolved.target.duplicate_proof_required:
+        return None
+    return FakeDuplicateLookup().check(duplicate_unit(candidate))
 
 
 @dataclass

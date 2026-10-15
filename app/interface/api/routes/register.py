@@ -35,6 +35,7 @@ from app.stages.register.contracts import (
     AuthoredInputsView,
     AuthoringMetadataView,
     BulkCreateResult,
+    DuplicateOverrideResult,
     GuidanceResolutionView,
     PreparationView,
     RegisterOverview,
@@ -100,6 +101,18 @@ class ApplyEnrichmentRequest(BaseModel):
 class FreezeRequest(BaseModel):
     """Freeze the unit this preparation authored and open its CREATE Intent, if it is READY."""
 
+    actor: str = Field(min_length=2, max_length=64)
+
+
+class DuplicateOverrideRequest(BaseModel):
+    """「의도적으로 한 번 더 등록」 (ADR-0042 §0 a4): the seller's explicit decision to list this
+    unit's products again in this store, with a reason; audited and revocable (ADR-0014 §13)."""
+
+    actor: str = Field(min_length=2, max_length=64)
+    reason: str = Field(min_length=2, max_length=200)
+
+
+class RevokeDuplicateOverrideRequest(BaseModel):
     actor: str = Field(min_length=2, max_length=64)
 
 
@@ -264,6 +277,28 @@ def freeze_preparation(
 ) -> ActionResult:
     return container.register.freeze_preparation(
         preparation_id, actor=request.actor, correlation_id=_correlation()
+    )
+
+
+@router.post("/preparations/{preparation_id}/duplicate-override")
+def record_duplicate_override(
+    container: ContainerDep, preparation_id: str, request: DuplicateOverrideRequest
+) -> DuplicateOverrideResult:
+    """Recorded only while the unit shows a duplicate; it never releases an UNKNOWN (§10, §13)."""
+    return container.register.record_duplicate_override(
+        preparation_id, reason=request.reason, actor=request.actor, correlation_id=_correlation()
+    )
+
+
+@router.post("/preparations/{preparation_id}/duplicate-override/{override_id}/revoke")
+def revoke_duplicate_override(
+    container: ContainerDep,
+    preparation_id: str,
+    override_id: str,
+    request: RevokeDuplicateOverrideRequest,
+) -> DuplicateOverrideResult:
+    return container.register.revoke_duplicate_override(
+        preparation_id, override_id, actor=request.actor, correlation_id=_correlation()
     )
 
 

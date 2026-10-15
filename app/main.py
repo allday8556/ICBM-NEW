@@ -161,6 +161,9 @@ def create_app(
             await services.review_reconciler.start()
             # M6-A (ADR-0023 §3): the periodic read-only listing-state sync.
             services.listing_sync_scheduler.start()
+            # ADR-0042 S1a (§5.4): the periodic read-only store-catalog sync, and the first
+            # sync of a newly connected store.
+            services.store_catalog_scheduler.start()
             # M6-B (ADR-0023 §4): the periodic supplier stock recheck.
             services.stock_recheck_scheduler.start()
             # M6-D (ADR-0023 §5, §7): the periodic order ingest and shipping-record retention.
@@ -178,6 +181,7 @@ def create_app(
             await asyncio.to_thread(services.smartstore_keeper.stop)
             await asyncio.to_thread(services.order_sync_scheduler.stop)
             await asyncio.to_thread(services.stock_recheck_scheduler.stop)
+            await asyncio.to_thread(services.store_catalog_scheduler.stop)
             await asyncio.to_thread(services.listing_sync_scheduler.stop)
             await services.review_reconciler.stop()
             await services.worker.stop()

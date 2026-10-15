@@ -3,19 +3,25 @@ supplier order is placed by hand and only recorded. The one marketplace write, �
 through the DISPATCH stage of the send-time safety stack (ADR-0025 §5)."""
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.interface.api.deps import ContainerDep
 from app.platform.core.correlation import new_correlation_id
+from app.platform.core.errors import InputValidationError, PolicyBlockedError
+from app.stages.operate.catalog.service import ALL as CATALOG_ALL
+from app.stages.operate.catalog.service import OPERATOR as CATALOG_OPERATOR
+from app.stages.operate.catalog.service import PAGE_LIMIT_DEFAULT as CATALOG_PAGE_LIMIT
 from app.stages.operate.listing import OPERATOR
 from app.stages.operate.orders import OPERATOR as ORDER_OPERATOR
 from app.stages.operate.stock import OPERATOR as STOCK_OPERATOR
+from app.stages.register.category_catalog import MARKETPLACE as CATEGORY_MARKETPLACE
 
 router = APIRouter(prefix="/api/v1/operate", tags=["operate"])
 
@@ -44,6 +50,278 @@ async def sync_listings(container: ContainerDep) -> dict[str, Any]:
         container.listing_sync.sync, trigger=OPERATOR, correlation_id=new_correlation_id()
     )
     return asdict(run)
+
+
+@router.get("/store-catalog")
+def store_catalog(container: ContainerDep) -> dict[str, Any]:
+    """The connected store's catalog as the last syncs saw it (ADR-0042 §5.4): the running sync
+    and its progress, the last sync whatever its outcome, the last COMPLETE sync (「마지막
+    동기화」, SCP-07) and every listing with its derived state and latest read fields."""
+    status = container.store_catalog.status()
+    return {
+        "status": asdict(status),
+        "listings": [asdict(listing) for listing in container.store_catalog.listings()],
+    }
+
+
+@router.get("/store-catalog/shape")
+def store_catalog_shape(container: ContainerDep) -> dict[str, Any]:
+    """「문제 해결용 정보」 (ADR-0042 §5.1 item 3), read only: the response shape the latest
+    operator 「지금 동기화」 recorded — key paths, JSON types and enum tokens, never a value — for
+    the search pages and the origin reads. ``shape`` is ``null`` before any such sync."""
+    shape = container.store_catalog.shape()
+    if shape is None:
+        return {"shape": None}
+    return {
+        "shape": {
+            "run_id": shape.run_id,
+            "as_of": shape.as_of,
+            "outcome": shape.outcome,
+            "path_count": shape.path_count,
+            "search": shape.search,
+            "origin_read": shape.origin_read,
+        }
+    }
+
+
+@router.get("/store-catalog/status")
+def store_catalog_status(container: ContainerDep) -> dict[str, Any]:
+    """The catalog's sync status alone (ADR-0042 S1b): what 「스토어 상품」 re-reads while a sync
+    runs, so 「마지막 동기화」 and the progress stay current without re-reading every listing."""
+    return {"status": asdict(container.store_catalog.status())}
+
+
+@router.get("/store-catalog/listings")
+def store_catalog_listings(
+    container: ContainerDep,
+    filter_key: Annotated[str, Query(alias="filter")] = CATALOG_ALL,
+    q: str | None = None,
+    offset: int = 0,
+    limit: int = CATALOG_PAGE_LIMIT,
+) -> dict[str, Any]:
+    """「스토어 상품」 (ADR-0042 S1b, §0 b2), read only: one page of the store's listings under one
+    status filter and an optional search (name, seller code or product number), every filter's
+    count, and the sync status beside it (「마지막 동기화」 always, SCP-07). Only the page's
+    listings carry their read fields. ``category_name`` is the leaf category's whole name from
+    ICBM's recorded official category catalog, or ``null`` when that catalog does not hold it."""
+    page = container.store_catalog.listing_page(
+        filter_key=filter_key, query=q, offset=offset, limit=limit
+    )
+    leaves = {_leaf_category(entry.listing.fields) for entry in page.listings}
+    names = _category_names(container, {leaf for leaf in leaves if leaf is not None})
+    return {
+        "status": asdict(container.store_catalog.status()),
+        "filter": page.filter,
+        "query": page.query,
+        "counts": dict(page.counts),
+        "matching": page.matching,
+        "offset": page.offset,
+        "limit": page.limit,
+        "listings": [
+            {
+                **asdict(entry.listing),
+                "filter": entry.filter,
+                "category_name": names.get(_leaf_category(entry.listing.fields) or ""),
+            }
+            for entry in page.listings
+        ],
+    }
+
+
+def _leaf_category(fields: Mapping[str, Any] | None) -> str | None:
+    category = fields.get("category") if fields is not None else None
+    leaf = category.get("leaf_category_id") if isinstance(category, Mapping) else None
+    return leaf if isinstance(leaf, str) and leaf else None
+
+
+def _category_names(container: ContainerDep, leaves: set[str]) -> dict[str, str]:
+    """Each leaf category's whole name, as ICBM's recorded SmartStore category catalog holds it
+    (ADR-0029); a leaf it does not hold has no name. Nothing is read from the provider."""
+    if container.store_catalog.marketplace_key != CATEGORY_MARKETPLACE:
+        return {}
+    names: dict[str, str] = {}
+    for leaf in sorted(leaves):
+        found = container.category_catalog.catalog(CATEGORY_MARKETPLACE, query=leaf, limit=500)
+        for entry in found.entries:
+            if entry.category_id == leaf:
+                names[leaf] = entry.whole_category_name
+    return names
+
+
+class StoreCoverageConfirmRequest(BaseModel):
+    """「판매자센터 상품 수와 같습니다」 for exactly the sync the seller looked at."""
+
+    run_id: str = Field(min_length=1, max_length=36)
+    actor: str = Field(min_length=2, max_length=64)
+
+
+@router.get("/store-catalog/coverage")
+def store_catalog_coverage(container: ContainerDep) -> dict[str, Any]:
+    """ADR-0042 §5.2 tightening: the per-status counts of the last COMPLETE sync beside the
+    seller's confirmation that they equal the seller center's, and whether it still holds. Until
+    it does, a duplicate check is never ``NO_MATCH``."""
+    return asdict(container.store_coverage.view())
+
+
+@router.post("/store-catalog/coverage/confirm")
+def confirm_store_catalog_coverage(
+    container: ContainerDep, request: StoreCoverageConfirmRequest
+) -> dict[str, Any]:
+    view = container.store_coverage.confirm(
+        run_id=request.run_id, actor=request.actor, correlation_id=new_correlation_id()
+    )
+    return asdict(view)
+
+
+@router.post("/store-catalog/sync", status_code=202)
+def sync_store_catalog(container: ContainerDep) -> dict[str, Any]:
+    """「지금 동기화」: start one read-only catalog sync in the background. A store that is not
+    connected is refused; a sync already running is the one the operator asked for."""
+    if container.store_catalog.account() is None:
+        raise PolicyBlockedError(
+            "STORE_CATALOG_STORE_NOT_CONNECTED",
+            "connect and bind the store before its catalog can be synced",
+        )
+    started = container.store_catalog_scheduler.request(trigger=CATALOG_OPERATOR)
+    return {"started": started, "status": asdict(container.store_catalog.status())}
+
+
+# ---------------------------------------------------------------- ADR-0042 S2a: listing links
+
+
+class StoreLinkConfirmRequest(BaseModel):
+    """「같은 상품」: a listing (by id, or by its store and product number) is this product.
+    ``survivor_group_id`` is the product kept when two become one (default: this product)."""
+
+    product_group_id: str = Field(min_length=1, max_length=36)
+    listing_id: str | None = Field(default=None, min_length=1, max_length=36)
+    marketplace_key: str | None = Field(default=None, min_length=1, max_length=40)
+    marketplace_account_id: str | None = Field(default=None, min_length=1, max_length=40)
+    origin_product_no: str | None = Field(default=None, min_length=1, max_length=20)
+    survivor_group_id: str | None = Field(default=None, min_length=1, max_length=36)
+    actor: str = Field(min_length=2, max_length=64)
+
+
+class StoreLinkRejectRequest(BaseModel):
+    """「다른 상품」: this listing (by id, or by its store and product number) is not that
+    product. Revocable."""
+
+    listing_id: str | None = Field(default=None, min_length=1, max_length=36)
+    marketplace_key: str | None = Field(default=None, min_length=1, max_length=40)
+    marketplace_account_id: str | None = Field(default=None, min_length=1, max_length=40)
+    origin_product_no: str | None = Field(default=None, min_length=1, max_length=20)
+    product_group_id: str = Field(min_length=1, max_length=36)
+    actor: str = Field(min_length=2, max_length=64)
+
+
+class StoreLinkActorRequest(BaseModel):
+    actor: str = Field(min_length=2, max_length=64)
+
+
+class StoreLinkUnlinkRequest(BaseModel):
+    actor: str = Field(min_length=2, max_length=64)
+    # 「되돌리기」 of an automatic link's notice, rather than 「연결 해제」 of the product.
+    undo: bool = False
+
+
+class StoreLinkAcknowledgeRequest(BaseModel):
+    actor: str = Field(min_length=2, max_length=64)
+    # None: every open notice (「확인」 on the notice).
+    notice_ids: list[str] | None = Field(default=None, max_length=500)
+
+
+@router.get("/store-links")
+def store_links(container: ContainerDep) -> dict[str, Any]:
+    """What the 통합DB shows after an import (ADR-0042 §0 b3): the automatic links not yet
+    acknowledged, the 「같은 상품인가요?」 proposals and the 「다른 상품」 decisions, with the last
+    complete sync time (SCP-07). A read; nothing is linked here."""
+    return asdict(container.store_links.overview())
+
+
+@router.get("/store-links/products")
+def store_links_of_products(
+    container: ContainerDep, group_id: Annotated[list[str] | None, Query()] = None
+) -> dict[str, Any]:
+    """The store side of the 통합DB rows: each product's listings and whether it has a supplier
+    (「도매처 미연결」 when it has none)."""
+    groups = list(group_id or ())[:50]
+    return {"products": [asdict(view) for view in container.store_links.for_groups(groups)]}
+
+
+@router.post("/store-links/confirm")
+def confirm_store_link(container: ContainerDep, request: StoreLinkConfirmRequest) -> dict[str, Any]:
+    links = container.store_links
+    listing_id = request.listing_id
+    if listing_id is None:
+        if not (
+            request.marketplace_key and request.marketplace_account_id and request.origin_product_no
+        ):
+            raise InputValidationError(
+                "STORE_LINK_LISTING_REQUIRED", "name the listing by id or by store and product"
+            )
+        listing_id = links.listing_id_of(
+            request.marketplace_key, request.marketplace_account_id, request.origin_product_no
+        )
+    result = links.confirm(
+        listing_id,
+        request.product_group_id,
+        survivor_group_id=request.survivor_group_id,
+        actor=request.actor,
+        correlation_id=new_correlation_id(),
+    )
+    return asdict(result)
+
+
+@router.post("/store-links/reject")
+def reject_store_link(container: ContainerDep, request: StoreLinkRejectRequest) -> dict[str, Any]:
+    listing_id = request.listing_id
+    if listing_id is None:
+        if not (
+            request.marketplace_key and request.marketplace_account_id and request.origin_product_no
+        ):
+            raise InputValidationError(
+                "STORE_LINK_LISTING_REQUIRED", "name the listing by id or by store and product"
+            )
+        listing_id = container.store_links.listing_id_of(
+            request.marketplace_key, request.marketplace_account_id, request.origin_product_no
+        )
+    result = container.store_links.reject(
+        listing_id,
+        request.product_group_id,
+        actor=request.actor,
+        correlation_id=new_correlation_id(),
+    )
+    return asdict(result)
+
+
+@router.post("/store-links/decisions/{decision_id}/revoke")
+def revoke_store_link_decision(
+    container: ContainerDep, decision_id: str, request: StoreLinkActorRequest
+) -> dict[str, Any]:
+    container.store_links.revoke_decision(
+        decision_id, actor=request.actor, correlation_id=new_correlation_id()
+    )
+    return {"decision_id": decision_id, "revoked": True}
+
+
+@router.post("/store-links/notices/acknowledge")
+def acknowledge_store_link_notices(
+    container: ContainerDep, request: StoreLinkAcknowledgeRequest
+) -> dict[str, Any]:
+    count = container.store_links.acknowledge(
+        request.notice_ids, actor=request.actor, correlation_id=new_correlation_id()
+    )
+    return {"acknowledged": count}
+
+
+@router.post("/store-links/{link_id}/unlink")
+def unlink_store_listing(
+    container: ContainerDep, link_id: str, request: StoreLinkUnlinkRequest
+) -> dict[str, Any]:
+    result = container.store_links.unlink(
+        link_id, actor=request.actor, correlation_id=new_correlation_id(), undo=request.undo
+    )
+    return asdict(result)
 
 
 @router.get("/stock")

@@ -276,9 +276,22 @@ function editor(view, onSaved, section) {
   const templates = h('textarea', { id: templatesId, rows: '3', spellcheck: 'false', 'data-policy-field': 'templates' });
   templates.value = templatesText(inputs?.templates);
   templates.disabled = !editable;
-  const proofRequired = check('중복 확인 증거 필수', inputs?.duplicate_proof_required, {
+  // Owner ruling (#219 6190407624): SmartStore keeps duplicate checking on; it is shown, checked
+  // and fixed, and the server refuses a revision that turns it off.
+  const proofFixed = view.marketplace_key === 'smartstore';
+  const proofRequired = check('중복 확인 증거 필수', proofFixed || inputs?.duplicate_proof_required, {
     ...on,
     name: 'duplicate_proof_required',
+  });
+  if (proofFixed) {
+    proofRequired.box.disabled = true;
+    proofRequired.row.append(h('span', { class: 'mini', 'data-role': 'duplicate-proof-fixed' }, '스마트스토어는 중복 확인을 끌 수 없습니다'));
+  }
+  // ADR-0042 §5.2: how long the store's last complete sync stays duplicate evidence (1–60 minutes;
+  // empty reads the default 60). A change is a new, audited policy revision like any other.
+  const catalogMaxAge = field('스토어 확인 유효 시간 (분, 1~60 · 비우면 60)', inputs?.catalog_max_age_minutes ?? '', {
+    ...on,
+    name: 'catalog_max_age_minutes',
   });
   const keys = LOOKUP_KEYS.map((key) => ({
     key,
@@ -337,8 +350,9 @@ function editor(view, onSaved, section) {
           // The seller's A/S contact the marketplace requires on every listing (null when empty).
           after_service_telephone: afterServicePhone.input.value.trim() || null,
           templates: templatesOf(templates.value),
-          duplicate_proof_required: proofRequired.box.checked,
+          duplicate_proof_required: proofFixed || proofRequired.box.checked,
           duplicate_lookup_keys: keys.filter((entry) => entry.box.checked).map((entry) => entry.key),
+          catalog_max_age_minutes: catalogMaxAge.input.value.trim() ? whole(catalogMaxAge.input.value) : null,
           // Server-owned references: never authored here; the server stamps them (ADR-0015 §2).
           category_mapping_revision: null,
           detail_composition_revision: null,
@@ -376,6 +390,7 @@ function editor(view, onSaved, section) {
     h('div', { class: 'form-row' }, h('label', { for: templatesId }, '템플릿 (한 줄에 종류=식별자)'), templates),
     proofRequired.row,
     ...keys.map((key) => key.row),
+    catalogMaxAge.row,
   ];
   const deliveryRows = [
     physicalDelivery.row,

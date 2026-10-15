@@ -19,7 +19,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Final, Literal, cast, overload
@@ -50,9 +50,11 @@ from integrations.marketplaces.smartstore.registry import (
 )
 from integrations.marketplaces.smartstore.retention import retain, retained_query
 from integrations.marketplaces.smartstore.search import (
+    CATALOG_MAX_PAGES,
     FIRST_PAGE,
     INT32_MAX,
     MAX_PAGE_SIZE,
+    catalog_request_body,
     request_body,
 )
 from integrations.marketplaces.smartstore.signing import (
@@ -87,6 +89,11 @@ _PRODUCT_CREATE = EndpointId.SMARTSTORE_PRODUCT_CREATE_V2
 _IMAGE_UPLOAD = EndpointId.SMARTSTORE_PRODUCT_IMAGE_UPLOAD
 _PRODUCT_SEARCH = EndpointId.SMARTSTORE_PRODUCT_SEARCH
 _PRODUCT_DELETE = EndpointId.SMARTSTORE_PRODUCT_DELETE_V2
+# ADR-0042 §5.1 item 3: the only endpoints whose parsed response a caller may observe for the
+# shape-only runtime capture of a store-catalog sync. Every other endpoint refuses a body sink.
+_SHAPE_OBSERVABLE = frozenset({_PRODUCT_SEARCH, EndpointId.SMARTSTORE_ORIGIN_PRODUCT_READ_V2})
+# A body sink sees the parsed JSON before retention and must record nothing but its shape.
+BodySink = Callable[[object], None]
 _NOTICE_LIST = EndpointId.SMARTSTORE_NOTICE_TYPES
 _NOTICE_TYPE = EndpointId.SMARTSTORE_NOTICE_TYPE_READ
 _CATEGORY_LIST = EndpointId.SMARTSTORE_CATEGORY_LIST
@@ -330,6 +337,22 @@ class ProductSearchRequest:
 
 
 @dataclass(frozen=True)
+class CatalogSearchRequest:
+    """One page of the store-catalog enumeration (ADR-0042 S1a; ``ENDPOINT_MATRIX.md`` §4.1.2).
+
+    The body is exactly the paging-only request (``search.catalog_request_body``): no keyword, no
+    status filter and no sort, because none is documented for it (E1, E2). ``page`` starts at 1
+    and is at most the catalog page budget; ``size`` is at most 500.
+    """
+
+    access_token: str = field(repr=False)
+    credential_generation: int
+    session_generation: int
+    page: int
+    size: int
+
+
+@dataclass(frozen=True)
 class ImageUploadRequest:
     """Upload exactly one immutable artifact in exactly one ``imageFiles`` part.
 
@@ -539,6 +562,7 @@ def _generations(request: object) -> tuple[int | None, int | None]:
         | ProductReadRequest
         | ProductCreateRequest
         | ProductSearchRequest
+        | CatalogSearchRequest
         | ImageUploadRequest
         | CategoryListRequest
         | AddressBookListRequest
@@ -804,6 +828,25 @@ def _compose(contract: EndpointContract, request: object) -> _Wire:
         assert contract.content_type is not None
         headers["Content-Type"] = contract.content_type
         return _Wire(contract.path, headers, {}, content=_json_body(request.document))
+    if contract.endpoint_id is _PRODUCT_SEARCH and isinstance(request, CatalogSearchRequest):
+        # ADR-0042 S1a: the paging-only catalog request, within the catalog page budget.
+        if (
+            isinstance(request.page, bool)
+            or not isinstance(request.page, int)
+            or not FIRST_PAGE <= request.page <= CATALOG_MAX_PAGES
+            or isinstance(request.size, bool)
+            or not isinstance(request.size, int)
+            or not 1 <= request.size <= MAX_PAGE_SIZE
+        ):
+            raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
+        _bearer(
+            headers, request.access_token, request.credential_generation, request.session_generation
+        )
+        assert contract.content_type is not None
+        headers["Content-Type"] = contract.content_type
+        body = catalog_request_body(request.page, request.size)
+        content = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return _Wire(contract.path, headers, {}, content=content)
     if contract.endpoint_id is _PRODUCT_SEARCH:
         if (
             not isinstance(request, ProductSearchRequest)
@@ -904,6 +947,14 @@ def _order_scope(body: object) -> dict[str, object]:
             }
         )
     return {"data": scoped}
+
+
+def _observe(sink: BodySink, body: object) -> None:
+    """Hand a parsed body to a shape sink. A failing sink never changes the call's outcome."""
+    try:
+        sink(body)
+    except Exception:
+        logger.warning("smartstore.shape_sink_failed", exc_info=True)
 
 
 def _json(content: bytes) -> object:
@@ -1028,7 +1079,7 @@ def _result(contract: EndpointContract, request: object, body: object, status: i
             http_status=status,
         )
     if contract.endpoint_id is _PRODUCT_SEARCH:
-        assert isinstance(request, ProductSearchRequest)
+        assert isinstance(request, ProductSearchRequest | CatalogSearchRequest)
         # Only the endpoint's retained-field allow-list crosses this boundary (ADR-0014 §15).
         return ProductSearchPage(
             retained=retain(contract, fields), http_status=status, page=request.page
@@ -1097,6 +1148,8 @@ class SmartStoreEndpointCaller:
             EndpointId.SMARTSTORE_CHANNEL_PRODUCT_READ_V2,
         ],
         request: ProductReadRequest,
+        *,
+        body_sink: BodySink | None = None,
     ) -> ProductReadback: ...
 
     @overload
@@ -1110,7 +1163,9 @@ class SmartStoreEndpointCaller:
     def call(
         self,
         endpoint_id: Literal[EndpointId.SMARTSTORE_PRODUCT_SEARCH],
-        request: ProductSearchRequest,
+        request: ProductSearchRequest | CatalogSearchRequest,
+        *,
+        body_sink: BodySink | None = None,
     ) -> ProductSearchPage: ...
 
     @overload
@@ -1188,7 +1243,12 @@ class SmartStoreEndpointCaller:
     @overload
     def call(self, endpoint_id: object, request: object) -> _Result: ...
 
-    def call(self, endpoint_id: object, request: object) -> _Result:
+    def call(
+        self, endpoint_id: object, request: object, *, body_sink: BodySink | None = None
+    ) -> _Result:
+        """One adopted call. ``body_sink`` (ADR-0042 §5.1 item 3; the search and the origin read
+        only) is handed every parsed JSON response body before retention, for the shape-only
+        runtime capture; it changes nothing the call sends, retains or returns."""
         started, started_mono = datetime.now(UTC), time.monotonic()
         endpoint = _endpoint_name(endpoint_id)
         recorder = TraceRecorder()
@@ -1199,6 +1259,8 @@ class SmartStoreEndpointCaller:
         error: SmartStoreCallError | None = None
         try:
             contract = resolve(endpoint_id)
+            if body_sink is not None and contract.endpoint_id not in _SHAPE_OBSERVABLE:
+                raise _Preflight("SMARTSTORE_REQUEST_CONTRACT_VIOLATION")
             if contract.endpoint_id is _PRODUCT_CREATE:
                 # Before the request is composed: no body is encoded for an incomplete CREATE.
                 self._require_complete(request)
@@ -1224,6 +1286,8 @@ class SmartStoreEndpointCaller:
             else:
                 status = response.status_code
                 body = _json(response.content)
+                if body_sink is not None and body is not None:
+                    _observe(body_sink, body)
                 fields = body if isinstance(body, dict) else {}
                 trace_id = _marker(fields.get("traceId")) or _marker(
                     response.headers.get(_TRACE_HEADER)

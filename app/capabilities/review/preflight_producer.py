@@ -2,9 +2,10 @@
 
 For every durable preparation that is still work to author, it asks the existing preflight owner
 for the **candidate** evaluation, exactly as Registration Management does
-(``RegistrationPreparationService.evaluate``). It indexes the ``REVIEW_REQUIRED`` reasons of that
-evaluation by reference. It copies no rule and stores no verdict, because none exists
-(ADR-0014 M5-03).
+(``RegistrationPreparationService.evaluate_current``: with the duplicate owner's current
+answer, ADR-0042 S3b, read here without starting a store re-sync). It indexes the
+``REVIEW_REQUIRED`` reasons of that evaluation by reference. It copies no rule and stores no
+verdict, because none exists (ADR-0014 M5-03).
 
 **Scope and identity (§8).**
 - The scope is ``marketplace_key``, ``marketplace_account_id``, ``draft_id`` and ``preparation_id``.
@@ -142,6 +143,8 @@ REVIEWED: Final = frozenset(
         p.DUPLICATE_EVIDENCE_INCONCLUSIVE,
         p.DUPLICATE_EVIDENCE_INCOMPLETE,
         p.DUPLICATE_EVIDENCE_SCOPE_MISMATCH,
+        # ADR-0042 S3b: no COMPLETE store snapshot yet.
+        p.DUPLICATE_EVIDENCE_UNAVAILABLE,
         # Final-stage reasons: the candidate never states them, and they are reviewed all the same.
         p.PREPARED_ASSET_UNEXPECTED,
         p.PREPARED_ASSET_DUPLICATED,
@@ -277,6 +280,10 @@ class PreflightReviewProducer:
     def truth_token(self) -> str:
         current = self._registrations.current_preparations()
         state = {
+            # ADR-0042 S3b: the duplicate owner's state of each account (its last COMPLETE store
+            # sync, that sync's freshness under the account's policy bound, ICBM's last mutation
+            # of the store), so a re-sync or a snapshot going stale re-derives the conditions.
+            "duplicates": self._duplicate_truth(current),
             "owner_writes": self._audit.owner_writes(),
             "m4_base": self._readiness.base_truth_token(),
             "capability": {
@@ -289,6 +296,19 @@ class PreflightReviewProducer:
             ],
         }
         return hashlib.sha256(json.dumps(state, sort_keys=True).encode("utf-8")).hexdigest()
+
+    def _duplicate_truth(self, current: Sequence[PreparationRecord]) -> dict[str, str | None]:
+        found: dict[str, str | None] = {}
+        for key, account in sorted(
+            {(record.marketplace_key, record.marketplace_account_id) for record in current}
+        ):
+            target = self._preflight.target_policy(key, account)
+            if target is None or not target.duplicate_proof_required:
+                continue
+            found[f"{key}:{account}"] = self._preparations.duplicate_truth(
+                account, target.catalog_max_age
+            )
+        return found
 
     def derive(self, scope: Mapping[str, str]) -> Sequence[ReviewCondition]:
         conditions: list[ReviewCondition] = []
@@ -303,7 +323,9 @@ class PreflightReviewProducer:
     ) -> list[ReviewCondition]:
         identity = record.current.preparation_revision_id
         try:
-            result = self._preparations.evaluate(record.preparation_id)
+            # Exactly as Registration Management evaluates it: with the duplicate owner's
+            # current answer (ADR-0042 S3b), read without starting a re-sync.
+            result, _ = self._preparations.evaluate_current(record.preparation_id, resync=False)
         except DatabaseWriteReentryError:
             raise
         except AppError as refused:

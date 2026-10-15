@@ -217,16 +217,42 @@ the category auto-matching agreement endpoint, plus their two unit suites. It ad
 provider caller and no mutation surface.
 All other Coupang adapters remain fake-only, retain sensitive provider envelopes without projecting
 customer or financial data, and grant no provider call or LIVE authority.
+ADR-0042 S1a added the StoreCatalog owner `app/stages/operate/catalog/` (its facts, models,
+the read-only sync service and its scheduler, and the shape-only response capture `shape.py`),
+migration `0067_store_catalog`, the SmartStore catalog source
+`integrations/marketplaces/smartstore/catalog.py`, the Settings card
+`ui/web/js/pages/settings/store-catalog.js`, one unit and three integration suites; the adopted
+search and origin read gained the catalog request and retention (`s1a-store-catalog-r1`).
+ADR-0042 S3b added the catalog duplicate source `app/stages/operate/catalog/duplicates.py`
+(REGISTER's SmartStore duplicate evidence, read from the store's COMPLETE, fresh catalog
+snapshot; `integrations/marketplaces/smartstore/lookup.py` now composes it with the positive spot
+check), the editor's duplicate row `ui/web/js/components/duplicate-row.js` and three integration
+suites; `catalog_max_age` moved into the target policy, and a CREATE re-checks the snapshot at
+send time, waiting for the re-sync after ICBM's own change.
+The S3b fail-closed pass added the coverage confirmation owner
+`app/stages/operate/catalog/coverage.py` (the seller's per-status count check in 「스토어 상품」,
+recorded as an audit event) and one integration suite.
+ADR-0042 S2a added the ListingLinks owner in `app/stages/operate/catalog/` (`keys.py`, the
+strong keys and weak signals; `link_models.py`; `links.py`, the post-sync pass that links each
+listing or gives it its own 「도매처 미연결」 common product, the proposals, 「같은 상품」 /
+「다른 상품」, unlink and the MERGE of an empty product), migration `0068_store_listing_links`,
+the 통합DB component `ui/web/js/components/store-links.js`, one unit and two integration suites;
+the duplicate row's 「같은 상품으로 연결」 is live, and a listing linked to the unit's product is a
+`LISTING_LINK` duplicate.
+ADR-0042 S1b added the 통합DB 「스토어 상품」 tab `ui/web/js/pages/db/store-listings.js` (wired into
+`ui/web/js/pages/db.js`), the read-only page read `listing_page` of the StoreCatalog owner with
+its status filters, and the routes `GET /api/v1/operate/store-catalog/listings` and `/status`;
+two integration suites under `tests/integration/operate/`.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 410 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 422 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 84 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
 | `app/interface/` | 32 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 96 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 193 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/platform/` | 98 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 203 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -245,16 +271,16 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
 | `documents/rules/` | 14 | operating rules (bodies); `agent-host/` holds the Agent Host protocol |
-| `integrations/` | 119 | adapters: suppliers and marketplaces |
-| `integrations/marketplaces/` | 45 |  |
+| `integrations/` | 120 | adapters: suppliers and marketplaces |
+| `integrations/marketplaces/` | 46 |  |
 | `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 448 | tests |
+| `tests/` | 463 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 184 | integration tests by runtime owner |
+| `tests/integration/` | 196 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
-| `tests/unit/` | 162 | unit tests by runtime owner |
-| `ui/` | 77 | operator clients: the served web client and the capture extension |
+| `tests/unit/` | 165 | unit tests by runtime owner |
+| `ui/` | 81 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 68 | the served web client |
+| `ui/web/` | 72 | the served web client |

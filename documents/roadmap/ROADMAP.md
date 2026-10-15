@@ -34,6 +34,8 @@ Everything else — AI, OCR, learning, category matching, pricing, alerts, analy
 - Existing functional UI builds are not inherited.
 - Old repository code may be inspected only when the architect explicitly approves a narrow reference case. Default is **do not reuse**.
 
+**Amendment note (ADR-0042 §13, effective with S1a; owner `6190428447`).** Amended, not superseded. This "clean start" stays entry path **(a)**: a new seller starting from an empty store (collect → product → register). Entry path **(b)** is added beside it: an existing operator's **current** store catalog may be imported **read-only** (S1, the StoreCatalog owner) and linked to common products (S2a). Legacy ICBM-PROJECT IDs, rows and state are still **not** imported; what is imported is the live provider catalog, read fresh through adopted endpoints (`ENDPOINT_MATRIX.md` §4.1.2 S1a amendment). Both paths converge on the same `ProductGroup` (SCP-02).
+
 ### 1.2 Roles
 
 ```text

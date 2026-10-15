@@ -1840,6 +1840,56 @@ td.no-data {
   margin-top: var(--space-4);
 }
 
+/* ADR-0042 S2a: the store listing links above the 통합DB list and in a product's detail. */
+.store-links {
+  display: grid;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+}
+
+.store-links .panel-title {
+  margin: 0;
+}
+
+.store-links-row,
+.store-links-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.store-links-row > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.store-links-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.store-links-proposal {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-line-soft);
+}
+
+.store-links-choices {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.store-links-detail .store-links-row + .store-links-row {
+  margin-top: var(--space-2);
+}
+
 .db-target:empty {
   display: none;
 }
@@ -1860,6 +1910,125 @@ td.no-data {
   .db-list-head,
   .db-pager {
     padding: var(--space-4);
+  }
+}
+
+/* 통합DB 「스토어 상품」 (ADR-0042 S1b): the sync line (마지막 동기화 always shown, SCP-07), the
+   search, the status filters with their counts and the paged listing table. The table scrolls
+   inside its own panel on a narrow screen; the page itself never scrolls sideways. */
+.store-workspace {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  padding-bottom: 140px;
+}
+
+.store-sync-bar {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-6);
+}
+
+.store-sync-line {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.store-sync-text {
+  min-width: 0;
+  color: var(--color-text-body);
+  font-size: var(--fs-lg);
+}
+
+.store-sync-text b {
+  color: var(--color-text-strong);
+}
+
+.store-sync-bar[data-state='running'] [data-role='store-sync-progress'] {
+  color: var(--color-info);
+}
+
+.store-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.store-workspace .store-toolbar {
+  margin-bottom: 0;
+}
+
+.store-listings {
+  min-width: 0;
+  padding: 0;
+}
+
+.store-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 0 var(--space-6) var(--space-4);
+}
+
+.store-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-pill);
+  padding: 6px 12px;
+  background: var(--color-panel);
+  color: var(--color-text-body);
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+
+.store-filter.active {
+  border-color: var(--color-info);
+  background: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+.store-table-scroll {
+  overflow-x: auto;
+}
+
+.store-listings .store-table {
+  min-width: 960px;
+}
+
+.store-listings .store-table th {
+  white-space: nowrap;
+}
+
+.store-cell-line {
+  display: block;
+  margin-top: 2px;
+}
+
+.store-name-cell {
+  min-width: 200px;
+  overflow-wrap: anywhere;
+}
+
+.store-code-cell {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .store-sync-bar {
+    padding: var(--space-4);
+  }
+  .store-filters {
+    padding: 0 var(--space-4) var(--space-4);
+  }
+  .store-sync-line .btn {
+    width: 100%;
   }
 }
 

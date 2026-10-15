@@ -3,6 +3,12 @@
 Status: **ACCEPTED** 2026-10-08. It lands with its own PR (M6-E) and amends nothing in ADR-0023; it
 adds a second kind of operated listing beside ICBM's own registrations.
 
+**Amendment note (ADR-0042 §13, effective with S2a).** An `ACTIVE` adoption is read as one kind of
+store listing link, `ADOPTED` (ADR-0042 §7): its Item's group is the listing's common product. The
+link is read from this owner and never rewritten; the `operate_adopted_listings` table and
+M6E-02..06 are unchanged. M6E-01 stays in force: it is lifted only through ADR-0042 S2c's
+per-listing UPDATE grant, never by S2a.
+
 Decision owners:
 - **Product direction:** the owner, Issue #219 `6049563563`.
   - M6 acceptance is run on a KM listing the operator registered by hand and that is already on

@@ -589,6 +589,13 @@ class RegistrationStore:
         """Whether a deletion of the registration is in flight, applied or unresolved (§3.5)."""
         return any(record.open for record in self.deletions(registration_id))
 
+    def last_mutation_started(
+        self, marketplace_key: str, marketplace_account_id: str
+    ) -> datetime | None:
+        """When ICBM last started a listing mutation of this store (ADR-0042 §5.2)."""
+        with self.reading() as unit:
+            return unit.last_mutation_started(marketplace_key, marketplace_account_id)
+
     def batch_summary(self, registration_batch_id: str) -> BatchSummary:
         with self.reading() as unit:
             return unit.batch_summary(registration_batch_id)
@@ -2219,6 +2226,29 @@ class RegistrationUnit:
         return _check_record(row)
 
     # ------------------------------------------------------------------ deletions (ADR-0018 §3.5)
+
+    def last_mutation_started(
+        self, marketplace_key: str, marketplace_account_id: str
+    ) -> datetime | None:
+        """The start of the latest CREATE attempt or deletion attempt of this marketplace account
+        (ADR-0042 §5.2): a store-catalog snapshot taken before it is no longer duplicate evidence.
+        Only what changes the store's listings counts; an image upload does not."""
+        created = self.session.scalar(
+            select(func.max(RegistrationAttempt.started_at))
+            .join(RegistrationIntent, RegistrationIntent.intent_id == RegistrationAttempt.intent_id)
+            .where(
+                RegistrationIntent.marketplace_key == marketplace_key,
+                RegistrationIntent.marketplace_account_id == marketplace_account_id,
+            )
+        )
+        deleted = self.session.scalar(
+            select(func.max(RegistrationDeletion.started_at)).where(
+                RegistrationDeletion.marketplace_key == marketplace_key,
+                RegistrationDeletion.marketplace_account_id == marketplace_account_id,
+            )
+        )
+        found = [moment for moment in (created, deleted) if moment is not None]
+        return max(found) if found else None
 
     def deletions(self, registration_id: str) -> tuple[DeletionRecord, ...]:
         rows = self.session.scalars(

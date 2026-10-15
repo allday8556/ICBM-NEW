@@ -56,6 +56,8 @@ from app.stages.register.execution import (
 )
 from app.stages.register.policy import StaticRegistrationMetadata, StaticRegistrationPolicy
 from app.stages.register.preflight import RegistrationPreflightService
+from app.stages.register.preparation import PreflightResult
+from app.stages.register.provider import DuplicateCheck
 from app.stages.register.service import RegisterService
 from app.stages.register.store import RegistrationStore
 from automation.acceptance.m5.harness.seams import (
@@ -70,6 +72,17 @@ from integrations.marketplaces.smartstore import readback as smartstore_readback
 from integrations.marketplaces.smartstore.adoption import SmartStoreAdoption
 
 MARKETPLACE = "smartstore"
+
+
+def _store_still_shows_no_match(candidate: PreflightResult) -> DuplicateCheck | None:
+    """The harness's send-time duplicate revalidation (offline, synthetic): no proof required, no
+    check; otherwise the same synthetic no-match the unit was frozen with."""
+    # Imported here: ``synthetic`` imports this module.
+    from automation.acceptance.m5.harness import synthetic
+
+    if not candidate.resolved.target.duplicate_proof_required:
+        return None
+    return DuplicateCheck(synthetic.no_match(candidate))
 
 
 @dataclass
@@ -181,6 +194,9 @@ def open_owners(
             clock=the_clock,
             authority=HarnessAuthority(),
             policy=policy or ExecutionPolicy(),
+            # ADR-0042 §6: the send-time duplicate revalidation is mandatory; the synthetic store
+            # still shows no match, exactly as the frozen evidence said.
+            duplicate_check=_store_still_shows_no_match,
         )
         registry = JobRegistry()
         registry.register(create_job_definition(execution, retry_policy=CREATE_POLICY))

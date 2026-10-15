@@ -12,6 +12,7 @@ Status: **ACCEPTED** 2026-09-19. This is PR-A of Issue #89 (kickoff `5740316498`
   - §28 and invariants M5-31–M5-36 replace, for SmartStore, the unreachable "retry after proven remote absence" path with positive-only reconcile, recovered provider identity, durable reconcile checks and one total, disjoint registration read state;
   - §10, §11, §17.2 and §22 are narrowed where they read on it;
   - the amendment is contract only: it authorizes no schema, migration, runtime code, endpoint adoption, provider call, LIVE change or canary.
+- It is amended by ADR-0042 (owner decisions Issue #219 `6190407624`, `6190978708`), effective with its slice S3b: §13 and §17.2 carry an amendment note each. The SmartStore duplicate-preflight evidence is the store-catalog duplicate source of ADR-0042 §6; nothing in §10, §14 or §28 changes.
 
 Apart from the two migrations §26 and §27 name, it authorizes no schema, migration, runtime code, UI, AI call, supplier request or marketplace call; the single endpoint adoption it authorizes is the bounded IMAGE UPLOAD of §17.1, which authorizes no real upload. **No real SmartStore request of any kind is authorized by it.** Each implementation PR (PR-B to PR-F) needs its own authorization, and a real CREATE needs a separate, explicit user authorization of a bounded scope.
 
@@ -369,6 +370,10 @@ provider listing exists
 - **No `allow_duplicate`** exists on the `ProductGroup` (ADR-0013 §4).
 - The duplicate scope starts at `ACCOUNT` (v3.1 §9.4). DB identity and marketplace compliance policy are never mixed.
 
+> **Amendment note (ADR-0042 §13, effective with S3b).** The adopted provider lookup evidence for
+> SmartStore is the catalog duplicate source of ADR-0042 §6. Its `NO_MATCH` holds relative to a
+> `COMPLETE` snapshot under 60 minutes old, and for new Intents only.
+
 ### 14. External removal and re-registration (ruling R4)
 
 M5's first vertical adds **no automatic DELETE** merely to clean up a CREATE. When an operator removes a SmartStore listing outside ICBM:
@@ -489,6 +494,11 @@ it adopts a strategy that never needs remote absence. The verdict itself stands 
 seller-side code, grant, proof or approval ever becomes remote-absence evidence for SmartStore.** For CREATE,
 §17's "idempotency and read-back behaviour" adoption requirement is met by recording the provider's actual
 (absent) idempotency and binding the endpoint to §28's never-resend rule — never by assuming idempotency.
+
+> **Amendment note (ADR-0042 §13, effective with S3b).** This note scopes the last paragraph.
+> "No lookup result … becomes remote-absence evidence" stays absolute for §10, §14 and §28. The
+> bounded duplicate-preflight use of ADR-0042 §6 is not remote-absence evidence and resolves no
+> ambiguity. The verdict stays `INSUFFICIENT`.
 
 #### 17.3 CREATE adoption amendment (ADR-0020 §4 order 1)
 

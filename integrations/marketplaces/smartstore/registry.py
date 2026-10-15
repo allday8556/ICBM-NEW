@@ -482,7 +482,41 @@ _PRODUCT_READ_FIELDS = frozenset(
 # response carries (Commerce API 2.90.0; Issue #89 5911962320): ``originProduct.statusType`` and
 # ``smartstoreChannelProduct.channelProductDisplayStatusType``. The channel-product read response
 # is not captured, so it keeps the narrower set.
-_ORIGIN_READ_FIELDS = _PRODUCT_READ_FIELDS | {"statusType", "channelProductDisplayStatusType"}
+_PUBLISHED_STATE_FIELDS = frozenset({"statusType", "channelProductDisplayStatusType"})
+# ADR-0042 S1a (§5.1 amendment 2, §5.3): the store-catalog leaves of the origin read whose paths
+# this catalog's official evidence records (``PRODUCT_READ.md`` § store-catalog field paths, E4):
+# the remaining seller codes, the leaf category, the combination options, the delivery fee and the
+# seller's own A/S contact (owner ``6190978708`` Q6). Deny-by-default still holds: a field with no
+# recorded path (the ``customerBenefit`` members, ``modelName``, brand, manufacturer, times) is not
+# here, and the catalog normalizer reads each leaf at exactly its path (``catalog.py``).
+_CATALOG_READ_FIELDS = frozenset(
+    {
+        "sellerBarcode",
+        "sellerCustomCode1",
+        "sellerCustomCode2",
+        "leafCategoryId",
+        "optionGroupName1",
+        "optionGroupName2",
+        "optionGroupName3",
+        "optionGroupName4",
+        "id",
+        "optionName1",
+        "optionName2",
+        "optionName3",
+        "optionName4",
+        "price",
+        "usable",
+        "deliveryType",
+        "deliveryAttributeType",
+        "deliveryFeeType",
+        "baseFee",
+        "freeConditionalAmount",
+        "deliveryFeePayType",
+        "afterServiceTelephoneNumber",
+        "afterServiceGuideContent",
+    }
+)
+_ORIGIN_READ_FIELDS = _PRODUCT_READ_FIELDS | _PUBLISHED_STATE_FIELDS | _CATALOG_READ_FIELDS
 _IMAGE_UPLOAD_FIELDS = frozenset({"url"})
 # The CREATE success response: the provider identifiers the official evidence names, plus the same
 # safe product leaves a read-back may keep — the response echoes ``originProduct``, the product
@@ -967,7 +1001,7 @@ def wire_identity(endpoint_id: EndpointId) -> tuple[str, str, str]:
 
 # ---------------------------------------------------------------- endpoint-mapping revision
 
-SMARTSTORE_ENDPOINT_MAPPING_REVISION = "m65-dispatch-r1"
+SMARTSTORE_ENDPOINT_MAPPING_REVISION = "s1a-store-catalog-r1"
 
 # ADR-0014 §15: the safe query-key / retained-response-field profile is versioned together with
 # the mapping revision, so it is part of the fingerprint below and cannot drift on its own.
@@ -1012,6 +1046,9 @@ MAPPING_FINGERPRINTS: Mapping[str, str] = {
     "ai-tags-r1": "9645e40ac9cad4abff0398ee772806650ffa46de573406aaa4f3bc9ac7e9cf14",
     # M6.5-C adopts the order dispatch (ADR-0025 §5.1), a mutation of the 주문 판매자 group.
     "m65-dispatch-r1": "ff7a27e0f8e0fb5bdcc3103a92630ec3c2cd6e9a550e5bb5c5f97af601813322",
+    # ADR-0042 S1a: the search's paging-only catalog request and the origin read's widened
+    # store-catalog retention (ENDPOINT_MATRIX.md §4.1.2 amendment). No endpoint is adopted.
+    "s1a-store-catalog-r1": "c3023131f1378f6f0a6aad02156aeaf26db6f0d313485ccd96017156baa8f976",
 }
 
 

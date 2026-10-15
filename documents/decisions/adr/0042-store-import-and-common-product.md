@@ -133,6 +133,8 @@ These two walkthroughs are the acceptance script of every slice (§14). Each sli
   - Every readiness that needs source facts stays not ready: pricing from cost, stock recheck, and a new registration from facts.
   - The listing can still be operated and edited with direct values (§9).
   - **Evidence-capture task (S2a):** how the 통합DB list (G1-C) and readiness derivation render a zero-member `ACTIVE` group. Pinned by tests.
+  - **Result (S2a; `tests/integration/operate/test_s2a_listing_links.py`).** The 통합DB list shows such a group like any `ACTIVE` product: no member, no membership revision, no Item; it is counted in 전체상품. Its detail lists no Item and names `PRODUCTS_MEMBERSHIP_REVISION_MISSING` as the reason nothing is selectable (「도매처가 연결되지 않아 아직 등록 대상으로 고를 수 없습니다.」), and the registration-target check refuses it. Readiness is derived per Item, so none derives for it: `active_items` omits it and the M4 review producer indexes nothing. The screen names it by its linked listing and marks it 「도매처 미연결」.
+  - **Member GTIN facts (S2a evidence, 2026-10-16).** No current supplier records a barcode: the M3 field registry (`app/stages/collect/facts.py` `FIELD_REGISTRY`) has no barcode or GTIN field, and no supplier parser or site configuration emits one. The §7 strong key "a valid GTIN against a member's facts" is nevertheless wired: S2a reads each member's CONFIRMED `gtin` fact of its current source revision (`products.store.GTIN_FIELD`), normalizes a valid GTIN to 14 digits and links on it like a seller code. Until a supplier records the fact, an imported listing's barcode links only against a listing of another store, and a listing with no other strong match becomes its own common product. Pinned by a test that seeds a member GTIN fact.
 - **A store listing is not a registration.**
   - An ICBM `MarketplaceRegistration` stays REGISTER's (ADR-0014).
   - An adoption stays ADR-0024's.
@@ -206,6 +208,13 @@ What a `COMPLETE` sync proves:
 **Staleness (owner `6190978708` Q1).** A snapshot is registration evidence for **60 minutes** from `as_of`. The value `catalog_max_age = 60 min` lives in the target policy, and later changes are audited. When the snapshot is older, or an ICBM mutation of that store has started since `as_of`:
 - the registration path first runs a **fresh sync automatically**. That is a routine read (ADR-0018 governance clarification), and the UI shows 「스토어 다시 확인 중…」;
 - until that sync is `COMPLETE`, the result is `DUPLICATE_EVIDENCE_STALE`, never `NO_MATCH`.
+
+**Coverage confirmation (tightening, S3b; seller-decides principle `6109102895`).** Whether the paging-only enumeration lists every sale status is not captured (E1 per status). So a `COMPLETE` snapshot is `NO_MATCH` evidence only after the seller has confirmed, once per store, in 통합DB › 「스토어 상품」, that the per-status counts shown there equal the seller center's (「판매자센터 상품 수와 같습니다」).
+- The confirmation is an append-only audit event: who, when, the sync run, its total and its per-status counts.
+- It stops holding for a later `COMPLETE` sync when a status class confirmed with at least one listing has none, or the total moved by more than `max(10, 20 %)` of the confirmed total. The seller then confirms again.
+- Until it holds, the result is `DUPLICATE_EVIDENCE_UNAVAILABLE`, and the duplicate row points to the tab. A positive match needs no confirmation.
+
+This tightens §6 and relaxes nothing: it adds a condition before a `NO_MATCH`.
 
 ### 5.3 What is stored: an allowlist
 

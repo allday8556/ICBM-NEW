@@ -3,7 +3,9 @@
 This store writes and reads the foundation rows and nothing more. It never decides:
 - which revision is current: the caller names the move and its reason (PR-C's materializer owns
   the automatic rule);
-- which source products belong together: grouping, matching, merge and split belong to callers;
+- which source products belong together: grouping, matching, merge and split belong to callers
+  (ADR-0042 S2a's MERGE of an empty group into a chosen survivor is recorded here as the caller
+  decided it, :meth:`ProductFoundationUnit.retire_into`);
 - a price or a readiness: PR-D;
 - a derived image: PR-E;
 - which tiers a revision states as offers: the materializer reads them
@@ -49,6 +51,7 @@ from app.stages.products.model import (
     SIGNATURE_VERSION,
     SOURCE_OFFER_PROVENANCE_FIELDS,
     BindingKind,
+    ChangeEventType,
     CompositionSpec,
     GroupStatus,
     MemberStatus,
@@ -74,6 +77,12 @@ from app.stages.products.quantity import OfferTerms
 OFFER_FIELDS = ("options", "quantity_tiers")
 # The source fact a product DB search reads, through each member's current source revision only.
 NAME_FIELD = "original_name"
+# ADR-0042 §7 (S2a): the source fact a member's barcode (GTIN) is read from, compared with a store
+# listing's valid GTIN as a strong key. No supplier records it today: the M3 field registry
+# (``app.stages.collect.facts.FIELD_REGISTRY``) has no barcode field and no supplier parser or site
+# configuration emits one (checked 2026-10-16). The comparison is wired, so it links as soon as a
+# CONFIRMED fact under this key appears.
+GTIN_FIELD = "gtin"
 
 
 def current_revision_for_confirmed_member(
@@ -153,6 +162,27 @@ class ConfirmedMembership:
     member_id: str
     product_group_id: str
     group_status: GroupStatus
+
+
+@dataclass(frozen=True)
+class GroupShape:
+    """What one group holds now: its status, its CONFIRMED members and its Items, counted."""
+
+    product_group_id: str
+    status: GroupStatus
+    confirmed_members: int
+    items: int
+
+
+@dataclass(frozen=True)
+class MemberName:
+    """One CONFIRMED member and the name its current source revision states, if CONFIRMED, and
+    the barcode (GTIN) text it states, if CONFIRMED (:data:`GTIN_FIELD`)."""
+
+    supplier_key: str
+    source_product_id: str
+    name: str | None
+    gtin: str | None = None
 
 
 @dataclass(frozen=True)
@@ -598,6 +628,175 @@ class ProductFoundationUnit:
         )
         self.session.flush()
         return group_id
+
+    def group_shape(self, product_group_id: str) -> GroupShape | None:
+        """What a group holds now: its status, CONFIRMED members and Items (ADR-0042 §7)."""
+        group = self.session.get(ProductGroup, product_group_id)
+        if group is None:
+            return None
+        members = self.session.scalar(
+            select(func.count())
+            .select_from(GroupMember)
+            .where(
+                GroupMember.product_group_id == product_group_id,
+                GroupMember.status == MemberStatus.CONFIRMED.value,
+            )
+        )
+        items = self.session.scalar(
+            select(func.count())
+            .select_from(ProductItem)
+            .where(ProductItem.product_group_id == product_group_id)
+        )
+        return GroupShape(product_group_id, GroupStatus(group.status), members or 0, items or 0)
+
+    def group_shapes(self, product_group_ids: Iterable[str]) -> dict[str, GroupShape]:
+        """:meth:`group_shape` of many groups in three reads (a screen of many products)."""
+        wanted = sorted(set(product_group_ids))
+        if not wanted:
+            return {}
+        members = dict(
+            self.session.execute(
+                select(GroupMember.product_group_id, func.count())
+                .where(
+                    GroupMember.product_group_id.in_(wanted),
+                    GroupMember.status == MemberStatus.CONFIRMED.value,
+                )
+                .group_by(GroupMember.product_group_id)
+            )
+            .tuples()
+            .all()
+        )
+        items = dict(
+            self.session.execute(
+                select(ProductItem.product_group_id, func.count())
+                .where(ProductItem.product_group_id.in_(wanted))
+                .group_by(ProductItem.product_group_id)
+            )
+            .tuples()
+            .all()
+        )
+        return {
+            str(group_id): GroupShape(
+                str(group_id),
+                GroupStatus(status),
+                int(members.get(group_id, 0)),
+                int(items.get(group_id, 0)),
+            )
+            for group_id, status in self.session.execute(
+                select(ProductGroup.product_group_id, ProductGroup.status).where(
+                    ProductGroup.product_group_id.in_(wanted)
+                )
+            ).tuples()
+        }
+
+    def retire_into(
+        self,
+        retired_group_id: str,
+        survivor_group_id: str,
+        *,
+        decided_by: str,
+        correlation_id: str,
+    ) -> str:
+        """ADR-0013 §4 MERGE of a group with no CONFIRMED member and no Item into a survivor the
+        caller chose (ADR-0042 §7): the merge is recorded as a ``GroupChangeEvent`` and the
+        retired group stays addressable as history. A group that holds a member or an Item is
+        never retired here: moving a CONFIRMED member is its own decision (SCP-13)."""
+        if retired_group_id == survivor_group_id:
+            raise InputValidationError(
+                "PRODUCTS_MERGE_SAME_GROUP", "a group is never merged into itself"
+            )
+        retired = self.group_shape(retired_group_id)
+        survivor = self.group_shape(survivor_group_id)
+        if retired is None or survivor is None:
+            raise NotFoundError("PRODUCTS_PRODUCT_UNKNOWN", "no product has that identifier")
+        if retired.status is not GroupStatus.ACTIVE or survivor.status is not GroupStatus.ACTIVE:
+            raise InputValidationError(
+                "PRODUCTS_MERGE_GROUP_NOT_ACTIVE", "only ACTIVE products are merged"
+            )
+        if retired.confirmed_members or retired.items:
+            raise InputValidationError(
+                "PRODUCTS_MERGE_RETIRED_NOT_EMPTY",
+                "only a product with no confirmed member and no Item is retired by a merge",
+            )
+        row = self.session.get(ProductGroup, retired_group_id)
+        assert row is not None
+        now = self._clock.now()
+        row.status, row.retired_at = GroupStatus.RETIRED.value, now
+        event_id = str(uuid.uuid4())
+        self.session.add(
+            GroupChangeEvent(
+                event_id=event_id,
+                event_type=ChangeEventType.MERGE.value,
+                predecessor_group_ids=json.dumps(sorted([retired_group_id, survivor_group_id])),
+                successor_group_ids=json.dumps([survivor_group_id]),
+                membership_revision_id=None,
+                decided_by=decided_by,
+                correlation_id=correlation_id,
+                created_at=now,
+            )
+        )
+        self.session.flush()
+        return event_id
+
+    def member_names(self) -> dict[str, tuple[MemberName, ...]]:
+        """Each ACTIVE group's CONFIRMED members with the ``original_name`` their **current**
+        source revision states, when CONFIRMED (``None`` otherwise). A read for proposals only
+        (ADR-0042 §7): nothing is chosen as the product's name."""
+        rows = self.session.execute(
+            select(
+                GroupMember.product_group_id,
+                SourceProduct.source_product_uid,
+                SourceProduct.supplier_key,
+                SourceProduct.source_product_id,
+            )
+            .join(SourceProduct, SourceProduct.source_product_uid == GroupMember.source_product_uid)
+            .join(ProductGroup, ProductGroup.product_group_id == GroupMember.product_group_id)
+            .where(
+                GroupMember.status == MemberStatus.CONFIRMED.value,
+                ProductGroup.status == GroupStatus.ACTIVE.value,
+            )
+            .order_by(
+                GroupMember.product_group_id,
+                SourceProduct.supplier_key,
+                SourceProduct.source_product_id,
+            )
+        ).tuples()
+        found: dict[str, list[MemberName]] = {}
+        for group_id, uid, supplier_key, source_product_id in rows:
+            move = self.current_move(uid)
+            name = gtin = None
+            if move is not None:
+                reading = self.source_fields(move.revision_id, (NAME_FIELD,)).get(NAME_FIELD)
+                if reading is not None and reading.status is FieldStatus.CONFIRMED:
+                    text = getattr(reading.value, "text", None)
+                    name = text if isinstance(text, str) and text else None
+                gtin = self._confirmed_text(move.revision_id, GTIN_FIELD)
+            found.setdefault(group_id, []).append(
+                MemberName(supplier_key, source_product_id, name, gtin)
+            )
+        return {group_id: tuple(names) for group_id, names in found.items()}
+
+    def _confirmed_text(self, revision_id: str, field_key: str) -> str | None:
+        """The text of one CONFIRMED field of a revision, read raw: a ``{"text": …}`` value (the
+        M3 text shape) or a bare JSON string. Anything else, or a field under review or absent,
+        is ``None``. Used for :data:`GTIN_FIELD`, which the M3 registry does not name yet, so it
+        is not read through it."""
+        value_json = self.session.scalar(
+            select(ProductFactsField.value_json).where(
+                ProductFactsField.revision_id == revision_id,
+                ProductFactsField.field_key == field_key,
+                ProductFactsField.status == FieldStatus.CONFIRMED.value,
+            )
+        )
+        if value_json is None:
+            return None
+        try:
+            value = json.loads(value_json)
+        except ValueError:
+            return None
+        if isinstance(value, dict):
+            value = value.get("text")
+        return value if isinstance(value, str) and value.strip() else None
 
     def confirmed_membership(self, source_product_uid: str) -> ConfirmedMembership | None:
         """The source product's one CONFIRMED member, if it has one, and its group's status."""
@@ -1206,18 +1405,28 @@ class ProductFoundationUnit:
     # ------------------------------------------------------------------ product DB list (G1-C)
 
     def active_product_page(
-        self, *, needle: str | None, after: ProductPageKey | None, limit: int
+        self,
+        *,
+        needle: str | None,
+        after: ProductPageKey | None,
+        limit: int,
+        also: Iterable[str] = (),
     ) -> ProductPage:
         """One page of ACTIVE Products, newest first, strictly after ``after``.
 
         A retired group is history: it is never listed, and stays addressable by its identifier.
         With a ``needle`` only Products that match it now are counted and listed
-        (:func:`_matches_now`). The order is total and every key is immutable, so paging an
-        unchanged database neither repeats nor skips a Product.
+        (:func:`_matches_now`), and the Products the caller names in ``also`` — those whose linked
+        store listing's name matches the same search (ADR-0042 S2a). The order is total and every
+        key is immutable, so paging an unchanged database neither repeats nor skips a Product.
         """
         matching = ProductGroup.status == GroupStatus.ACTIVE.value
         if needle is not None:
-            matching = and_(matching, _matches_now(needle))
+            named = sorted(set(also))
+            found = _matches_now(needle)
+            if named:
+                found = or_(found, ProductGroup.product_group_id.in_(named))
+            matching = and_(matching, found)
         total = self.session.scalar(select(func.count()).select_from(ProductGroup).where(matching))
         query = select(ProductGroup.created_at, ProductGroup.product_group_id).where(matching)
         if after is not None:

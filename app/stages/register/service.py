@@ -69,6 +69,9 @@ from app.stages.register.contracts import (
     BulkCreateResult,
     CategoryChoiceView,
     CategoryView,
+    DuplicateCheckView,
+    DuplicateMatchView,
+    DuplicateOverrideResult,
     FieldStateView,
     FieldValueView,
     GuidanceChoiceView,
@@ -124,7 +127,7 @@ from app.stages.register.model import (
 )
 from app.stages.register.preflight import CapabilityReader, RegistrationPreflightService
 from app.stages.register.preview import SnapshotPreviewView, preview
-from app.stages.register.provider import WireProjector
+from app.stages.register.provider import DuplicateCheck, WireProjector
 from app.stages.register.read_state import (
     READ_STATE_LABELS,
     READ_STATE_PARTITION_VERSION,
@@ -757,9 +760,10 @@ class RegisterService:
         """Ask the preflight owner what these inputs are worth against current truth (§3).
 
         No job exists yet and none is needed, nothing is stored, and the status and every reason
-        code are the owner's own.
+        code are the owner's own. With a duplicate-proof policy the duplicate-evidence owner's
+        current answer is part of it, exactly as the screen shows it (ADR-0042 S3b).
         """
-        result = self._require_authoring().evaluate(preparation_id)
+        result, _ = self._require_authoring().evaluate_current(preparation_id)
         return ActionResult(
             action=RegisterAction.EVALUATE,
             preparation_id=preparation_id,
@@ -862,7 +866,11 @@ class RegisterService:
             decode_send_request(payload)
             frozen_unit_identity(payload)
             return intent, payload
-        copy = self._require_authoring().execution_copy(intent.registration_snapshot_id)
+        # ADR-0042 §6: the first CREATE copy adds the positive seller-code spot check; a store
+        # listing the snapshot did not show refuses the copy, and nothing is queued.
+        copy = self._require_authoring().execution_copy(
+            intent.registration_snapshot_id, spot_check=True
+        )
         payload = encode_send_request(
             intent_id,
             copy.request,
@@ -1028,7 +1036,18 @@ class RegisterService:
         """
         chosen = [item for item in draft.items if item.item_id in set(item_ids)]
         facts, facts_problem = self._item_facts(draft.draft_id, tuple(sorted(item_ids)))
-        preflight, preflight_problem = self._candidate_of(authored)
+        preflight, preflight_problem, check = self._current_of(authored)
+        duplicate = (
+            None
+            if check is None or preflight is None
+            else self._duplicate_view(
+                check,
+                preflight,
+                draft.marketplace_key,
+                draft.marketplace_account_id,
+                {item.product_group_id for item in chosen},
+            )
+        )
         return self._unit_view(
             draft,
             unit_ref=(
@@ -1046,6 +1065,7 @@ class RegisterService:
             snapshot=None,
             intent=None,
             conflicting_intents=(),
+            duplicate=duplicate,
         )
 
     def _unit_view(
@@ -1063,6 +1083,7 @@ class RegisterService:
         snapshot: SnapshotRecord | None,
         intent: IntentRecord | None,
         conflicting_intents: tuple[str, ...],
+        duplicate: DuplicateCheckView | None = None,
     ) -> UnitView:
         store = self._require_store()
         attempts = () if intent is None else store.attempts(intent.intent_id)
@@ -1099,6 +1120,7 @@ class RegisterService:
             preflight=preflight,
             preflight_unavailable_reason=preflight_unavailable_reason,
             item_facts_unavailable_reason=item_facts_unavailable_reason,
+            duplicate=duplicate,
             snapshot=None if snapshot is None else _snapshot_view(snapshot),
             intent=(
                 None
@@ -1194,7 +1216,10 @@ class RegisterService:
             return SCOPE_PAUSED if budget.paused_by is not None else BUDGET_EXHAUSTED
         if self._send_request(intent.intent_id) is None:
             try:
-                self._require_authoring().execution_copy(intent.registration_snapshot_id)
+                # An availability read, not the first CREATE copy: no provider search here.
+                self._require_authoring().execution_copy(
+                    intent.registration_snapshot_id, spot_check=False
+                )
             except AppError as exc:
                 return exc.code
         return None
@@ -1451,6 +1476,81 @@ class RegisterService:
         if revision is None:  # pragma: no cover - a link names a revision of its own preparation
             return None, PREFLIGHT_INPUTS_NOT_DURABLE
         return self._candidate(authored, revision, generation=provenance.identity_generation)
+
+    def _current_of(
+        self, authored: PreparationRecord | None
+    ) -> tuple[PreflightView | None, str | None, DuplicateCheck | None]:
+        """The candidate the seller sees for an unfrozen unit (ADR-0042 §0 a4): with a
+        duplicate-proof policy, evaluated with the duplicate-evidence owner's current answer — the
+        store snapshot's evidence, or why there is none — by the owner that decides it."""
+        if self._preflight is None or authored is None or self._authoring is None:
+            view, problem = self._candidate_of(authored)
+            return view, problem, None
+        try:
+            result, check = self._authoring.evaluate_current(authored.preparation_id)
+        except AppError as refused:
+            return None, refused.code, None
+        return _preflight_view(result, source=PREPARATION_SOURCE, matches=None), None, check
+
+    def _duplicate_view(
+        self,
+        check: DuplicateCheck,
+        preflight: PreflightView,
+        marketplace_key: str,
+        marketplace_account_id: str,
+        groups: set[str],
+    ) -> DuplicateCheckView:
+        """The duplicate row, rendered from the owner's answer and the owner's reasons."""
+        if check.evidence is not None:
+            state = "MATCH" if check.matched else "NO_MATCH"
+        elif check.resyncing:
+            state = "RESYNCING"
+        elif check.coverage_unconfirmed:
+            # ADR-0042 §5.2 tightening: the seller confirms the store's counts in 「스토어 상품」.
+            state = "COVERAGE_UNCONFIRMED"
+        else:
+            state = check.problem or "UNAVAILABLE"
+        overrides = self._require_authoring().active_overrides(
+            marketplace_key, marketplace_account_id, groups
+        )
+        return DuplicateCheckView(
+            state=state.removeprefix("DUPLICATE_EVIDENCE_"),
+            as_of=check.as_of,
+            matches=tuple(
+                DuplicateMatchView(
+                    key_kind=match.key_kind.value,
+                    marketplace_product_id=match.marketplace_product_id,
+                    name=match.name,
+                    sale_status=match.sale_status,
+                )
+                for match in check.matched
+            ),
+            codes=tuple(reason.code for reason in preflight.reasons if "DUPLICATE" in reason.areas),
+            override_ids=tuple(override.override_id for override in overrides),
+        )
+
+    def record_duplicate_override(
+        self, preparation_id: str, *, reason: str, actor: str, correlation_id: str
+    ) -> DuplicateOverrideResult:
+        """「의도적으로 한 번 더 등록」, recorded by the preparation owner (ADR-0014 §13)."""
+        records = self._require_authoring().record_duplicate_override(
+            preparation_id, reason=reason, actor=actor, correlation_id=correlation_id
+        )
+        return DuplicateOverrideResult(
+            preparation_id=preparation_id,
+            override_ids=tuple(record.override_id for record in records),
+            active=True,
+        )
+
+    def revoke_duplicate_override(
+        self, preparation_id: str, override_id: str, *, actor: str, correlation_id: str
+    ) -> DuplicateOverrideResult:
+        record = self._require_authoring().revoke_duplicate_override(
+            preparation_id, override_id, actor=actor, correlation_id=correlation_id
+        )
+        return DuplicateOverrideResult(
+            preparation_id=preparation_id, override_ids=(record.override_id,), active=False
+        )
 
     def _candidate_of(
         self, authored: PreparationRecord | None

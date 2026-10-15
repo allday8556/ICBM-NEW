@@ -16,8 +16,9 @@ Pure and provider-neutral: no database, no provider, no I/O. Nothing here is Sma
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
+from datetime import timedelta
 from enum import StrEnum
-from typing import Protocol
+from typing import Final, Protocol
 
 from app.stages.products.model import ReadinessStatus
 from app.stages.products.pricing import PricingContextInput
@@ -39,17 +40,36 @@ SATISFYING: frozenset[Provenance] = frozenset(
 
 class DuplicateKeyKind(StrEnum):
     """The provider lookup keys of the duplicate preflight (ADR-0014 §13). A normalized name is
-    only a weaker signal."""
+    only a weaker signal. ``LISTING_LINK`` (ADR-0042 §6, S2a) is a store listing already linked to
+    the unit's common product: one listing per product and store, so it is strong."""
 
     SELLER_CODE = "SELLER_CODE"
     GTIN = "GTIN"
     OFFICIAL_KEY = "OFFICIAL_KEY"
     NORMALIZED_NAME = "NORMALIZED_NAME"
+    LISTING_LINK = "LISTING_LINK"
 
 
 STRONG_KEYS: frozenset[DuplicateKeyKind] = frozenset(
-    {DuplicateKeyKind.SELLER_CODE, DuplicateKeyKind.GTIN, DuplicateKeyKind.OFFICIAL_KEY}
+    {
+        DuplicateKeyKind.SELLER_CODE,
+        DuplicateKeyKind.GTIN,
+        DuplicateKeyKind.OFFICIAL_KEY,
+        DuplicateKeyKind.LISTING_LINK,
+    }
 )
+
+# ADR-0042 §5.2 (owner 6190978708 Q1): a COMPLETE store-catalog snapshot is duplicate evidence for
+# at most 60 minutes from its start. The target policy holds the value (``catalog_max_age``); a
+# revision may shorten it, never lengthen it past this owner-decided bound.
+CATALOG_MAX_AGE_MINUTES: Final = 60
+CATALOG_MAX_AGE: Final = timedelta(minutes=CATALOG_MAX_AGE_MINUTES)
+
+# Owner ruling (Issue #219 ``6190407624``): duplicate checking stays ON. For these marketplaces a
+# policy can never turn duplicate proof off: a new revision that tries is refused, a stored one
+# that holds ``false`` is read as ``true``, and the CREATE send path revalidates whatever a flag
+# says.
+DUPLICATE_PROOF_MANDATORY: Final = frozenset({"smartstore"})
 
 
 class FieldValueType(StrEnum):
@@ -217,6 +237,14 @@ class TargetPolicy:
     templates: Mapping[str, str] = field(default_factory=dict)
     duplicate_proof_required: bool = True
     duplicate_lookup_keys: frozenset[DuplicateKeyKind] = frozenset({DuplicateKeyKind.SELLER_CODE})
+    # ADR-0042 §5.2: how long a COMPLETE store-catalog snapshot stays duplicate evidence, from its
+    # start. A revision that names none reads the owner-decided 60 minutes.
+    catalog_max_age: timedelta = CATALOG_MAX_AGE
+
+    def __post_init__(self) -> None:
+        # A stored revision holding ``false`` is never rewritten; it is only read as ``true``.
+        if self.marketplace_key in DUPLICATE_PROOF_MANDATORY and not self.duplicate_proof_required:
+            object.__setattr__(self, "duplicate_proof_required", True)
 
 
 class RegistrationMetadataSource(Protocol):

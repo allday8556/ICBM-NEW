@@ -40,7 +40,7 @@ so `JobRunner.reconcile_terminal_owners()` converges after any crash.
 """
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from types import MappingProxyType
@@ -77,9 +77,11 @@ from app.stages.register.model import (
     publication_asset_kind,
     sanitized_digest,
 )
-from app.stages.register.policy import DuplicateKeyKind, Provenance
+from app.stages.register.policy import DUPLICATE_PROOF_MANDATORY, DuplicateKeyKind, Provenance
 from app.stages.register.preflight import CapabilityReader, RegistrationPreflightService
 from app.stages.register.preparation import (
+    DUPLICATE_EVIDENCE_STALE,
+    DUPLICATE_EVIDENCE_UNAVAILABLE,
     CategoryConfirmation,
     CategorySelection,
     DetailComposition,
@@ -95,6 +97,7 @@ from app.stages.register.preparation import (
 )
 from app.stages.register.provider import (
     CreateSender,
+    DuplicateCheck,
     LookupStatus,
     ReadbackComparator,
     ReadbackSource,
@@ -126,6 +129,15 @@ CREATE_JOB_TYPE: Final = "register.create"
 # attempt already proven NOT_APPLIED_PROVEN ever reaches it (§9).
 CREATE_POLICY: Final = RetryPolicy(max_attempts=3, base_delay_s=60.0, factor=2.0, max_delay_s=900.0)
 SEND_REQUEST_VERSION: Final = "registration-send-request/v1"
+# ADR-0042 §5.2 (S3b): a CREATE not yet sent whose store snapshot went stale only because an ICBM
+# mutation of the store started since — the previous unit of a bulk run — waits for the automatic
+# re-sync through the job's own retry schedule, for at most this long after that mutation began.
+DUPLICATE_RESYNC_WAIT: Final = "REGISTER_DUPLICATE_RESYNC_WAIT"
+DUPLICATE_RESYNC_WAIT_CAP: Final = timedelta(minutes=10)
+# ADR-0042 §6: a CREATE send refuses when no send-time duplicate revalidation is wired.
+DUPLICATE_REVALIDATION_NOT_WIRED: Final = "REGISTER_SEND_DUPLICATE_REVALIDATION_NOT_WIRED"
+# Owner ruling #219 6190407624: a SmartStore CREATE always has a duplicate check.
+DUPLICATE_CHECK_REQUIRED: Final = "REGISTER_SEND_DUPLICATE_CHECK_REQUIRED"
 EXECUTION_POLICY_VERSION: Final = "registration-execution-policy/v1"
 # The job states in which a CREATE job is still the queued work of its Intent (ADR-0005).
 ACTIVE_JOB_STATES: Final = (
@@ -665,7 +677,10 @@ class RegistrationExecutionService:
         authority: CreateAuthority,
         policy: ExecutionPolicy | None = None,
         actor: str = "worker",
+        duplicate_check: Callable[[PreflightResult], DuplicateCheck | None] | None = None,
     ) -> None:
+        # ADR-0042 §6: the duplicate-evidence owner's current answer, read again at send time.
+        self._duplicate_check = duplicate_check
         self._registrations = registrations
         self._preflight = preflight
         self._sender = sender
@@ -778,6 +793,7 @@ class RegistrationExecutionService:
         # The owner-write fence, read before the final preflight is re-evaluated: the unit below
         # reads it again first, under the write coordinator, and refuses if any owner wrote in
         # between — so the send gate is still current at the mutation-start boundary (§4.3).
+        request = self._send_time_duplicates(request, generation, intent.marketplace_key)
         truth_fence = self._authority.truth_fence()
         fresh = self._gate(intent, snapshot, request, prepared, generation)
         sanitized_request = self._sanitized_request(snapshot, fresh)
@@ -901,6 +917,59 @@ class RegistrationExecutionService:
         )
 
     # ------------------------------------------------------------------ the send gate (§3)
+
+    def _send_time_duplicates(
+        self, request: PreflightRequest, identity_generation: int, marketplace_key: str
+    ) -> PreflightRequest:
+        """ADR-0042 §6: freshness is checked again at send time, before anything is sent.
+
+        The frozen request carries the evidence the Snapshot was frozen with. The duplicate owner
+        is asked again; its current evidence replaces it, so the gate's fingerprint comparison
+        refuses any change (a new match is never sent over). Without current evidence nothing is
+        sent: a snapshot stale only because ICBM changed the store since its start waits for the
+        automatic re-sync (a TRANSIENT refusal the job's retry schedule repeats, never an
+        attempt), for at most ``DUPLICATE_RESYNC_WAIT_CAP``; anything else is refused as it is.
+        """
+        if self._duplicate_check is None:
+            # Fail closed: a CREATE is never sent without its send-time duplicate revalidation.
+            raise ExecutionRefused(
+                DUPLICATE_REVALIDATION_NOT_WIRED,
+                "no send-time duplicate revalidation is wired; nothing is sent",
+            )
+        # Owner ruling #219 6190407624: for SmartStore the check runs whatever a flag says, so a
+        # request frozen without evidence is revalidated too (its fingerprint then refuses it).
+        mandatory = marketplace_key in DUPLICATE_PROOF_MANDATORY
+        if request.duplicate_evidence is None and not mandatory:
+            return request
+        candidate = self._preflight.candidate(request, identity_generation=identity_generation)
+        check = self._duplicate_check(candidate)
+        if check is None:
+            if mandatory:
+                raise ExecutionRefused(
+                    DUPLICATE_CHECK_REQUIRED,
+                    "this marketplace's CREATE is never sent without a duplicate check",
+                )
+            return request
+        if check.evidence is not None:
+            return replace(request, duplicate_evidence=check.evidence)
+        since = check.stale_since_mutation
+        if (
+            check.problem == DUPLICATE_EVIDENCE_STALE
+            and since is not None
+            and self._clock.now() - since <= DUPLICATE_RESYNC_WAIT_CAP
+        ):
+            raise ExecutionRefused(
+                DUPLICATE_RESYNC_WAIT,
+                "the store is being checked again after ICBM's own change; the CREATE waits",
+                error_class=ErrorClass.TRANSIENT,
+                details={"resyncing": check.resyncing},
+            )
+        problem = check.problem or DUPLICATE_EVIDENCE_UNAVAILABLE
+        raise ExecutionRefused(
+            f"REGISTER_SEND_{problem}",
+            "no current store-catalog duplicate evidence; nothing is sent",
+            details={"problem": problem, "resyncing": check.resyncing},
+        )
 
     def _gate(
         self,
