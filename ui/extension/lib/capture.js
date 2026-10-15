@@ -151,6 +151,9 @@ export async function captureInPage(policy) {
   // parsed as data (JSON.parse, never run), bounded, and projected onto the declared allowlist.
   // Nothing outside the allowlist leaves the page, and the script's text is never sent. Any
   // mismatch sends no data at all, only the code that says why: the DOM capture itself goes on.
+  // The parsed argument itself stays in this function: only its projection is sent. The
+  // description step reads its document's URL from here (ADR-0040 §3.2, OC-09).
+  let argumentData;
   const embedded = (rule) => {
     const mismatch = (code) => ({ refused: code });
     const scripts = Array.from(document.scripts).filter(
@@ -222,6 +225,7 @@ export async function captureInPage(policy) {
         for (const child of Object.values(value)) pending.push([child, depth + 1]);
       }
     }
+    argumentData = parsed;
     // The allowlist as a tree. A path is dot-separated segments: a key name, or "*" for every key
     // of a map; a segment ending in "[]" names an array whose every element the rest applies to.
     const tree = () => ({ keys: new Map(), any: null, each: false, type: null });
@@ -285,16 +289,17 @@ export async function captureInPage(policy) {
 
   // ---- 6. the description images (ADR-0040 §3.2, OC-09; 1688 only) -----------------------
   // Only a policy that declares `description` has them. Inside this same user-started capture,
-  // the one description document the page names (its URL, from the projection above) is read
+  // the one description document the page names (its URL, read from the parsed argument above
+  // and never sent: OC-09 lets only image references leave the page) is read
   // once, from a declared host, with no cookies and no redirect, under the byte bound. Its literal
   // is cut between the declared prefix and terminator and parsed as data (JSON.parse, never run);
   // its `content` HTML is parsed into an inert document (DOMParser: nothing runs, nothing loads,
   // nothing is inserted into the page). Only the image references on the declared image hosts
   // leave the page, in document order and de-duplicated. Any mismatch sends no images, only the
   // code that says why.
-  const describe = async (rule, projection) => {
+  const describe = async (rule, argument) => {
     const mismatch = (code) => ({ refused: code });
-    let stated = projection;
+    let stated = argument;
     for (const step of rule.url_path.split(".")) {
       stated = stated !== null && typeof stated === "object" ? stated[step] : undefined;
     }
@@ -399,8 +404,7 @@ export async function captureInPage(policy) {
     return { images: found.slice(0, rule.max_image_refs), total: found.length };
   };
   if (policy.description) {
-    const projection = member.embedded_data && member.embedded_data.projection;
-    member.description_images = await describe(policy.description, projection);
+    member.description_images = await describe(policy.description, argumentData);
   }
 
   return {

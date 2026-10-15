@@ -59,7 +59,7 @@ def _reference() -> dict[str, str]:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
-    return {"revision": "ali1688-capture-2", "digest": hashlib.sha256(canonical).hexdigest()}
+    return {"revision": "ali1688-capture-3", "digest": hashlib.sha256(canonical).hexdigest()}
 
 
 def _projection() -> dict[str, Any]:
@@ -241,6 +241,50 @@ def test_a_member_outside_the_allowlist_is_refused_and_its_fields_wait_for_revie
     assert reasons == {"EMBEDDED_PATH_NOT_ALLOWED"}
     stored = json.dumps(rows(config, "SELECT * FROM product_facts_evidence"), ensure_ascii=False)
     assert "某省某市" not in stored
+
+
+@pytest.mark.parametrize(
+    ("detail_url", "outcome"),
+    [
+        # A plain URL reaches the allowlist re-check: the whole member is refused.
+        ("https://itemcdn.tmall.com/1688offer/icoss5072039755", ("RECORDED", None)),
+        # One with a credential or a secret query is refused with the whole capture.
+        (
+            "https://user:pw@itemcdn.tmall.com/1688offer/icoss1?token=abcdefgh12345678",
+            ("FAILED", "EXTENSION_FINAL_SCAN_REFUSED"),
+        ),
+    ],
+)
+def test_a_member_that_carries_the_description_url_is_refused(
+    client: TestClient,
+    config: AppConfig,
+    gateway: FakeGateway,
+    detail_url: str,
+    outcome: tuple[str, str | None],
+) -> None:
+    # OC-09: the description's URL is a browser-only read; the policy never projects it.
+    projection = _projection()
+    projection["result"]["data"]["description"] = {"fields": {"detailUrl": detail_url}}
+    response = post_capture(client, pair(_container(client)), _capture({"projection": projection}))
+    run = wait_for_outcome(client, response.json()["collection_run_id"])
+    assert run["outcome"] == outcome[0]
+    if outcome[1] is None:
+        assert run["facts_status"] == "REVIEW_REQUIRED"
+        reasons = {
+            normalized
+            for (normalized,) in rows(
+                config, "SELECT normalized FROM product_facts_evidence WHERE locator = 'embedded'"
+            )
+        }
+        assert reasons == {"EMBEDDED_PATH_NOT_ALLOWED"}
+    else:
+        assert run["detail"] == outcome[1]
+        assert rows(config, "SELECT COUNT(*) FROM product_facts_revisions") == [(0,)]
+    assert gateway.document_reads == 0
+    assert not any("itemcdn" in url for url in gateway.image_reads)
+    stored = json.dumps(rows(config, "SELECT * FROM product_facts_evidence"), ensure_ascii=False)
+    for never in ("itemcdn", "detailUrl", "token="):
+        assert never not in stored, never
 
 
 def test_a_browser_refusal_is_recorded_as_its_code(

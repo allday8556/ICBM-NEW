@@ -1,7 +1,7 @@
 {
   "schema": "icbm-browser-capture-policy/v1",
   "supplier_key": "ali1688",
-  "revision": "ali1688-capture-2",
+  "revision": "ali1688-capture-3",
   "host": "detail.1688.com",
   "product_root": {"by": "id", "token": "gallery"},
   "allowed_regions": [
@@ -78,8 +78,7 @@
       {"path": "result.data.Root.fields.dataJson.skuModel.skuInfoMap.*.canBookCount", "type": "integer"},
       {"path": "result.data.Root.fields.dataJson.skuModel.skuInfoMap.*.isPromotionSku", "type": "boolean"},
       {"path": "result.data.shippingServices.fields.freightInfo.location", "type": "string"},
-      {"path": "result.data.shippingServices.fields.freightInfo.totalCost", "type": "number"},
-      {"path": "result.data.description.fields.detailUrl", "type": "string"}
+      {"path": "result.data.shippingServices.fields.freightInfo.totalCost", "type": "number"}
     ]
   },
   "description": {

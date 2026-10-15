@@ -1,11 +1,12 @@
 """1688's collector over the five pinned captures (ADR-0040 §3, §4; slice C2).
 
 Each fixture is exactly what the extension's own ``captureInPage`` cut in the owner's signed-in
-browser on 2026-10-14: the product-scope DOM and the projected embedded-data member (the bytes of
-that capture, which states ``description.fields.detailUrl`` again under ADR-0040 §3.2). The
+browser on 2026-10-14: the product-scope DOM and the projected embedded-data member. The
 ``description_images`` members were cut on 2026-10-15 by the same ``captureInPage`` with the
-description step, on the same pages, whose ``detailUrl`` was unchanged (§3.2, OC-09). Nothing here
-reaches a network.
+description step, on the same pages (ADR-0040 §3.2, OC-09). The description's URL is read in
+the browser from the parsed argument and is never projected, so the embedded members are the
+bytes ``captureInPage`` sends: the 2026-10-14 projections, with nothing of the description.
+Nothing here reaches a network.
 """
 
 import copy
@@ -63,23 +64,23 @@ NUMBERS = ("990041659965", "970942992948", "959613200255", "1051005117944", "106
 PINNED = {
     "990041659965.html": "895af94fb85893b9b60513a9b2fc0db0148c8810f06320f0c8a891bd21b016e0",
     "990041659965.embedded.json": (
-        "12f9683ffc272eb9ed58e5d832fe612c4e0601f9836a63e11186b1afe2e00cb6"
+        "4a2591f9431b355469085962f9c7336ac05d20c4d412a2f561921fe71a056f74"
     ),
     "970942992948.html": "a98d64304ccab16521f49ecc6f2bee08544a9ee7e3c8e4c83902241954971615",
     "970942992948.embedded.json": (
-        "1c38c6c1ce9a0ba2bc435dc05eb79211a1fc570db8271ff4b5b09e084fe063f5"
+        "30c134b488b9cc043089088f7401ff9bbf2490923d6dbe6089bd67746bd4a99b"
     ),
     "959613200255.html": "f2b3f8ac6b0426f06eb60a5f82bf6851eaaf238e9a997cfb7817178bd01a9ff5",
     "959613200255.embedded.json": (
-        "d85074e500effd0549d9ddf8accc336087ce2436d8b573f57eff038fe274d8cd"
+        "6aa0350c1a7cf1d51a4cf1397d7a480099e859fc58739c5d830d48916646ba26"
     ),
     "1051005117944.html": "36e041d0577fc6a55bf6b78f971194d8641480138bc69f92c441350d1fb12f3f",
     "1051005117944.embedded.json": (
-        "2ac0c5bfc18d831a4ffa32077dd56ac362c0ae2dfc4d4c01989623150b55f84c"
+        "7cb1197804c9517358a24a6aac9faa988dde4bd7bb84103145172a2ddd6a808f"
     ),
     "1066237370938.html": "3000b5ce903957ef4e2d6dd52e839d3763368d04594323a994c92b361be4e03c",
     "1066237370938.embedded.json": (
-        "e5b7b23263c017657f73865de07929bf57ee50a6267100704556ca420d234803"
+        "be7fa5e8aee588e01c45496c7bd5fbd658ed532d02d74cc8655427026698a088"
     ),
     # ADR-0040 §3.2: the description images the extension read within the capture.
     "990041659965.description_images.json": (
@@ -601,13 +602,14 @@ def test_free_and_unstated_freight() -> None:
 
 @pytest.mark.parametrize("number", NUMBERS)
 def test_the_description_images_are_detail_candidates_and_nothing_else(number: str) -> None:
-    # ADR-0040 §3.2 (OC-09): the projection states the description's URL, which only the extension
-    # uses; the server holds only the image references, re-checked, and makes each one a DETAIL
-    # candidate after the page's own references. Nothing reads the document here.
+    # ADR-0040 §3.2 (OC-09): only the extension reads the description's URL, from the parsed
+    # argument; the projection never states it. The server holds only the image references,
+    # re-checked, and makes each one a DETAIL candidate after the page's own references.
     policy = CapturePolicySource(REPO_ROOT / "integrations" / "suppliers").load("ali1688")
     assert policy.description is not None
-    url = _projection(number)["result"]["data"]["description"]["fields"]["detailUrl"]
-    assert url.startswith("https://itemcdn.tmall.com/1688offer/icoss")
+    assert "description" not in _projection(number)["result"]["data"]
+    sent = (FIXTURES / f"{number}.embedded.json").read_text("utf-8")
+    assert "detailUrl" not in sent and "itemcdn" not in sent
     member = _described(number)
     assert len(member["images"]) == member["total"] == DESCRIPTION_IMAGES[number]
     assert description_images_problem(policy.description, member["images"], member["total"]) is None

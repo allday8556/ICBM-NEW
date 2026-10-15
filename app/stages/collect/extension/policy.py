@@ -391,18 +391,44 @@ def _hosts(value: Any, what: str) -> frozenset[str]:
     return frozenset(value)
 
 
+def _overlaps(entry: tuple[str, ...], path: tuple[str, ...]) -> bool:
+    """Whether a projection by ``entry`` could hold ``path``'s value or a part of it.
+
+    The shorter of the two is compared with the start of the other, an array segment by its key
+    and a map's ``*`` against any key: a path that one of them leads into is projected.
+    """
+    return all(
+        a.removesuffix("[]") == b.removesuffix("[]") or "*" in (a, b)
+        for a, b in zip(entry, path, strict=False)
+    )
+
+
 def _description(value: Any, embedded: EmbeddedDataRule | None) -> DescriptionRule:
     if not isinstance(value, dict) or set(value) != _DESCRIPTION_KEYS:
         raise _policy_refused(
             "CAPTURE_POLICY_INVALID", "the capture policy's description does not have its keys"
         )
     url_path = value["url_path"]
-    if embedded is None or not any(
-        entry.path == url_path and entry.type == "string" for entry in embedded.allowlist
-    ):
-        # The document's URL is read from the projection, so it must be an allowlisted string.
+    if embedded is None:
+        # The document's URL is read from the embedded argument, in the browser.
         raise _policy_refused(
-            "CAPTURE_POLICY_INVALID", "the description URL is not an allowlisted string"
+            "CAPTURE_POLICY_INVALID", "a description needs the embedded data it is named in"
+        )
+    segments = tuple(url_path.split(".")) if isinstance(url_path, str) else ()
+    if (
+        segments[: len(EMBEDDED_ROOT)] != EMBEDDED_ROOT
+        or len(segments) <= len(EMBEDDED_ROOT)
+        or not all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", part) for part in segments)
+    ):
+        raise _policy_refused(
+            "CAPTURE_POLICY_INVALID",
+            "the description URL path is not a plain path under result.data",
+        )
+    if any(_overlaps(entry.segments, segments) for entry in embedded.allowlist):
+        # OC-09: the URL is a browser-only read. It is never projected, so it never leaves the
+        # browser, and a member that carries it is refused by the server's allowlist re-check.
+        raise _policy_refused(
+            "CAPTURE_POLICY_INVALID", "the description URL path is on the embedded allowlist"
         )
     description_hosts = _hosts(value["description_hosts"], "hosts")
     image_hosts = _hosts(value["image_hosts"], "image hosts")

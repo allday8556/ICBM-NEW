@@ -109,7 +109,6 @@ EXPECTED = {
             "shippingServices": {
                 "fields": {"freightInfo": {"location": "浙江省金华市", "totalCost": 3}}
             },
-            "description": {"fields": {"detailUrl": DESCRIPTION_URL}},
         }
     }
 }
@@ -270,6 +269,11 @@ def test_only_the_allowlisted_projection_leaves_the_page(
         "evil.test",
         "img.alicdn.com",
         "window.__pwned",
+        # OC-09: the description's URL is read in the page and never sent.
+        "detailUrl",
+        "itemcdn",
+        "icoss5072039755",
+        "详情描述",
     ):
         assert absent not in sent, absent
     # The DOM capture is the reviewed product scope, and the server finds nothing it disallows.
@@ -427,6 +431,12 @@ def test_a_description_url_off_the_declared_host_is_never_read(
     context = CONTEXT.replace(DESCRIPTION_URL, detail_url)
     cut = _cut(browser, _page_html([_context_script(context)]), policy)
     assert cut["description_images"] == {"refused": code}
+    # OC-09: the refused URL, its credential and its secret query never leave the page either;
+    # the projection is exactly the allowlisted one.
+    assert cut["embedded_data"] == {"projection": EXPECTED}
+    sent = json.dumps(cut, ensure_ascii=False)
+    for absent in (detail_url, "detailUrl", "itemcdn", "token=abc", "user:pw", "icoss1"):
+        assert absent not in sent, absent
 
 
 def test_a_page_whose_member_holds_no_url_reads_nothing(

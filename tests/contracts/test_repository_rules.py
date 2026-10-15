@@ -3114,7 +3114,9 @@ def test_no_server_code_reads_the_1688_description_document() -> None:
     # ADR-0040 §3.2 and OC-09: only the extension reads the description document, inside the
     # user's capture. The reviewed host is policy data the extension is served; the policy owner
     # parses it, and no other production module touches it or names the host, so no server path
-    # can read the document. The images it names are fetched by the ordinary image fetch.
+    # can read the document. The images it names are fetched by the ordinary image fetch. The
+    # document's URL is a browser-only read (OC-09): no production module names its path, and
+    # the policy owner refuses a policy that would project it.
     touching = set()
     naming = set()
     for path, tree in _production_modules().items():
@@ -3128,7 +3130,7 @@ def test_no_server_code_reads_the_1688_description_document() -> None:
             if (
                 isinstance(node, ast.Constant)
                 and isinstance(node.value, str)
-                and ("itemcdn" in node.value or "offer_details" in node.value)
+                and any(word in node.value for word in ("itemcdn", "offer_details", "detailUrl"))
             ):
                 naming.add(path)
     assert touching == {"app/stages/collect/extension/policy.py"}
@@ -3139,6 +3141,14 @@ def test_no_server_code_reads_the_1688_description_document() -> None:
     from integrations.suppliers.ali1688.collection import COLLECTION
 
     assert "itemcdn.tmall.com" not in COLLECTION.profile.hosts
+    from app.stages.collect.extension.policy import CapturePolicySource
+
+    policy = CapturePolicySource(REPO_ROOT / "integrations" / "suppliers").load("ali1688")
+    assert policy.embedded_data is not None and policy.description is not None
+    assert all(
+        not entry.path.startswith("result.data.description")
+        for entry in policy.embedded_data.allowlist
+    )
 
 
 def test_a_platform_template_is_one_extraction_identity() -> None:
