@@ -146,7 +146,7 @@ These two walkthroughs are the acceptance script of every slice (§14). Each sli
 
 ## 4. Evidence-capture tasks: provider facts not yet verified
 
-Every item below is **unverified** at main `40a73ff3`. Each one is captured from the official NAVER Commerce API reference in the slice named, before any code depends on it. Until then, the dependent behaviour stays fail-closed.
+Every item below is **unverified** at main `40a73ff3`. Each one is captured in the slice named, before any code depends on it, from the official NAVER Commerce API reference, an official support answer, or the shape-only runtime capture of §5.1 item 3. Until then, the dependent behaviour stays fail-closed.
 
 | # | fact | slice |
 | --- | --- | --- |
@@ -168,11 +168,16 @@ Every item below is **unverified** at main `40a73ff3`. Each one is captured from
 | enumerate every origin product of the store | `SMARTSTORE_PRODUCT_SEARCH` `POST /v1/products/search` | `ADOPTED` **for positive-only reconcile only**: a seller-code-only request, and kept fields of identities plus the pagination envelope (`ENDPOINT_MATRIX.md` §4.1.2; `registry.py` `_PRODUCT_SEARCH_FIELDS`) |
 | full fields of one listing | `SMARTSTORE_ORIGIN_PRODUCT_READ_V2` `GET /v2/products/origin-products/{originProductNo}` | `ADOPTED`, keeping `name`, `salePrice`, `stockQuantity`, `sellerManagementCode`, `sellerManagerCode`, `url`, `statusType`, `channelProductDisplayStatusType` only (`_ORIGIN_READ_FIELDS`) |
 
-**S1a makes two adoption amendments.** Neither is a new endpoint:
+**S1a makes two adoption amendments and one runtime capture.** None is a new endpoint:
 1. **A catalog-enumeration request shape for the search** (E1, E2): no seller-code keyword, `page` from 1, `size` 500, and every-status and stable-sort parameters if they are documented.
    - A catalog over the provider's 100,000-result limit is `UNAVAILABLE`, never partial (E6).
 2. **A widened, deny-by-default retention profile** on the search and the origin read, for the §5.3 fields. Each field must be named in the official schema (E3, E4).
    - If the search does not carry a field, each new or changed listing is read by its origin read, paced at 1 s (ADR-0023 §3).
+3. **A shape-only runtime capture** (owner, 2026-10-15: the official reference site cannot be read from this environment).
+   - On an operator's 「지금 동기화」, the sync records the **shape** of the raw search page and origin-read responses it received: every key path and its JSON type (`string`, `number`, `boolean`, `null`, `object`, `array`).
+   - **No value is recorded.** The one exception is a string at a key whose name ends in `Type`, `Status`, `Unit` or `Method` that matches `^[A-Z][A-Z0-9_]{0,40}$`: it is an enum token and is kept. Product numbers, names, prices, texts, URLs and contacts never are.
+   - The shape is stored with the sync run, never shown on the seller's screens except under 「문제 해결용 정보」, and is runtime evidence (`source documented != runtime verified`, `SOURCES.md`) for E2–E6.
+   - It widens no retention profile. A field is retained only after it is named in an adoption amendment backed by this or official evidence.
 
 The identity fields stay exactly as §4.1.2 reads them. The reconcile use of the search is unchanged.
 
