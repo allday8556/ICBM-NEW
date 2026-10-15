@@ -19,13 +19,27 @@ const ROLE_CHOICES = [
   ['EXCLUDE', '사용 안 함'],
 ];
 const SOURCE_ROLE_LABEL = { REPRESENTATIVE: '원본 대표', DETAIL: '원본 상세' };
-const QA_LABEL = { PASS: ['QA 통과', 'good'], REVIEW_REQUIRED: ['QA 확인 필요', 'warn'], FAIL: ['QA 실패', 'bad'] };
+// The automatic image check's verdict, in a seller's words (the verdict stays `data-qa`).
+const QA_LABEL = {
+  PASS: ['이미지 검사 통과', 'good'],
+  REVIEW_REQUIRED: ['이미지 확인 필요', 'warn'],
+  FAIL: ['이미지 검사 실패', 'bad'],
+};
 const AUTO_STATUS_COPY = {
   SELECTED: '자동 선택 규칙으로 새로 골랐습니다.',
   UNCHANGED: '자동 선택 결과가 이미 현재 선택과 같습니다.',
   OPERATOR_HELD: '운영자가 직접 고른 선택이 있어 자동 선택은 바꾸지 않았습니다.',
   BLOCKED: '자동 선택 규칙이 고르지 못했습니다.',
 };
+// Why the rule could not choose (app/stages/products/auto_images.py AutoSelectionBlocked).
+const AUTO_BLOCKED_COPY = {
+  NO_BOUND_REVISION: '수집한 원본 정보가 아직 확정되지 않았습니다.',
+  ROLE_RULES_UNAVAILABLE: '이 공급처의 이미지 구분 규칙이 아직 없습니다.',
+  ROLE_RULE_UNKNOWN: '이 공급처의 이미지 구분 규칙을 알 수 없습니다.',
+  REPRESENTATIVE_MISSING: '대표로 쓸 원본 이미지가 없습니다.',
+};
+// The image auto-selection rule records its selections under its own version name.
+const AUTO_ACTOR = 'image-auto-selection/';
 // The order a saved selection places its outputs: the representative first, then the gallery,
 // then the detail body, each in the source page order.
 const OUTPUT_ORDER = ['REPRESENTATIVE', 'ADDITIONAL', 'DETAIL'];
@@ -60,7 +74,7 @@ function imageCard(itemId, image, choice, editable) {
   );
   select.value = choice ?? '';
   select.disabled = !editable;
-  const [qaLabel, qaTone] = QA_LABEL[image.qa_verdict] ?? ['QA 없음', ''];
+  const [qaLabel, qaTone] = QA_LABEL[image.qa_verdict] ?? ['검사 전', ''];
   return {
     image,
     select,
@@ -138,7 +152,7 @@ function editorBody(itemId, found, editable, reload, onChanged) {
     auto.disabled = true;
     try {
       const result = await sendJson('POST', `/api/v1/products/items/${encodeURIComponent(itemId)}/image-auto-selection`, {});
-      toast(AUTO_STATUS_COPY[result.status] ?? result.status, result.detail ?? undefined);
+      toast(AUTO_STATUS_COPY[result.status] ?? '자동 선택을 마쳤습니다.', AUTO_BLOCKED_COPY[result.blocked] ?? undefined);
       await reload();
       onChanged?.();
     } catch (error) {
@@ -147,7 +161,11 @@ function editorBody(itemId, found, editable, reload, onChanged) {
     }
   });
   const origin = selection
-    ? h('span', { class: 'mini', 'data-selection-by': selection.decided_by }, `현재 선택 #${selection.revision_no} · ${selection.decided_by}`)
+    ? h(
+        'span',
+        { class: 'mini', 'data-selection-by': selection.decided_by, 'data-selection-revision': String(selection.revision_no) },
+        String(selection.decided_by).startsWith(AUTO_ACTOR) ? '자동으로 선택됨' : '직접 선택함',
+      )
     : h('span', { class: 'chip warn', 'data-selection-by': 'NONE' }, '아직 선택 없음');
   return [
     h('div', { class: 'supplier-head-row' }, origin, derived ? h('span', { class: 'chip warn' }, '대체 이미지가 있어 이 화면에서는 보기만 합니다') : null),

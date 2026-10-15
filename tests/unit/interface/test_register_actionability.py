@@ -104,6 +104,17 @@ def test_every_value_has_a_label() -> None:
     assert set(SURFACE_LABELS) == set(FixSurface)
 
 
+def test_every_place_is_named_as_the_seller_finds_it() -> None:
+    # 2026-10-15 jargon sweep: each place is the screen and tab the seller opens, never an
+    # internal term ("단위", "메타데이터") and never a place the settings screen does not have.
+    assert SURFACE_LABELS[FixSurface.REGISTER_ACTION] == "등록관리 › 상품 등록 작업"
+    assert SURFACE_LABELS[FixSurface.SETTINGS_CONNECT] == "설정 › API 관리"
+    assert SURFACE_LABELS[FixSurface.SETTINGS_CATEGORY_METADATA] == "설정 › 상품 / 카테고리"
+    for label in SURFACE_LABELS.values():
+        assert "단위" not in label and "메타데이터" not in label, label
+        assert label.isascii() is False, label
+
+
 def test_the_table_reads_no_owner() -> None:
     tree = ast.parse(Path(actionability.__file__).read_text("utf-8"))
     imported = {

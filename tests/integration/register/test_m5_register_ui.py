@@ -219,7 +219,10 @@ def test_an_auth_brake_is_shown_and_never_offered_a_resume(
     with _page(browser, client, writes) as page:
         scope = page.locator(".register-scope").first
         assert scope.get_attribute("data-scope-state") == "PAUSED"
-        assert "인증 중단" in scope.inner_text()
+        # The pause in a seller's words, with what to do about it; never the brake's own terms.
+        assert "마켓 인증 문제로 멈춤" in scope.inner_text()
+        assert "설정 › API 관리" in scope.inner_text()
+        assert "브레이크" not in scope.inner_text()
         assert _action(page, "RESUME_SCOPE")["disabled"] is True
         # A reload rebuilds the same screen from durable rows: nothing was kept in the page.
         page.reload()
@@ -477,8 +480,12 @@ def test_the_unit_workspace_edits_images_through_the_image_owner(
         images.locator("button[data-action='save-image-selection']").click()
         page.wait_for_function(
             "() => [...document.querySelectorAll('[data-selection-by]')]"
-            ".some((n) => n.textContent.includes('#2'))"
+            ".some((n) => n.dataset.selectionRevision === '2')"
         )
+        # The selection says who chose it in words; the revision and actor stay attributes.
+        origin = images.locator("[data-selection-revision='2']")
+        assert origin.inner_text() == "직접 선택함"
+        assert "#2" not in images.inner_text() and "operator" not in images.inner_text()
         assert writes == [("POST", f"/api/v1/products/items/{item.item_id}/image-selection")]
     after = container.images.current_selection(item.item_id)
     assert after is not None and after.revision_no == before.revision_no + 1

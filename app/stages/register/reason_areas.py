@@ -47,7 +47,7 @@ class ReasonArea(StrEnum):
 # The operator-facing label of each area (server-side, like the read-state labels).
 AREA_LABELS: Final[Mapping[ReasonArea, str]] = {
     ReasonArea.ACCOUNT: "계정·연결",
-    ReasonArea.UNIT: "등록 단위",
+    ReasonArea.UNIT: "상품 구성",
     ReasonArea.SOURCE: "원본 상품",
     ReasonArea.PRICE: "가격",
     ReasonArea.CATEGORY: "카테고리",
@@ -59,7 +59,7 @@ AREA_LABELS: Final[Mapping[ReasonArea, str]] = {
     ReasonArea.IMAGES: "이미지",
     ReasonArea.DUPLICATE: "중복·충돌",
     ReasonArea.SAFETY: "외부 링크·민감정보",
-    ReasonArea.UNCLASSIFIED: "미분류",
+    ReasonArea.UNCLASSIFIED: "기타",
 }
 
 _A = ReasonArea

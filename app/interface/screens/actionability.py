@@ -57,10 +57,10 @@ ACTIONABILITY_LABELS: Final[Mapping[Actionability, str]] = {
 
 SURFACE_LABELS: Final[Mapping[FixSurface, str]] = {
     FixSurface.REGISTER_PREPARATION: "등록관리 › 등록 준비 입력",
-    FixSurface.REGISTER_ACTION: "등록관리 › 단위 동작",
+    FixSurface.REGISTER_ACTION: "등록관리 › 상품 등록 작업",
     FixSurface.SETTINGS_TARGET_POLICY: "설정 › 등록 정책",
-    FixSurface.SETTINGS_CATEGORY_METADATA: "설정 › 카테고리 메타데이터",
-    FixSurface.SETTINGS_CONNECT: "설정 › 마켓 연결",
+    FixSurface.SETTINGS_CATEGORY_METADATA: "설정 › 상품 / 카테고리",
+    FixSurface.SETTINGS_CONNECT: "설정 › API 관리",
     FixSurface.REGISTER_IMAGES: "등록관리 › 이미지",
 }
 

@@ -90,6 +90,13 @@ def test_every_area_has_a_label() -> None:
     assert all(label.strip() for label in AREA_LABELS.values())
 
 
+def test_the_area_labels_are_a_sellers_words() -> None:
+    # 2026-10-15 jargon sweep: no internal term ("미분류", "등록 단위") reaches the screen.
+    assert AREA_LABELS[ReasonArea.UNCLASSIFIED] == "기타"
+    assert AREA_LABELS[ReasonArea.UNIT] == "상품 구성"
+    assert not any("미분류" in label or "단위" in label for label in AREA_LABELS.values())
+
+
 def test_the_table_imports_no_evaluating_owner() -> None:
     tree = ast.parse(Path(reason_areas.__file__).read_text("utf-8"))
     imported = {

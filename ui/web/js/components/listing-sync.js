@@ -53,6 +53,9 @@ const OUTCOME_LABEL = {
   INTERRUPTED: '중단됨',
 };
 
+// A refusal is never shown as the server's English message or its code (2026-10-15).
+const FAILED_COPY = '요청을 처리하지 못했습니다. 잠시 뒤 다시 시도하고, 계속되면 화면을 새로 고쳐 주세요.';
+
 function won(value) {
   return typeof value === 'number' ? `${value.toLocaleString('ko-KR')}원` : '—';
 }
@@ -64,9 +67,13 @@ function stateCell(listing) {
   }
   if (!listing.last_result) return h('span', { class: 'chip', 'data-listing-state': 'NOT_SYNCED' }, '아직 확인 전');
   if (listing.last_result === 'READ_FAILED') {
-    return h('span', { class: 'chip warn', 'data-listing-state': 'READ_FAILED', title: listing.error_code ?? '' }, '확인 실패');
+    return h(
+      'span',
+      { class: 'chip warn', 'data-listing-state': 'READ_FAILED', 'data-error-code': listing.error_code ?? '', title: '네이버에서 이 상품을 읽지 못했습니다. 다음 동기화 때 다시 확인합니다.' },
+      '확인 실패',
+    );
   }
-  const label = STATUS_LABEL[listing.sale_status] ?? listing.sale_status ?? '—';
+  const label = listing.sale_status ? STATUS_LABEL[listing.sale_status] ?? '확인 필요' : '—';
   const tone = listing.sale_status === 'SALE' && listing.display_status === 'ON' ? 'good' : 'warn';
   return h('span', { class: `chip ${tone}`, 'data-listing-state': listing.sale_status ?? 'UNKNOWN' }, label);
 }
@@ -90,7 +97,7 @@ function row(listing) {
     h(
       'td',
       {},
-      ...(listing.drift ?? []).map((code) => h('span', { class: 'chip warn', 'data-drift': code }, DRIFT_LABEL[code] ?? code)),
+      ...(listing.drift ?? []).map((code) => h('span', { class: 'chip warn', 'data-drift': code }, DRIFT_LABEL[code] ?? '차이 있음')),
     ),
   );
 }
@@ -102,11 +109,11 @@ function body(found, reload) {
     button.disabled = true;
     try {
       const run = await sendJson('POST', SYNC, {});
-      toast('판매 상태', `${OUTCOME_LABEL[run.outcome] ?? run.outcome} · 확인 ${run.observed}/${run.targets}`);
+      toast('판매 상태', `${OUTCOME_LABEL[run.outcome] ?? '확인 결과 알 수 없음'} · 확인 ${run.observed}/${run.targets}`);
       await reload();
     } catch (error) {
       const code = error instanceof ApiError ? error.error?.code : null;
-      toast('판매 상태', code === 'OPERATE_LISTING_SYNC_RUNNING' ? '이미 동기화가 진행 중입니다.' : String(error?.message ?? error));
+      toast('판매 상태', code === 'OPERATE_LISTING_SYNC_RUNNING' ? '이미 동기화가 진행 중입니다.' : FAILED_COPY);
       button.disabled = false;
     }
   });
@@ -122,13 +129,13 @@ function body(found, reload) {
         const tally = {};
         for (const outcome of run.outcomes) tally[outcome.outcome] = (tally[outcome.outcome] ?? 0) + 1;
         const summary = Object.entries(tally)
-          .map(([code, count]) => `${ADOPTION_LABEL[code] ?? code} ${count}`)
+          .map(([code, count]) => `${ADOPTION_LABEL[code] ?? '기타'} ${count}`)
           .join(' · ');
         toast(title, summary || '대상 상품 없음');
         await reload();
       } catch (error) {
         const code = error instanceof ApiError ? error.error?.code : null;
-        toast(title, code === 'OPERATE_ADOPTION_RUNNING' ? '이미 가져오는 중입니다.' : String(error?.message ?? error));
+        toast(title, code === 'OPERATE_ADOPTION_RUNNING' ? '이미 가져오는 중입니다.' : FAILED_COPY);
       } finally {
         adopt.disabled = false;
       }
@@ -145,7 +152,7 @@ function body(found, reload) {
         ? h(
             'span',
             { class: 'mini', 'data-sync-outcome': last.outcome ?? last.state },
-            `마지막 확인 ${dotDateTime(last.started_at)} · ${OUTCOME_LABEL[last.outcome] ?? last.outcome ?? '진행 중'}`,
+            `마지막 확인 ${dotDateTime(last.started_at)} · ${last.outcome ? OUTCOME_LABEL[last.outcome] ?? '확인 결과 알 수 없음' : '진행 중'}`,
           )
         : h('span', { class: 'mini', 'data-sync-outcome': 'NONE' }, '아직 확인한 적 없음'),
       ...adopters,
@@ -181,7 +188,10 @@ export function listingSyncPanel() {
       content.replaceChildren(...body(found, reload));
     } catch (error) {
       content.setAttribute('data-listing-sync', 'UNAVAILABLE');
-      content.replaceChildren(h('span', { class: 'chip warn' }, `판매 상태를 불러오지 못했습니다 · ${String(error?.message ?? error)}`));
+      const code = error instanceof ApiError ? error.error?.code ?? '' : '';
+      content.replaceChildren(
+        h('span', { class: 'chip warn', 'data-error-code': code }, '판매 상태를 불러오지 못했습니다. 화면을 새로 고쳐 주세요.'),
+      );
     }
   };
   reload();

@@ -248,11 +248,11 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `integrations/` | 119 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 45 |  |
 | `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 448 | tests |
+| `tests/` | 449 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 184 | integration tests by runtime owner |
+| `tests/integration/` | 185 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
 | `tests/unit/` | 162 | unit tests by runtime owner |
 | `ui/` | 77 | operator clients: the served web client and the capture extension |
