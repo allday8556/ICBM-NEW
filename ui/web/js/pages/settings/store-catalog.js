@@ -41,14 +41,16 @@ function count(value) {
 
 function line(status) {
   const running = status.running;
+  const complete = status.last_complete;
   if (running) {
+    // SCP-07: the last complete sync stays visible while another one runs.
+    const since = complete ? ` · 마지막 동기화 ${dotDateTime(complete.as_of)}` : '';
     if (running.details_target > 0) {
       const done = running.details_done + running.details_failed;
-      return `스토어 상품 가져오는 중 ${count(done)} / ${count(running.details_target)}`;
+      return `스토어 상품 가져오는 중 ${count(done)} / ${count(running.details_target)}${since}`;
     }
-    return '스토어 상품 확인 중…';
+    return `스토어 상품 확인 중…${since}`;
   }
-  const complete = status.last_complete;
   if (complete) {
     return `스토어 상품 ${count(status.listing_count)}개 · 마지막 동기화 ${dotDateTime(complete.as_of)}`;
   }

@@ -109,6 +109,11 @@ def test_the_running_first_sync_shows_its_progress_then_the_complete_result(
         complete = _status(page)
     # The fixture records no observation, so the complete sync read 0 listings.
     assert "스토어 상품 0개 · 마지막 동기화" in complete
+    # SCP-07: a later sync that is running keeps the last complete one visible.
+    _run(config, "r-second", state="RUNNING", outcome=None, target=1200, done=10)
+    with _no_egress(), _page(browser, client, Traffic()) as page:
+        again = _status(page)
+    assert "스토어 상품 가져오는 중 10 / 1,200 · 마지막 동기화" in again
 
 
 def test_a_failed_sync_is_shown_as_such_beside_the_last_complete_one(
