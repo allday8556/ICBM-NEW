@@ -218,6 +218,14 @@ DUPLICATE_EVIDENCE_INCONCLUSIVE: Final = "DUPLICATE_EVIDENCE_INCONCLUSIVE"
 DUPLICATE_EVIDENCE_INCOMPLETE: Final = "DUPLICATE_EVIDENCE_INCOMPLETE"
 DUPLICATE_EVIDENCE_SCOPE_MISMATCH: Final = "DUPLICATE_EVIDENCE_SCOPE_MISMATCH"
 DUPLICATE_EVIDENCE_UNSAFE: Final = "DUPLICATE_EVIDENCE_UNSAFE"
+# ADR-0042 §5.2, §6 (S3b): the store-catalog snapshot the duplicate source reads is older than the
+# target policy's bound, or an ICBM mutation of the store started after it: no evidence until the
+# automatic re-sync completes, never a NO_MATCH.
+DUPLICATE_EVIDENCE_STALE: Final = "DUPLICATE_EVIDENCE_STALE"
+# ADR-0042 §6: no COMPLETE snapshot of the store exists (or no store is bound): no evidence.
+DUPLICATE_EVIDENCE_UNAVAILABLE: Final = "DUPLICATE_EVIDENCE_UNAVAILABLE"
+# Why the duplicate-evidence owner had no evidence; anything else reads DUPLICATE_EVIDENCE_MISSING.
+DUPLICATE_PROBLEMS: Final = frozenset({DUPLICATE_EVIDENCE_STALE, DUPLICATE_EVIDENCE_UNAVAILABLE})
 M4_BASE_PREFIX: Final = "M4_BASE."
 M4_PRICING_PREFIX: Final = "M4_PRICING."
 
@@ -308,6 +316,8 @@ REASON_CODES: Final = frozenset(
         DUPLICATE_EVIDENCE_INCOMPLETE,
         DUPLICATE_EVIDENCE_SCOPE_MISMATCH,
         DUPLICATE_EVIDENCE_UNSAFE,
+        DUPLICATE_EVIDENCE_STALE,
+        DUPLICATE_EVIDENCE_UNAVAILABLE,
         sanitize.SECRET_MATERIAL,
         sanitize.EXTERNAL_URL,
     }
@@ -529,6 +539,10 @@ class PreflightRequest:
     # authored it (the identity of a ``CUSTOM`` notice's resolved entry).
     guidance: GuidanceChoice = DEFAULT_CHOICE
     preparation_revision_id: str | None = None
+    # ADR-0042 §6 (S3b): why the duplicate-evidence owner has no evidence now — a stale or missing
+    # store-catalog snapshot (``DUPLICATE_PROBLEMS``). Only read when ``duplicate_evidence`` is
+    # None; never a verdict, never part of the fingerprint, and never READY.
+    duplicate_problem: str | None = None
 
 
 # ---------------------------------------------------------------- resolved current truth
@@ -1445,7 +1459,15 @@ def _duplicate_reasons(request: PreflightRequest, unit: ResolvedUnit) -> list[Re
     evidence = request.duplicate_evidence
     if evidence is None:
         if target.duplicate_proof_required:
-            reasons.append(Reason(DUPLICATE_EVIDENCE_MISSING, _R, "duplicate"))
+            # ADR-0042 §5.2: a stale snapshot is STALE (the automatic re-sync is running or due),
+            # a missing one REVIEW_REQUIRED; neither is ever a NO_MATCH.
+            problem = request.duplicate_problem
+            if problem == DUPLICATE_EVIDENCE_STALE:
+                reasons.append(Reason(DUPLICATE_EVIDENCE_STALE, _S, "duplicate"))
+            elif problem == DUPLICATE_EVIDENCE_UNAVAILABLE:
+                reasons.append(Reason(DUPLICATE_EVIDENCE_UNAVAILABLE, _R, "duplicate"))
+            else:
+                reasons.append(Reason(DUPLICATE_EVIDENCE_MISSING, _R, "duplicate"))
         return reasons
     if evidence.unsafe_fields():
         # Before any verdict or override: unsanitized evidence is never READY (§15, B4).

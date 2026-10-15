@@ -20,6 +20,7 @@ import contextlib
 import sqlite3
 from collections.abc import Iterator
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -128,6 +129,8 @@ def inputs(**overrides: Any) -> dict[str, Any]:
         # Server-owned references: only an explicit null is valid; the server stamps them.
         "category_mapping_revision": None,
         "detail_composition_revision": None,
+        # ADR-0042 §5.2: unset reads the owner-decided 60 minutes.
+        "catalog_max_age_minutes": None,
     }
     values.update(overrides)
     return values
@@ -232,6 +235,41 @@ def test_delivery_policy_is_revisioned_and_materialized_exactly(
     assert target.delivery_policy.exchange_delivery_fee_krw == 6000
     assert target.delivery_policy.shipping_address_id == 200441202
     assert target.delivery_policy.return_address_id == 200401837
+
+
+def test_the_store_snapshot_bound_lives_in_the_policy_and_is_only_ever_shortened(
+    api: TestClient, container: Container, config: AppConfig, account: str
+) -> None:
+    """ADR-0042 §5.2 (S3b): ``catalog_max_age`` is target policy, changed only by an audited
+    revision; unset it is the owner's 60 minutes, and no revision may lengthen it."""
+    first = save(api, account, inputs())
+    assert first.status_code == 200, first.text
+    target = container.registration_preflight.target_policy(MARKET, account)
+    assert target is not None and target.catalog_max_age == timedelta(minutes=60)
+    # The unset revision keeps its exact earlier content: the field is not even named.
+    with contextlib.closing(sqlite3.connect(config.database_path)) as raw_db:
+        stored = [row[0] for row in raw_db.execute(f"SELECT content_json FROM {REVISIONS}")]
+    assert stored and all("catalog_max_age_minutes" not in text for text in stored)
+    for refused in (0, 61, 600):
+        response = save(
+            api,
+            account,
+            inputs(catalog_max_age_minutes=refused),
+            expected=first.json()["current"]["policy_revision"],
+        )
+        assert response.status_code == 422, refused
+        assert "catalog_max_age_minutes" in response.text
+    shorter = save(
+        api,
+        account,
+        inputs(catalog_max_age_minutes=15),
+        expected=first.json()["current"]["policy_revision"],
+    )
+    assert shorter.status_code == 200, shorter.text
+    assert shorter.json()["inputs"]["catalog_max_age_minutes"] == 15
+    assert shorter.json()["current"]["revision_no"] == 2
+    target = container.registration_preflight.target_policy(MARKET, account)
+    assert target is not None and target.catalog_max_age == timedelta(minutes=15)
 
 
 def test_a_save_appends_a_revision_and_never_rewrites_the_one_before(

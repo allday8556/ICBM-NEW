@@ -16,8 +16,9 @@ Pure and provider-neutral: no database, no provider, no I/O. Nothing here is Sma
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
+from datetime import timedelta
 from enum import StrEnum
-from typing import Protocol
+from typing import Final, Protocol
 
 from app.stages.products.model import ReadinessStatus
 from app.stages.products.pricing import PricingContextInput
@@ -50,6 +51,12 @@ class DuplicateKeyKind(StrEnum):
 STRONG_KEYS: frozenset[DuplicateKeyKind] = frozenset(
     {DuplicateKeyKind.SELLER_CODE, DuplicateKeyKind.GTIN, DuplicateKeyKind.OFFICIAL_KEY}
 )
+
+# ADR-0042 §5.2 (owner 6190978708 Q1): a COMPLETE store-catalog snapshot is duplicate evidence for
+# at most 60 minutes from its start. The target policy holds the value (``catalog_max_age``); a
+# revision may shorten it, never lengthen it past this owner-decided bound.
+CATALOG_MAX_AGE_MINUTES: Final = 60
+CATALOG_MAX_AGE: Final = timedelta(minutes=CATALOG_MAX_AGE_MINUTES)
 
 
 class FieldValueType(StrEnum):
@@ -217,6 +224,9 @@ class TargetPolicy:
     templates: Mapping[str, str] = field(default_factory=dict)
     duplicate_proof_required: bool = True
     duplicate_lookup_keys: frozenset[DuplicateKeyKind] = frozenset({DuplicateKeyKind.SELLER_CODE})
+    # ADR-0042 §5.2: how long a COMPLETE store-catalog snapshot stays duplicate evidence, from its
+    # start. A revision that names none reads the owner-decided 60 minutes.
+    catalog_max_age: timedelta = CATALOG_MAX_AGE
 
 
 class RegistrationMetadataSource(Protocol):

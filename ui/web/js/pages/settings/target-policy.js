@@ -280,6 +280,12 @@ function editor(view, onSaved, section) {
     ...on,
     name: 'duplicate_proof_required',
   });
+  // ADR-0042 §5.2: how long the store's last complete sync stays duplicate evidence (1–60 minutes;
+  // empty reads the default 60). A change is a new, audited policy revision like any other.
+  const catalogMaxAge = field('스토어 확인 유효 시간 (분, 1~60 · 비우면 60)', inputs?.catalog_max_age_minutes ?? '', {
+    ...on,
+    name: 'catalog_max_age_minutes',
+  });
   const keys = LOOKUP_KEYS.map((key) => ({
     key,
     ...check(`조회 키 ${key}`, (inputs?.duplicate_lookup_keys ?? []).includes(key), { ...on, name: `lookup_${key}` }),
@@ -339,6 +345,7 @@ function editor(view, onSaved, section) {
           templates: templatesOf(templates.value),
           duplicate_proof_required: proofRequired.box.checked,
           duplicate_lookup_keys: keys.filter((entry) => entry.box.checked).map((entry) => entry.key),
+          catalog_max_age_minutes: catalogMaxAge.input.value.trim() ? whole(catalogMaxAge.input.value) : null,
           // Server-owned references: never authored here; the server stamps them (ADR-0015 §2).
           category_mapping_revision: null,
           detail_composition_revision: null,
@@ -376,6 +383,7 @@ function editor(view, onSaved, section) {
     h('div', { class: 'form-row' }, h('label', { for: templatesId }, '템플릿 (한 줄에 종류=식별자)'), templates),
     proofRequired.row,
     ...keys.map((key) => key.row),
+    catalogMaxAge.row,
   ];
   const deliveryRows = [
     physicalDelivery.row,

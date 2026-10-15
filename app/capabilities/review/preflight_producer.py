@@ -142,6 +142,8 @@ REVIEWED: Final = frozenset(
         p.DUPLICATE_EVIDENCE_INCONCLUSIVE,
         p.DUPLICATE_EVIDENCE_INCOMPLETE,
         p.DUPLICATE_EVIDENCE_SCOPE_MISMATCH,
+        # ADR-0042 S3b: no COMPLETE store snapshot yet.
+        p.DUPLICATE_EVIDENCE_UNAVAILABLE,
         # Final-stage reasons: the candidate never states them, and they are reviewed all the same.
         p.PREPARED_ASSET_UNEXPECTED,
         p.PREPARED_ASSET_DUPLICATED,

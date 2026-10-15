@@ -181,9 +181,14 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     # blocks nothing: there is nothing to fix here (the choice itself lives on the supplier card).
     "SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED": (_N, None),
     "SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED": (_N, None),
-    "PROVIDER_DUPLICATE_FOUND": (_X, None),
-    "PROVIDER_DUPLICATE_WEAK_SIGNAL": (_X, None),
-    # No provider duplicate lookup is adopted yet.
+    # ADR-0042 S3b: a store listing matched; the editor's duplicate row offers
+    # 「의도적으로 한 번 더 등록」 (a DuplicateOverride). Linking it is S2a's.
+    "PROVIDER_DUPLICATE_FOUND": (_F, _PREP),
+    "PROVIDER_DUPLICATE_WEAK_SIGNAL": (_F, _PREP),
+    # ADR-0042 §5.2: the automatic re-sync of the store runs by itself.
+    "DUPLICATE_EVIDENCE_STALE": (_W, None),
+    "DUPLICATE_EVIDENCE_UNAVAILABLE": (_W, None),
+    # No duplicate source is wired.
     "DUPLICATE_EVIDENCE_MISSING": (_X, None),
     "DUPLICATE_EVIDENCE_INCONCLUSIVE": (_X, None),
     "DUPLICATE_EVIDENCE_INCOMPLETE": (_X, None),

@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from app.stages.products.image_model import ImageAssetKind
+from app.stages.register.provider import DuplicateUnit
 from integrations.marketplaces.smartstore import assets, lookup, product, readback
 from integrations.marketplaces.smartstore.notice_schema import NoticePresence, load_notice_schema
 from integrations.marketplaces.smartstore.registry import ADOPTED, EndpointId, resolve
@@ -993,14 +994,37 @@ def test_an_unsafe_provider_reference_never_enters_the_comparison_evidence() -> 
 # ---------------------------------------------------------------- duplicate lookup (§13)
 
 
+class _NoSnapshotCatalog:
+    """A bound store whose catalog has never completed a sync (ADR-0042 §6)."""
+
+    def account(self) -> str:
+        return "mpa-1"
+
+    def freshness(self, **_: Any) -> tuple[str, None]:
+        return "NONE", None
+
+
 def test_duplicate_lookup_is_fail_closed_and_never_fabricates_no_match() -> None:
-    source = lookup.SmartStoreDuplicateLookup()
+    # ADR-0042 S3b: the SmartStore duplicate source is the store-catalog snapshot. Without a
+    # COMPLETE one there is no evidence at all — the reason, and never a NO_MATCH.
+    refreshed: list[bool] = []
+    source = lookup.smartstore_duplicate_source(
+        catalog=_NoSnapshotCatalog(),  # type: ignore[arg-type]
+        refresh=lambda: refreshed.append(True) or True,
+        convention_codes=lambda items: (),
+        mutation_started_at=lambda key, account: None,
+        caller=None,  # type: ignore[arg-type]
+        bearer=lambda: None,
+    )
     assert not source.available()
-    with pytest.raises(lookup.DuplicateLookupUnavailableError) as refused:
-        source.evidence(marketplace_account_id="mpa-1", listing_identity=IDENTITY)
-    assert refused.value.code == "SMARTSTORE_DUPLICATE_LOOKUP_NOT_ADOPTED"
-    # The refusal names the endpoint and stays a refusal: no verdict is invented from existence.
-    assert "NO_MATCH" not in str(refused.value)
+    check = source.check(
+        DuplicateUnit("smartstore", "mpa-1", IDENTITY, listing_name="상품"), spot_check=True
+    )
+    assert check.evidence is None
+    assert check.problem == "DUPLICATE_EVIDENCE_UNAVAILABLE"
+    # The automatic re-sync is asked for, and the screen reads 「스토어 다시 확인 중…」.
+    assert check.resyncing is True and refreshed == [True]
+    assert lookup.LOOKUP_CONTRACT_VERSION == "smartstore-catalog-duplicate/v1"
 
 
 # ---------------------------------------------------------------- image upload outcome (§4)

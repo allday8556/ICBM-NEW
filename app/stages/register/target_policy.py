@@ -13,8 +13,9 @@ REGISTER preflight reads on every evaluation, and this module is its only owner:
   revision exists.
 - **It owns only the ADR-0015 §2 inputs**: the taxonomy revision, the M4 pricing context, the
   account's template identities, the sanitizer profile, the asset policy, the duplicate-proof
-  policy and the authoring revision references. No Product, price, readiness, Snapshot, capability
-  or provider truth, and no category metadata.
+  policy and the authoring revision references — plus, since ADR-0042 S3b, how long a store-catalog
+  snapshot stays duplicate evidence (``catalog_max_age_minutes``, §5.2). No Product, price,
+  readiness, Snapshot, capability or provider truth, and no category metadata.
 - **The authoring revision references are server-owned.** ``category_mapping_revision`` and
   ``detail_composition_revision`` name revisions of the authoring-revision owner
   (``app.stages.register.authoring_revisions``; ADR-0014 §27.1, Issue #89 ``5907626428``). A client
@@ -38,7 +39,7 @@ import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any, Final
 
@@ -58,7 +59,14 @@ from app.stages.products.sales_policy import SALES_POLICY_SURFACE
 from app.stages.register import sanitize
 from app.stages.register.authoring_revisions import AuthoringRevisionStore
 from app.stages.register.model import RegistrationConflictError, canonical_json, sanitized_digest
-from app.stages.register.policy import AssetPolicy, DeliveryPolicy, DuplicateKeyKind, TargetPolicy
+from app.stages.register.policy import (
+    CATALOG_MAX_AGE,
+    CATALOG_MAX_AGE_MINUTES,
+    AssetPolicy,
+    DeliveryPolicy,
+    DuplicateKeyKind,
+    TargetPolicy,
+)
 from app.stages.register.target_policy_models import (
     RegistrationTargetPolicy,
     RegistrationTargetPolicyCurrent,
@@ -185,6 +193,10 @@ class TargetPolicyInputsView(_Strict):
     duplicate_lookup_keys: list[DuplicateKeyKind]
     category_mapping_revision: StrictStr | None
     detail_composition_revision: StrictStr | None
+    # ADR-0042 §5.2: minutes a COMPLETE store-catalog snapshot stays duplicate evidence (1–60).
+    # Older revisions omit it and read the owner-decided 60; a later change is a new, audited
+    # revision like any other.
+    catalog_max_age_minutes: StrictInt | None = None
 
 
 class AppendRevisionRequest(_Strict):
@@ -329,6 +341,14 @@ def encode_content(
                 " null is accepted and the server stamps the owner's current revision",
                 name,
             )
+    max_age = inputs.catalog_max_age_minutes
+    if max_age is not None and not 1 <= max_age <= CATALOG_MAX_AGE_MINUTES:
+        raise _invalid(
+            TARGET_POLICY_INVALID,
+            f"a store snapshot is duplicate evidence for 1 to {CATALOG_MAX_AGE_MINUTES} minutes"
+            " (ADR-0042 §5.2): it may be shortened, never lengthened",
+            "catalog_max_age_minutes",
+        )
     phone = inputs.after_service_telephone
     if phone is not None and not AFTER_SERVICE_TELEPHONE.fullmatch(phone):
         raise _invalid(
@@ -361,6 +381,8 @@ def encode_content(
         # Never a client-invented label (checked above): the store stamps the owner-held ones.
         "category_mapping_revision": None,
         "detail_composition_revision": None,
+        # Named only when set, so a revision without it keeps its exact earlier content.
+        **({} if max_age is None else {"catalog_max_age_minutes": max_age}),
     }
     try:
         sanitize.require_clean(content, "target_policy")
@@ -420,6 +442,11 @@ def target_policy_of(policy_revision: str, content: Mapping[str, Any]) -> Target
         templates=dict(inputs.templates),
         duplicate_proof_required=inputs.duplicate_proof_required,
         duplicate_lookup_keys=frozenset(inputs.duplicate_lookup_keys),
+        catalog_max_age=(
+            CATALOG_MAX_AGE
+            if inputs.catalog_max_age_minutes is None
+            else timedelta(minutes=inputs.catalog_max_age_minutes)
+        ),
     )
 
 

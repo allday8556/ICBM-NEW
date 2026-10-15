@@ -220,16 +220,21 @@ migration `0067_store_catalog`, the SmartStore catalog source
 `integrations/marketplaces/smartstore/catalog.py`, the Settings card
 `ui/web/js/pages/settings/store-catalog.js`, one unit and three integration suites; the adopted
 search and origin read gained the catalog request and retention (`s1a-store-catalog-r1`).
+ADR-0042 S3b added the catalog duplicate source `app/stages/operate/catalog/duplicates.py`
+(REGISTER's SmartStore duplicate evidence, read from the store's COMPLETE, fresh catalog
+snapshot; `integrations/marketplaces/smartstore/lookup.py` now composes it with the positive spot
+check), the editor's duplicate row `ui/web/js/components/duplicate-row.js` and two integration
+suites; `catalog_max_age` moved into the target policy.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 416 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 417 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 84 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
 | `app/interface/` | 32 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 97 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 198 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/stages/` | 199 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -251,13 +256,13 @@ search and origin read gained the catalog request and retention (`s1a-store-cata
 | `integrations/` | 120 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 46 |  |
 | `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 448 | tests |
+| `tests/` | 450 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 184 | integration tests by runtime owner |
+| `tests/integration/` | 186 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
 | `tests/unit/` | 162 | unit tests by runtime owner |
-| `ui/` | 76 | operator clients: the served web client and the capture extension |
+| `ui/` | 77 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 67 | the served web client |
+| `ui/web/` | 68 | the served web client |

@@ -24,6 +24,7 @@ import { KIND_LABEL } from '../components/review-counts.js';
 import { READ_STATE_TONE } from '../components/registration-status.js';
 import { itemImagesEditor } from '../components/item-images.js';
 import { listingSyncPanel } from '../components/listing-sync.js';
+import { duplicateRow } from '../components/duplicate-row.js';
 
 const SCREEN = '/api/v1/screens/register';
 const OVERVIEW = '/api/v1/register/overview';
@@ -198,7 +199,12 @@ export const REASON_COPY = {
   REGISTER_UNIT_ALREADY_FROZEN: '이미 스냅샷이 고정된 단위입니다.',
   REGISTER_FROZEN_METADATA_UNRESOLVED:
     '스냅샷이 고정한 카테고리 메타데이터 리비전을 찾을 수 없어 규칙을 표시하지 않습니다. 현재 리비전으로 대신 표시하지 않습니다.',
-  DUPLICATE_EVIDENCE_MISSING: '중복 조회 근거가 없습니다. 조회 계약이 아직 채택되지 않았습니다.',
+  DUPLICATE_EVIDENCE_MISSING: '중복 확인 근거가 없습니다.',
+  // ADR-0042 S3b: the store's own catalog decides duplicates.
+  DUPLICATE_EVIDENCE_STALE: '스토어 다시 확인 중입니다. 확인이 끝나면 중복 여부를 다시 판단합니다.',
+  DUPLICATE_EVIDENCE_UNAVAILABLE: '스토어 상품을 아직 확인하지 못해 중복 여부를 알 수 없습니다.',
+  PROVIDER_DUPLICATE_FOUND: '이미 스토어에 같은 판매자코드의 상품이 있습니다.',
+  PROVIDER_DUPLICATE_WEAK_SIGNAL: '스토어에 상품명이 같은 상품이 있습니다. 같은 상품인지 확인해 주세요.',
   // ADR-0033 §8: a resolved top or bottom notice the unit's composition does not place. Since G5
   // the SmartStore composition (v3) places both; an older composition revision does not.
   PUBLICATION_GUIDANCE_UNPLACED: '이 상품의 상세페이지 구성은 상·하단 공지를 넣지 못합니다. 등록 정책을 다시 저장한 뒤 준비 내용을 저장하면 공지가 들어갑니다. 이 상품에서 그 공지를 끄면 이 사유는 사라집니다.',
@@ -1363,6 +1369,8 @@ function unitPanel(unit, onDone, labels) {
       unit,
       'ready',
       '등록 준비',
+      // ADR-0042 S3b (§0 a4): the duplicate row, decided by the store's last complete sync.
+      duplicateRow(unit, onDone),
       preflightBlock(unit, labels),
       previewBlock(unit),
       intent && intent.attempts.length

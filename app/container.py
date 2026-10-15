@@ -144,7 +144,7 @@ from app.stages.connect.sessions import (
 from app.stages.connect.smartstore.keeper import SmartStoreSessionKeeper
 from app.stages.connect.smartstore.service import SmartStoreConnectService
 from app.stages.operate.adoption import CONVENTIONS as ADOPTION_CONVENTIONS
-from app.stages.operate.adoption import AdoptionService
+from app.stages.operate.adoption import AdoptionService, seller_code_of
 from app.stages.operate.catalog.service import StoreCatalogScheduler, StoreCatalogService
 from app.stages.operate.dispatch import DispatchService, dispatch_unit
 from app.stages.operate.fulfillment import FulfillmentService
@@ -227,7 +227,7 @@ from integrations.marketplaces.smartstore.execution import (
     SmartStoreReconcileLookup,
 )
 from integrations.marketplaces.smartstore.listing_finder import SmartStoreListingFinder
-from integrations.marketplaces.smartstore.lookup import SmartStoreDuplicateLookup
+from integrations.marketplaces.smartstore.lookup import smartstore_duplicate_source
 from integrations.marketplaces.smartstore.notice_catalog import SmartStoreNoticeCatalog
 from integrations.marketplaces.smartstore.notice_schema import SmartStoreNoticeRules
 from integrations.marketplaces.smartstore.orders import SmartStoreOrderSource
@@ -1098,11 +1098,59 @@ def build_container(
         execution=ai_execution,
     )
     registry.register(image_translation.job_definition())
+
+    def _bound_account(marketplace_key: str) -> str | None:
+        """The one canonical account of the marketplace bound to its committed identity."""
+        for record in accounts.accounts(marketplace_key):
+            if (
+                accounts.binding(marketplace_key, record.marketplace_account_id)
+                is AccountBinding.BOUND
+            ):
+                return record.marketplace_account_id
+        return None
+
+    # ADR-0042 S1a (§5): the store's whole catalog, read only through the adopted search and
+    # origin read with the CONNECT owner's committed bearer; without a proven current
+    # committed session nothing is read.
+    store_catalog = StoreCatalogService(
+        db=db,
+        clock=clock,
+        source=SmartStoreCatalogSource(
+            smartstore_caller or SmartStoreEndpointCaller(), committed_bearer
+        ),
+        account_of=_bound_account,
+        interval_s=config.operate_store_catalog_interval_s,
+    )
+    store_catalog_scheduler = StoreCatalogScheduler(store_catalog)
+    adoption_codes = adoption_conventions()
+
+    def _convention_codes(item_ids: Sequence[str]) -> set[str]:
+        """ADR-0024 §2: the owner-declared seller code of each Item's source, where one exists."""
+        found: set[str] = set()
+        for item_id in item_ids:
+            identity = _item_source(item_id)
+            code = None if identity is None else seller_code_of(*identity, adoption_codes)
+            if code is not None:
+                found.add(code)
+        return found
+
+    # ADR-0042 S3b (§6): REGISTER's duplicate evidence is the bound store's COMPLETE catalog
+    # snapshot, fresh under the target policy's catalog_max_age; a stale or missing one is no
+    # evidence and starts the automatic pre-registration sync (a routine read). The first CREATE
+    # copy adds the positive-only seller-code spot check through the adopted search.
+    duplicate_source = smartstore_duplicate_source(
+        catalog=store_catalog,
+        refresh=store_catalog_scheduler.refresh_for_registration,
+        convention_codes=_convention_codes,
+        mutation_started_at=registrations.last_mutation_started,
+        caller=smartstore_caller or SmartStoreEndpointCaller(),
+        bearer=committed_bearer,
+    )
     registration_preparations = RegistrationPreparationService(
         registrations=registrations,
         preflight=registration_preflight,
         builder=registration_builder,
-        duplicate_lookup=SmartStoreDuplicateLookup(),
+        duplicate_lookup=duplicate_source,
         prepared_assets=PreparedUploadAssets(live_store),
         # ADR-0026 AIF-4: the current enrichment results an apply reads.
         enrichment=enrichment,
@@ -1156,16 +1204,6 @@ def build_container(
     safety_stack = SafetyStack(
         store=live_store, mode=execution_mode, proofs=stage_proofs, clock=clock
     )
-
-    def _bound_account(marketplace_key: str) -> str | None:
-        """The one canonical account of the marketplace bound to its committed identity."""
-        for record in accounts.accounts(marketplace_key):
-            if (
-                accounts.binding(marketplace_key, record.marketplace_account_id)
-                is AccountBinding.BOUND
-            ):
-                return record.marketplace_account_id
-        return None
 
     def _dispatch_unit(product_order_id: str) -> DispatchUnit:
         with db.read() as session:
@@ -1384,18 +1422,6 @@ def build_container(
         seller_code=smartstore_product.seller_management_code,
         adoptions=adoptions,
     )
-    # ADR-0042 S1a (§5): the store's whole catalog, read only through the adopted search and
-    # origin read with the CONNECT owner's committed bearer; without a proven current
-    # committed session nothing is read.
-    store_catalog = StoreCatalogService(
-        db=db,
-        clock=clock,
-        source=SmartStoreCatalogSource(
-            smartstore_caller or SmartStoreEndpointCaller(), committed_bearer
-        ),
-        account_of=_bound_account,
-        interval_s=config.operate_store_catalog_interval_s,
-    )
     order_sync = OrderSyncService(
         db=db,
         clock=clock,
@@ -1472,7 +1498,7 @@ def build_container(
         dispatches=dispatches,
         listing_sync_scheduler=ListingSyncScheduler(listing_sync),
         store_catalog=store_catalog,
-        store_catalog_scheduler=StoreCatalogScheduler(store_catalog),
+        store_catalog_scheduler=store_catalog_scheduler,
         auto_images=auto_images,
         common_images=common_images,
         config=config,

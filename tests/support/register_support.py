@@ -65,6 +65,7 @@ from app.stages.register.preparation import (
     PreparedAsset,
     UnitRequest,
 )
+from app.stages.register.provider import DuplicateCheck, DuplicateUnit
 from app.stages.register.store import RegistrationStore
 from tests.support.collect_support import confirmed
 from tests.support.product_support import Collections, context, product, raw
@@ -159,24 +160,29 @@ class FakeDuplicateLookup:
     marketplace_account_id: str | None = None
     listing_identity: str | None = None
     calls: list[tuple[str, str]] = field(default_factory=list)
+    spot_checks: list[bool] = field(default_factory=list)
 
     def available(self) -> bool:
         return self.available_result
 
-    def evidence(
-        self, *, marketplace_account_id: str, listing_identity: str
-    ) -> DuplicateEvidence | None:
-        self.calls.append((marketplace_account_id, listing_identity))
+    def check(self, unit: DuplicateUnit, *, spot_check: bool = False) -> DuplicateCheck:
+        # An unavailable source has nothing to read: it is never asked for a unit's evidence.
+        if not self.available_result:
+            return DuplicateCheck(None, "DUPLICATE_EVIDENCE_UNAVAILABLE")
+        self.calls.append((unit.marketplace_account_id, unit.listing_identity))
+        self.spot_checks.append(spot_check)
         if self.return_none:
-            return None
-        return DuplicateEvidence(
-            marketplace_key=self.marketplace_key,
-            marketplace_account_id=self.marketplace_account_id or marketplace_account_id,
-            listing_identity=self.listing_identity or listing_identity,
-            lookup_contract_version="lookup-test-1",
-            evidence_digest=self.evidence_digest,
-            verdict=DuplicateVerdict.NO_MATCH,
-            keys_checked=frozenset({DuplicateKeyKind.SELLER_CODE}),
+            return DuplicateCheck(None, "DUPLICATE_EVIDENCE_UNAVAILABLE")
+        return DuplicateCheck(
+            DuplicateEvidence(
+                marketplace_key=self.marketplace_key,
+                marketplace_account_id=self.marketplace_account_id or unit.marketplace_account_id,
+                listing_identity=self.listing_identity or unit.listing_identity,
+                lookup_contract_version="lookup-test-1",
+                evidence_digest=self.evidence_digest,
+                verdict=DuplicateVerdict.NO_MATCH,
+                keys_checked=frozenset({DuplicateKeyKind.SELLER_CODE}),
+            )
         )
 
 
