@@ -43,6 +43,15 @@ def test_a_clean_surface_passes_every_check() -> None:
     [
         ({"states": [{"at": BLOCKER, "hidden": "no-box"}]}, "state_visible"),
         ({"states": [{"at": BLOCKER, "hidden": "visibility"}]}, "state_visible"),
+        ({"states": [{"at": BLOCKER, "hidden": "closed-details:details"}]}, "state_visible"),
+        (
+            {"states": [{"at": BLOCKER, "revealed": "details", "hidden": "no-box"}]},
+            "state_visible",
+        ),
+        (
+            {"states": [{"at": BLOCKER, "revealed": "details", "covered": "div.toast"}]},
+            "state_not_covered",
+        ),
         ({"states": [{"at": BLOCKER, "clipped": "y:div.panel"}]}, "state_visible"),
         ({"states": [{"at": BLOCKER, "truncated": True}]}, "state_not_truncated"),
         ({"states": [{"at": BLOCKER, "covered": "div.toast"}]}, "state_not_covered"),
@@ -65,6 +74,28 @@ def test_each_hidden_or_broken_state_fails_its_check(change: dict[str, Any], che
     assert check in found, found
     if "states" in change:
         assert any(BLOCKER in failure for failure in found[check])
+
+
+def test_a_state_revealed_from_a_collapsed_details_passes_and_is_named() -> None:
+    """ADR-0018 §9 amendment (Issue #219 6185598957): the measurement opened the details, so the
+    state is judged like any other; both visibility outcomes name it as revealed."""
+    measurement = clean() | {
+        "states": [
+            {"at": BLOCKER},
+            {"at": 'li[data-missing="LIVE_SENDER_NOT_WIRED"]', "revealed": "details.x"},
+        ]
+    }
+    checks = judge(measurement, REGISTER, console_errors=[], external_requests=0)
+    assert all(outcome["passed"] for outcome in checks.values()), checks
+    named = ['li[data-missing="LIVE_SENDER_NOT_WIRED"] in details.x']
+    assert checks["state_visible"]["revealed_from_details"] == named
+    assert checks["state_not_covered"]["revealed_from_details"] == named
+    assert (
+        judge(clean(), REGISTER, console_errors=[], external_requests=0)["state_visible"][
+            "revealed_from_details"
+        ]
+        == []
+    )
 
 
 def test_console_errors_and_external_requests_fail() -> None:

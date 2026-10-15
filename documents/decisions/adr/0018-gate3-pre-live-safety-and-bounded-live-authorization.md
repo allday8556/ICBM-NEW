@@ -734,6 +734,26 @@ That staleness rule is a send-time coverage rule, not an instruction to re-run a
 every provider-zero merge. The reviewed record is created on the final main immediately before the
 bounded LIVE action; until then no record is current and the readiness layer remains blocked.
 
+> **Amendment (2026-10-15, owner decision Issue #219 comment 6185598957).** A server-owned state
+> inside a closed `<details>` is **visible on demand** when that details' own `<summary>` is itself
+> visible and uncovered — by the same rules as any state: not hidden (no box, `display:none`,
+> `visibility`, `opacity`), not clipped, not off-screen and not covered at its visible centre. The
+> visual acceptance opens each such details (outermost first) before it measures, and then judges
+> every state inside it by every unchanged rule of this section: visible, untruncated, uncovered,
+> not overlapping and inside the viewport's width. The report names each state judged this way.
+> The rule relaxes nothing else:
+> - a state inside a closed details whose summary is missing, hidden, clipped, off-screen or covered
+>   stays collapsed and fails as hidden (`closed-details`);
+> - a state hidden by any other means — `display:none`, `visibility`, `opacity`, a zero size, a
+>   vertical clip, off-screen or covered — still fails, inside an opened details as anywhere else;
+> - the measurement opens only closed details that collapse a server-owned state, and changes
+>   nothing else on the page.
+>
+> It lets the register page keep its LIVE-safety states (PR #352) in a collapsed
+> `register-safety-details` disclosure. The harness version becomes `g3-visual-acceptance/v3`; the
+> full-page screenshot is taken after the measurement, so it shows those details open, the state
+> that was judged.
+
 ### 10. Mutation-stage readiness
 
 Each stage has its own derived, read-only readiness, and **it is a mandatory layer of the send-time
