@@ -154,26 +154,29 @@ class CatalogDuplicateSource:
             return sanitized_digest({"account": None})
         mutation = self._mutation_started_at(self._marketplace_key, account)
         state, run = self._catalog.freshness(max_age=max_age, mutation_started_at=mutation)
+        links = self._links(account)
         return sanitized_digest(
             {
                 "contract": self._contract_version,
                 "state": state,
                 "run": None if run is None else run.run_id,
                 "mutation": None if mutation is None else mutation.isoformat(),
-                # A link moves an answer as much as a sync does (ADR-0042 §6, S2a).
-                "links": sorted(self._links(account).items()),
+                # A link moves an answer as much as a sync does (ADR-0042 §6, S2a); a failed
+                # read is its own state, never an empty set of links.
+                "links": None if links is None else sorted(links.items()),
             }
         )
 
-    def _links(self, account: str) -> Mapping[str, str]:
+    def _links(self, account: str) -> Mapping[str, str] | None:
+        """The store's links (origin product → common product), ``{}`` when no links owner is
+        wired, and ``None`` when the owner failed to answer: a failed read is never "no link"."""
         if self._linked is None:
             return {}
         try:
             return self._linked(self._marketplace_key, account)
         except Exception:
-            # Without the links nothing is claimed about them: the check names no link key.
             logger.warning("operate.catalog_duplicate_links_failed", exc_info=True)
-            return {}
+            return None
 
     def check(
         self, unit: DuplicateUnit, *, spot_check: bool = False, resync: bool = True
@@ -215,7 +218,12 @@ class CatalogDuplicateSource:
             # Another sync completed while this one was read: never mix two runs, never guess.
             return DuplicateCheck(None, DUPLICATE_EVIDENCE_UNAVAILABLE, as_of=run.as_of)
         groups = set(unit.group_ids)
-        links = self._links(account) if self._linked is not None else {}
+        links = self._links(account)
+        if links is None:
+            # Fail closed (SCP-06): the links owner did not answer, so whether a store listing is
+            # already this product's is unknown. No evidence, never a NO_MATCH that names the
+            # link key as checked.
+            return DuplicateCheck(None, DUPLICATE_EVIDENCE_UNAVAILABLE, as_of=run.as_of)
         found: dict[str, MatchedListing] = {}
         for listing in index:
             if links.get(listing.origin_product_no) in groups:

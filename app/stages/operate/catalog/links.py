@@ -9,8 +9,11 @@ per listing (SCP-09):
 - ``ADOPTED``: an ``ACTIVE`` ADR-0024 adoption; its Item's group. Read from the adoption owner,
   never rewritten (ADR-0024 amendment, ADR-0042 §13).
 - ``STRONG_KEY``: the server linked it **automatically** by an equal seller code or a valid equal
-  GTIN (owner ``6190978708`` Q3), against an owner-declared seller-code convention of a member
-  (ADR-0024 §2) or a listing of another store. Always with a notice and an undo (SCP-10).
+  GTIN (owner ``6190978708`` Q3), against a member's facts — the code its supplier's
+  owner-declared convention gives it (ADR-0024 §2), or its CONFIRMED barcode fact when that is a
+  valid GTIN — or against a listing of another store. Always with a notice and an undo (SCP-10).
+  No supplier records a barcode fact today (``products.store.GTIN_FIELD``); the member GTIN
+  comparison is wired regardless, so it links as soon as one does.
 - ``USER_CONFIRMED``: the seller's 「같은 상품」. Audited, reversible.
 - ``IMPORTED``: the listing's own common product, created for it because no strong key linked it
   (owner Q4, SCP-12): a ``ProductGroup`` with **no** supplier member, shown 「도매처 미연결」.
@@ -56,9 +59,11 @@ from app.platform.core.errors import AppError, ErrorClass, NotFoundError
 from app.platform.db.database import Database
 from app.stages.operate.catalog.facts import COMPLETE, OBSERVED
 from app.stages.operate.catalog.keys import (
+    GTIN,
     SELLER_CODE,
     amounts,
     conflicts,
+    gtin_key,
     name_similarity,
     name_tokens,
     seller_code_key,
@@ -395,21 +400,33 @@ class ListingLinkService:
 
     def _member_codes(
         self, unit: ProductFoundationUnit
-    ) -> tuple[dict[str, set[str]], dict[str, tuple[MemberName, ...]]]:
-        """Seller code → the ACTIVE groups whose member's convention gives it, and each group's
-        member names (for conflicts and proposals)."""
+    ) -> tuple[dict[tuple[str, str], set[str]], dict[str, tuple[MemberName, ...]]]:
+        """Each strong key a member's facts give → the ACTIVE groups with that member, and each
+        group's member names (for conflicts and proposals). The keys are:
+
+        - ``SELLER_CODE``: the code the supplier's owner-declared convention gives the member
+          (ADR-0024 §2);
+        - ``GTIN``: the member's CONFIRMED barcode fact, when it is a valid GTIN (14-digit form).
+          No supplier records one today (``products.store.GTIN_FIELD``); the comparison is wired so
+          a listing links as soon as one does, and it is never skipped.
+        """
         names = unit.member_names()
-        codes: dict[str, set[str]] = {}
+        codes: dict[tuple[str, str], set[str]] = {}
         for group, members in names.items():
             for member in members:
                 convention = self._conventions.get(member.supplier_key)
-                if convention is None:
-                    continue
-                code = seller_code_key(
-                    convention.format(source_product_id=member.source_product_id)
+                code = (
+                    None
+                    if convention is None
+                    else seller_code_key(
+                        convention.format(source_product_id=member.source_product_id)
+                    )
                 )
                 if code is not None:
-                    codes.setdefault(code, set()).add(group)
+                    codes.setdefault((SELLER_CODE, code), set()).add(group)
+                gtin = gtin_key(member.gtin)
+                if gtin is not None:
+                    codes.setdefault((GTIN, gtin), set()).add(group)
         return codes, names
 
     @staticmethod
@@ -583,7 +600,7 @@ class ListingLinkService:
     def _strong_targets(
         self,
         listing: _Listing,
-        codes: Mapping[str, set[str]],
+        codes: Mapping[tuple[str, str], set[str]],
         other_keys: Mapping[tuple[str, str], set[str]],
         decisions: set[tuple[str, str]],
     ) -> dict[str, str]:
@@ -591,8 +608,7 @@ class ListingLinkService:
         found: dict[str, str] = {}
         for kind, value in sorted(listing.keys):
             groups = set(other_keys.get((kind, value), set()))
-            if kind == SELLER_CODE:
-                groups |= codes.get(value, set())
+            groups |= codes.get((kind, value), set())
             for group in sorted(groups):
                 if (listing.view.listing_id, group) not in decisions:
                     found.setdefault(group, kind)
@@ -603,7 +619,7 @@ class ListingLinkService:
         store: tuple[str, str],
         listing: _Listing,
         shared: Counter[tuple[str, str]],
-        codes: Mapping[str, set[str]],
+        codes: Mapping[tuple[str, str], set[str]],
         other_keys: Mapping[tuple[str, str], set[str]],
         decisions: set[tuple[str, str]],
         in_store: Counter[str],
@@ -1375,7 +1391,7 @@ class ListingLinkService:
         views: Sequence[CatalogListingView],
         current: Mapping[str, _Current],
         links: Mapping[str, LinkView],
-        codes: Mapping[str, set[str]],
+        codes: Mapping[tuple[str, str], set[str]],
         names: Mapping[str, Sequence[MemberName]],
         others: Sequence[_Other],
         decisions: set[tuple[str, str]],

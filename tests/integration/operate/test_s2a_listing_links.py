@@ -21,6 +21,7 @@ product is collected from synthetic source truth. Proven here:
 - the catalog duplicate source matches a listing linked to the unit's product (LISTING_LINK).
 """
 
+import json
 import sqlite3
 from collections.abc import Callable
 from typing import Any
@@ -54,8 +55,8 @@ from app.stages.operate.catalog.links import (
 from app.stages.operate.catalog.service import OPERATOR, StoreCatalogService
 from app.stages.products.catalog import MEMBERSHIP_REVISION_MISSING, SelectionConflictError
 from app.stages.products.service import ProductsService
-from app.stages.register.policy import DuplicateKeyKind
-from app.stages.register.preparation import DuplicateVerdict
+from app.stages.register.policy import CATALOG_MAX_AGE, DuplicateKeyKind
+from app.stages.register.preparation import DUPLICATE_EVIDENCE_UNAVAILABLE, DuplicateVerdict
 from app.stages.register.provider import DuplicateUnit
 from tests.conftest import LOCAL
 from tests.support.collect_support import confirmed
@@ -468,6 +469,86 @@ def test_the_duplicate_source_matches_a_listing_linked_to_the_units_product(
     assert DuplicateKeyKind.LISTING_LINK in check.evidence.keys_checked
     other = duplicates.check(DuplicateUnit(MARKET, ACCOUNT, "unit-2", group_ids=("g-other",)))
     assert other.evidence is not None and other.evidence.verdict is DuplicateVerdict.NO_MATCH
+
+
+def test_a_failed_links_read_is_no_duplicate_evidence(
+    container: Container, harness: Harness, source: FakeSource
+) -> None:
+    # Fail closed (SCP-06): a links owner that does not answer is never "no link", so the unit
+    # gets no evidence — never a NO_MATCH that names LISTING_LINK as checked.
+    source.put("101", fields("전혀 다른 이름", code="OWN-0101"))
+    harness.sync()
+
+    def broken(key: str, account: str) -> dict[str, str]:
+        raise RuntimeError("links owner unavailable")
+
+    duplicates = CatalogDuplicateSource(
+        marketplace_key=MARKET,
+        contract_version="fixture-duplicate/v1",
+        catalog=harness.catalog,
+        seller_code=lambda identity: f"ICBM-{identity}",
+        convention_codes=lambda items: (),
+        mutation_started_at=lambda key, account: None,
+        refresh=lambda: False,
+        linked=broken,
+    )
+    check = duplicates.check(DuplicateUnit(MARKET, ACCOUNT, "unit-1", group_ids=("g-1",)))
+    assert check.evidence is None
+    assert check.problem == DUPLICATE_EVIDENCE_UNAVAILABLE
+    assert check.as_of is not None and check.matched == ()
+    # The truth token says the read failed, distinct from a store with no links at all.
+    healthy = CatalogDuplicateSource(
+        marketplace_key=MARKET,
+        contract_version="fixture-duplicate/v1",
+        catalog=harness.catalog,
+        seller_code=lambda identity: f"ICBM-{identity}",
+        convention_codes=lambda items: (),
+        mutation_started_at=lambda key, account: None,
+        refresh=lambda: False,
+        linked=lambda key, account: {},
+    )
+    assert duplicates.truth_token(ACCOUNT, CATALOG_MAX_AGE) != healthy.truth_token(
+        ACCOUNT, CATALOG_MAX_AGE
+    )
+
+
+def _seed_member_gtin(container: Container, source_product_id: str, gtin: str) -> None:
+    """A CONFIRMED barcode fact on the member's current source revision. No supplier records one
+    today (ADR-0042 §3 evidence note); the fact is seeded to prove the comparison is wired."""
+    with sqlite3.connect(container.config.database_path) as raw:
+        (revision,) = raw.execute(
+            "SELECT m.revision_id FROM current_source_revision_moves m"
+            " JOIN source_products s ON s.source_product_uid = m.source_product_uid"
+            " WHERE s.supplier_key = ? AND s.source_product_id = ?"
+            " ORDER BY m.sequence DESC LIMIT 1",
+            (SUPPLIER, source_product_id),
+        ).fetchone()
+        raw.execute(
+            "INSERT INTO product_facts_fields"
+            " (revision_id, field_key, level, status, value_json, field_fingerprint)"
+            " VALUES (?, 'gtin', 'COVERAGE', 'CONFIRMED', ?, ?)",
+            (revision, json.dumps({"text": gtin}), "c" * 64),
+        )
+
+
+def test_a_valid_gtin_links_to_the_member_that_states_it(
+    container: Container, harness: Harness, source: FakeSource, sources: Collections
+) -> None:
+    group = supplier_group(container, sources, "300", "국산 참기름 300ml")
+    other = supplier_group(container, sources, "301", "볶음 참깨 1kg")
+    # The member states the UPC-A; the listing carries the same GTIN as an EAN-13.
+    _seed_member_gtin(container, "300", "036000291452")
+    _seed_member_gtin(container, "301", "8801234567893")
+    source.put("101", fields("스토어 참기름", code="OWN-0101", barcode="0036000291452"))
+    # A barcode with a wrong check digit is no key: that listing becomes its own product.
+    source.put("102", fields("스토어 참깨", code="OWN-0102", barcode="8801234567890"))
+    harness.sync()
+    first = harness.link_of("101")
+    assert (first.kind, first.key_kind, first.product_group_id) == (STRONG_KEY, "GTIN", group)
+    (notice,) = harness.links.overview().notices
+    assert notice.key_kind == "GTIN" and notice.link_id == first.link_id
+    second = harness.link_of("102")
+    assert second.kind == IMPORTED and second.product_group_id not in (group, other)
 
 
 def test_the_api_reads_and_acts_through_the_owner(config: AppConfig, source: FakeSource) -> None:

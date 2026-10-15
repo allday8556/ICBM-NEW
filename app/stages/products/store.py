@@ -77,6 +77,12 @@ from app.stages.products.quantity import OfferTerms
 OFFER_FIELDS = ("options", "quantity_tiers")
 # The source fact a product DB search reads, through each member's current source revision only.
 NAME_FIELD = "original_name"
+# ADR-0042 §7 (S2a): the source fact a member's barcode (GTIN) is read from, compared with a store
+# listing's valid GTIN as a strong key. No supplier records it today: the M3 field registry
+# (``app.stages.collect.facts.FIELD_REGISTRY``) has no barcode field and no supplier parser or site
+# configuration emits one (checked 2026-10-16). The comparison is wired, so it links as soon as a
+# CONFIRMED fact under this key appears.
+GTIN_FIELD = "gtin"
 
 
 def current_revision_for_confirmed_member(
@@ -170,11 +176,13 @@ class GroupShape:
 
 @dataclass(frozen=True)
 class MemberName:
-    """One CONFIRMED member and the name its current source revision states, if CONFIRMED."""
+    """One CONFIRMED member and the name its current source revision states, if CONFIRMED, and
+    the barcode (GTIN) text it states, if CONFIRMED (:data:`GTIN_FIELD`)."""
 
     supplier_key: str
     source_product_id: str
     name: str | None
+    gtin: str | None = None
 
 
 @dataclass(frozen=True)
@@ -756,14 +764,39 @@ class ProductFoundationUnit:
         found: dict[str, list[MemberName]] = {}
         for group_id, uid, supplier_key, source_product_id in rows:
             move = self.current_move(uid)
-            name = None
+            name = gtin = None
             if move is not None:
                 reading = self.source_fields(move.revision_id, (NAME_FIELD,)).get(NAME_FIELD)
                 if reading is not None and reading.status is FieldStatus.CONFIRMED:
                     text = getattr(reading.value, "text", None)
                     name = text if isinstance(text, str) and text else None
-            found.setdefault(group_id, []).append(MemberName(supplier_key, source_product_id, name))
+                gtin = self._confirmed_text(move.revision_id, GTIN_FIELD)
+            found.setdefault(group_id, []).append(
+                MemberName(supplier_key, source_product_id, name, gtin)
+            )
         return {group_id: tuple(names) for group_id, names in found.items()}
+
+    def _confirmed_text(self, revision_id: str, field_key: str) -> str | None:
+        """The text of one CONFIRMED field of a revision, read raw: a ``{"text": …}`` value (the
+        M3 text shape) or a bare JSON string. Anything else, or a field under review or absent,
+        is ``None``. Used for :data:`GTIN_FIELD`, which the M3 registry does not name yet, so it
+        is not read through it."""
+        value_json = self.session.scalar(
+            select(ProductFactsField.value_json).where(
+                ProductFactsField.revision_id == revision_id,
+                ProductFactsField.field_key == field_key,
+                ProductFactsField.status == FieldStatus.CONFIRMED.value,
+            )
+        )
+        if value_json is None:
+            return None
+        try:
+            value = json.loads(value_json)
+        except ValueError:
+            return None
+        if isinstance(value, dict):
+            value = value.get("text")
+        return value if isinstance(value, str) and value.strip() else None
 
     def confirmed_membership(self, source_product_uid: str) -> ConfirmedMembership | None:
         """The source product's one CONFIRMED member, if it has one, and its group's status."""
