@@ -328,6 +328,55 @@ def test_an_ai_suggestion_is_never_recorded_as_reviewed(
     assert counts(config) == _none() and events(container) == []
 
 
+def test_the_form_offers_the_documented_notice_types_by_name_and_records_nothing(
+    api: TestClient, container: Container, config: AppConfig
+) -> None:
+    # 2026-10-16: the seller chooses a notice type by its Korean name; the stored value is the
+    # same enum. Only a documented type is offered, in the provider's own order.
+    from integrations.marketplaces.smartstore.notice_schema import load_notice_schema
+
+    schema = load_notice_schema()
+    form = api.get(f"/api/v1/settings/category-metadata-form/{KNOWN}", headers=CLIENT)
+    assert form.status_code == 200, form.text
+    offered = form.json()
+    choices = [(c["notice_type"], c["label"]) for c in offered["notice_types"]]
+    assert choices == [
+        (notice_type, schema.types[notice_type].name)
+        for notice_type in schema.notice_types
+        if notice_type in schema.types
+    ]
+    assert ("ETC", schema.types["ETC"].name) in choices
+    # An undocumented type (no captured child) is never offered: nothing could be sent for it.
+    assert "LODGMENT_RESERVATION" not in {value for value, _ in choices}
+    # No adopted evidence records the product-name limit: none is offered. A new category starts
+    # without options, the only option limits valid without them.
+    assert offered["name_max_length"] is None
+    assert (offered["options_supported"], offered["max_options"], offered["max_dimensions"]) == (
+        False,
+        1,
+        1,
+    )
+    # Another marketplace has no documented notice schema here: nothing is named for it.
+    other = api.get("/api/v1/settings/category-metadata-form/coupang", headers=CLIENT)
+    assert other.json()["notice_types"] == []
+    unknown = api.get("/api/v1/settings/category-metadata-form/nowhere", headers=CLIENT)
+    assert unknown.status_code == 404
+    # Reading the form records nothing and reviews nothing.
+    assert counts(config) == _none() and events(container) == []
+    # The form's defaults are a valid revision as they stand, still unreviewed until the operator
+    # records it reviewed from evidence.
+    saved = save(
+        api,
+        body(
+            reviewed=False,
+            notice={"notice_type": "ETC", "fields": []},
+            options={"options_supported": False, "max_options": 1, "max_dimensions": 1},
+        ),
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["current"]["reviewed"] is False
+
+
 def test_marketplace_taxonomy_and_category_are_isolated(
     api: TestClient, container: Container
 ) -> None:

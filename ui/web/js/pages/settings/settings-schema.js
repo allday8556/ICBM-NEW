@@ -220,7 +220,11 @@ export const SUBTABS = {
               title: '가격 우선순위',
               items: [
                 { flow: ['판매금지/품절', '매입원가', '최저판매가', '목표마진 계산'] },
-                note('실제 판매가는 스마트스토어 › 등록 정책의 수수료·마진 설정으로 자동 계산됩니다.'),
+                // 2026-10-16: the target margin is the pricing owner's fixed 35% (TARGET_NET_MARGIN);
+                // no setting changes it yet, so the note never claims one does.
+                note(
+                  '목표 마진은 지금 35%로 고정되어 있으며 아직 바꿀 수 없습니다. 판매가는 매입원가·배송비와 스마트스토어 › 등록 정책의 수수료 설정으로 자동 계산됩니다.',
+                ),
               ],
             },
           ],

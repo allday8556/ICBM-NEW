@@ -17,6 +17,7 @@ No provider is reached: a target policy is local configuration.
 """
 
 import contextlib
+import re
 import sqlite3
 from collections.abc import Iterator
 from dataclasses import replace
@@ -370,7 +371,108 @@ INVALID = {
         422,
         "TARGET_POLICY_INVALID",
     ),
+    # 2026-10-16: a pricing label may be left to the server, but one that is sent is validated
+    # exactly as before.
+    "a typed pricing label that is no label": (
+        inputs(pricing_context={**inputs()["pricing_context"], "fee_table_version": "fee table 1"}),
+        422,
+        "TARGET_POLICY_PRICING_CONTEXT_INVALID",
+    ),
+    "a stamped pricing context M4 would refuse": (
+        inputs(
+            pricing_context={
+                **inputs()["pricing_context"],
+                "fee_table_version": None,
+                "pricing_policy_version": None,
+                "fee_rate": "1.5",
+            }
+        ),
+        422,
+        "TARGET_POLICY_PRICING_CONTEXT_INVALID",
+    ),
 }
+
+
+STAMPED = re.compile(r"^(fees|pricing)-\d{8}-[0-9a-f]{12}$")
+
+
+def _unlabelled(**pricing: Any) -> dict[str, Any]:
+    """What Settings sends since 2026-10-16: the fees, and both pricing labels as null."""
+    return {
+        **inputs()["pricing_context"],
+        "fee_table_version": None,
+        "pricing_policy_version": None,
+        **pricing,
+    }
+
+
+def test_the_server_stamps_the_pricing_labels_the_seller_never_types(
+    api: TestClient, container: Container, account: str
+) -> None:
+    first = save(api, account, inputs(pricing_context=_unlabelled()))
+    assert first.status_code == 200, first.text
+    pricing = first.json()["inputs"]["pricing_context"]
+    fee_label, policy_label = pricing["fee_table_version"], pricing["pricing_policy_version"]
+    assert STAMPED.fullmatch(fee_label) and fee_label.startswith("fees-")
+    assert STAMPED.fullmatch(policy_label) and policy_label.startswith("pricing-")
+    target = container.registration_preflight.target_policy(MARKET, account)
+    assert target is not None
+    fingerprint = target.pricing_context.fingerprint
+
+    # A save that changes no fee keeps both labels, so the pricing context does not move.
+    kept = save(
+        api,
+        account,
+        inputs(
+            pricing_context=_unlabelled(),
+            templates={"shipping": "shipping-template-2", "returns": "returns-template-test"},
+        ),
+        expected=first.json()["current"]["policy_revision"],
+    )
+    assert kept.status_code == 200, kept.text
+    again = kept.json()["inputs"]["pricing_context"]
+    assert (again["fee_table_version"], again["pricing_policy_version"]) == (
+        fee_label,
+        policy_label,
+    )
+    target = container.registration_preflight.target_policy(MARKET, account)
+    assert target is not None and target.pricing_context.fingerprint == fingerprint
+
+    # A changed fee gets a new fee-table label; the untouched pricing policy keeps its own.
+    moved = save(
+        api,
+        account,
+        inputs(pricing_context=_unlabelled(fee_rate="0.11")),
+        expected=kept.json()["current"]["policy_revision"],
+    )
+    assert moved.status_code == 200, moved.text
+    after = moved.json()["inputs"]["pricing_context"]
+    assert STAMPED.fullmatch(after["fee_table_version"])
+    assert after["fee_table_version"] != fee_label
+    assert after["pricing_policy_version"] == policy_label
+    target = container.registration_preflight.target_policy(MARKET, account)
+    assert target is not None and target.pricing_context.fingerprint != fingerprint
+
+
+def test_a_typed_label_is_kept_while_the_fees_it_names_are_unchanged(
+    api: TestClient, account: str
+) -> None:
+    # A policy saved before 2026-10-16 holds the labels its operator typed; leaving them to the
+    # server keeps them as long as the fees they name stay the same.
+    first = save(api, account, inputs())
+    assert first.status_code == 200, first.text
+    kept = save(
+        api,
+        account,
+        inputs(pricing_context=_unlabelled(), after_service_telephone="02-111-1111"),
+        expected=first.json()["current"]["policy_revision"],
+    )
+    assert kept.status_code == 200, kept.text
+    pricing = kept.json()["inputs"]["pricing_context"]
+    assert (pricing["fee_table_version"], pricing["pricing_policy_version"]) == (
+        "fee-test-1",
+        "policy-test-1",
+    )
 
 
 @pytest.mark.parametrize("case", sorted(INVALID))

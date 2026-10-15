@@ -53,7 +53,8 @@ from app.platform.core.clock import Clock
 from app.platform.core.errors import InputValidationError, NotFoundError
 from app.platform.db.database import Database
 from app.stages.connect.accounts import AccountBinding, MarketplaceAccountStore, binding_state
-from app.stages.products.pricing import PricingContextInput, PricingError, Rounding
+from app.stages.products.pricing import PricingContextInput, PricingError, Rounding, rate
+from app.stages.products.pricing import digest as pricing_digest
 from app.stages.products.sales_policy import SALES_POLICY_SURFACE
 from app.stages.register import sanitize
 from app.stages.register.authoring_revisions import AuthoringRevisionStore
@@ -117,12 +118,17 @@ class _Strict(BaseModel):
 
 
 class PricingContextInputView(_Strict):
-    """The M4 ``PricingContextInput`` fields, as authored (ADR-0013 §7)."""
+    """The M4 ``PricingContextInput`` fields, as authored (ADR-0013 §7).
+
+    ``fee_table_version`` and ``pricing_policy_version`` may be sent as an explicit ``null``
+    (2026-10-16 seller fixes): the server then stamps each label itself before the revision is
+    validated (:func:`stamp_pricing_versions`), so the seller never invents one. A stored revision
+    always holds both labels, and a label that is sent is validated exactly as before."""
 
     marketplace_key: StrictStr
     account_id: StrictStr | None
-    fee_table_version: StrictStr
-    pricing_policy_version: StrictStr
+    fee_table_version: StrictStr | None
+    pricing_policy_version: StrictStr | None
     fee_rate: StrictStr
     fee_fixed_krw: StrictInt
     other_cost_rate: StrictStr
@@ -371,6 +377,73 @@ def encode_content(
             details={"found": [list(item) for item in refused.found]},
         ) from refused
     return content
+
+
+def _rate_text(value: Any) -> Any:
+    # Equal rates compare equal however they were typed ("0.055", "0.0550"); a rate that is not
+    # one stays as typed, and the validation that follows refuses it.
+    try:
+        exact = rate(value)
+    except (PricingError, TypeError, ValueError):
+        return value
+    return f"{exact.numerator}/{exact.denominator}"
+
+
+def _fee_table_part(pricing: Mapping[str, Any]) -> dict[str, Any]:
+    """What a fee-table label names: the marketplace fee charged on a sale."""
+    return {
+        "marketplace_key": pricing.get("marketplace_key"),
+        "account_id": pricing.get("account_id"),
+        "fee_rate": _rate_text(pricing.get("fee_rate")),
+        "fee_fixed_krw": pricing.get("fee_fixed_krw"),
+    }
+
+
+def _pricing_policy_part(pricing: Mapping[str, Any]) -> dict[str, Any]:
+    """What a pricing-policy label names: the other costs and the rounding rules."""
+    return {
+        "other_cost_rate": _rate_text(pricing.get("other_cost_rate")),
+        "other_cost_fixed_krw": pricing.get("other_cost_fixed_krw"),
+        "cost_rounding": pricing.get("cost_rounding"),
+        "price_rounding": pricing.get("price_rounding"),
+    }
+
+
+_STAMPED_LABELS: Final = (
+    ("fee_table_version", _fee_table_part, "fees"),
+    ("pricing_policy_version", _pricing_policy_part, "pricing"),
+)
+
+
+def stamp_pricing_versions(
+    inputs: TargetPolicyInputsView, previous: Mapping[str, Any] | None, now: datetime
+) -> TargetPolicyInputsView:
+    """The inputs with each pricing label sent as ``null`` stamped by the server.
+
+    A label names the content it versions. When that content is the same as in the current
+    revision (``previous``), the current label is kept — so a save that changes no fee never
+    moves the pricing context. Otherwise the label is ``<fees|pricing>-<save date>-<digest>``,
+    the digest of exactly that content. A label that was sent is kept as sent. Nothing is
+    validated here: the whole revision is validated afterwards, labels included."""
+    pricing = inputs.pricing_context
+    authored = pricing.model_dump(mode="json")
+    prior = None if previous is None else previous.get("pricing_context")
+    stamped: dict[str, str] = {}
+    for name, part, prefix in _STAMPED_LABELS:
+        if authored[name] is not None:
+            continue
+        content = part(authored)
+        if (
+            isinstance(prior, Mapping)
+            and isinstance(prior.get(name), str)
+            and part(prior) == content
+        ):
+            stamped[name] = prior[name]
+        else:
+            stamped[name] = f"{prefix}-{now:%Y%m%d}-{pricing_digest(content)[:12]}"
+    if not stamped:
+        return inputs
+    return inputs.model_copy(update={"pricing_context": pricing.model_copy(update=stamped)})
 
 
 def inputs_of(content: Mapping[str, Any]) -> TargetPolicyInputsView:
@@ -681,9 +754,12 @@ class DurableRegistrationPolicy:
 class TargetPolicyService:
     """What Settings reads and saves for the target-policy surface, and nothing else."""
 
-    def __init__(self, store: TargetPolicyStore, accounts: MarketplaceAccountStore) -> None:
+    def __init__(
+        self, store: TargetPolicyStore, accounts: MarketplaceAccountStore, clock: Clock
+    ) -> None:
         self._store = store
         self._accounts = accounts
+        self._clock = clock
 
     def accounts(self, marketplace_key: str) -> TargetPolicyAccountsView:
         return TargetPolicyAccountsView(
@@ -708,7 +784,14 @@ class TargetPolicyService:
         correlation_id: str,
     ) -> TargetPolicyView:
         self._require_account(marketplace_key, marketplace_account_id)
-        content = encode_content(marketplace_key, marketplace_account_id, request.inputs)
+        # The seller never types a pricing label: one sent as null is stamped from the current
+        # revision's labels or the saved content, and then validated with everything else. A save
+        # made against a moved policy is still refused by the store below.
+        current = self._store.current(marketplace_key, marketplace_account_id)
+        inputs = stamp_pricing_versions(
+            request.inputs, None if current is None else current.content, self._clock.now()
+        )
+        content = encode_content(marketplace_key, marketplace_account_id, inputs)
         self._store.append(
             marketplace_key,
             marketplace_account_id,

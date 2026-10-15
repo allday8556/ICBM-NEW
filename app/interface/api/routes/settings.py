@@ -15,6 +15,7 @@ from app.interface.api.deps import ContainerDep
 from app.platform.core.correlation import get_correlation_id, new_correlation_id
 from app.stages.register.category_catalog import CategoryCatalogView
 from app.stages.register.category_metadata import (
+    CategoryMetadataFormView,
     CategoryMetadataListView,
     CategoryMetadataView,
     RecordRevisionRequest,
@@ -74,6 +75,14 @@ def category_metadata_entries(
 ) -> CategoryMetadataListView:
     """Every recorded category of the marketplace with its current revision and history."""
     return container.category_metadata.entries(marketplace_key)
+
+
+@router.get("/category-metadata-form/{marketplace_key}")
+def category_metadata_form(
+    container: ContainerDep, marketplace_key: str
+) -> CategoryMetadataFormView:
+    """The metadata form's choices (the notice types by their Korean names) and starting values."""
+    return container.category_metadata.form(marketplace_key)
 
 
 @router.get("/category-metadata/{marketplace_key}/{taxonomy_revision}/{category_id}")

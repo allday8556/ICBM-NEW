@@ -231,6 +231,7 @@ from integrations.marketplaces.smartstore.notice_catalog import SmartStoreNotice
 from integrations.marketplaces.smartstore.notice_schema import (
     SmartStoreNoticeRules,
     notice_labels,
+    notice_type_choices,
 )
 from integrations.marketplaces.smartstore.orders import SmartStoreOrderSource
 from integrations.marketplaces.smartstore.registry import RegistryMappingRevision
@@ -971,7 +972,7 @@ def build_container(
     # detail-composition revisions a newly appended target-policy revision is stamped with.
     authoring_revisions = AuthoringRevisionStore(db, clock, audit)
     target_policy_store = TargetPolicyStore(db, clock, audit, authoring_revisions)
-    target_policies = TargetPolicyService(target_policy_store, accounts)
+    target_policies = TargetPolicyService(target_policy_store, accounts, clock)
     # Official SmartStore leaf-category catalog (owner decision 2026-10-04): one read-only provider
     # capture becomes an immutable local snapshot. Its digest is the taxonomy revision used by the
     # target policy and category metadata.
@@ -991,6 +992,8 @@ def build_container(
         category_metadata_store,
         frozenset(m.key for m in MARKETPLACE_IDENTITIES),
         category_catalog,
+        # 2026-10-16: the form offers the documented notice types by their Korean names.
+        notice_types=notice_type_choices,
     )
     # The source-side gates of Items (ADR-0031 §4, ADR-0030 §7) under each supplier's sales policy
     # (ADR-0039 §2): the one seam every marketplace's REGISTER reads.

@@ -25,6 +25,7 @@ import { READ_STATE_TONE } from '../components/registration-status.js';
 import { itemImagesEditor } from '../components/item-images.js';
 import { listingSyncPanel } from '../components/listing-sync.js';
 import { categoryPath, categoryPicker, findCategory } from '../components/category-picker.js';
+import { openCategoryMetadataEditor } from './settings/category-metadata.js';
 import { freshProductFacts, unitFacts, unitProductName } from '../components/product-facts.js';
 
 const SCREEN = '/api/v1/screens/register';
@@ -170,11 +171,11 @@ export const REASON_COPY = {
   PRICING_SOURCE_CURRENCY_UNSUPPORTED: '해외 통화(CNY·JPY) 수량별 가격은 가격을 정할 수 없습니다',
   // ADR-0038 §3, §4 (O2): the landed cost of a 구매대행 product, failing closed.
   PRICING_FX_UNAVAILABLE:
-    '환율(송금 보낼때 TTS)이 아직 없어 가격을 정할 수 없습니다. 설정 › 해외구매대행에서 환율을 갱신하세요.',
+    '환율(송금 보낼때 TTS)이 아직 없어 가격을 정할 수 없습니다. 설정 › 공통 › 해외구매대행에서 환율을 갱신하세요.',
   PRICING_FX_STALE:
-    '환율이 영업일 3일보다 오래되어 가격을 정할 수 없습니다. 설정 › 해외구매대행에서 환율을 갱신하세요.',
+    '환율이 영업일 3일보다 오래되어 가격을 정할 수 없습니다. 설정 › 공통 › 해외구매대행에서 환율을 갱신하세요.',
   PRICING_OVERSEAS_SHIPPING_UNSET:
-    '해외 배송비가 없어 가격을 정할 수 없습니다. 상품의 해외 배송비를 입력하거나 설정 › 해외구매대행에서 기본값을 정하세요.',
+    '해외 배송비가 없어 가격을 정할 수 없습니다. 상품의 해외 배송비를 입력하거나 설정 › 공통 › 해외구매대행에서 기본값을 정하세요.',
   // The other M4 pricing reasons (unprefixed, as an Item row carries them).
   PRICING_SNAPSHOT_MISSING: '이 품목의 판매가가 아직 계산되지 않았습니다. 「가격 다시 계산」을 누르세요.',
   PRICING_SNAPSHOT_SUPERSEDED: '판매가가 새로 계산되었습니다. 「가격 다시 계산」을 누르면 새 판매가로 바뀝니다.',
@@ -224,7 +225,8 @@ export const REASON_COPY = {
   CONNECT_AUTH_NOT_READY: '마켓 인증이 준비되지 않았습니다. 설정 › API 관리에서 계정을 확인하세요.',
   CONNECT_AUTH_MISMATCH: '마켓 인증 정보가 이 판매 계정과 맞지 않습니다. 설정 › API 관리에서 확인하세요.',
   CONNECT_NOT_BOUND: '마켓 계정이 연결되지 않았습니다. 설정 › API 관리에서 연결하세요.',
-  CONNECT_WRITE_SCOPE_MISSING: '마켓에 상품을 등록할 권한이 없습니다. 마켓 판매자센터의 API 권한을 확인하세요.',
+  CONNECT_WRITE_SCOPE_MISSING:
+    '등록 권한 확인에 상품 등록에 필요한 API 그룹이 꺼져 있다고 기록되어 있습니다. 커머스API센터에서 그 그룹을 켠 뒤 설정 › 스마트스토어 › API 관리의 「등록 권한 확인」에서 다시 체크해 저장하세요 (확인 기록은 30일 동안 유효합니다).',
   CONNECT_WORKFLOW_PAUSED: '마켓 연결 작업이 멈춰 있습니다.',
   CONNECT_WORKFLOW_REVIEW_REQUIRED: '마켓 연결에 확인할 일이 있습니다. 설정 › API 관리를 확인하세요.',
   DRAFT_REVISION_STALE: '저장한 뒤 상품 구성이 바뀌었습니다. 준비 내용을 다시 저장하세요.',
@@ -257,12 +259,15 @@ export const REASON_COPY = {
   FIELD_VALUE_FORM_INVALID: '날짜 형식이 맞지 않는 값이 있습니다 (예: 2026-01 또는 2026-01-31).',
   FIELD_AI_SUGGESTION_UNCONFIRMED: 'AI가 넣은 값이 아직 확인되지 않았습니다. 확인한 뒤 저장하세요.',
   FIELD_DETAIL_REFERENCE_NOT_PERMITTED: '「상세페이지 참조」를 쓸 수 없는 항목입니다. 값을 직접 입력하세요.',
-  OPTIONS_NOT_SUPPORTED: '이 카테고리는 옵션 상품을 등록할 수 없습니다.',
-  OPTION_COUNT_EXCEEDED: '옵션 수가 이 카테고리의 한도를 넘습니다.',
+  OPTIONS_NOT_SUPPORTED:
+    '이 카테고리는 옵션 상품을 등록할 수 없다고 기록되어 있습니다. 설정 › 상품 / 카테고리의 카테고리 등록 정보에서 옵션 지원을 확인하거나, 품목을 하나만 담아 등록하세요.',
+  OPTION_COUNT_EXCEEDED:
+    '옵션 수가 이 카테고리에 기록한 최대 옵션 수를 넘습니다. 설정 › 상품 / 카테고리의 카테고리 등록 정보에서 최대 옵션 수를 확인하거나 품목을 줄이세요.',
   OPTION_VALUE_MISSING: '비어 있는 옵션값이 있습니다.',
   OPTION_VALUES_UNEXPECTED: '옵션이 필요 없는 상품에 옵션값이 들어 있습니다.',
   OPTION_DIMENSIONS_INCONSISTENT: '품목마다 옵션 항목이 다릅니다. 모든 품목에 같은 옵션 항목을 채우세요.',
-  OPTION_DIMENSIONS_EXCEEDED: '옵션 항목(예: 색상, 사이즈)이 너무 많습니다.',
+  OPTION_DIMENSIONS_EXCEEDED:
+    '옵션 항목(예: 색상, 사이즈)이 이 카테고리에 기록한 최대 단계 수보다 많습니다. 카테고리 등록 정보에서 확인하거나 옵션 항목을 줄이세요.',
   OPTION_VALUES_NOT_DISTINCT: '옵션값이 같은 품목이 있습니다. 품목마다 다른 옵션값을 넣으세요.',
   POLICY_TEMPLATE_MISSING: '배송·반품 정책이 없습니다. 설정 › 등록 정책에서 정하세요.',
   POLICY_AFTER_SERVICE_PHONE_MISSING: 'A/S 전화번호가 없습니다. 설정 › 등록 정책에서 입력하세요.',
@@ -272,7 +277,8 @@ export const REASON_COPY = {
   PUBLICATION_ASSETS_MISSING: '등록할 이미지가 없습니다. 이미지 단계에서 고르세요.',
   PUBLICATION_ASSET_COUNT_EXCEEDED: '이미지가 마켓 한도보다 많습니다. 일부를 「사용 안 함」으로 바꾸세요.',
   PUBLICATION_REPRESENTATIVE_MISSING: '대표 이미지가 없습니다. 이미지 단계에서 대표 이미지를 고르세요.',
-  PUBLICATION_DETAIL_IMAGES_UNPLACED: '상세 이미지를 넣을 자리가 없는 상세페이지 구성입니다. 준비 내용을 다시 저장하세요.',
+  PUBLICATION_DETAIL_IMAGES_UNPLACED:
+    '상세 이미지를 넣을 자리가 없는 예전 상세페이지 구성으로 저장되어 있습니다. 「준비 내용 저장」을 다시 누르세요. 그래도 남으면 설정 › 등록 정책을 한 번 저장한 뒤 다시 저장하세요.',
   PUBLICATION_ASSET_QA_NOT_PASSED: '자동 검사를 통과하지 못한 이미지가 있습니다. 다른 이미지를 고르세요.',
   PROVIDER_ASSET_IDENTITY_MISSING: '마켓에 올린 이미지 정보가 없습니다.',
   PREPARED_ASSET_CANDIDATE_MISMATCH: '마켓에 올린 이미지가 지금 고른 이미지와 다릅니다.',
@@ -349,7 +355,8 @@ export const REASON_COPY = {
     '등록 내용을 확정할 때 쓴 카테고리 등록 정보를 찾을 수 없어 필수 항목을 표시하지 않습니다.',
   // ADR-0033 §8: a resolved top or bottom notice the unit's composition does not place. Since G5
   // the SmartStore composition (v3) places both; an older composition revision does not.
-  PUBLICATION_GUIDANCE_UNPLACED: '상·하단 공지를 넣으려면 설정 › 등록 정책을 한 번 저장한 뒤 이 상품을 다시 저장하세요. 이 상품에서 공지를 끄면 이 안내는 사라집니다.',
+  PUBLICATION_GUIDANCE_UNPLACED:
+    '상·하단 공지를 넣을 자리가 없는 예전 상세페이지 구성으로 저장되어 있습니다. 「준비 내용 저장」을 다시 누르세요. 그래도 남으면 설정 › 등록 정책을 한 번 저장한 뒤 다시 저장하세요. 이 상품에서 공지를 끄면 이 안내는 사라집니다.',
   // ADR-0037 §2: an image over SmartStore's upload limit with no upload-fit variant.
   IMAGE_UPLOAD_FIT_FAILED: '9.5MB가 넘는 이미지를 줄인 파일이 없습니다. 준비 내용을 저장하면 다시 만듭니다. 저장 후에도 남으면 줄일 수 없는 이미지이니 다른 이미지를 고르세요.',
   GUIDANCE_TEXT_INVALID: '쓸 수 없는 공지 문구입니다. 상세페이지 단계의 직접 작성 문구를 확인하세요.',
@@ -711,6 +718,20 @@ export function reasonGroups(reasons, labels) {
   );
 }
 
+// The Settings tab and sub-tab each Settings fix surface is on. A marketplace's own tab is the
+// unit's marketplace (SmartStore when the row names no unit).
+const SETTINGS_PLACE = {
+  SETTINGS_CONNECT: 'api',
+  SETTINGS_TARGET_POLICY: 'policy',
+  SETTINGS_CATEGORY_METADATA: 'product',
+};
+
+export function settingsPlace(surface, marketplaceKey) {
+  if (surface === 'SETTINGS_OVERSEAS') return { tab: 'common', sub: 'overseas' };
+  const sub = SETTINGS_PLACE[surface];
+  return sub ? { tab: marketplaceKey || 'smartstore', sub } : {};
+}
+
 // B-UX2: the fix-only projection. A row only says where to act; the move is to that surface, and
 // nothing is fixed from here. Rows without an action are counted, never offered.
 function fixesPanel(found, ctx) {
@@ -719,13 +740,13 @@ function fixesPanel(found, ctx) {
     return h('div', { class: 'register-fixes', 'data-fixes': 'UNAVAILABLE' }, summaryUnavailable(found.unavailable, '확인이 필요한 항목'));
   }
   const go = (row) => {
-    if (row.surface?.startsWith('SETTINGS_')) {
-      ctx.navigate('settings');
-      return;
-    }
     const unit = row.draft_id
       ? document.querySelector(`.register-unit[data-draft='${CSS.escape(row.draft_id)}']`)
       : null;
+    if (row.surface?.startsWith('SETTINGS_')) {
+      ctx.navigate('settings', settingsPlace(row.surface, unit?.dataset.marketplace));
+      return;
+    }
     const section = row.surface === 'REGISTER_IMAGES' ? unit?.querySelector("[data-editor-section='images']") : null;
     (section ?? unit)?.scrollIntoView({ block: 'start' });
   };
@@ -984,8 +1005,56 @@ export function authoringForm(unit, onDone) {
     fieldControls.clear();
     dynamicFields.replaceChildren();
     const text = errorCopy(error);
-    picker.setProblem(text);
+    picker.setProblem(text, prepareCategoryAction(error));
     toast('카테고리 등록 정보를 불러오지 못했습니다', text);
+  }
+
+  // 2026-10-16: a category without reviewed requirements is prepared from here. The server named
+  // the category and the policy's taxonomy it is read under; the same Settings form opens for
+  // exactly that key, the seller confirms and saves it there, and the category is read again —
+  // its fields appear, and a saved preparation is evaluated again. Nothing is reviewed for them.
+  function prepareCategoryAction(error) {
+    if (errorCode(error) !== 'REGISTER_CATEGORY_METADATA_MISSING') return null;
+    const details = error.error?.details ?? {};
+    const categoryId = details.category_id ?? categoryControl.value.trim();
+    const taxonomyRevision = details.taxonomy_revision;
+    if (!categoryId || !taxonomyRevision) return null;
+    return {
+      name: 'PREPARE_CATEGORY_METADATA',
+      label: '이 카테고리 등록 정보 준비',
+      run: async () => {
+        const entry = await findCategory(unit.marketplace_key, categoryId);
+        try {
+          await openCategoryMetadataEditor({
+            marketplaceKey: unit.marketplace_key,
+            taxonomyRevision,
+            categoryId,
+            categoryName: entry?.whole_category_name ? categoryPath(entry.whole_category_name) : null,
+            onSaved: categoryPrepared,
+          });
+        } catch (failed) {
+          toast('카테고리 등록 정보를 열지 못했습니다', errorCopy(failed));
+        }
+      },
+    };
+  }
+
+  async function categoryPrepared() {
+    metadata = null;
+    try {
+      await loadMetadata();
+    } catch (error) {
+      // Saved without 확인 완료, or refused: the problem says why, with the same way back in.
+      metadataFailed(error);
+      return;
+    }
+    if (!authored) return;
+    try {
+      const result = await sendJson('POST', `/api/v1/register/preparations/${authored.preparation_id}/evaluate`, { actor: OPERATOR });
+      toast('등록 준비를 다시 확인했습니다', READINESS_LABEL[result?.preflight?.status] ?? '');
+    } catch (error) {
+      toast('등록 준비를 다시 확인하지 못했습니다', errorCopy(error));
+    }
   }
 
   // A field the marketplace fills itself when it is omitted ("상품상세 참조", a stated default) is
@@ -1349,7 +1418,9 @@ export function authoringForm(unit, onDone) {
       toast('등록 준비 내용을 저장했습니다');
       onDone();
     } catch (error) {
-      if (errorCode(error) === 'REGISTER_CATEGORY_METADATA_MISSING') picker.setProblem(errorCopy(error));
+      if (errorCode(error) === 'REGISTER_CATEGORY_METADATA_MISSING') {
+        picker.setProblem(errorCopy(error), prepareCategoryAction(error));
+      }
       toast('저장하지 못했습니다', errorCopy(error));
     }
   });

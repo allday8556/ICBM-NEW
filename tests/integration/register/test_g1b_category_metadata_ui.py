@@ -24,6 +24,10 @@ from playwright.sync_api import Error as PlaywrightError
 from app.config import AppConfig
 from app.container import Container
 from app.main import create_app
+from integrations.marketplaces.smartstore.notice_schema import (
+    load_notice_schema,
+    notice_policy,
+)
 from tests.conftest import LOCAL
 from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.product_support import raw
@@ -108,10 +112,13 @@ def _fill_new(page: Page, *, reviewed: bool, provenance: str) -> None:
     page.locator(_field(page, "leaf")).check()
     page.locator(_field(page, "registrable")).check()
     page.locator(_field(page, "name_max_length")).fill("100")
+    # 2026-10-16: the notice type is chosen by its Korean name; the value is the stored enum.
+    page.locator(_field(page, "notice_type")).select_option("ETC")
+    # The rules a seller rarely writes are folded under 세부 규칙.
+    page.locator(f"{PANEL} [data-meta-advanced] summary").click()
     page.locator(_field(page, "attributes")).fill(
         "brand | y | n | REVIEW_REQUIRED | -\ncolor | n | n | REVIEW_REQUIRED | 20"
     )
-    page.locator(_field(page, "notice_type")).fill("notice-ui-1")
     page.locator(_field(page, "notice_fields")).fill(
         "manufacturer | y | n | BLOCKED | -\norigin | y | y | REVIEW_REQUIRED | -"
     )
@@ -165,6 +172,13 @@ def test_the_operator_records_then_reviews_metadata_and_it_survives_reload_and_r
             "color | n | n | REVIEW_REQUIRED | 20"
             in page.locator(_field(page, "attributes")).input_value()
         )
+        # The chosen type is shown by the provider's own Korean name, never the enum.
+        notice = page.locator(_field(page, "notice_type"))
+        assert notice.input_value() == "ETC"
+        shown = notice.locator("option:checked").inner_text()
+        assert shown == load_notice_schema().types["ETC"].name
+        # The review tick is never pre-set: the operator records the review.
+        assert page.locator(_field(page, "reviewed")).is_checked() is False
         page.locator(_field(page, "content_provenance")).select_option("OPERATOR_CONFIRMED")
         page.locator(_field(page, "reviewed")).check()
         _save(page)
@@ -194,11 +208,12 @@ def test_the_operator_records_then_reviews_metadata_and_it_survives_reload_and_r
             "REVIEW_REQUIRED",
         ]
         # A SmartStore category's notice fields are the provider notice schema's own for the
-        # reviewed type (notice coverage S3): this synthetic type has no documented child, so the
-        # preflight blocks it and nothing is ever sent for it.
+        # reviewed type (notice coverage S3), whatever rules were typed: the chosen enum is stored.
+        assert recorded["notice_type"] == "ETC"
         assert materialized.notice is not None
-        assert materialized.notice.notice_type == recorded["notice_type"]
-        assert materialized.notice.documented is False and materialized.notice.fields == ()
+        assert materialized.notice.notice_type == "ETC"
+        assert materialized.notice.documented is True
+        assert materialized.notice.fields == notice_policy("ETC").fields
     with _served(config) as client, _page(browser, client, []) as page:
         page.wait_for_selector(f"{PANEL} [data-metadata-key='{KEY}'][data-meta-reviewed='true']")
         assert _entry(page) == reviewed

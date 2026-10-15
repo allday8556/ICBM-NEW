@@ -498,6 +498,21 @@ def notice_labels(marketplace_key: str, notice_type: str) -> tuple[str | None, M
     return notice.name, MappingProxyType({item.name: item.label for item in notice.fields})
 
 
+def notice_type_choices(marketplace_key: str) -> tuple[tuple[str, str], ...]:
+    """Every notice type the schema documents, in the provider's own enumeration order, with the
+    provider's own Korean name — the choices a seller picks a category's notice type from. A type
+    the schema does not document (no captured child) is never offered: nothing could be sent for
+    it. Another marketplace has no choices here: no name is guessed."""
+    if marketplace_key != NOTICE_MARKETPLACE_KEY:
+        return ()
+    schema = load_notice_schema()
+    return tuple(
+        (notice_type, schema.types[notice_type].name)
+        for notice_type in schema.notice_types
+        if notice_type in schema.types
+    )
+
+
 class SmartStoreNoticeRules:
     """The SmartStore ``NoticeRuleSource``: every notice field the REGISTER owner declares for a
     SmartStore category is the provider schema's own (notice coverage S3)."""

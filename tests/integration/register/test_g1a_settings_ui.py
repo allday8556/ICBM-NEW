@@ -12,6 +12,7 @@ No provider is reached: a target policy is local configuration.
 """
 
 import contextlib
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from urllib.parse import urlsplit
@@ -24,6 +25,7 @@ from playwright.sync_api import Error as PlaywrightError
 from app.config import AppConfig
 from app.container import Container
 from app.main import create_app
+from app.stages.register.category_catalog import CategoryCatalogStore, ProviderCategory
 from tests.conftest import LOCAL
 from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.product_support import raw
@@ -46,8 +48,6 @@ TABLES = (
 VALUES = {
     "taxonomy_revision": "taxonomy-ui-1",
     "sanitizer_profile_version": "sanitizer-ui-1",
-    "fee_table_version": "fee-ui-1",
-    "pricing_policy_version": "pricing-ui-1",
     "fee_rate": "0.055",
     "fee_fixed_krw": "0",
     "other_cost_rate": "0",
@@ -179,6 +179,11 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
                 shown = editor.locator(f"[data-policy-reference='{reference}']")
                 assert shown.locator("input, textarea, select").count() == 0
                 assert "자동으로 기록됩니다" in shown.inner_text()
+            # 2026-10-16: the two pricing labels are the server's too; the seller types only fees.
+            for reference in ("fee_table_version", "pricing_policy_version"):
+                assert editor.locator(f"[data-policy-field='{reference}']").count() == 0
+                shown = editor.locator(f"[data-policy-reference='{reference}']")
+                assert shown.locator("input, textarea, select").count() == 0
             # The delivery fields are not on this tab: they live in 배송 관리.
             assert editor.locator("[data-policy-field='base_fee_krw']").count() == 0
             _fill(page, account, VALUES)
@@ -209,6 +214,10 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
         # The save sent null for both; the server stamped its owner's revisions.
         assert stored.inputs.category_mapping_revision
         assert stored.inputs.detail_composition_revision
+        # And the pricing labels: stamped from the saved fees, kept by the delivery-only save.
+        pricing = stored.inputs.pricing_context
+        assert re.fullmatch(r"fees-\d{8}-[0-9a-f]{12}", pricing.fee_table_version or "")
+        assert re.fullmatch(r"pricing-\d{8}-[0-9a-f]{12}", pricing.pricing_policy_version or "")
     # A restart: a new process owns the same data directory and serves the same durable policy.
     with (
         _served(config) as client,
@@ -344,3 +353,42 @@ def test_the_naver_address_book_becomes_named_dropdowns_and_the_choice_is_saved(
         assert target.delivery_policy.return_address_id == 200583581
     revisions = f"/api/v1/settings/target-policies/{MARKETPLACE}/{account}/revisions"
     assert writes == [("POST", revisions), ("POST", revisions)]
+
+
+def test_the_taxonomy_is_aligned_to_the_naver_catalog_only_after_the_seller_confirms(
+    browser: Browser, config: AppConfig
+) -> None:
+    writes: list[tuple[str, str]] = []
+    with _served(config) as client:
+        served: Container = client.app.state.container  # type: ignore[attr-defined]
+        account = establish(served, config, MARKETPLACE, "uid-smartstore-1")
+        CategoryCatalogStore(served.db, served.clock, served.audit).record(
+            MARKETPLACE,
+            (ProviderCategory("50000803", "비타민", "식품>건강식품>비타민", True),),
+            endpoint_mapping_revision="test",
+            actor="operator",
+            correlation_id="align-catalog",
+        )
+        latest = served.category_catalog.catalog(MARKETPLACE, limit=1).taxonomy_revision
+        assert latest
+        with _page(browser, client, POLICY_TAB, _editor(account), writes) as page:
+            editor = page.locator(_editor(account))
+            state = editor.locator("[data-taxonomy-state='BEHIND']")
+            state.wait_for(timeout=10_000)
+            assert "다릅니다" in state.inner_text()
+            editor.locator("button[data-action='align-taxonomy']").click()
+            confirm = page.locator("[data-role='align-taxonomy-confirm']")
+            confirm.wait_for()
+            # Nothing changes before the seller confirms.
+            field = editor.locator("[data-policy-field='taxonomy_revision']")
+            assert field.input_value() == ""
+            page.locator("button[data-action='confirm-align-taxonomy']").click()
+            assert field.input_value() == latest
+            editor.locator("[data-taxonomy-state='CURRENT']").wait_for()
+            assert editor.locator("button[data-action='align-taxonomy']").is_disabled()
+            assert writes == []
+            values = {key: value for key, value in VALUES.items() if key != "taxonomy_revision"}
+            _fill(page, account, values)
+            _save(page, account, 1)
+        target = served.registration_preflight.target_policy(MARKETPLACE, account)
+        assert target is not None and target.taxonomy_revision == latest

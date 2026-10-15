@@ -7,18 +7,26 @@
 // its identity, fingerprint and review provenance, refuses an AI suggestion recorded as reviewed,
 // and refuses a save that is invalid, unchanged or made against a revision that moved since it was
 // read. After every save the page re-reads the server.
+//
+// 2026-10-16 seller fixes: the notice type is chosen from the marketplace's documented types by
+// their Korean names (the stored value is the same enum), a new category starts from the server's
+// form defaults (no options: 1 item, 1 dimension), and the rules a seller rarely writes are folded
+// under 「세부 규칙」. The 확인 완료 tick and the 근거 are still the seller's own: nothing is ever
+// marked reviewed for them. The register category picker opens the same form for one category
+// (openCategoryMetadataEditor).
 
 import { getJson, sendJson } from '../../core/api.js';
 import { h } from '../../core/dom.js';
 import { errorText as plainError } from '../../core/errors.js';
+import { closeModal, openModal } from '../../core/modal.js';
 import { toast } from '../../core/toast.js';
 
 const BASE = '/api/v1/settings/category-metadata';
+const FORM = '/api/v1/settings/category-metadata-form';
 const CATALOG = '/api/v1/settings/category-catalog';
 const SMARTSTORE_SYNC = '/api/v1/connect/marketplaces/smartstore/categories/sync';
-const TITLE = '카테고리 메타데이터';
+const TITLE = '카테고리 등록 정보';
 const ACTOR = 'operator';
-const MISSING = ['REVIEW_REQUIRED', 'BLOCKED'];
 const PROVENANCE = [
   ['OPERATOR_CONFIRMED', '직접 확인함 (근거 있음)'],
   ['AI_SUGGESTION', 'AI 제안 (확인 전)'],
@@ -31,34 +39,60 @@ const ERROR_COPY = {
   CATEGORY_METADATA_CURRENT_MOVED: '다른 곳에서 바뀌었습니다. 다시 불러온 뒤 저장하세요.',
   CATEGORY_CATALOG_MISSING: '저장된 네이버 카테고리가 없습니다. 먼저 동기화하세요.',
   CATEGORY_CATALOG_EMPTY: '네이버에서 받은 카테고리가 없습니다. 잠시 후 다시 시도하세요.',
+  CATEGORY_TAXONOMY_NOT_CURRENT:
+    '등록 정책의 카테고리 체계가 지금 네이버 카테고리 목록과 다릅니다. 설정 › 스마트스토어 › 등록 정책에서 「최신 카테고리 체계로 맞추기」를 누르고 저장하세요.',
+  CATEGORY_NOT_CURRENT_LEAF: '지금 네이버 카테고리 목록의 마지막 단계 카테고리가 아닙니다. 카테고리를 다시 고르세요.',
 };
+// Without the server's form (an older server, a failed read) nothing is offered: the notice type
+// stays a typed field and no default is assumed beyond the one valid without options.
+const NO_FORM = { notice_types: [], name_max_length: null, options_supported: false, max_options: 1, max_dimensions: 1 };
+const NAME_HINT = '네이버 판매자센터 상품 등록 화면에서 확인한 상품명 최대 글자 수를 넣으세요.';
+const NOTICE_FIELDS_HINT =
+  '스마트스토어는 고른 고시 유형의 네이버 기준 항목이 자동으로 적용됩니다. 보통은 비워 둡니다.';
 
 let sequence = 0;
+const forms = new Map();
 
 function errorText(error) {
   return plainError(error, ERROR_COPY);
 }
 
-function input(label, name, value, { type = 'text', readonly = false } = {}) {
+// The form's choices and starting values, read once per marketplace per page.
+function metadataForm(marketplaceKey) {
+  if (!forms.has(marketplaceKey)) {
+    forms.set(
+      marketplaceKey,
+      getJson(`${FORM}/${encodeURIComponent(marketplaceKey)}`).catch(() => {
+        forms.delete(marketplaceKey);
+        return NO_FORM;
+      }),
+    );
+  }
+  return forms.get(marketplaceKey);
+}
+
+function input(label, name, value, { type = 'text', readonly = false, hint = null, placeholder = null } = {}) {
   sequence += 1;
   const id = `category-metadata-${sequence}`;
-  const control = h('input', { id, type, autocomplete: 'off', spellcheck: 'false', 'data-meta-field': name });
+  const control = h('input', { id, type, autocomplete: 'off', spellcheck: 'false', 'data-meta-field': name, placeholder });
   if (type === 'checkbox') control.checked = Boolean(value);
   else control.value = value ?? '';
   control.readOnly = readonly;
+  const note = hint ? h('div', { class: 'mini', 'data-meta-hint': name }, hint) : null;
   const row =
     type === 'checkbox'
       ? h('label', { class: 'kv', for: id }, h('span', {}, label), control)
-      : h('div', { class: 'form-row' }, h('label', { for: id }, label), control);
+      : h('div', { class: 'form-row' }, h('label', { for: id }, label), control, note);
   return { control, row };
 }
 
-function area(label, name, value) {
+function area(label, name, value, hint = null) {
   sequence += 1;
   const id = `category-metadata-${sequence}`;
   const control = h('textarea', { id, rows: '4', spellcheck: 'false', 'data-meta-field': name });
   control.value = value;
-  return { control, row: h('div', { class: 'form-row' }, h('label', { for: id }, label), control) };
+  const note = hint ? h('div', { class: 'mini', 'data-meta-hint': name }, hint) : null;
+  return { control, row: h('div', { class: 'form-row' }, h('label', { for: id }, label), control, note) };
 }
 
 function select(label, name, options, value) {
@@ -71,6 +105,17 @@ function select(label, name, options, value) {
   );
   if (value) control.value = value;
   return { control, row: h('div', { class: 'form-row' }, h('label', { for: id }, label), control) };
+}
+
+// 상품정보고시 유형: a choice among the documented types by their Korean names; the value sent is
+// the enum the server stores. A stored value the list does not hold is kept and named as such.
+// Without choices (another marketplace) it stays a typed field.
+function noticeTypeControl(form, value) {
+  const choices = form.notice_types ?? [];
+  if (!choices.length) return input('상품정보고시 유형 (비우면 없음)', 'notice_type', value);
+  const options = [['', '고르지 않음 (고시 없이 저장)'], ...choices.map((choice) => [choice.notice_type, choice.label])];
+  if (value && !choices.some((choice) => choice.notice_type === value)) options.push([value, `${value} (목록에 없는 유형)`]);
+  return select('상품정보고시 유형', 'notice_type', options, value ?? '');
 }
 
 // One rule per line: key | 필수 y/n | 상세페이지 참조 y/n | REVIEW_REQUIRED or BLOCKED | 최대 길이 or -.
@@ -165,11 +210,16 @@ function categorySelect(catalog, value) {
   return { control, row: h('div', { class: 'form-row' }, h('label', { for: id }, '카테고리'), control) };
 }
 
-function editor(marketplaceKey, entry, catalog, onSaved) {
+// The editor of one key. `entry` is the server's view of a recorded key (its content may be null:
+// a key opened from the register picker before anything was recorded); without one the operator
+// picks the key. `options.fromCatalog` says the key is a leaf of the current catalog (the picker's
+// choice); `options.compact` leaves out the key rows a seller does not need to see.
+function editor(marketplaceKey, entry, catalog, onSaved, form = NO_FORM, options = {}) {
   const content = entry?.content;
   const current = entry?.current;
   const fixed = Boolean(entry);
   const catalogReady = !entry && Boolean(catalog?.taxonomy_revision && catalog.entries?.length);
+  const leafKnown = catalogReady || Boolean(options.fromCatalog);
   const taxonomy = input(
     '카테고리 체계 버전',
     'taxonomy_revision',
@@ -179,16 +229,34 @@ function editor(marketplaceKey, entry, catalog, onSaved) {
   const category = catalogReady
     ? categorySelect(catalog, entry?.category_id)
     : input('카테고리 ID', 'category_id', entry?.category_id, { readonly: fixed });
-  const leaf = input('리프 카테고리', 'leaf', catalogReady ? true : content?.leaf, { type: 'checkbox' });
+  // A leaf of the current catalog is a leaf, and a leaf is where a product is registered; both
+  // stay the seller's to change before the save, and nothing is reviewed until they tick it.
+  const leaf = input('리프 카테고리', 'leaf', content ? content.leaf : leafKnown, { type: 'checkbox' });
   if (catalogReady) leaf.control.disabled = true;
-  const registrable = input('등록 가능 카테고리', 'registrable', content?.registrable, { type: 'checkbox' });
-  const nameMax = input('상품명 최대 길이', 'name_max_length', content ? String(content.name_max_length) : '');
+  const registrable = input('등록 가능 카테고리', 'registrable', content ? content.registrable : leafKnown, { type: 'checkbox' });
+  const nameMax = input(
+    '상품명 최대 길이',
+    'name_max_length',
+    content ? String(content.name_max_length) : form.name_max_length == null ? '' : String(form.name_max_length),
+    { hint: content ? null : NAME_HINT, placeholder: '예: 100' },
+  );
   const attributes = area('속성 규칙 (한 줄에 하나: 항목 | 필수 y/n | 상세페이지 참조 y/n | 없을 때 REVIEW_REQUIRED(확인 필요) 또는 BLOCKED(등록 불가) | 최대 글자 수 또는 -)', 'attributes', rulesText(content?.attributes));
-  const noticeType = input('상품정보고시 유형 (비우면 없음)', 'notice_type', content?.notice?.notice_type);
-  const noticeFields = area('상품정보고시 항목 규칙 (같은 형식)', 'notice_fields', rulesText(content?.notice?.fields));
-  const optionsSupported = input('옵션 지원', 'options_supported', content?.options?.options_supported, { type: 'checkbox' });
-  const maxOptions = input('최대 옵션 수', 'max_options', content ? String(content.options.max_options) : '');
-  const maxDimensions = input('최대 옵션 단계 수', 'max_dimensions', content ? String(content.options.max_dimensions) : '');
+  const noticeType = noticeTypeControl(form, content?.notice?.notice_type);
+  const noticeFields = area(
+    '상품정보고시 항목 규칙 (같은 형식)',
+    'notice_fields',
+    rulesText(content?.notice?.fields),
+    (form.notice_types ?? []).length ? NOTICE_FIELDS_HINT : null,
+  );
+  const optionsSupported = input('옵션 지원', 'options_supported', content ? content.options.options_supported : form.options_supported, { type: 'checkbox' });
+  const maxOptions = input('최대 옵션 수', 'max_options', String(content ? content.options.max_options : form.max_options));
+  const maxDimensions = input('최대 옵션 단계 수', 'max_dimensions', String(content ? content.options.max_dimensions : form.max_dimensions));
+  // A category without options allows exactly one item and one dimension: unticking says so.
+  optionsSupported.control.addEventListener('change', () => {
+    if (optionsSupported.control.checked) return;
+    maxOptions.control.value = '1';
+    maxDimensions.control.value = '1';
+  });
   const templates = input('필수 템플릿 (쉼표로 구분)', 'required_templates', (content?.required_templates ?? []).join(', '));
   const evidence = input('확인한 근거 (예: 판매자센터 화면, 날짜 · 주소는 넣지 마세요)', 'evidence_reference', current?.evidence_reference ?? '');
   const provenance = select('내용 출처', 'content_provenance', PROVENANCE, current?.content_provenance ?? 'OPERATOR_CONFIRMED');
@@ -199,8 +267,9 @@ function editor(marketplaceKey, entry, catalog, onSaved) {
     save.disabled = true;
     const tax = taxonomy.control.value.trim();
     const cat = category.control.value.trim();
+    const notice = noticeType.control.value.trim();
     try {
-      await sendJson('POST', `${BASE}/${marketplaceKey}/${encodeURIComponent(tax)}/${encodeURIComponent(cat)}/revisions`, {
+      const saved = await sendJson('POST', `${BASE}/${marketplaceKey}/${encodeURIComponent(tax)}/${encodeURIComponent(cat)}/revisions`, {
         actor: ACTOR,
         expected_current_revision: current?.metadata_revision ?? null,
         content_provenance: provenance.control.value,
@@ -211,9 +280,7 @@ function editor(marketplaceKey, entry, catalog, onSaved) {
           registrable: registrable.control.checked,
           name_max_length: length(nameMax.control.value.trim()),
           attributes: rulesOf(attributes.control.value),
-          notice: noticeType.control.value.trim()
-            ? { notice_type: noticeType.control.value.trim(), fields: rulesOf(noticeFields.control.value) }
-            : null,
+          notice: notice ? { notice_type: notice, fields: rulesOf(noticeFields.control.value) } : null,
           options: {
             options_supported: optionsSupported.control.checked,
             max_options: length(maxOptions.control.value.trim()),
@@ -226,7 +293,7 @@ function editor(marketplaceKey, entry, catalog, onSaved) {
         },
       });
       toast(TITLE, '저장했습니다. 이후 등록 확인에 바로 적용됩니다.');
-      await onSaved();
+      await onSaved(saved);
     } catch (error) {
       // Nothing was written: the server refuses a save whole. The typed values stay for a fix.
       toast(TITLE, errorText(error));
@@ -234,26 +301,69 @@ function editor(marketplaceKey, entry, catalog, onSaved) {
     }
   });
 
+  // The rules a seller rarely writes: open when the recorded revision holds any.
+  const advanced = h(
+    'details',
+    {
+      class: 'category-metadata-advanced',
+      'data-meta-advanced': 'true',
+      open: Boolean(content?.attributes?.length || content?.notice?.fields?.length || content?.required_templates?.length),
+    },
+    h('summary', {}, '세부 규칙 (속성·고시 항목·템플릿 · 보통은 비워 둡니다)'),
+    attributes.row,
+    noticeFields.row,
+    templates.row,
+  );
   return h(
     'div',
     { class: 'category-metadata-editor', 'data-editing': entry ? `${entry.taxonomy_revision}/${entry.category_id}` : 'new' },
-    taxonomy.row,
-    category.row,
+    options.compact ? null : taxonomy.row,
+    options.compact ? null : category.row,
     leaf.row,
     registrable.row,
-    nameMax.row,
-    attributes.row,
     noticeType.row,
-    noticeFields.row,
+    nameMax.row,
     optionsSupported.row,
     maxOptions.row,
     maxDimensions.row,
-    templates.row,
+    advanced,
     evidence.row,
     provenance.row,
     reviewed.row,
     h('div', { class: 'api-action-row' }, save),
   );
+}
+
+// 「이 카테고리 등록 정보 준비」 (register category picker): the same form for exactly one
+// category of the policy's taxonomy, in a modal. `onSaved` runs after the server recorded it, so
+// the caller reads the category again; the seller still ticks 확인 완료 themselves.
+export async function openCategoryMetadataEditor({ marketplaceKey, taxonomyRevision, categoryId, categoryName, onSaved }) {
+  const [entry, form] = await Promise.all([
+    getJson(`${BASE}/${encodeURIComponent(marketplaceKey)}/${encodeURIComponent(taxonomyRevision)}/${encodeURIComponent(categoryId)}`),
+    metadataForm(marketplaceKey),
+  ]);
+  const body = h(
+    'div',
+    { class: 'category-metadata', 'data-marketplace': marketplaceKey, 'data-metadata-modal': `${taxonomyRevision}/${categoryId}` },
+    h('div', { class: 'kv' }, h('span', {}, '카테고리'), h('b', {}, categoryName || `카테고리 번호 ${categoryId}`)),
+    editor(
+      marketplaceKey,
+      entry,
+      null,
+      async (saved) => {
+        closeModal();
+        await onSaved?.(saved);
+      },
+      form,
+      { fromCatalog: true, compact: true },
+    ),
+  );
+  openModal({
+    eyebrow: '카테고리 등록 정보',
+    title: '이 카테고리 등록 정보 준비',
+    help: '고시 유형과 상품명 최대 길이를 판매자센터에서 확인해 넣고, 근거를 적은 뒤 「확인 완료로 저장」을 체크하세요. 체크하지 않으면 확인 전으로 저장되어 아직 등록할 수 없습니다.',
+    body,
+  });
 }
 
 export function categoryMetadataPanel(marketplaceKey) {
@@ -262,7 +372,8 @@ export function categoryMetadataPanel(marketplaceKey) {
   const host = h('div', { class: 'category-metadata', 'data-marketplace': marketplaceKey }, list, form);
   let load = null;
   let catalog = null;
-  const edit = (entry) => form.replaceChildren(editor(marketplaceKey, entry, catalog, load));
+  let formView = NO_FORM;
+  const edit = (entry) => form.replaceChildren(editor(marketplaceKey, entry, catalog, load, formView));
   const fresh = h('button', { type: 'button', class: 'btn', 'data-action': 'new-category-metadata' }, '새 카테고리 기록');
   fresh.addEventListener('click', () => edit(null));
   const catalogQuery = h('input', {
@@ -300,11 +411,13 @@ export function categoryMetadataPanel(marketplaceKey) {
   });
   load = async () => {
     try {
-      const [view, catalogView] = await Promise.all([
+      const [view, catalogView, offered] = await Promise.all([
         getJson(`${BASE}/${marketplaceKey}`),
         getJson(`${CATALOG}/${marketplaceKey}?limit=500`),
+        metadataForm(marketplaceKey),
       ]);
       catalog = catalogView;
+      formView = offered;
       const catalogLine = catalog.taxonomy_revision
         ? `네이버 카테고리 ${catalog.total}개를 받아 두었습니다.`
         : '저장된 네이버 카테고리가 없습니다. 「네이버 카테고리 동기화」를 누르세요.';

@@ -19,6 +19,7 @@ No provider is contacted: execution stays DRY_RUN.
 
 import contextlib
 import json
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -43,7 +44,9 @@ from tests.support.gate1_support import (
     CLIENT,
     ETC_NOTICE_KEYS,
     MARKET,
+    OPERATOR,
     TAXONOMY,
+    policy_inputs,
     record_reviewed_metadata,
 )
 from tests.support.product_support import raw
@@ -136,7 +139,12 @@ def test_the_category_is_found_by_name_and_its_notice_reads_in_korean(
         other.click()
         problem = unit.locator("[data-role='category-problem']")
         problem.wait_for(timeout=10_000)
-        assert problem.inner_text() == METADATA_MISSING_COPY
+        assert problem.locator("[data-role='category-problem-text']").inner_text() == (
+            METADATA_MISSING_COPY
+        )
+        # 2026-10-16: the one thing to do about it is offered right there.
+        prepare = problem.locator("button[data-action='PREPARE_CATEGORY_METADATA']")
+        assert prepare.inner_text() == "이 카테고리 등록 정보 준비"
         assert unit.locator("input[name='notice.itemName']").count() == 0
         assert "reviewed metadata" not in page.locator("body").inner_text()
     missing = f"/api/v1/register/drafts/{draft_id}/authoring-metadata/{UNPREPARED}"
@@ -264,3 +272,80 @@ def test_the_pending_list_names_a_unit_by_its_collected_product(
         assert name.inner_text() == COLLECTED_NAME
         assert "상품 1개" not in page.locator("[data-role='register-queue']").inner_text()
     assert not any(method != "GET" for method, _, _ in calls)
+
+
+def test_a_category_without_requirements_is_prepared_from_the_picker(
+    browser: Browser,  # noqa: F811
+    api: TestClient,  # noqa: F811
+    container: Container,  # noqa: F811
+    draft: tuple[str, str],  # noqa: F811
+) -> None:
+    """2026-10-16: 「이 카테고리 등록 정보 준비」 opens the category's form right from the picker;
+    the seller chooses the notice type by name, ticks 확인 완료 themselves, and the category's
+    fields appear without leaving the screen."""
+    draft_id, _ = draft
+    _catalog(container)
+    latest = container.category_catalog.catalog(MARKET, limit=1).taxonomy_revision
+    assert latest
+    # The policy is aligned to the synchronized catalog (설정's 「최신 카테고리 체계로 맞추기」):
+    # a new category is recorded under the current catalog's taxonomy only.
+    view = api.get(f"/api/v1/settings/target-policies/{MARKET}", headers=CLIENT).json()
+    policy = view["accounts"][0]
+    account = policy["marketplace_account_id"]
+    aligned = api.post(
+        f"/api/v1/settings/target-policies/{MARKET}/{account}/revisions",
+        json={
+            "actor": OPERATOR,
+            "expected_current_revision": policy["current"]["policy_revision"],
+            "inputs": {**policy_inputs(account), "taxonomy_revision": latest},
+        },
+        headers=CLIENT,
+    )
+    assert aligned.status_code == 200, aligned.text
+    etc = load_notice_schema().types["ETC"]
+    calls: list[tuple[str, str, int]] = []
+    with _page(browser, api, calls) as page:
+        unit = page.locator(f".register-unit[data-draft='{draft_id}']")
+        search = unit.locator("[data-role='category-search']")
+        search.fill("루테인")
+        other = unit.locator(f"[data-role='category-results'] li[data-category='{UNPREPARED}']")
+        other.wait_for(timeout=10_000)
+        other.click()
+        prepare = unit.locator("button[data-action='PREPARE_CATEGORY_METADATA']")
+        prepare.wait_for(timeout=10_000)
+        prepare.click()
+        modal = page.locator(f"[data-metadata-modal='{latest}/{UNPREPARED}']")
+        modal.wait_for(timeout=10_000)
+        assert "식품 > 건강식품 > 영양제 > 루테인" in modal.inner_text()
+
+        def field(name: str) -> Any:
+            return modal.locator(f"[data-meta-field='{name}']")
+
+        # A leaf of the current catalog starts as a registrable leaf without options; the review
+        # tick is never set for the seller, and the name limit is left for them with a hint.
+        assert field("leaf").is_checked() and field("registrable").is_checked()
+        assert not field("options_supported").is_checked()
+        assert (field("max_options").input_value(), field("max_dimensions").input_value()) == (
+            "1",
+            "1",
+        )
+        assert field("name_max_length").input_value() == ""
+        assert modal.locator("[data-meta-hint='name_max_length']").count() == 1
+        assert not field("reviewed").is_checked()
+        # The notice type is chosen by its Korean name; the value is the stored enum.
+        field("notice_type").select_option(label=etc.name)
+        assert field("notice_type").input_value() == "ETC"
+        field("name_max_length").fill("100")
+        field("evidence_reference").fill("seller-center/lutein/2026-10-16")
+        field("reviewed").check()
+        modal.locator("button[data-action='save-category-metadata']").click()
+        # The category is read again: its fields appear in the same form.
+        unit.locator("input[name='notice.itemName']").wait_for(timeout=10_000)
+        assert page.locator("[data-metadata-modal]").count() == 0
+        assert unit.locator("[data-role='category-problem']").is_hidden()
+    recorded = f"/api/v1/settings/category-metadata/{MARKET}/{latest}/{UNPREPARED}/revisions"
+    assert [call for call in calls if call[0] != "GET"] == [("POST", recorded, 200)]
+    stored = container.registration_preflight.category_metadata(MARKET, latest, UNPREPARED)
+    assert stored is not None and stored.reviewed is True
+    assert stored.notice is not None and stored.notice.notice_type == "ETC"
+    assert (stored.options.options_supported, stored.options.max_options) == (False, 1)

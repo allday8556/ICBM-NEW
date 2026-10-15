@@ -9,9 +9,12 @@
 import { getJson, sendJson } from '../../core/api.js';
 import { h } from '../../core/dom.js';
 import { errorText as plainError } from '../../core/errors.js';
+import { closeModal, openModal } from '../../core/modal.js';
 import { toast } from '../../core/toast.js';
 
 const BASE = '/api/v1/settings/target-policies';
+// The current leaf catalog's taxonomy revision: one entry is enough to read it.
+const CATALOG = '/api/v1/settings/category-catalog';
 // The seller's SmartStore address book, read from the connected account (never stored).
 const ADDRESS_BOOKS = '/api/v1/connect/marketplaces/smartstore/addressbooks';
 const ADDRESS_TYPE_LABEL = { RELEASE: '출고지', REFUND_OR_EXCHANGE: '반품·교환지', GENERAL: '일반' };
@@ -143,12 +146,12 @@ function editor(view, onSaved, section, accountLabel = '스마트스토어 판�
 
   const taxonomy = field('카테고리 체계 버전', inputs?.taxonomy_revision, { ...on, name: 'taxonomy_revision' });
   const sanitizer = field('상품정보 정리 규칙 버전', inputs?.sanitizer_profile_version, { ...on, name: 'sanitizer_profile_version' });
-  const feeTable = field('수수료표 버전', pricing?.fee_table_version, { ...on, name: 'fee_table_version' });
-  const pricingPolicy = field('가격정책 버전', pricing?.pricing_policy_version, { ...on, name: 'pricing_policy_version' });
-  const feeRate = field('수수료율 (예: 0.055)', pricing?.fee_rate, { ...on, name: 'fee_rate' });
-  const feeFixed = field('고정 수수료 (원)', pricing ? String(pricing.fee_fixed_krw) : '', { ...on, name: 'fee_fixed_krw' });
-  const otherRate = field('기타 비용률', pricing?.other_cost_rate, { ...on, name: 'other_cost_rate' });
-  const otherFixed = field('기타 고정비 (원)', pricing ? String(pricing.other_cost_fixed_krw) : '', {
+  // 2026-10-16: the two pricing labels are the server's, stamped from the saved fees; the seller
+  // types only the fees themselves.
+  const feeRate = field('판매 수수료율 (소수로: 5.5%면 0.055)', pricing?.fee_rate, { ...on, name: 'fee_rate' });
+  const feeFixed = field('건당 고정 수수료 (원, 없으면 0)', pricing ? String(pricing.fee_fixed_krw) : '', { ...on, name: 'fee_fixed_krw' });
+  const otherRate = field('기타 비용률 (카드·광고 등, 소수로: 2%면 0.02, 없으면 0)', pricing?.other_cost_rate, { ...on, name: 'other_cost_rate' });
+  const otherFixed = field('건당 기타 비용 (원, 없으면 0)', pricing ? String(pricing.other_cost_fixed_krw) : '', {
     ...on,
     name: 'other_cost_fixed_krw',
   });
@@ -156,8 +159,65 @@ function editor(view, onSaved, section, accountLabel = '스마트스토어 판�
     ...on,
     name: 'pricing_account_scoped',
   });
-  const costRounding = choice('원가 반올림', ROUNDING, pricing?.cost_rounding, { ...on, name: 'cost_rounding' });
-  const priceRounding = choice('판매가 반올림', ROUNDING, pricing?.price_rounding, { ...on, name: 'price_rounding' });
+  const costRounding = choice('원가 원 단위 처리', ROUNDING, pricing?.cost_rounding, { ...on, name: 'cost_rounding' });
+  const priceRounding = choice('판매가 원 단위 처리', ROUNDING, pricing?.price_rounding, { ...on, name: 'price_rounding' });
+  // 최신 카테고리 체계로 맞추기: the current Naver leaf catalog's taxonomy revision, offered with one
+  // click and applied only after the seller confirms it in the dialog; it is saved with the policy.
+  const taxonomyState = h('div', { class: 'mini', 'data-taxonomy-state': 'NOT_LOADED' });
+  const alignTaxonomy = h(
+    'button',
+    { type: 'button', class: 'btn', 'data-action': 'align-taxonomy' },
+    '최신 카테고리 체계로 맞추기',
+  );
+  alignTaxonomy.disabled = true;
+  let latestTaxonomy = null;
+  const showTaxonomyState = () => {
+    const typed = taxonomy.input.value.trim();
+    const state = !latestTaxonomy ? 'NO_CATALOG' : typed === latestTaxonomy ? 'CURRENT' : 'BEHIND';
+    taxonomyState.setAttribute('data-taxonomy-state', state);
+    taxonomyState.textContent = {
+      NO_CATALOG: '받아 둔 네이버 카테고리 목록이 없습니다. 설정 › 스마트스토어 › 상품 / 카테고리에서 동기화하세요.',
+      CURRENT: '지금 네이버 카테고리 목록과 같습니다.',
+      BEHIND: '받아 둔 네이버 카테고리 목록과 다릅니다. 「최신 카테고리 체계로 맞추기」를 누르고 저장하세요.',
+    }[state];
+    alignTaxonomy.disabled = !editable || state !== 'BEHIND';
+  };
+  taxonomy.input.addEventListener('input', showTaxonomyState);
+  if (section !== 'delivery') {
+    getJson(`${CATALOG}/${encodeURIComponent(view.marketplace_key)}?limit=1`)
+      .then((catalog) => {
+        latestTaxonomy = catalog.taxonomy_revision ?? null;
+        showTaxonomyState();
+      })
+      .catch(() => {
+        taxonomyState.textContent = '네이버 카테고리 목록을 확인하지 못했습니다.';
+      });
+  }
+  alignTaxonomy.addEventListener('click', () => {
+    const apply = h('button', { type: 'button', class: 'btn blue', 'data-action': 'confirm-align-taxonomy' }, '맞추기');
+    apply.addEventListener('click', () => {
+      taxonomy.input.value = latestTaxonomy;
+      showTaxonomyState();
+      closeModal();
+      toast(TITLE, '카테고리 체계를 맞췄습니다. 「등록 정책 저장」을 눌러야 적용됩니다.');
+    });
+    openModal({
+      eyebrow: TITLE,
+      title: '최신 카테고리 체계로 맞출까요?',
+      narrow: true,
+      body: h(
+        'div',
+        { 'data-role': 'align-taxonomy-confirm' },
+        h('p', {}, '등록 정책의 카테고리 체계를 받아 둔 네이버 카테고리 목록에 맞춥니다.'),
+        h(
+          'p',
+          { class: 'mini' },
+          '맞춘 뒤에는 새 체계로 기록한 카테고리 등록 정보만 쓰입니다. 이전 체계로 기록한 카테고리는 다시 준비해야 합니다. 「등록 정책 저장」을 눌러야 적용됩니다.',
+        ),
+      ),
+      footer: [apply],
+    });
+  });
   const profile = field('이미지 프로필', asset?.profile, { ...on, name: 'asset_profile' });
   const minImages = field('최소 이미지 수', asset ? String(asset.min_images) : '', { ...on, name: 'min_images' });
   const maxImages = field('최대 이미지 수', asset ? String(asset.max_images) : '', { ...on, name: 'max_images' });
@@ -320,8 +380,9 @@ function editor(view, onSaved, section, accountLabel = '스마트스토어 판�
           pricing_context: {
             marketplace_key: view.marketplace_key,
             account_id: pricingAccount.box.checked ? view.marketplace_account_id : null,
-            fee_table_version: feeTable.input.value.trim(),
-            pricing_policy_version: pricingPolicy.input.value.trim(),
+            // Server-owned labels: sent as null, stamped from the saved fees.
+            fee_table_version: null,
+            pricing_policy_version: null,
             fee_rate: feeRate.input.value.trim(),
             fee_fixed_krw: whole(feeFixed.input.value),
             other_cost_rate: otherRate.input.value.trim(),
@@ -387,14 +448,15 @@ function editor(view, onSaved, section, accountLabel = '스마트스토어 판�
     h('h4', { class: 'policy-advanced-title' }, '고급 설정 · 처음 한 번 입력하면 보통은 바꿀 필요가 없습니다'),
     pricingAccount.row,
     taxonomy.row,
+    h('div', { class: 'form-row' }, taxonomyState, alignTaxonomy),
     sanitizer.row,
-    feeTable.row,
-    pricingPolicy.row,
     profile.row,
     providerIdentity.row,
     h('div', { class: 'form-row' }, h('label', { for: templatesId }, '스마트스토어 템플릿 번호 (한 줄에 종류=번호)'), templates),
     proofRequired.row,
     ...keys.map((key) => key.row),
+    serverOwned('수수료 변경 기록', pricing?.fee_table_version, 'fee_table_version'),
+    serverOwned('가격 규칙 변경 기록', pricing?.pricing_policy_version, 'pricing_policy_version'),
     serverOwned('카테고리 연결 버전', inputs?.category_mapping_revision, 'category_mapping_revision'),
     serverOwned('상세페이지 구성 버전', inputs?.detail_composition_revision, 'detail_composition_revision'),
   ];
