@@ -25,7 +25,10 @@ itself — the stack still refuses under ``M0_DRY_RUN_ONLY``.
 ``icbm coupang save-credentials`` is the no-echo local input path into the OS credential store.
 ``icbm coupang read-canary`` composes the one C-LIVE-R1 identity-bound KR read and
 ``icbm coupang read-category-metadata`` reads and immediately stores the exact recommended
-category contracts without exposing provider bodies or account values.
+category contracts without exposing provider bodies or account values. Category reads consume a
+durable pre-transport barrier; ``mark-category-metadata-ambiguous`` records the one known legacy
+gap without transport, and ``recover-category-metadata`` performs only one explicitly approved
+read for the unique ambiguous category.
 ``icbm coupang mutate-test-products`` composes the C-LIVE-MUT-1 exact test 1..11 workflow.
 ``icbm coupang recover-test-product-create`` performs only the positive-only identity lookup for
 one ambiguous C-LIVE-MUT-1 CREATE and never treats an empty answer as absence.
@@ -110,6 +113,8 @@ COUPANG_OPERATOR_COMMANDS: tuple[str, ...] = (
     "save-credentials",
     "read-canary",
     "read-category-metadata",
+    "mark-category-metadata-ambiguous",
+    "recover-category-metadata",
     "mutate-test-products",
     "complete-rejected-test-products",
     "recover-test-product-create",
@@ -182,6 +187,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     metadata.add_argument(
         "--clock-skew-seconds", required=True, type=float, help="observed absolute clock offset"
+    )
+    mark_metadata = coupang_commands.add_parser(
+        "mark-category-metadata-ambiguous",
+        help="record the known pre-journal first-category ambiguity without provider transport",
+    )
+    mark_metadata.add_argument("--scope-id", required=True, help="must be C-LIVE-CATEGORY-LEGACY-1")
+    recover_metadata = coupang_commands.add_parser(
+        "recover-category-metadata",
+        help="perform one explicitly approved recovery read for the unique ambiguous category",
+    )
+    recover_metadata.add_argument(
+        "--clock-skew-seconds", required=True, type=float, help="observed absolute clock offset"
+    )
+    recover_metadata.add_argument(
+        "--scope-id", required=True, help="must be C-LIVE-CATEGORY-RECOVERY-1"
+    )
+    recover_metadata.add_argument(
+        "--approved-at", required=True, help="approval time with explicit offset"
+    )
+    recover_metadata.add_argument(
+        "--expires-at", required=True, help="expiry time with explicit offset"
     )
     mutations = coupang_commands.add_parser(
         "mutate-test-products",
@@ -732,16 +758,37 @@ def _coupang_read_category_metadata(
         clock = SystemUtcClock()
         now = clock.now()
         proof = CoupangCanaryProofStore(secrets).load_current(credentials=credentials, now=now)
+        category_codes = store.pending_category_metadata_codes(
+            recommendations.unique_category_codes,
+            generation=credentials.credential_generation,
+        )
+        if not category_codes:
+            print(
+                json.dumps(
+                    {"attempted": 0, "failed": 0, "failure_codes": [], "succeeded": 0},
+                    sort_keys=True,
+                )
+            )
+            return 0
         owner = CoupangCategoryMetadataPreflight(
             context=AuthContext(credentials, Market.KR, proof),
-            category_codes=recommendations.unique_category_codes,
+            category_codes=category_codes,
             clock=clock,
             clock_preflight=ClockPreflight.create(args.clock_skew_seconds, checked_at=now),
         )
-        result = owner.run(
-            on_attempt=lambda attempt: store.save_category_metadata_attempt(
+
+        def persist(attempt: Any) -> None:
+            store.save_category_metadata_attempt(
                 attempt, generation=credentials.credential_generation
             )
+            if not attempt.succeeded:
+                raise ValueError("COUPANG_CATEGORY_METADATA_PROVIDER_FAILURE")
+
+        result = owner.run(
+            on_before_attempt=lambda code: store.begin_category_metadata_attempt(
+                code, generation=credentials.credential_generation
+            ),
+            on_attempt=persist,
         )
     except (LiveCategoryMetadataTransportRefused, OSError, ValueError):
         print("COUPANG_CATEGORY_METADATA_LOCAL_REFUSAL", file=sys.stderr)
@@ -755,6 +802,117 @@ def _coupang_read_category_metadata(
     }
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
     return 1 if failed else 0
+
+
+def _coupang_mark_category_metadata_ambiguous(
+    config: AppConfig, lease: DataDirLease, args: argparse.Namespace
+) -> int:
+    """Persist the one known legacy ambiguity without making any provider request."""
+    from app.platform.core.ownership import require_ownership
+    from app.platform.core.secrets import build_secret_store
+    from app.stages.connect.coupang.credentials import CoupangCredentialStore
+    from app.stages.connect.coupang.live_preflight import CoupangLivePreflightStore
+
+    require_ownership(lease, config.data_dir)
+    if args.scope_id != "C-LIVE-CATEGORY-LEGACY-1":
+        print("COUPANG_CATEGORY_METADATA_LEGACY_SCOPE_INVALID", file=sys.stderr)
+        return 1
+    secrets = build_secret_store(config.secret_backend)
+    status = secrets.status()
+    if not status.available or status.backend == "memory":
+        print("COUPANG_OS_SECRET_STORE_UNAVAILABLE", file=sys.stderr)
+        return 1
+    try:
+        credentials = CoupangCredentialStore(secrets).load()
+    except OSError:
+        credentials = None
+    if credentials is None:
+        print("COUPANG_CREDENTIALS_NOT_CONFIGURED", file=sys.stderr)
+        return 1
+    try:
+        store = CoupangLivePreflightStore(secrets)
+        first = store.category_recommendations().unique_category_codes[0]
+        store.mark_legacy_category_metadata_ambiguous(
+            first, generation=credentials.credential_generation
+        )
+    except (OSError, ValueError):
+        print("COUPANG_CATEGORY_METADATA_LEGACY_MARK_LOCAL_REFUSAL", file=sys.stderr)
+        return 1
+    print("Coupang category metadata ambiguity recorded")
+    return 0
+
+
+def _coupang_recover_category_metadata(
+    config: AppConfig, lease: DataDirLease, args: argparse.Namespace
+) -> int:
+    """Use one bounded approval for one recovery GET of the unique ambiguous category."""
+    from app.platform.core.ownership import require_ownership
+    from app.platform.core.secrets import build_secret_store
+    from app.stages.connect.coupang.canary_proof import CoupangCanaryProofStore
+    from app.stages.connect.coupang.credentials import CoupangCredentialStore
+    from app.stages.connect.coupang.live_preflight import CoupangLivePreflightStore
+    from integrations.marketplaces.coupang.auth import AuthContext, Market, SystemUtcClock
+    from integrations.marketplaces.coupang.canary import ClockPreflight
+    from integrations.marketplaces.coupang.live_category_metadata import (
+        CoupangCategoryMetadataPreflight,
+        LiveCategoryMetadataTransportRefused,
+    )
+
+    require_ownership(lease, config.data_dir)
+    secrets = build_secret_store(config.secret_backend)
+    status = secrets.status()
+    if not status.available or status.backend == "memory":
+        print("COUPANG_OS_SECRET_STORE_UNAVAILABLE", file=sys.stderr)
+        return 1
+    try:
+        credentials = CoupangCredentialStore(secrets).load()
+    except OSError:
+        credentials = None
+    if credentials is None:
+        print("COUPANG_CREDENTIALS_NOT_CONFIGURED", file=sys.stderr)
+        return 1
+    store = CoupangLivePreflightStore(secrets)
+    try:
+        recommendations = store.category_recommendations()
+        target = store.category_metadata_recovery_target(
+            recommendations.unique_category_codes,
+            generation=credentials.credential_generation,
+        )
+        clock = SystemUtcClock()
+        now = clock.now()
+        proof = CoupangCanaryProofStore(secrets).load_current(credentials=credentials, now=now)
+        approved_at = _instant(args.approved_at, "--approved-at")
+        expires_at = _instant(args.expires_at, "--expires-at")
+        owner = CoupangCategoryMetadataPreflight(
+            context=AuthContext(credentials, Market.KR, proof),
+            category_codes=(target,),
+            clock=clock,
+            clock_preflight=ClockPreflight.create(args.clock_skew_seconds, checked_at=now),
+        )
+        result = owner.run(
+            on_before_attempt=lambda code: store.begin_category_metadata_recovery(
+                code,
+                generation=credentials.credential_generation,
+                scope_id=args.scope_id,
+                approved_at=approved_at,
+                expires_at=expires_at,
+                now=now,
+            ),
+            on_attempt=lambda attempt: store.save_category_metadata_attempt(
+                attempt, generation=credentials.credential_generation
+            ),
+        )
+    except (LiveCategoryMetadataTransportRefused, OSError, ValueError):
+        print("COUPANG_CATEGORY_METADATA_RECOVERY_LOCAL_REFUSAL", file=sys.stderr)
+        return 1
+    attempt = result.attempts[0]
+    summary = {
+        "attempted": 1,
+        "failed": 0 if attempt.succeeded else 1,
+        "succeeded": 1 if attempt.succeeded else 0,
+    }
+    print(json.dumps(summary, sort_keys=True))
+    return 0 if attempt.succeeded else 1
 
 
 def _coupang_recover_test_product_create(
@@ -1192,6 +1350,11 @@ OWNING_COMMANDS: dict[Command, Callable[[AppConfig, DataDirLease, argparse.Names
     ("coupang", "bind-saved-delivery"): _coupang_bind_saved_delivery,
     ("coupang", "read-canary"): _coupang_read_canary,
     ("coupang", "read-category-metadata"): _coupang_read_category_metadata,
+    (
+        "coupang",
+        "mark-category-metadata-ambiguous",
+    ): _coupang_mark_category_metadata_ambiguous,
+    ("coupang", "recover-category-metadata"): _coupang_recover_category_metadata,
     ("coupang", "mutate-test-products"): _coupang_mutate_test_products,
     (
         "coupang",

@@ -117,6 +117,51 @@ def test_each_attempt_is_reported_immediately_in_order() -> None:
     assert [attempt.category_code for attempt in result.attempts] == seen
 
 
+def test_durable_barrier_callback_runs_before_each_transport() -> None:
+    events: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        events.append(f"transport:{request.url.path.rsplit('/', 1)[-1]}")
+        return httpx.Response(200, json=_metadata())
+
+    _owner(httpx.MockTransport(handler)).run(
+        on_before_attempt=lambda code: events.append(f"barrier:{code}")
+    )
+
+    assert events == ["barrier:100", "transport:100", "barrier:200", "transport:200"]
+
+
+def test_barrier_failure_prevents_transport() -> None:
+    called = False
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json=_metadata())
+
+    def fail_barrier(_: str) -> None:
+        raise OSError("barrier unavailable")
+
+    with pytest.raises(OSError, match="barrier unavailable"):
+        _owner(httpx.MockTransport(handler), ("100",)).run(on_before_attempt=fail_barrier)
+    assert called is False
+
+
+def test_result_storage_failure_stops_before_the_next_category() -> None:
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path.rsplit("/", 1)[-1])
+        return httpx.Response(200, json=_metadata())
+
+    def fail_storage(_: object) -> None:
+        raise OSError("result storage unavailable")
+
+    with pytest.raises(OSError, match="result storage unavailable"):
+        _owner(httpx.MockTransport(handler)).run(on_attempt=fail_storage)
+    assert requests == ["100"]
+
+
 @pytest.mark.parametrize(
     "codes",
     [(), ("100", "100"), ("unsafe",), tuple(str(index) for index in range(9))],

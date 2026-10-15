@@ -236,6 +236,7 @@ class CoupangCategoryMetadataPreflight:
     def run(
         self,
         *,
+        on_before_attempt: Callable[[str], None] | None = None,
         on_attempt: Callable[[CategoryMetadataAttempt], None] | None = None,
     ) -> CategoryMetadataPreflightResult:
         if self._used:
@@ -244,6 +245,8 @@ class CoupangCategoryMetadataPreflight:
         self._preflight(_aware_utc(self._clock.now(), "clock.now"))
         attempts: list[CategoryMetadataAttempt] = []
         for code in self._category_codes:
+            if on_before_attempt is not None:
+                on_before_attempt(code)
             attempt = self._attempt(code)
             attempts.append(attempt)
             if on_attempt is not None:
