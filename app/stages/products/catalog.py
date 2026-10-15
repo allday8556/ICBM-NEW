@@ -9,7 +9,8 @@ This module decides only how they are read and shown. It owns no truth and write
   identifier, behind an opaque cursor bound to its own search. A retired Product is never listed and
   stays addressable by its identifier.
 - **Search** reads identities and each member's **current** CONFIRMED ``original_name`` only: a
-  historical revision never matches.
+  historical revision never matches. Since ADR-0042 S2a it also finds a common product by the name
+  of a store listing linked to it, as the ListingLinks owner answers.
 - **Source facts** are read through each member's exact current source revision and carry that
   revision's identifier. Nothing is copied, nothing is chosen as "the" product name when members
   differ, and a fact under review or absent stays so: no value is filled from another member or

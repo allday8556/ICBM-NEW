@@ -230,8 +230,13 @@ CANONICAL_TABLES = (
     "store_catalog_memberships",
     "store_catalog_observations",
     "store_catalog_listing_endings",
+    # ADR-0042 S2a: the ListingLinks owner — links, 「다른 상품」 decisions and the notices of
+    # automatic links.
+    "store_listing_links",
+    "store_listing_decisions",
+    "store_link_notices",
 )
-HEAD = "0067_store_catalog"
+HEAD = "0068_store_listing_links"
 
 
 def _url(path: Path) -> str:

@@ -1757,6 +1757,56 @@ td.no-data {
   margin-top: var(--space-4);
 }
 
+/* ADR-0042 S2a: the store listing links above the 통합DB list and in a product's detail. */
+.store-links {
+  display: grid;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+}
+
+.store-links .panel-title {
+  margin: 0;
+}
+
+.store-links-row,
+.store-links-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.store-links-row > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.store-links-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.store-links-proposal {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-line-soft);
+}
+
+.store-links-choices {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.store-links-detail .store-links-row + .store-links-row {
+  margin-top: var(--space-2);
+}
+
 .db-target:empty {
   display: none;
 }

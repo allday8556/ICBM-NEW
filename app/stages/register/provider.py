@@ -33,7 +33,9 @@ class DuplicateUnit:
 
     ``item_ids`` name the unit's Items (their sources carry the owner-declared seller-code
     conventions, ADR-0024 §2), ``listing_name`` is the authored listing name (a weak signal only)
-    and ``max_age`` is the target policy's store-catalog bound (ADR-0042 §5.2)."""
+    and ``max_age`` is the target policy's store-catalog bound (ADR-0042 §5.2). ``group_ids`` are
+    the unit's common products: a store listing linked to one of them is a duplicate (ADR-0042 §6,
+    S2a)."""
 
     marketplace_key: str
     marketplace_account_id: str
@@ -41,6 +43,7 @@ class DuplicateUnit:
     item_ids: tuple[str, ...] = ()
     listing_name: str | None = None
     max_age: timedelta = CATALOG_MAX_AGE
+    group_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -86,6 +89,7 @@ def duplicate_unit(candidate: PreflightResult) -> DuplicateUnit:
         item_ids=tuple(unit.unit_item_ids),
         listing_name=None if name is None else str(name.value),
         max_age=unit.target.catalog_max_age,
+        group_ids=tuple(sorted({item.product_group_id for item in unit.items})),
     )
 
 

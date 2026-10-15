@@ -5,9 +5,10 @@
 //
 // - 「중복 없음 · 14:02 동기화 기준」 when the snapshot shows no matching store listing;
 // - 「스토어 다시 확인 중…」 while the automatic re-sync runs, with 「다시 보기」 to read it again;
-// - 「이미 스토어에 있는 상품: …」 with the seller's choice when a store listing matches:
-//   「의도적으로 한 번 더 등록」, which records the seller's reason and can be undone. Linking
-//   the listing as the same product (「같은 상품으로 연결」) is S2a's and is not shown until then.
+// - 「이미 스토어에 있는 상품: …」 with the seller's choices when a store listing matches:
+//   「같은 상품으로 연결」 (ADR-0042 S2a: the store listing becomes this product's listing, and
+//   nothing is registered again), or 「의도적으로 한 번 더 등록」, which records the seller's reason
+//   and can be undone. A listing already linked to this product reads so, with no link button.
 // The last complete sync time is always shown beside any result (SCP-07).
 
 import { ApiError, sendJson } from '../core/api.js';
@@ -16,11 +17,19 @@ import { closeModal, openModal } from '../core/modal.js';
 import { toast } from '../core/toast.js';
 
 const PREPARATIONS = '/api/v1/register/preparations';
+const LINK = '/api/v1/operate/store-links/confirm';
 const OPERATOR = 'operator';
 
 const KEY_LABEL = {
   SELLER_CODE: '판매자코드가 같습니다',
   NORMALIZED_NAME: '상품명이 같습니다',
+  LISTING_LINK: '이 상품과 연결된 스토어 상품입니다',
+};
+const LINK_ERROR = {
+  STORE_LINK_GROUP_ALREADY_IN_STORE: '이 상품은 이미 이 스토어의 다른 상품과 연결되어 있습니다.',
+  STORE_LINK_LISTING_LINKED_ELSEWHERE: '이 스토어 상품은 다른 상품에 연결되어 있습니다. 통합DB에서 먼저 연결을 해제해 주세요.',
+  STORE_LINK_LISTING_OWNED: 'ICBM 등록이나 기존 상품 연결로 관리되는 스토어 상품이라 연결할 수 없습니다.',
+  STORE_LINK_LISTING_UNKNOWN: '스토어 상품을 아직 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.',
 };
 const SALE_LABEL = {
   SALE: '판매중',
@@ -101,19 +110,71 @@ async function undoOverride(unit, overrideId, reload, button) {
   }
 }
 
-function matchLine(match) {
+// The one common product of this unit, when its Items name exactly one (ADR-0042 S2a).
+function unitProduct(unit) {
+  const groups = [...new Set((unit.items ?? []).map((item) => item.product_group_id).filter(Boolean))];
+  return groups.length === 1 ? groups[0] : null;
+}
+
+function linkModal(unit, match, product, reload) {
+  const submit = h('button', { type: 'button', class: 'btn blue', 'data-action': 'duplicate-link-confirm' }, '같은 상품으로 연결');
+  submit.addEventListener('click', async () => {
+    submit.disabled = true;
+    try {
+      await sendJson('POST', LINK, {
+        actor: OPERATOR,
+        marketplace_key: unit.marketplace_key,
+        marketplace_account_id: unit.marketplace_account_id,
+        origin_product_no: match.marketplace_product_id,
+        product_group_id: product,
+      });
+      closeModal();
+      toast('중복 확인', '스토어 상품을 이 상품과 같은 상품으로 연결했습니다.');
+      await reload();
+    } catch (error) {
+      const code = error instanceof ApiError ? error.error?.code : null;
+      toast('중복 확인', LINK_ERROR[code] ?? '연결하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      submit.disabled = false;
+    }
+  });
+  openModal({
+    eyebrow: '중복 확인',
+    title: '같은 상품으로 연결',
+    help: '스토어에 이미 있는 상품을 이 상품으로 관리합니다. 연결은 통합DB에서 언제든 해제할 수 있습니다.',
+    narrow: true,
+    body: h(
+      'div',
+      { class: 'stack' },
+      h('div', { class: 'note' }, `스토어 상품 ‘${match.name || '이름 없는 상품'}’(상품번호 ${match.marketplace_product_id})을 이 상품과 같은 상품으로 연결합니다. 스토어에 새로 등록하지 않습니다.`),
+    ),
+    footer: [submit],
+  });
+}
+
+function matchLine(match, link) {
   const status = SALE_LABEL[match.sale_status] ? ` · ${SALE_LABEL[match.sale_status]}` : '';
   return h(
     'li',
     { 'data-key-kind': match.key_kind, 'data-product-no': match.marketplace_product_id },
     h('b', {}, match.name || '이름 없는 상품'),
     h('span', { class: 'mini' }, ` 상품번호 ${match.marketplace_product_id}${status} · ${KEY_LABEL[match.key_kind] ?? '같은 상품일 수 있습니다'}`),
+    link,
   );
+}
+
+function linkButton(unit, match, editable, reload) {
+  const product = unitProduct(unit);
+  if (match.key_kind === 'LISTING_LINK' || !product) return null;
+  const button = h('button', { type: 'button', class: 'btn', 'data-action': 'duplicate-link', 'data-product-no': match.marketplace_product_id }, '같은 상품으로 연결');
+  button.disabled = !editable;
+  button.addEventListener('click', () => linkModal(unit, match, product, reload));
+  return button;
 }
 
 function matchBlock(unit, duplicate, reload) {
   const editable = Boolean(unit.authored?.preparation_id) && !unit.snapshot;
   const chosen = duplicate.override_ids.length > 0;
+  const linkedOnly = duplicate.matches.length > 0 && duplicate.matches.every((match) => match.key_kind === 'LISTING_LINK');
   const choices = chosen
     ? [
         h('span', { class: 'chip good', 'data-role': 'duplicate-override-active' }, '한 번 더 등록하기로 함'),
@@ -131,10 +192,13 @@ function matchBlock(unit, duplicate, reload) {
           return again;
         })(),
       ];
+  const why = linkedOnly
+    ? '이 상품은 이미 이 스토어에서 판매 중이라 새로 등록하지 않습니다. 따로 한 번 더 판매하려면 이유를 적고 한 번 더 등록할 수 있습니다.'
+    : '같은 상품을 두 번 등록하지 않도록 등록을 멈췄습니다. 같은 상품이면 스토어 상품과 연결하고, 다른 상품이라면 이유를 적고 한 번 더 등록할 수 있습니다.';
   return [
     h('div', {}, h('b', {}, '이미 스토어에 있는 상품:')),
-    h('ul', { class: 'duplicate-matches' }, ...duplicate.matches.map(matchLine)),
-    chosen ? null : h('div', { class: 'mini' }, '같은 상품을 두 번 등록하지 않도록 등록을 멈췄습니다. 다른 상품이라면 이유를 적고 한 번 더 등록할 수 있습니다.'),
+    h('ul', { class: 'duplicate-matches' }, ...duplicate.matches.map((match) => matchLine(match, chosen ? null : linkButton(unit, match, editable, reload)))),
+    chosen ? null : h('div', { class: 'mini' }, why),
     h('div', { class: 'row' }, ...choices),
   ];
 }

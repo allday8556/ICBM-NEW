@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.interface.api.deps import ContainerDep
 from app.platform.core.correlation import new_correlation_id
-from app.platform.core.errors import PolicyBlockedError
+from app.platform.core.errors import InputValidationError, PolicyBlockedError
 from app.stages.operate.catalog.service import ALL as CATALOG_ALL
 from app.stages.operate.catalog.service import OPERATOR as CATALOG_OPERATOR
 from app.stages.operate.catalog.service import PAGE_LIMIT_DEFAULT as CATALOG_PAGE_LIMIT
@@ -159,6 +159,129 @@ def sync_store_catalog(container: ContainerDep) -> dict[str, Any]:
         )
     started = container.store_catalog_scheduler.request(trigger=CATALOG_OPERATOR)
     return {"started": started, "status": asdict(container.store_catalog.status())}
+
+
+# ---------------------------------------------------------------- ADR-0042 S2a: listing links
+
+
+class StoreLinkConfirmRequest(BaseModel):
+    """「같은 상품」: a listing (by id, or by its store and product number) is this product.
+    ``survivor_group_id`` is the product kept when two become one (default: this product)."""
+
+    product_group_id: str = Field(min_length=1, max_length=36)
+    listing_id: str | None = Field(default=None, min_length=1, max_length=36)
+    marketplace_key: str | None = Field(default=None, min_length=1, max_length=40)
+    marketplace_account_id: str | None = Field(default=None, min_length=1, max_length=40)
+    origin_product_no: str | None = Field(default=None, min_length=1, max_length=20)
+    survivor_group_id: str | None = Field(default=None, min_length=1, max_length=36)
+    actor: str = Field(min_length=2, max_length=64)
+
+
+class StoreLinkRejectRequest(BaseModel):
+    """「다른 상품」: this listing is not that product. Revocable."""
+
+    listing_id: str = Field(min_length=1, max_length=36)
+    product_group_id: str = Field(min_length=1, max_length=36)
+    actor: str = Field(min_length=2, max_length=64)
+
+
+class StoreLinkActorRequest(BaseModel):
+    actor: str = Field(min_length=2, max_length=64)
+
+
+class StoreLinkUnlinkRequest(BaseModel):
+    actor: str = Field(min_length=2, max_length=64)
+    # 「되돌리기」 of an automatic link's notice, rather than 「연결 해제」 of the product.
+    undo: bool = False
+
+
+class StoreLinkAcknowledgeRequest(BaseModel):
+    actor: str = Field(min_length=2, max_length=64)
+    # None: every open notice (「확인」 on the notice).
+    notice_ids: list[str] | None = Field(default=None, max_length=500)
+
+
+@router.get("/store-links")
+def store_links(container: ContainerDep) -> dict[str, Any]:
+    """What the 통합DB shows after an import (ADR-0042 §0 b3): the automatic links not yet
+    acknowledged, the 「같은 상품인가요?」 proposals and the 「다른 상품」 decisions, with the last
+    complete sync time (SCP-07). A read; nothing is linked here."""
+    return asdict(container.store_links.overview())
+
+
+@router.get("/store-links/products")
+def store_links_of_products(
+    container: ContainerDep, group_id: Annotated[list[str] | None, Query()] = None
+) -> dict[str, Any]:
+    """The store side of the 통합DB rows: each product's listings and whether it has a supplier
+    (「도매처 미연결」 when it has none)."""
+    groups = list(group_id or ())[:50]
+    return {"products": [asdict(view) for view in container.store_links.for_groups(groups)]}
+
+
+@router.post("/store-links/confirm")
+def confirm_store_link(container: ContainerDep, request: StoreLinkConfirmRequest) -> dict[str, Any]:
+    links = container.store_links
+    listing_id = request.listing_id
+    if listing_id is None:
+        if not (
+            request.marketplace_key and request.marketplace_account_id and request.origin_product_no
+        ):
+            raise InputValidationError(
+                "STORE_LINK_LISTING_REQUIRED", "name the listing by id or by store and product"
+            )
+        listing_id = links.listing_id_of(
+            request.marketplace_key, request.marketplace_account_id, request.origin_product_no
+        )
+    result = links.confirm(
+        listing_id,
+        request.product_group_id,
+        survivor_group_id=request.survivor_group_id,
+        actor=request.actor,
+        correlation_id=new_correlation_id(),
+    )
+    return asdict(result)
+
+
+@router.post("/store-links/reject")
+def reject_store_link(container: ContainerDep, request: StoreLinkRejectRequest) -> dict[str, Any]:
+    result = container.store_links.reject(
+        request.listing_id,
+        request.product_group_id,
+        actor=request.actor,
+        correlation_id=new_correlation_id(),
+    )
+    return asdict(result)
+
+
+@router.post("/store-links/decisions/{decision_id}/revoke")
+def revoke_store_link_decision(
+    container: ContainerDep, decision_id: str, request: StoreLinkActorRequest
+) -> dict[str, Any]:
+    container.store_links.revoke_decision(
+        decision_id, actor=request.actor, correlation_id=new_correlation_id()
+    )
+    return {"decision_id": decision_id, "revoked": True}
+
+
+@router.post("/store-links/notices/acknowledge")
+def acknowledge_store_link_notices(
+    container: ContainerDep, request: StoreLinkAcknowledgeRequest
+) -> dict[str, Any]:
+    count = container.store_links.acknowledge(
+        request.notice_ids, actor=request.actor, correlation_id=new_correlation_id()
+    )
+    return {"acknowledged": count}
+
+
+@router.post("/store-links/{link_id}/unlink")
+def unlink_store_listing(
+    container: ContainerDep, link_id: str, request: StoreLinkUnlinkRequest
+) -> dict[str, Any]:
+    result = container.store_links.unlink(
+        link_id, actor=request.actor, correlation_id=new_correlation_id(), undo=request.undo
+    )
+    return asdict(result)
 
 
 @router.get("/stock")

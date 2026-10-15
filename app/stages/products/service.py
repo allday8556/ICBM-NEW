@@ -1,4 +1,4 @@
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from app.platform.core.errors import NotFoundError
 from app.stages.products.catalog import (
@@ -47,8 +47,16 @@ class ProductsService:
     reads one consistent snapshot and writes nothing.
     """
 
-    def __init__(self, store: ProductFoundationStore) -> None:
+    def __init__(
+        self,
+        store: ProductFoundationStore,
+        *,
+        listing_search: Callable[[str], Iterable[str]] | None = None,
+    ) -> None:
         self._store = store
+        # ADR-0042 S2a: the common products whose linked store listing's name matches a search.
+        # A read of the ListingLinks owner; without it the search reads members only.
+        self._listing_search = listing_search
 
     def product_count(self) -> int:
         """ACTIVE canonical Products: not revisions, not source products, not retired groups."""
@@ -121,8 +129,11 @@ class ProductsService:
         text = search_text(query)
         size = page_limit(limit)
         after = None if cursor is None else decode_cursor(cursor, text)
+        also: Iterable[str] = ()
+        if text is not None and self._listing_search is not None:
+            also = tuple(self._listing_search(text))
         with self._store.reading() as unit:
-            page = unit.active_product_page(needle=needle(text), after=after, limit=size)
+            page = unit.active_product_page(needle=needle(text), after=after, limit=size, also=also)
             rows = []
             for key in page.keys:
                 product = unit.readback(key.product_group_id)

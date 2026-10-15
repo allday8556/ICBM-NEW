@@ -5,7 +5,9 @@ is answered in-process, and the override call is answered by a stub. Proven, wit
 - 「중복 없음 · <time> 동기화 기준」 for a NO_MATCH;
 - 「스토어 다시 확인 중…」 with the last complete sync time while the automatic re-sync runs;
 - a real match shows 「이미 스토어에 있는 상품: …」 with its listing and 「의도적으로 한 번
-  더 등록」, which asks for a reason and posts it; 「같은 상품으로 연결」 is not shown before S2a;
+  더 등록」, which asks for a reason and posts it;
+- since S2a, 「같은 상품으로 연결」 links the matched store listing to the unit's one product
+  through the ListingLinks owner, and a listing already linked to it reads so, with no button;
 - a recorded override reads 「한 번 더 등록하기로 함」 with 「되돌리기」;
 - the words are plain Korean: every code stays in a data-* attribute.
 """
@@ -66,6 +68,14 @@ def page(browser: Browser, api: TestClient) -> Iterator[tuple[Page, list[dict[st
                 body=json.dumps(
                     {"preparation_id": "prep-1", "override_ids": ["ovr-1"], "active": True}
                 ),
+            )
+            return
+        if parts.path.endswith("/store-links/confirm") and request.method == "POST":
+            posted.append({"path": parts.path, "body": json.loads(request.post_data or "{}")})
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"link": None, "retired_group_id": None, "decision_id": None}),
             )
             return
         path = parts.path + (f"?{parts.query}" if parts.query else "")
@@ -171,9 +181,8 @@ def test_a_real_match_blocks_with_the_sellers_choices(
     _plain(text)
     row = "#probe-MATCH"
     assert opened.locator(f"{row} [data-key-kind='SELLER_CODE']").count() == 1
-    # Linking is S2a's: no inert button stands in for it.
+    # A unit whose Items name no single product offers no link (this one names none).
     assert opened.locator(f"{row} [data-action='duplicate-link']").count() == 0
-    assert "같은 상품으로 연결" not in text
     again = opened.locator(f"{row} [data-action='duplicate-override']")
     assert again.inner_text() == "의도적으로 한 번 더 등록" and again.is_enabled()
     again.click()
@@ -222,3 +231,78 @@ def test_a_store_never_synced_says_so_in_plain_words(
     assert "스토어 상품을 아직 확인하지 못했습니다" in shown["text"]
     assert "아직 동기화 기록이 없습니다" in shown["text"]
     _plain(shown["text"])
+
+
+def _linkable(**duplicate: Any) -> dict[str, Any]:
+    unit = _unit("MATCH", **duplicate)
+    unit["marketplace_key"] = "smartstore"
+    unit["marketplace_account_id"] = "mpa-1"
+    unit["items"] = [{"product_group_id": "g-1"}, {"product_group_id": "g-1"}]
+    return unit
+
+
+def test_a_match_can_be_linked_as_the_same_product(
+    page: tuple[Page, list[dict[str, Any]]],
+) -> None:
+    opened, posted = page
+    shown = opened.evaluate(
+        RENDER,
+        _linkable(
+            codes=["PROVIDER_DUPLICATE_FOUND"],
+            matches=[
+                {
+                    "key_kind": "SELLER_CODE",
+                    "marketplace_product_id": "777",
+                    "name": "스토어에 있는 상품",
+                    "sale_status": "SALE",
+                }
+            ],
+        ),
+    )
+    assert "같은 상품으로 연결" in shown["text"]
+    _plain(shown["text"])
+    link = opened.locator("#probe-MATCH [data-action='duplicate-link']")
+    assert link.is_enabled() and link.get_attribute("data-product-no") == "777"
+    link.click()
+    confirm = opened.locator("[data-action='duplicate-link-confirm']")
+    confirm.wait_for(timeout=10_000)
+    assert "스토어에 새로 등록하지 않습니다" in opened.locator("body").inner_text()
+    confirm.click()
+    opened.wait_for_function("window.__reloads === 1", timeout=10_000)
+    assert posted == [
+        {
+            "path": "/api/v1/operate/store-links/confirm",
+            "body": {
+                "actor": "operator",
+                "marketplace_key": "smartstore",
+                "marketplace_account_id": "mpa-1",
+                "origin_product_no": "777",
+                "product_group_id": "g-1",
+            },
+        }
+    ]
+
+
+def test_a_listing_already_linked_to_the_product_reads_so(
+    page: tuple[Page, list[dict[str, Any]]],
+) -> None:
+    opened, _ = page
+    shown = opened.evaluate(
+        RENDER,
+        _linkable(
+            codes=["PROVIDER_DUPLICATE_FOUND"],
+            matches=[
+                {
+                    "key_kind": "LISTING_LINK",
+                    "marketplace_product_id": "778",
+                    "name": "이미 연결된 상품",
+                    "sale_status": "SALE",
+                }
+            ],
+        ),
+    )
+    text = shown["text"]
+    assert "이 상품과 연결된 스토어 상품입니다" in text
+    assert "이미 이 스토어에서 판매 중이라 새로 등록하지 않습니다" in text
+    assert opened.locator("#probe-MATCH [data-action='duplicate-link']").count() == 0
+    _plain(text)

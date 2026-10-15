@@ -147,6 +147,13 @@ class AuditEventType(StrEnum):
     # convention, or provider evidence ended an adoption. Identifiers only.
     LISTING_ADOPTED = "LISTING_ADOPTED"
     ADOPTED_LISTING_REMOVED = "ADOPTED_LISTING_REMOVED"
+    # ADR-0042 S2a: store listings linked to common products — one pass after a COMPLETE sync
+    # (counts), the seller's 「같은 상품」 / 「확인」, 「다른 상품」 and its undo, an unlink or an
+    # automatic link's undo. Identifiers and counts only, never a listing name.
+    STORE_LISTINGS_LINKED = "STORE_LISTINGS_LINKED"
+    STORE_LISTING_LINK_CONFIRMED = "STORE_LISTING_LINK_CONFIRMED"
+    STORE_LISTING_DECISION_RECORDED = "STORE_LISTING_DECISION_RECORDED"
+    STORE_LISTING_UNLINKED = "STORE_LISTING_UNLINKED"
     # M6.5 (ADR-0025 §3, §4): the supplier order the operator placed by hand was recorded or
     # amended, and its carrier and tracking number captured. By product-order id only.
     SUPPLIER_ORDER_RECORDED = "SUPPLIER_ORDER_RECORDED"

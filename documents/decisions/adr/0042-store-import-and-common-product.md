@@ -133,6 +133,7 @@ These two walkthroughs are the acceptance script of every slice (§14). Each sli
   - Every readiness that needs source facts stays not ready: pricing from cost, stock recheck, and a new registration from facts.
   - The listing can still be operated and edited with direct values (§9).
   - **Evidence-capture task (S2a):** how the 통합DB list (G1-C) and readiness derivation render a zero-member `ACTIVE` group. Pinned by tests.
+  - **Result (S2a; `tests/integration/operate/test_s2a_listing_links.py`).** The 통합DB list shows such a group like any `ACTIVE` product: no member, no membership revision, no Item; it is counted in 전체상품. Its detail lists no Item and names `PRODUCTS_MEMBERSHIP_REVISION_MISSING` as the reason nothing is selectable (「도매처가 연결되지 않아 아직 등록 대상으로 고를 수 없습니다.」), and the registration-target check refuses it. Readiness is derived per Item, so none derives for it: `active_items` omits it and the M4 review producer indexes nothing. The screen names it by its linked listing and marks it 「도매처 미연결」.
 - **A store listing is not a registration.**
   - An ICBM `MarketplaceRegistration` stays REGISTER's (ADR-0014).
   - An adoption stays ADR-0024's.

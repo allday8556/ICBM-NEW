@@ -37,6 +37,7 @@ import { pageHead } from '../components/page-head.js';
 import { emptyState, errorState, unsupportedState } from '../components/states.js';
 import { reviewItemsBlock } from '../components/review-items.js';
 import { KIND_LABEL } from '../components/review-counts.js';
+import { KIND_LABEL as LINK_KIND_LABEL, UNCONNECTED, fetchStoreLinks, storeLinksPanel, storeListingsGroup } from '../components/store-links.js';
 import { storeListingsView } from './db/store-listings.js';
 
 const SCREEN = '/api/v1/screens/db';
@@ -118,7 +119,7 @@ const STATUS_LABEL = { ABSENT: '없음', REVIEW_REQUIRED: '확인 필요' };
 // Server reason codes rendered as copy. The page never derives a verdict, only its wording.
 const REASON_COPY = {
   PRODUCTS_PRODUCT_RETIRED: '보관된 상품이라 등록 대상으로 고를 수 없습니다.',
-  PRODUCTS_MEMBERSHIP_REVISION_MISSING: '확정된 구성원이 없어 고를 수 없습니다.',
+  PRODUCTS_MEMBERSHIP_REVISION_MISSING: '도매처가 연결되지 않아 아직 등록 대상으로 고를 수 없습니다.',
   PRODUCTS_MEMBERSHIP_REVISION_NOT_CURRENT: '구성원 기록이 현재 구성과 맞지 않아 고를 수 없습니다.',
   PRODUCTS_ITEM_BINDING_MISSING: '현재 연결된 원천 상품이 없는 품목입니다.',
   PRODUCTS_ITEM_BINDING_MEMBER_NOT_CONFIRMED: '연결된 원천 상품이 이 상품의 확정 구성원이 아닙니다.',
@@ -209,8 +210,23 @@ function kpiCards(total) {
   );
 }
 
-function nameLines(row) {
-  if (!row.member_names.length) return h('div', { class: 'mini' }, '확정 구성원 없음');
+// ADR-0042 S2a: a common product with no supplier is named by its linked store listings.
+function listingLines(links) {
+  return links.listings.map((listing) =>
+    h(
+      'div',
+      { class: 'db-member-name', 'data-role': 'db-listing-name', 'data-listing': listing.listing_id, 'data-link-kind': listing.kind },
+      h('span', { class: 'db-name' }, listing.name || '이름 없는 스토어 상품'),
+      h('span', { class: 'mini' }, `스토어 상품번호 ${listing.origin_product_no}`),
+    ),
+  );
+}
+
+function nameLines(row, links) {
+  if (!row.member_names.length) {
+    if (links?.listings?.length) return listingLines(links);
+    return h('div', { class: 'mini' }, UNCONNECTED);
+  }
   return row.member_names.map((member) =>
     h(
       'div',
@@ -221,7 +237,29 @@ function nameLines(row) {
   );
 }
 
-function listRow(row, state, onSelect) {
+// The 네이버 slot shows the linked SmartStore listing's sale price; the 등록유형 slot how the
+// listing came to the product. Without a linked listing both keep 데이터 없음.
+function storeCells(links) {
+  const smartstore = links?.listings?.find((listing) => listing.marketplace_key === 'smartstore' && typeof listing.sale_price === 'number');
+  return NO_DATA_COLUMNS.map((label) =>
+    label === '네이버' && smartstore
+      ? h('td', { 'data-role': 'db-store-price', 'data-product-no': smartstore.origin_product_no }, `${smartstore.sale_price.toLocaleString('ko-KR')}원`)
+      : noData(label),
+  );
+}
+
+function supplierCell(row) {
+  if (row.member_names.length) return h('td', {}, [...new Set(row.member_names.map((member) => member.supplier_key))].join(', '));
+  return h('td', {}, h('span', { class: 'chip warn', 'data-role': 'db-unconnected' }, UNCONNECTED));
+}
+
+function registrationKind(links) {
+  const listing = links?.listings?.[0];
+  if (!listing) return noData('등록유형');
+  return h('td', { 'data-role': 'db-link-kind', 'data-link-kind': listing.kind }, LINK_KIND_LABEL[listing.kind] ?? '연결됨');
+}
+
+function listRow(row, state, onSelect, links) {
   const product = row.product;
   const id = product.product_group_id;
   const tr = h(
@@ -241,7 +279,7 @@ function listRow(row, state, onSelect) {
     h(
       'td',
       {},
-      nameLines(row),
+      nameLines(row, links),
       h(
         'div',
         { class: 'mini db-row-meta' },
@@ -251,10 +289,10 @@ function listRow(row, state, onSelect) {
         ` · ${dotDateTime(product.created_at)}`,
       ),
     ),
-    h('td', {}, [...new Set(row.member_names.map((member) => member.supplier_key))].join(', ') || '—'),
-    ...NO_DATA_COLUMNS.map(noData),
+    supplierCell(row),
+    ...storeCells(links),
     h('td', {}, chip(GROUP_STATUS[product.status] ?? product.status, product.status === 'ACTIVE' ? 'good' : 'warn')),
-    noData('등록유형'),
+    registrationKind(links),
   );
   return tr;
 }
@@ -325,10 +363,12 @@ function detailThumb(detail) {
   return empty();
 }
 
-// The first member's confirmed name, or the Product's own id when no member states one.
-function detailName(detail) {
+// The first member's confirmed name, else the linked store listing's name (ADR-0042 S2a), or the
+// Product's own id when neither states one.
+function detailName(detail, links) {
   const fact = detail.member_sources.flatMap((source) => source.facts).find((candidate) => candidate.key === 'original_name');
-  return fact?.status === 'CONFIRMED' ? fact.value : null;
+  if (fact?.status === 'CONFIRMED') return fact.value;
+  return links?.listings?.find((listing) => listing.name)?.name ?? null;
 }
 
 // v29's detail groups, as their own card under the detail. Only what a member's source states is
@@ -431,6 +471,7 @@ function workspace(initialProduct, navigateTo) {
     productId: null,
     detailSeq: 0,
     detail: null,
+    detailLinks: null, // the selected Product's store listings (ADR-0042 S2a)
     chosen: new Set(),
     targetSeq: 0,
     draftSeq: 0,
@@ -480,6 +521,20 @@ function workspace(initialProduct, navigateTo) {
     h('div', { class: 'db-pager' }, pageLabel, first, previous, next),
   );
   const detailPanel = h('aside', { class: 'panel db-detail', 'data-role': 'product-detail' });
+  // ADR-0042 S2a: after a link changes, the list, the panel and the selected detail read again.
+  async function rereadProducts() {
+    await loadList();
+    if (state.productId) {
+      const id = state.productId;
+      state.productId = null; // read the same Product again, fresh, with nothing chosen
+      selectProduct(id);
+    }
+  }
+  async function refreshAfterLinkChange() {
+    linksPanel.reload();
+    await rereadProducts();
+  }
+  const linksPanel = storeLinksPanel({ onChanged: rereadProducts });
   const v29Panel = h('section', { class: 'panel db-detail db-v29-groups', 'data-role': 'product-v29-groups' });
   let lastPage = null;
 
@@ -499,7 +554,7 @@ function workspace(initialProduct, navigateTo) {
     }
   }
 
-  function renderList(page) {
+  function renderList(page, links = new Map()) {
     lastPage = page;
     total.textContent = `${page.matching_total.toLocaleString('ko-KR')}개`;
     pageLabel.textContent = `${state.cursors.length}페이지`;
@@ -508,7 +563,7 @@ function workspace(initialProduct, navigateTo) {
     next.disabled = page.next_cursor === null;
     listBody.replaceChildren(
       ...(page.products.length
-        ? page.products.map((row) => listRow(row, state, selectProduct))
+        ? page.products.map((row) => listRow(row, state, selectProduct, links.get(row.product.product_group_id)))
         : [h('tr', {}, h('td', { class: 'table-empty', colspan: '11' }, state.query ? '검색 결과가 없습니다.' : '운영 중인 상품이 없습니다.'))]),
     );
   }
@@ -523,7 +578,10 @@ function workspace(initialProduct, navigateTo) {
     try {
       const page = await getJson(`${PRODUCTS}?${params}`);
       if (seq !== state.listSeq) return; // a newer list request superseded this one
-      renderList(page);
+      // ADR-0042 S2a: each row's store listings, from the ListingLinks owner.
+      const links = await fetchStoreLinks(page.products.map((row) => row.product.product_group_id));
+      if (seq !== state.listSeq) return;
+      renderList(page, links);
     } catch (error) {
       if (seq !== state.listSeq) return;
       listBody.replaceChildren(
@@ -540,6 +598,7 @@ function workspace(initialProduct, navigateTo) {
     if (state.productId === id) return;
     state.productId = id;
     state.detail = null;
+    state.detailLinks = null;
     state.chosen = new Set();
     state.targetSeq += 1;
     state.draftSeq += 1; // a Draft command still in flight answers for the previous Product only
@@ -553,11 +612,12 @@ function workspace(initialProduct, navigateTo) {
       withHelp(h('h3', {}, '상품 상세 정보'), DETAIL_HELP),
       h('div', { class: 'mini' }, `상품 ${short(id)} 상세를 불러오는 중입니다.`),
     );
-    getJson(`${PRODUCTS}/${encodeURIComponent(id)}/detail`).then(
-      (detail) => {
+    Promise.all([getJson(`${PRODUCTS}/${encodeURIComponent(id)}/detail`), fetchStoreLinks([id])]).then(
+      ([detail, links]) => {
         // Only the latest request for the Product selected now may render.
         if (seq !== state.detailSeq || state.productId !== id || detail.product.product_group_id !== id) return;
         state.detail = detail;
+        state.detailLinks = links.get(id) ?? null;
         renderDetail();
       },
       (error) => {
@@ -835,12 +895,15 @@ function workspace(initialProduct, navigateTo) {
         h(
           'div',
           { class: 'db-detail-name' },
-          h('b', { 'data-role': 'detail-name' }, detailName(detail) ?? short(product.product_group_id)),
+          h('b', { 'data-role': 'detail-name' }, detailName(detail, state.detailLinks) ?? short(product.product_group_id)),
           h('div', { class: 'mini' }, '상품 ID · ', h('span', { class: 'mono' }, product.product_group_id)),
           h('div', { class: 'mini' }, `생성 ${dotDateTime(product.created_at)}`),
         ),
+        product.members.length ? null : h('span', { class: 'chip warn', 'data-role': 'detail-unconnected' }, UNCONNECTED),
         chip(GROUP_STATUS[product.status] ?? product.status, product.status === 'ACTIVE' ? 'good' : 'warn'),
       ),
+      // ADR-0042 S2a: the product's store listings, with 「연결 해제」 where the seller may end one.
+      state.detailLinks?.listings?.length || !product.members.length ? storeListingsGroup(state.detailLinks, refreshAfterLinkChange) : null,
 
       h(
         'div',
@@ -949,5 +1012,5 @@ function workspace(initialProduct, navigateTo) {
     renderDraftButton();
   });
   if (initialProduct) selectProduct(initialProduct);
-  return h('div', { class: 'db-workspace' }, toolbar, h('div', { class: 'db-layout' }, listPanel, h('div', { class: 'db-side' }, detailPanel, v29Panel)));
+  return h('div', { class: 'db-workspace' }, toolbar, linksPanel, h('div', { class: 'db-layout' }, listPanel, h('div', { class: 'db-side' }, detailPanel, v29Panel)));
 }

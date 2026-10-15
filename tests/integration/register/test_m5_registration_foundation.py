@@ -582,6 +582,10 @@ ADAPTIVE_TABLES = (
     "store_catalog_memberships",
     "store_catalog_observations",
     "store_catalog_listing_endings",
+    # ADR-0042 S2a (0068): the ListingLinks owner.
+    "store_listing_links",
+    "store_listing_decisions",
+    "store_link_notices",
 )
 GROUP = "product_registration"
 _SCOPE_COLUMNS = (

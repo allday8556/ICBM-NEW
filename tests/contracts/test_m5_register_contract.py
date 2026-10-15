@@ -290,7 +290,10 @@ LANDED_COST = "0066_landed_cost"
 # ADR-0042 S1a: the StoreCatalog owner. A store's provider catalog as OPERATE observed it,
 # never registration state.
 STORE_CATALOG = "0067_store_catalog"
-SCHEMA_HEAD = STORE_CATALOG
+# ADR-0042 S2a: the ListingLinks owner. Which common product each store listing is; never
+# registration state.
+STORE_LISTING_LINKS = "0068_store_listing_links"
+SCHEMA_HEAD = STORE_LISTING_LINKS
 AFTER_M5 = (
     "0021_g2_review_items",
     "0022_g2_review_coverage",
@@ -339,6 +342,7 @@ AFTER_M5 = (
     IMAGE_STUDIO_TRANSLATION,
     LANDED_COST,
     STORE_CATALOG,
+    STORE_LISTING_LINKS,
 )
 REGISTRATION_STATE = re.compile(
     r"registration|registerable|listing_draft|draft_listing|duplicate_override"
