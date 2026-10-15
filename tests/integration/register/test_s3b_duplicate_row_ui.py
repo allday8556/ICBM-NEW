@@ -188,7 +188,7 @@ def test_a_real_match_blocks_with_the_sellers_choices(
     again.click()
     opened.fill("[data-role='duplicate-reason']", "구성이 다른 묶음이라 따로 팝니다")
     opened.click("[data-action='duplicate-override-confirm']")
-    opened.wait_for_function("window.__reloads === 1", timeout=10_000)
+    opened.wait_for_function("() => window.__reloads === 1", timeout=10_000)
     assert posted == [
         {
             "path": "/api/v1/register/preparations/prep-1/duplicate-override",
@@ -268,7 +268,7 @@ def test_a_match_can_be_linked_as_the_same_product(
     confirm.wait_for(timeout=10_000)
     assert "스토어에 새로 등록하지 않습니다" in opened.locator("body").inner_text()
     confirm.click()
-    opened.wait_for_function("window.__reloads === 1", timeout=10_000)
+    opened.wait_for_function("() => window.__reloads === 1", timeout=10_000)
     assert posted == [
         {
             "path": "/api/v1/operate/store-links/confirm",
