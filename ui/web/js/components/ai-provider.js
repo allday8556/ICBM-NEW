@@ -33,13 +33,20 @@ const ERROR_COPY = {
   AI_CREDENTIAL_INVALID: '접속 키는 공백 없는 영문·숫자·기호 16~200자입니다.',
 };
 
+// The capability's state for a button outside 설정 › AI: one plain line that points there.
+export function sellerStateText(capability) {
+  if (capability.status === 'READY') return '연결됨';
+  if (capability.detail === 'no AI provider is configured') return 'AI 공급자가 설정되지 않았습니다 (설정 › AI)';
+  return 'AI 설정을 확인해야 합니다 (설정 › AI)';
+}
+
 export function stateText(capability) {
   if (capability.status === 'READY') return '연결됨';
   const detail = capability.detail ?? '';
   if (detail.startsWith('not approved: ')) {
     return `승인 필요 · ${detail.slice(14).split(', ').map((key) => MISSING_COPY[key] ?? key).join(', ')}`;
   }
-  return DETAIL_COPY[detail] ?? detail;
+  return DETAIL_COPY[detail] ?? '확인 필요';
 }
 
 function short(hash) {
