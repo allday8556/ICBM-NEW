@@ -29,7 +29,7 @@ def _resolve_and_reload(page: Page, block_selector: str, reason: str) -> str:
     block = page.locator(block_selector)
     block.wait_for(timeout=15_000)
     assert block.get_attribute("data-coverage") == "CURRENT"
-    item = block.locator("[data-review-item][data-state='OPEN']", has_text=reason)
+    item = block.locator(f"[data-review-item][data-state='OPEN']:has([data-reason='{reason}'])")
     assert item.count() == 1
     item_id = str(item.get_attribute("data-review-item"))
     item.locator("[data-role='review-disposition']").select_option("FOLLOW_UP_REQUIRED")
