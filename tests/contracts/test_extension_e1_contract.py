@@ -148,11 +148,29 @@ def test_the_extension_reads_no_cookie_storage_or_header_and_downloads_nothing()
         reads = 1 if injected == "capture.js" else 0
         assert body.count("fetch(") == reads, injected
         assert body.count('credentials: "omit"') == body.count('redirect: "error"') == reads
-        # The description's HTML is parsed into an inert document and never inserted into the page.
-        for word in ("innerHTML", "insertAdjacentHTML", "document.write", "appendChild"):
+        # The description's HTML is read as text: no document or element is ever built from
+        # markup, so nothing in it can load, run or be inserted into the page.
+        for word in (
+            "DOMParser",
+            "parseFromString",
+            "createHTMLDocument",
+            "document.implementation",
+            "createContextualFragment",
+            "innerHTML",
+            "outerHTML",
+            "insertAdjacentHTML",
+            "document.write",
+            "appendChild",
+            "createElement",
+            "srcdoc",
+            "new Image",
+            "importNode",
+            "cloneNode",
+            "XMLSerializer",
+        ):
             assert word not in body, (injected, word)
     capture = _read(EXTENSION / "lib" / "capture.js")
-    assert 'new DOMParser().parseFromString(content, "text/html")' in capture
+    assert "for (const written of imageSources(content))" in capture
     assert "rule.description_hosts.includes(target.hostname)" in capture
     # Every request to ICBM omits credentials and refuses a redirect.
     client = _read(EXTENSION / "lib" / "client.js")

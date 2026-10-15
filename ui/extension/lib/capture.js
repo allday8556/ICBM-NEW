@@ -293,10 +293,92 @@ export async function captureInPage(policy) {
   // and never sent: OC-09 lets only image references leave the page) is read
   // once, from a declared host, with no cookies and no redirect, under the byte bound. Its literal
   // is cut between the declared prefix and terminator and parsed as data (JSON.parse, never run);
-  // its `content` HTML is parsed into an inert document (DOMParser: nothing runs, nothing loads,
-  // nothing is inserted into the page). Only the image references on the declared image hosts
-  // leave the page, in document order and de-duplicated. Any mismatch sends no images, only the
-  // code that says why.
+  // its `content` HTML is read as text only: no document is built from it, nothing of it is
+  // parsed by the browser, inserted into the page or loaded. A linear tokenizer walks its tags
+  // (skipping comments and raw-text elements) and takes the `src` and `data-src` values of its
+  // `<img` start tags. Only the image references on the declared image hosts leave the page, in
+  // document order and de-duplicated. Any mismatch sends no images, only the code that says why.
+  const imageSources = (html) => {
+    const sources = [];
+    const space = (c) => c === " " || c === "\t" || c === "\n" || c === "\r" || c === "\f";
+    const ends = (c) => c === undefined || space(c) || c === "/" || c === ">";
+    const letter = (c) => c !== undefined && /^[A-Za-z]$/.test(c);
+    const entities = { "&amp;": "&", "&quot;": '"', "&#39;": "'", "&#x27;": "'" };
+    const decode = (value) =>
+      value.replace(/&(?:amp|quot|#39|#x27);/gi, (entity) => entities[entity.toLowerCase()]);
+    let at = 0;
+    while (at < html.length) {
+      const open = html.indexOf("<", at);
+      if (open < 0) break;
+      at = open + 1;
+      if (html.startsWith("<!--", open)) {
+        const close = html.indexOf("-->", open + 4);
+        if (close < 0) break;
+        at = close + 3;
+        continue;
+      }
+      // Anything else that is not a start or end tag is text.
+      const ending = html[open + 1] === "/";
+      let i = ending ? open + 2 : open + 1;
+      if (!letter(html[i])) continue;
+      const begin = i;
+      while (i < html.length && !ends(html[i])) i += 1;
+      const tag = html.slice(begin, i).toLowerCase();
+      // The tag's attributes, read and never acted on; the first of each name counts, as in HTML.
+      const attributes = new Map();
+      let closed = false;
+      while (i < html.length) {
+        while (i < html.length && (space(html[i]) || html[i] === "/")) i += 1;
+        if (i >= html.length) break;
+        if (html[i] === ">") {
+          closed = true;
+          i += 1;
+          break;
+        }
+        const start = i;
+        i += 1;
+        while (i < html.length && !ends(html[i]) && html[i] !== "=") i += 1;
+        const name = html.slice(start, i).toLowerCase();
+        while (i < html.length && space(html[i])) i += 1;
+        let value = "";
+        if (html[i] === "=") {
+          i += 1;
+          while (i < html.length && space(html[i])) i += 1;
+          const quote = html[i];
+          if (quote === '"' || quote === "'") {
+            const close = html.indexOf(quote, i + 1);
+            if (close < 0) break;
+            value = html.slice(i + 1, close);
+            i = close + 1;
+          } else {
+            const from = i;
+            while (i < html.length && !space(html[i]) && html[i] !== ">") i += 1;
+            value = html.slice(from, i);
+          }
+        }
+        if (!attributes.has(name)) attributes.set(name, decode(value));
+      }
+      // A tag the content never closes is no tag, and nothing after it is.
+      if (!closed) break;
+      at = i;
+      if (ending) continue;
+      if (["script", "style", "textarea", "title", "xmp"].includes(tag)) {
+        // A raw-text element's content is text, never a tag.
+        const closing = new RegExp(`</${tag}[\\s/>]`, "gi");
+        closing.lastIndex = at;
+        const found = closing.exec(html);
+        if (!found) break;
+        at = found.index;
+        continue;
+      }
+      if (tag !== "img") continue;
+      for (const name of ["src", "data-src"]) {
+        const written = (attributes.get(name) || "").trim();
+        if (written) sources.push(written);
+      }
+    }
+    return sources;
+  };
   const describe = async (rule, argument) => {
     const mismatch = (code) => ({ refused: code });
     let stated = argument;
@@ -384,22 +466,17 @@ export async function captureInPage(policy) {
         ? literal.content
         : undefined;
     if (typeof content !== "string") return mismatch("DESCRIPTION_NO_CONTENT");
-    const inert = new DOMParser().parseFromString(content, "text/html");
     const found = [];
-    for (const image of Array.from(inert.querySelectorAll("img"))) {
-      for (const name of ["src", "data-src"]) {
-        const written = (image.getAttribute(name) || "").trim();
-        if (!written) continue;
-        let reference;
-        try {
-          reference = new URL(written, target.href);
-        } catch {
-          continue;
-        }
-        if (!rule.image_hosts.includes(reference.hostname)) continue;
-        if (!plain(reference)) return mismatch("DESCRIPTION_IMAGE_NOT_PLAIN");
-        if (!found.includes(reference.href)) found.push(reference.href);
+    for (const written of imageSources(content)) {
+      let reference;
+      try {
+        reference = new URL(written, target.href);
+      } catch {
+        continue;
       }
+      if (!rule.image_hosts.includes(reference.hostname)) continue;
+      if (!plain(reference)) return mismatch("DESCRIPTION_IMAGE_NOT_PLAIN");
+      if (!found.includes(reference.href)) found.push(reference.href);
     }
     return { images: found.slice(0, rule.max_image_refs), total: found.length };
   };

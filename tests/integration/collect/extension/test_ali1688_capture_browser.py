@@ -220,7 +220,7 @@ def _cut(
         page.context.add_cookies([{"name": "member", "value": "secret", "url": URL}])
         evaluated = page.evaluate(script, policy)
         result: dict[str, Any] = json.loads(evaluated) if isinstance(evaluated, str) else evaluated
-        # Nothing of the description ran in the page: it was parsed into an inert document.
+        # Nothing of the description ran in the page: it was only read as text.
         assert page.evaluate("window.__pwned") is None
         return result
     finally:
@@ -437,6 +437,152 @@ def test_a_description_url_off_the_declared_host_is_never_read(
     sent = json.dumps(cut, ensure_ascii=False)
     for absent in (detail_url, "detailUrl", "itemcdn", "token=abc", "user:pw", "icoss1"):
         assert absent not in sent, absent
+
+
+# Everything in a description that a browser would load if it built a document from it.
+LOADING = (
+    '<img src="https://cbu01.alicdn.com/img/ibank/d1.jpg">'
+    '<img src="https://evil.test/undeclared.jpg" srcset="https://evil.test/s1.jpg 2x">'
+    '<img data-src="https://cbu01.alicdn.com/img/ibank/d2.jpg"'
+    ' srcset="https://cbu01.alicdn.com/img/ibank/srcset.jpg 1x">'
+    '<picture><source srcset="https://evil.test/picture.webp">'
+    '<img src="https://img.alicdn.com/tfs/pic.png"></picture>'
+    '<iframe src="https://evil.test/frame.html"></iframe>'
+    '<video src="https://evil.test/v.mp4" poster="https://evil.test/poster.jpg" autoplay>'
+    '<source src="https://evil.test/v2.mp4"></video>'
+    '<audio src="https://evil.test/a.mp3" autoplay></audio>'
+    '<link rel="preload" as="image" href="https://evil.test/preload.jpg">'
+    '<link rel="stylesheet" href="https://evil.test/s.css">'
+    '<div style="background-image:url(https://evil.test/bg.jpg)">x</div>'
+    "<style>body{background:url(https://evil.test/style.jpg)}</style>"
+    '<object data="https://evil.test/o.swf"></object><embed src="https://evil.test/e.swf">'
+    '<input type="image" src="https://evil.test/input.jpg">'
+    '<script src="https://evil.test/s.js"></script><script>window.__pwned = 1</script>'
+    '<img src="https://evil.test/onerror.jpg" onerror="window.__pwned = 2">'
+    '<meta http-equiv="refresh" content="0;url=https://evil.test/refresh">'
+    '<!-- <img src="https://cbu01.alicdn.com/img/ibank/commented.jpg"> -->'
+    '<textarea><img src="https://cbu01.alicdn.com/img/ibank/text.jpg"></textarea>'
+    '<p title="<img src=https://cbu01.alicdn.com/img/ibank/attr.jpg>">t</p>'
+    "<IMG SRC=https://cbu01.alicdn.com/img/ibank/d3.jpg />"
+)
+
+
+def test_the_description_is_the_only_request_the_cut_makes(
+    browser: Browser, policy: dict[str, Any]
+) -> None:
+    # OC-09: within the capture the extension makes one request, the description document's,
+    # without cookies. Nothing the description names is loaded, framed, preloaded or styled in:
+    # its HTML is read as text, never built into a document.
+    html = _page_html([_context_script()])
+    seen: list[str] = []
+
+    def answer(route: Route) -> None:
+        requested = route.request.url
+        if requested == DESCRIPTION_URL:
+            assert "cookie" not in {name.lower() for name in route.request.headers}
+            route.fulfill(
+                status=200,
+                body=_document(LOADING),
+                headers={"content-type": "text/plain; charset=UTF-8"},
+            )
+        elif requested.startswith(MODULE_BASE):
+            source = EXTENSION_ROOT / requested.removeprefix(MODULE_BASE)
+            route.fulfill(
+                status=200, content_type="text/javascript", body=source.read_text("utf-8")
+            )
+        elif requested == URL:
+            route.fulfill(status=200, content_type="text/html; charset=utf-8", body=html)
+        else:
+            route.abort()
+
+    context = browser.new_context()
+    page = context.new_page()
+    try:
+        page.route("**/*", answer)
+        page.goto(URL)
+        page.context.add_cookies([{"name": "member", "value": "secret", "url": URL}])
+        # The module is loaded before the count starts; the count is every request of the
+        # context, the page's and any frame's or worker's.
+        page.evaluate('() => import("/__icbm_extension__/lib/capture.js").then(() => true)')
+        page.wait_for_load_state("networkidle")
+        context.on("request", lambda request: seen.append(request.url))
+        cut = json.loads(page.evaluate(CUT_JSON, policy))
+        page.wait_for_timeout(1000)
+        assert page.evaluate("window.__pwned") is None
+        assert len(page.frames) == 1
+    finally:
+        context.close()
+    assert seen == [DESCRIPTION_URL]
+    # Every <img> start tag's src and data-src, in document order, on the declared host only:
+    # not srcset, not a <source>, not a comment, a textarea's text or an attribute value that
+    # looks like a tag. The upper-case, unquoted, self-closed tag is an <img> too.
+    assert cut["description_images"] == {
+        "images": [
+            "https://cbu01.alicdn.com/img/ibank/d1.jpg",
+            "https://cbu01.alicdn.com/img/ibank/d2.jpg",
+            "https://cbu01.alicdn.com/img/ibank/d3.jpg",
+        ],
+        "total": 3,
+    }
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        # Quoted either way or unquoted, any case, the first of a repeated attribute.
+        (
+            "<img src='https://cbu01.alicdn.com/a.jpg'><img\nSRC=\"https://cbu01.alicdn.com/b.jpg\">"
+            "<img src=https://cbu01.alicdn.com/c.jpg>"
+            '<img src="https://cbu01.alicdn.com/d.jpg" src="https://cbu01.alicdn.com/x.jpg">',
+            [
+                "https://cbu01.alicdn.com/a.jpg",
+                "https://cbu01.alicdn.com/b.jpg",
+                "https://cbu01.alicdn.com/c.jpg",
+                "https://cbu01.alicdn.com/d.jpg",
+            ],
+        ),
+        # A value holding ">" stays inside its quotes; an entity in a value is decoded.
+        (
+            '<img alt="a > b" src="https://cbu01.alicdn.com/a.jpg">'
+            '<img src="https://cbu01.alicdn.com/b&amp;c.jpg">',
+            ["https://cbu01.alicdn.com/a.jpg", "https://cbu01.alicdn.com/b&c.jpg"],
+        ),
+        # A reference on the declared host that is not plain refuses the whole member.
+        (
+            '<img src="https://cbu01.alicdn.com/a.jpg">'
+            "<IMG SRC=https://cbu01.alicdn.com/b.jpg?x=1&amp;y=2 />",
+            {"refused": "DESCRIPTION_IMAGE_NOT_PLAIN"},
+        ),
+        # Not an <img>: <imgx>, an end tag, a tag the content never closes.
+        (
+            '<imgx src="https://cbu01.alicdn.com/a.jpg"></img src="https://cbu01.alicdn.com/b.jpg">'
+            '<img src="https://cbu01.alicdn.com/c.jpg"',
+            [],
+        ),
+        # A raw-text element ends only at its own end tag.
+        (
+            '<script>"<img src=https://cbu01.alicdn.com/a.jpg>"</script>'
+            '<img src="https://cbu01.alicdn.com/b.jpg">',
+            ["https://cbu01.alicdn.com/b.jpg"],
+        ),
+    ],
+)
+def test_the_tokenizer_reads_html_as_html_does(
+    browser: Browser,
+    policy: dict[str, Any],
+    content: str,
+    expected: list[str] | dict[str, str],
+) -> None:
+    cut = _cut(
+        browser,
+        _page_html([_context_script()]),
+        policy,
+        description=(200, _document(content), {"content-type": "text/plain; charset=UTF-8"}),
+    )
+    if isinstance(expected, dict):
+        assert cut["description_images"] == expected
+    else:
+        assert cut["description_images"] == {"images": expected, "total": len(expected)}
 
 
 def test_a_page_whose_member_holds_no_url_reads_nothing(
