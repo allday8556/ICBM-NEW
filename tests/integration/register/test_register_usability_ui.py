@@ -255,6 +255,31 @@ def test_an_empty_required_field_is_shown_focused_and_named_and_nothing_is_sent(
     ]
 
 
+def test_a_save_pressed_while_the_requirements_load_reads_them_once_and_keeps_the_typing(
+    browser: Browser,  # noqa: F811
+    api: TestClient,  # noqa: F811
+    draft: tuple[str, str],  # noqa: F811
+) -> None:
+    draft_id, _ = draft
+    path = f"/api/v1/register/drafts/{draft_id}/authoring-metadata/{CATEGORY}"
+    calls: list[tuple[str, str, int]] = []
+    with _page(browser, api, calls) as page:
+        unit = page.locator(f".register-unit[data-draft='{draft_id}']")
+        # The first read of the requirements is slow; the save is pressed before it answers.
+        page.route(f"**{path}", lambda route: (page.wait_for_timeout(1500), route.fallback()))
+        choose_category(unit, CATEGORY)
+        unit.locator("input[name='name']").fill("합성 상품")
+        unit.locator("button[data-action='SAVE_PREPARATION']").click()
+        unit.locator("[data-role='missing-required']").wait_for(timeout=10_000)
+        typed = unit.locator("input[name='notice.itemName']")
+        typed.fill("직접 쓴 값")
+        unit.locator("button[data-action='SAVE_PREPARATION']").click()
+        page.wait_for_timeout(500)
+        # The fields were built once: the typed value is still there after the second save.
+        assert typed.input_value() == "직접 쓴 값"
+    assert [call for call in calls if call[1] == path] == [("GET", path, 200)]
+
+
 def test_the_pending_list_names_a_unit_by_its_collected_product(
     browser: Browser,  # noqa: F811
     api: TestClient,  # noqa: F811

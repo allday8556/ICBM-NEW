@@ -118,8 +118,15 @@ def _run(scenario: str, root: Path) -> dict[str, object]:
         for line in output.splitlines()
         if line.lstrip().startswith(("HARNESS_", "FX_EXPECT=", "HOLD_CLASS=", "SUPERVISOR="))
     ]
+    # Which part of the user's repository a run changed, by field and file or ref name only.
+    user_repo_diff = [
+        line.strip()
+        for line in output.splitlines()
+        if line.lstrip().startswith("FX_USER_REPO_DIFF=")
+    ]
     return {
         "expect": checks.get("expect", "NOT_PINNED"),
+        "user_repo_diff": user_repo_diff,
         "status": loaded.get("runtime_status"),
         "reported": reported[-12:],
         "stderr": completed.stderr.decode("utf-8", "replace")[-1500:],

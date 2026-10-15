@@ -252,6 +252,16 @@ G @("-C", $user, "config", "user.email", "user@example.invalid") | Out-Null
 Add-Content -Path (Join-Path $user "README.md") -Value "user local uncommitted edit"
 W "scratch-untracked.txt" "user untracked file`n" $user
 
+# The user's repository as the invariant protects it: the checked-out branch, HEAD, the working tree
+# (every file but .git, by content, and git status) and the local branches (refs/heads).
+# refs/remotes is deliberately not part of it. The Host publishes a repair or a new slice from its own
+# worktree with `git push <origin URL> HEAD:refs/heads/<branch>`. Since Git 2.56 a push to a URL that
+# matches exactly one configured remote updates that remote's tracking ref too (RelNotes 2.56.0: "the
+# fetch refspec of a uniquely matching configured remote is now used to find and update the
+# remote-tracking branch"), so refs/remotes/origin/<branch> in the user's clone follows the push,
+# exactly as after a `git fetch`. That records what origin holds; it changes none of the user's work.
+# On Git 2.56 runners this alone failed every scenario that publishes a commit (gpt-loop, claude-loop,
+# max-cycles, scope-expansion, auto-next).
 function Get-UserSnapshot {
     $files = Get-ChildItem $user -Recurse -File -Force |
         Where-Object { $_.FullName -notmatch '\\\.git(\\|$)' } |
@@ -261,9 +271,35 @@ function Get-UserSnapshot {
         Branch = "$(G @('-C', $user, 'branch', '--show-current'))"
         Head = "$(G @('-C', $user, 'rev-parse', 'HEAD'))"
         Status = (G @("-C", $user, "status", "--porcelain")) -join "|"
-        LocalBranches = (G @("-C", $user, "for-each-ref", "refs/heads", "refs/remotes", "--format=%(refname) %(objectname)")) -join "|"
+        LocalBranches = (G @("-C", $user, "for-each-ref", "refs/heads", "--format=%(refname) %(objectname)")) -join "|"
         Files = $files -join "|"
     }
+}
+
+# Which snapshot fields differ, by name only, never by content: Branch / Head when they moved, and for
+# the list fields each entry added, removed or changed. An entry is named by its git status line
+# (status code and path), its ref name (without the sha) or its file path (without the hash).
+function Get-UserSnapshotDiff { param($Before, $After)
+    $d = New-Object System.Collections.Generic.List[string]
+    foreach ($k in @("Branch", "Head")) { if ("$($Before.$k)" -ne "$($After.$k)") { $d.Add($k) } }
+    $sep = @{ Status = $null; LocalBranches = " "; Files = "=" }
+    foreach ($k in @("Status", "LocalBranches", "Files")) {
+        $sides = foreach ($snap in @($Before, $After)) {
+            $m = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::Ordinal)
+            foreach ($x in @("$($snap.$k)" -split '\|' | Where-Object { $_ })) {
+                $name = if ($sep[$k] -and $x.LastIndexOf($sep[$k]) -gt 0) { $x.Substring(0, $x.LastIndexOf($sep[$k])) } else { $x }
+                $m[$name] = $x
+            }
+            ,$m
+        }
+        $b = $sides[0]; $a = $sides[1]
+        foreach ($n in @(@($b.Keys) + @($a.Keys) | Sort-Object -CaseSensitive -Unique)) {
+            if (-not $a.ContainsKey($n)) { $d.Add("${k}:removed:$n") }
+            elseif (-not $b.ContainsKey($n)) { $d.Add("${k}:added:$n") }
+            elseif ($a[$n] -cne $b[$n]) { $d.Add("${k}:changed:$n") }
+        }
+    }
+    return ($d -join ",")
 }
 
 $before = Get-UserSnapshot
@@ -1400,7 +1436,10 @@ if ($orchestratorExpect.ContainsKey($Scenario)) {
     # invariants of every control-loop scenario: no forbidden GitHub write, the user's repository untouched,
     # and a run never waits for the user unless the scenario says so
     if (@($global:FxCalls | Where-Object { $_ -like "FORBIDDEN*" -or $_ -like "UNHANDLED*" }).Count -gt 0) { $failed.Add("forbidden_or_unhandled_gh_call") }
-    if (($before | ConvertTo-Json) -ne ($after | ConvertTo-Json)) { $failed.Add("user_repo_changed") }
+    if (($before | ConvertTo-Json) -ne ($after | ConvertTo-Json)) {
+        $failed.Add("user_repo_changed")
+        Write-Host "FX_USER_REPO_DIFF=$(Get-UserSnapshotDiff $before $after)"
+    }
     if ($logText -match '(?m)^HUMAN_HOLD=') { $failed.Add("legacy_HUMAN_HOLD_line") }
     if ("$($runtime.hold_class)" -ne $wantClass) { $failed.Add("hold_class=$($runtime.hold_class)(want $wantClass)") }
     $global:FxChecks.expect = if ($failed.Count -eq 0) { "PASS" } else { "FAIL:" + ($failed -join ";") }
