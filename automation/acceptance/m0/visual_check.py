@@ -33,7 +33,11 @@ SCREENS = [
     "analytics",
     "settings",
 ]
-EXTRA_VIEWS = {"collect-suppliers": ("collect", {"view": "suppliers"})}
+EXTRA_VIEWS = {
+    "collect-suppliers": ("collect", {"view": "suppliers"}),
+    # ADR-0042 S1b: 통합DB 「스토어 상품」 (v29 has no such view; its 통합DB is compared).
+    "db-store": ("db", {"view": "store"}),
+}
 VIEWPORTS = {"landscape-1920x1080": (1920, 1080), "portrait-1080x1920": (1080, 1920)}
 
 MEASURE = """(sel) => {

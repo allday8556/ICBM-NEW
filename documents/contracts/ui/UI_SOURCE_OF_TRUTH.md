@@ -327,6 +327,14 @@ The same rule as the 수집 layout applies here. v29's composition is reproduced
   - `상세 편집` is inert.
   - The membership, the members' facts, the Items, the review items, the target check and the Draft form follow as before.
 
+### 통합DB › 「스토어 상품」 (ADR-0042 S1b)
+
+v29 has no store-listing view; ADR-0042 §0 a2 and b2 add it as a second tab of 통합DB. The tab lives in the route (`#/db?view=store`, with `filter`, `q` and `page`); `상품 목록` stays the default view and is unchanged.
+- **Sync line.** `스토어 상품 N개 · 마지막 동기화 <time>` is always on screen, also while a sync runs (SCP-07). A running sync adds `스토어 상품 가져오는 중 n / m`; a sync that did not complete is shown as such beside the last complete one, never as an old success. `지금 동기화` asks for one read-only sync and is disabled while one runs. A store that is not connected reads a plain prompt with `API 관리로 이동` (설정 › 스마트스토어 › API 관리).
+- **Filters.** `전체 / 판매중 / 품절 / 판매중지 / 판매종료 / 그 밖의 상태 / 종료(삭제됨) / 스토어에서 확인 안 됨 / 확인 전`, each with the server's count. Every listing is in exactly one filter, so the counts add up to 전체. The first five follow the seller center's sale status; `종료(삭제됨)` needs provider evidence (DELETE or a 404), and a listing the last sync did not list reads `스토어에서 확인 안 됨` until then (SCP-08).
+- **List.** The server pages it, 50 a page, and searches name, seller code and product number. The columns are `상품명 / 상태 / 판매가 / 할인 / 재고 / 옵션 / 배송 / 카테고리 / 판매자코드 / 상세 확인`, each from the listing's last successful detail read (`상세 확인` is that read's time). `할인` reads `데이터 없음` until the catalog keeps the discount; a category reads its whole name only from ICBM's recorded category catalog. Provider tokens appear only in `data-*` attributes.
+- At a narrow width the table scrolls inside its panel; the page never scrolls sideways.
+
 ### 등록관리
 
 - **Cards.** v29's five cards, each a count the server holds:

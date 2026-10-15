@@ -57,7 +57,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any, Final
 
@@ -66,7 +66,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.platform.core.clock import Clock
-from app.platform.core.errors import AppError, ErrorClass, PolicyBlockedError
+from app.platform.core.errors import (
+    AppError,
+    ErrorClass,
+    InputValidationError,
+    PolicyBlockedError,
+)
 from app.platform.db.database import Database
 from app.stages.operate.catalog.facts import (
     COMPLETE,
@@ -133,6 +138,43 @@ DETAILS_STALE: Final = "STORE_CATALOG_DETAILS_STALE"
 OUTSIDE_ENUMERATION: Final = "STORE_CATALOG_LISTING_OUTSIDE_ENUMERATION"
 SYNC_INTERRUPTED: Final = "STORE_CATALOG_SYNC_INTERRUPTED"
 UNREADABLE: Final = "STORE_CATALOG_LISTING_UNREADABLE"
+
+# 「스토어 상품」 (ADR-0042 S1b, §0 b2): the status filters of the listing list. A listing the
+# latest consistent enumeration listed is filed by the sale status of its latest successful read,
+# as the seller center files it (판매중, 품절, 판매중지, 판매종료, and the rest together); a listing
+# it did not list is NOT_SEEN (「스토어에서 확인 안 됨」), one provider evidence ended is ENDED
+# (종료), and a listed one with no successful read yet is NOT_READ. Every listing is in exactly
+# one filter, so the filters' counts add up to ALL.
+ALL: Final = "ALL"
+ON_SALE: Final = "ON_SALE"
+OUT_OF_STOCK: Final = "OUT_OF_STOCK"
+SUSPENDED: Final = "SUSPENDED"
+SALE_CLOSED: Final = "SALE_CLOSED"
+OTHER_STATUS: Final = "OTHER_STATUS"
+NOT_READ: Final = "NOT_READ"
+FILTERS: Final = (
+    ALL,
+    ON_SALE,
+    OUT_OF_STOCK,
+    SUSPENDED,
+    SALE_CLOSED,
+    OTHER_STATUS,
+    ENDED,
+    NOT_SEEN,
+    NOT_READ,
+)
+_SALE_FILTER: Final = {
+    "SALE": ON_SALE,
+    "OUTOFSTOCK": OUT_OF_STOCK,
+    "SUSPENSION": SUSPENDED,
+    "CLOSE": SALE_CLOSED,
+}
+PAGE_LIMIT_DEFAULT: Final = 50
+PAGE_LIMIT_MAX: Final = 200
+QUERY_MAX_LENGTH: Final = 100
+FILTER_INVALID: Final = "STORE_CATALOG_FILTER_INVALID"
+QUERY_INVALID: Final = "STORE_CATALOG_QUERY_INVALID"
+PAGE_INVALID: Final = "STORE_CATALOG_PAGE_INVALID"
 
 
 class StoreCatalogBusy(AppError):
@@ -249,6 +291,32 @@ class CatalogSnapshot:
     freshness: str
     run: CatalogRunView | None
     listings: tuple[CatalogListingView, ...]
+
+
+@dataclass(frozen=True)
+class CatalogListingEntry:
+    """One listing of a 「스토어 상품」 page and the status filter it is in."""
+
+    filter: str
+    listing: CatalogListingView
+
+
+@dataclass(frozen=True)
+class CatalogListingPage:
+    """One page of the 「스토어 상품」 list (ADR-0042 S1b).
+
+    ``counts`` holds every filter's count over the listings the search matches (the whole store
+    without a search); ``matching`` is how many of them the chosen filter holds, and ``listings``
+    is the page of those from ``offset``. Only the page's listings carry their read fields.
+    """
+
+    filter: str
+    query: str | None
+    counts: Mapping[str, int]
+    matching: int
+    offset: int
+    limit: int
+    listings: tuple[CatalogListingEntry, ...]
 
 
 def _run_view(row: CatalogSyncRun) -> CatalogRunView:
@@ -860,38 +928,210 @@ class StoreCatalogService:
             .order_by(CatalogObservation.observed_at.desc())
             .limit(1)
         ).first()
-        if ending is not None:
-            state = ENDED
-        elif not enumerated:
-            state = UNCONFIRMED
-        else:
-            state = LISTED if row.origin_product_no in members else NOT_SEEN
-        channel, listed_code = members.get(row.origin_product_no, (None, None))
-        if channel is None and last is not None:
-            channel = last.channel_product_no
         fields: Mapping[str, Any] | None = None
         if observation is not None and observation.field_set_digest is not None:
             content = session.get(CatalogFieldSet, observation.field_set_digest)
             fields = None if content is None else json.loads(content.fields_json)
-        return CatalogListingView(
-            listing_id=row.listing_id,
-            origin_product_no=row.origin_product_no,
-            channel_product_no=channel,
-            listed_seller_code=listed_code,
-            state=state,
-            last_result=None if last is None else last.result,
-            sale_status=None if observation is None else observation.sale_status,
-            display_status=None if observation is None else observation.display_status,
-            sale_price=None if observation is None else observation.sale_price,
-            stock_quantity=None if observation is None else observation.stock_quantity,
-            seller_management_code=(
-                None if observation is None else observation.seller_management_code
-            ),
-            seller_barcode=None if observation is None else observation.seller_barcode,
-            fields=fields,
-            details_read_at=None if observation is None else observation.observed_at,
-            ended_evidence=None if ending is None else ending.evidence,
+        return _assemble(row, members, enumerated, ending, last, observation, fields)
+
+    # ------------------------------------------------------------------ 「스토어 상품」 (S1b)
+
+    def listing_page(
+        self,
+        *,
+        filter_key: str = ALL,
+        query: str | None = None,
+        offset: int = 0,
+        limit: int = PAGE_LIMIT_DEFAULT,
+    ) -> CatalogListingPage:
+        """One page of the bound store's listings for 「스토어 상품」, read only.
+
+        Each listing is what :meth:`listings` says of it (the same state, the same latest reads),
+        read in a few set queries rather than per listing. ``query`` matches the name of the
+        latest successful read, the seller codes and the product numbers; ``filter_key`` is one
+        of ``FILTERS``. Only the page's listings load their read fields.
+        """
+        if filter_key not in FILTERS:
+            raise InputValidationError(FILTER_INVALID, "unknown store-listing filter")
+        if offset < 0 or not 1 <= limit <= PAGE_LIMIT_MAX:
+            raise InputValidationError(
+                PAGE_INVALID, f"offset is at least 0 and limit 1 to {PAGE_LIMIT_MAX}"
+            )
+        text = None if query is None else query.strip()
+        if text is not None and len(text) > QUERY_MAX_LENGTH:
+            raise InputValidationError(
+                QUERY_INVALID, f"a search is at most {QUERY_MAX_LENGTH} characters"
+            )
+        text = text or None
+        counts = dict.fromkeys(FILTERS, 0)
+        account = self.account()
+        if account is None:
+            return CatalogListingPage(filter_key, text, counts, 0, offset, limit, ())
+        needle = None if text is None else text.casefold()
+        with self._db.read() as session:
+            latest = self._last(session, account, enumerated=True)
+            members = self._members(session, latest)
+            endings = self._store_endings(session, account)
+            lasts = {obs.listing_id: obs for obs, _ in self._latest(session, account, False)}
+            observed = {
+                obs.listing_id: (obs, name) for obs, name in self._latest(session, account, True)
+            }
+            chosen: list[CatalogListingEntry] = []
+            for row in self._store_listings(session, account):
+                observation, name = observed.get(row.listing_id, (None, None))
+                view = _assemble(
+                    row,
+                    members,
+                    latest is not None,
+                    endings.get(row.listing_id),
+                    lasts.get(row.listing_id),
+                    observation,
+                    None,
+                )
+                if needle is not None and not _matches(view, name, needle):
+                    continue
+                key = listing_filter(view)
+                counts[key] += 1
+                counts[ALL] += 1
+                if filter_key in (ALL, key):
+                    chosen.append(CatalogListingEntry(key, view))
+            shown = chosen[offset : offset + limit]
+            digest_of = {
+                entry.listing.listing_id: observed[entry.listing.listing_id][0].field_set_digest
+                for entry in shown
+                if entry.listing.listing_id in observed
+            }
+            contents = {
+                content.digest: json.loads(content.fields_json)
+                for content in session.scalars(
+                    select(CatalogFieldSet).where(
+                        CatalogFieldSet.digest.in_({d for d in digest_of.values() if d})
+                    )
+                )
+            }
+        listings = tuple(
+            CatalogListingEntry(
+                entry.filter,
+                replace(
+                    entry.listing,
+                    fields=contents.get(digest_of.get(entry.listing.listing_id) or ""),
+                ),
+            )
+            for entry in shown
         )
+        return CatalogListingPage(filter_key, text, counts, len(chosen), offset, limit, listings)
+
+    def _store_endings(self, session: Session, account: str) -> dict[str, CatalogListingEnding]:
+        return {
+            ending.listing_id: ending
+            for ending in session.scalars(
+                select(CatalogListingEnding)
+                .join(CatalogListing, CatalogListing.listing_id == CatalogListingEnding.listing_id)
+                .where(
+                    CatalogListing.marketplace_key == self.marketplace_key,
+                    CatalogListing.marketplace_account_id == account,
+                )
+            )
+        }
+
+    def _latest(
+        self, session: Session, account: str, observed_only: bool
+    ) -> list[tuple[CatalogObservation, str | None]]:
+        """Each store listing's latest observation (``observed_only``: its latest successful
+        read), with the name its field set recorded, in one windowed query."""
+        ranked = (
+            select(
+                CatalogObservation.observation_id.label("observation_id"),
+                func.row_number()
+                .over(
+                    partition_by=CatalogObservation.listing_id,
+                    order_by=CatalogObservation.observed_at.desc(),
+                )
+                .label("position"),
+            )
+            .join(CatalogListing, CatalogListing.listing_id == CatalogObservation.listing_id)
+            .where(
+                CatalogListing.marketplace_key == self.marketplace_key,
+                CatalogListing.marketplace_account_id == account,
+            )
+        )
+        if observed_only:
+            ranked = ranked.where(CatalogObservation.result == OBSERVED)
+        latest = ranked.subquery()
+        query = (
+            select(CatalogObservation, func.json_extract(CatalogFieldSet.fields_json, "$.name"))
+            .join(latest, latest.c.observation_id == CatalogObservation.observation_id)
+            .outerjoin(
+                CatalogFieldSet, CatalogFieldSet.digest == CatalogObservation.field_set_digest
+            )
+            .where(latest.c.position == 1)
+        )
+        return [
+            (observation, name if isinstance(name, str) else None)
+            for observation, name in session.execute(query).tuples()
+        ]
+
+
+def _assemble(
+    row: CatalogListing,
+    members: Mapping[str, Any],
+    enumerated: bool,
+    ending: CatalogListingEnding | None,
+    last: CatalogObservation | None,
+    observation: CatalogObservation | None,
+    fields: Mapping[str, Any] | None,
+) -> CatalogListingView:
+    """One listing's view from its identity, the latest consistent membership, its ending, its
+    latest observation and its latest successful read (shared by every read of a listing)."""
+    if ending is not None:
+        state = ENDED
+    elif not enumerated:
+        state = UNCONFIRMED
+    else:
+        state = LISTED if row.origin_product_no in members else NOT_SEEN
+    channel, listed_code = members.get(row.origin_product_no, (None, None))
+    if channel is None and last is not None:
+        channel = last.channel_product_no
+    return CatalogListingView(
+        listing_id=row.listing_id,
+        origin_product_no=row.origin_product_no,
+        channel_product_no=channel,
+        listed_seller_code=listed_code,
+        state=state,
+        last_result=None if last is None else last.result,
+        sale_status=None if observation is None else observation.sale_status,
+        display_status=None if observation is None else observation.display_status,
+        sale_price=None if observation is None else observation.sale_price,
+        stock_quantity=None if observation is None else observation.stock_quantity,
+        seller_management_code=None if observation is None else observation.seller_management_code,
+        seller_barcode=None if observation is None else observation.seller_barcode,
+        fields=fields,
+        details_read_at=None if observation is None else observation.observed_at,
+        ended_evidence=None if ending is None else ending.evidence,
+    )
+
+
+def listing_filter(view: CatalogListingView) -> str:
+    """The one status filter a listing is in (see ``FILTERS``)."""
+    if view.state in (ENDED, NOT_SEEN):
+        return view.state
+    if view.state != LISTED or view.sale_status is None:
+        return NOT_READ
+    return _SALE_FILTER.get(view.sale_status, OTHER_STATUS)
+
+
+def _matches(view: CatalogListingView, name: str | None, needle: str) -> bool:
+    """Whether a search matches the listing's name, a seller code or a product number."""
+    return any(
+        value is not None and needle in value.casefold()
+        for value in (
+            name,
+            view.listed_seller_code,
+            view.seller_management_code,
+            view.origin_product_no,
+            view.channel_product_no,
+        )
+    )
 
 
 def _bounded(code: str | None) -> str | None:
@@ -970,20 +1210,30 @@ class StoreCatalogScheduler:
 
 
 __all__ = [
+    "ALL",
     "AUTO",
     "CATALOG_MAX_AGE",
     "CONNECT",
     "DETAIL_MAX_AGE",
     "ENDED",
+    "FILTERS",
     "FRESH",
     "LISTED",
     "NONE",
+    "NOT_READ",
     "NOT_SEEN",
+    "ON_SALE",
     "OPERATOR",
+    "OTHER_STATUS",
+    "OUT_OF_STOCK",
     "PRE_REGISTRATION",
     "REFRESH_PERIOD",
+    "SALE_CLOSED",
     "STALE",
+    "SUSPENDED",
     "UNCONFIRMED",
+    "CatalogListingEntry",
+    "CatalogListingPage",
     "CatalogListingView",
     "CatalogRunView",
     "CatalogShape",
@@ -993,5 +1243,6 @@ __all__ = [
     "StoreCatalogScheduler",
     "StoreCatalogService",
     "field_digests",
+    "listing_filter",
     "refresh_budget",
 ]

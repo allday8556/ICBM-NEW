@@ -220,6 +220,10 @@ migration `0067_store_catalog`, the SmartStore catalog source
 `integrations/marketplaces/smartstore/catalog.py`, the Settings card
 `ui/web/js/pages/settings/store-catalog.js`, one unit and three integration suites; the adopted
 search and origin read gained the catalog request and retention (`s1a-store-catalog-r1`).
+ADR-0042 S1b added the 통합DB 「스토어 상품」 tab `ui/web/js/pages/db/store-listings.js` (wired into
+`ui/web/js/pages/db.js`), the read-only page read `listing_page` of the StoreCatalog owner with
+its status filters, and the routes `GET /api/v1/operate/store-catalog/listings` and `/status`;
+two integration suites under `tests/integration/operate/`.
 
 | path | files | role |
 | --- | --- | --- |
@@ -251,13 +255,13 @@ search and origin read gained the catalog request and retention (`s1a-store-cata
 | `integrations/` | 120 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 46 |  |
 | `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 448 | tests |
+| `tests/` | 450 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 184 | integration tests by runtime owner |
+| `tests/integration/` | 186 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
 | `tests/unit/` | 162 | unit tests by runtime owner |
-| `ui/` | 76 | operator clients: the served web client and the capture extension |
+| `ui/` | 77 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 67 | the served web client |
+| `ui/web/` | 68 | the served web client |

@@ -18,6 +18,10 @@
 //
 // It reuses the v29 panel/table/chip/kv system and the prototype's DB layout (list beside a
 // detail panel). Explanations live behind the help icon, never as permanent subtitles.
+//
+// ADR-0042 S1b adds the 「스토어 상품」 tab (db/store-listings.js): the connected store's listings
+// as the StoreCatalog owner last read them. The tab lives in the route (view=store); the product
+// list stays the default view, unchanged.
 
 import { ApiError, getJson, sendJson } from '../core/api.js';
 import { fragment, h } from '../core/dom.js';
@@ -33,6 +37,7 @@ import { pageHead } from '../components/page-head.js';
 import { emptyState, errorState, unsupportedState } from '../components/states.js';
 import { reviewItemsBlock } from '../components/review-items.js';
 import { KIND_LABEL } from '../components/review-counts.js';
+import { storeListingsView } from './db/store-listings.js';
 
 const SCREEN = '/api/v1/screens/db';
 const PRODUCTS = '/api/v1/products';
@@ -48,6 +53,11 @@ const SHAPE_LABEL = {
 const BASIS_LABEL = { MINIMUM_SALE_PRICE: '최저판매가', TARGET_MARGIN: '목표 마진' };
 const OUTCOME_LABEL = { RECORDED: '새로 기록', UNCHANGED: '기존 스냅샷' };
 const TITLE = '통합DB';
+// The page's two views: the canonical products, and the connected store's listings (ADR-0042 S1b).
+const DB_VIEWS = [
+  ['products', '상품 목록'],
+  ['store', '스토어 상품'],
+];
 const HELP = '모든 상품을 하나의 DB에서 관리하고 등록부터 판매까지 빠르게 운영합니다.';
 const LIST_HELP =
   '운영 중인 정규 상품만 최신순으로 보여줍니다. 검색은 상품 ID, 공급처, 공급처 상품번호, 각 원천 상품의 현재 확정 상품명을 서버에서 찾습니다.';
@@ -374,11 +384,32 @@ export default {
       help: HELP,
       actions: [markInert(h('button', { type: 'button', class: 'btn' }, '⇩ 엑셀 다운로드'))],
     });
+    const view = ctx.params.get('view') === 'store' ? 'store' : 'products';
+    const tabs = h(
+      'div',
+      { class: 'inner-tabs', role: 'tablist', 'aria-label': '통합DB 보기', 'data-role': 'db-views' },
+      DB_VIEWS.map(([key, label]) =>
+        h(
+          'button',
+          {
+            type: 'button',
+            role: 'tab',
+            'data-view': key,
+            'aria-selected': String(key === view),
+            onclick: () => ctx.navigate('db', key === 'store' ? { view: key } : {}),
+          },
+          label,
+        ),
+      ),
+    );
+    // 「스토어 상품」 reads only the store catalog; the product screen is not read for it.
+    if (view === 'store') return fragment(head, tabs, await storeListingsView(ctx));
     const screen = await getJson(SCREEN);
     const cards = kpiCards(screen.products_total ?? 0);
     if (screen.meta.state === 'EMPTY') {
       return fragment(
         head,
+        tabs,
         emptyState({
           title: '통합DB에 상품이 없습니다',
           copy: '수집이 완료되면 정규화된 상품이 이곳에 쌓입니다.',
@@ -386,8 +417,8 @@ export default {
         }),
       );
     }
-    if (screen.meta.state !== 'READY') return fragment(head, unsupportedState(screen.meta));
-    return fragment(head, cards, workspace(ctx.params.get('product'), ctx.navigate));
+    if (screen.meta.state !== 'READY') return fragment(head, tabs, unsupportedState(screen.meta));
+    return fragment(head, tabs, cards, workspace(ctx.params.get('product'), ctx.navigate));
   },
 };
 

@@ -3,21 +3,25 @@ supplier order is placed by hand and only recorded. The one marketplace write, �
 through the DISPATCH stage of the send-time safety stack (ADR-0025 §5)."""
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.interface.api.deps import ContainerDep
 from app.platform.core.correlation import new_correlation_id
 from app.platform.core.errors import PolicyBlockedError
+from app.stages.operate.catalog.service import ALL as CATALOG_ALL
 from app.stages.operate.catalog.service import OPERATOR as CATALOG_OPERATOR
+from app.stages.operate.catalog.service import PAGE_LIMIT_DEFAULT as CATALOG_PAGE_LIMIT
 from app.stages.operate.listing import OPERATOR
 from app.stages.operate.orders import OPERATOR as ORDER_OPERATOR
 from app.stages.operate.stock import OPERATOR as STOCK_OPERATOR
+from app.stages.register.category_catalog import MARKETPLACE as CATEGORY_MARKETPLACE
 
 router = APIRouter(prefix="/api/v1/operate", tags=["operate"])
 
@@ -78,6 +82,70 @@ def store_catalog_shape(container: ContainerDep) -> dict[str, Any]:
             "origin_read": shape.origin_read,
         }
     }
+
+
+@router.get("/store-catalog/status")
+def store_catalog_status(container: ContainerDep) -> dict[str, Any]:
+    """The catalog's sync status alone (ADR-0042 S1b): what 「스토어 상품」 re-reads while a sync
+    runs, so 「마지막 동기화」 and the progress stay current without re-reading every listing."""
+    return {"status": asdict(container.store_catalog.status())}
+
+
+@router.get("/store-catalog/listings")
+def store_catalog_listings(
+    container: ContainerDep,
+    filter_key: Annotated[str, Query(alias="filter")] = CATALOG_ALL,
+    q: str | None = None,
+    offset: int = 0,
+    limit: int = CATALOG_PAGE_LIMIT,
+) -> dict[str, Any]:
+    """「스토어 상품」 (ADR-0042 S1b, §0 b2), read only: one page of the store's listings under one
+    status filter and an optional search (name, seller code or product number), every filter's
+    count, and the sync status beside it (「마지막 동기화」 always, SCP-07). Only the page's
+    listings carry their read fields. ``category_name`` is the leaf category's whole name from
+    ICBM's recorded official category catalog, or ``null`` when that catalog does not hold it."""
+    page = container.store_catalog.listing_page(
+        filter_key=filter_key, query=q, offset=offset, limit=limit
+    )
+    leaves = {_leaf_category(entry.listing.fields) for entry in page.listings}
+    names = _category_names(container, {leaf for leaf in leaves if leaf is not None})
+    return {
+        "status": asdict(container.store_catalog.status()),
+        "filter": page.filter,
+        "query": page.query,
+        "counts": dict(page.counts),
+        "matching": page.matching,
+        "offset": page.offset,
+        "limit": page.limit,
+        "listings": [
+            {
+                **asdict(entry.listing),
+                "filter": entry.filter,
+                "category_name": names.get(_leaf_category(entry.listing.fields) or ""),
+            }
+            for entry in page.listings
+        ],
+    }
+
+
+def _leaf_category(fields: Mapping[str, Any] | None) -> str | None:
+    category = fields.get("category") if fields is not None else None
+    leaf = category.get("leaf_category_id") if isinstance(category, Mapping) else None
+    return leaf if isinstance(leaf, str) and leaf else None
+
+
+def _category_names(container: ContainerDep, leaves: set[str]) -> dict[str, str]:
+    """Each leaf category's whole name, as ICBM's recorded SmartStore category catalog holds it
+    (ADR-0029); a leaf it does not hold has no name. Nothing is read from the provider."""
+    if container.store_catalog.marketplace_key != CATEGORY_MARKETPLACE:
+        return {}
+    names: dict[str, str] = {}
+    for leaf in sorted(leaves):
+        found = container.category_catalog.catalog(CATEGORY_MARKETPLACE, query=leaf, limit=500)
+        for entry in found.entries:
+            if entry.category_id == leaf:
+                names[leaf] = entry.whole_category_name
+    return names
 
 
 @router.post("/store-catalog/sync", status_code=202)
