@@ -61,7 +61,7 @@ class CoupangLivePreflightStore:
         return CategoryRecommendationSet(tuple(codes))
 
     def _metadata_record(self, *, generation: int) -> dict[str, object]:
-        raw = self._secrets.get(CATEGORY_METADATA_KEY)
+        raw = self._secrets.get_large(CATEGORY_METADATA_KEY)
         if not raw:
             return {"v": 1, "credential_generation": generation, "results": {}, "failures": {}}
         try:
@@ -104,7 +104,7 @@ class CoupangLivePreflightStore:
                 }.items()
                 if value is not None
             }
-        self._secrets.set(
+        self._secrets.set_large(
             CATEGORY_METADATA_KEY,
             json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
         )
