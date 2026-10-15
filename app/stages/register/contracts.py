@@ -17,7 +17,15 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    SerializerFunctionWrapHandler,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    model_serializer,
+)
 
 from app.platform.core.errors import ErrorClass
 from app.stages.connect.accounts import AccountBinding
@@ -390,6 +398,25 @@ class PreparationView(BaseModel):
     revisions: tuple[PreparationRevisionView, ...]
 
 
+class OverseasProjectionView(BaseModel):
+    """ADR-0038 §6 (O3): what a 구매대행 unit's SmartStore cross-border projection reads, as the
+    preflight owner read it — shown, never decided here. A reason that keeps the unit from being
+    projected is among the preflight's reasons; this only shows the inputs.
+
+    ``duties_included`` is FX-04's term of the pinned duty decisions: the duties are in the price
+    unless the user excluded them (``None`` when the Items disagree)."""
+
+    source_currencies: tuple[str, ...]
+    source_countries: tuple[str, ...]
+    duty_decisions: tuple[str, ...]
+    duties_included: bool | None
+    shipping_address_id: str | None
+    importer: str | None
+    delivery_days_min: int | None
+    delivery_days_max: int | None
+    settings_revision_no: int | None
+
+
 class PreflightView(BaseModel):
     """The preflight re-evaluated from current truth, by the owner that decides it (§3).
 
@@ -409,6 +436,16 @@ class PreflightView(BaseModel):
     dependency_fingerprint: str
     # Only a final evaluation of a frozen unit can answer this; a candidate leaves it unanswered.
     fingerprint_matches_snapshot: bool | None = None
+    # ADR-0038 §6 (O3): a foreign (구매대행) unit's cross-border inputs; absent for a KRW unit.
+    overseas: OverseasProjectionView | None = None
+
+    @model_serializer(mode="wrap")
+    def _without_absent_overseas(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        # A KRW unit keeps its exact shape: ``overseas`` appears only for a foreign unit.
+        data: dict[str, Any] = handler(self)
+        if data.get("overseas") is None:
+            data.pop("overseas", None)
+        return data
 
 
 class ReadStateView(BaseModel):

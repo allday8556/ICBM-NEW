@@ -341,6 +341,47 @@ The provider-evidence verdict stays `INSUFFICIENT` (§4.1, ADR-0014 §17.2), `pr
 stays `UNVERIFIED`, execution stays `DRY_RUN` / `M0_DRY_RUN_ONLY`, a real canary stays `BLOCKED`,
 and M5 stays `PENDING`.
 
+**The 구매대행 cross-border projection** (amendment note, ADR-0038 §6, slice O3; wire
+`smartstore-register-wire/v11`). It applies only to a Snapshot whose frozen payload carries the
+`overseas` section (`overseas-listing/v1`), which REGISTER freezes only for a foreign unit — an
+Item whose pinned PricingSnapshot is a landed-cost price (its source revision states a source
+currency). A Snapshot without the section projects exactly as under v10, byte for byte. Each
+cross-border member has one row here and its own contract test
+(`tests/contracts/test_o3_overseas_contract.py`); no row adopts an endpoint, widens a retained
+response field or changes the permission-relevant registry content, so the endpoint-mapping
+revision and its fingerprint are unchanged and no permission attestation is touched.
+
+*Amendment note (slice O3b, wire `smartstore-register-wire/v12`).* The cross-border members of the
+2.90.1 `(v2) 상품 등록` reference were captured on 2026-10-15 (`SOURCES.md` §5.11,
+`NAVER-P0-CROSS-BORDER-2901`; field level in `PRODUCT_CREATE.md` § SmartStore). The
+business-clearance flag and the KC exemption move from gap to projected; the import origin code
+stays a gap with its reason narrowed, and the reference's 구매대행 certification-information rule is
+a new gap. A Snapshot without the section still projects exactly as under v10, byte for byte. The
+two projected members travel together, and only with a 구매대행 `customsTaxType` (`INCLUDED`,
+`EXCLUDED`): a document that carries one without the other, or either with `NOT_APPLICABLE`, is
+`WIRE_OVERSEAS_MEMBERS_INCOHERENT`, and a value other than the 구매대행 one is
+`WIRE_DOCUMENT_VALUE_INVALID`.
+
+| Wire member | State | Source | Rule |
+| --- | --- | --- | --- |
+| `originProduct.deliveryInfo.claimDeliveryInfo.shippingAddressId` | projected | overseas settings `smartstore_overseas_shipping_address_id`, frozen as `overseas.shipping_address_id` | the overseas 출고지 replaces the account delivery policy's shipping address; the return address, fees and company stay the delivery policy's. None set → `REGISTER_OVERSEAS_SHIPPING_ADDRESS_UNSET`; not a positive int64 → `REGISTER_OVERSEAS_SHIPPING_ADDRESS_INVALID`; no delivery policy to carry it → `REGISTER_OVERSEAS_DELIVERY_POLICY_MISSING` (all `REVIEW_REQUIRED`) |
+| `originProduct.detailAttribute.customsTaxType` | projected | each Item's pinned duty decision, frozen as `overseas.duty_decisions` (FX-04: read from the pin, never recomputed) | `NOT_OVER_150` or `INCLUDED` → `INCLUDED`; `EXCLUDED` → `EXCLUDED`; Items whose terms disagree → `REGISTER_OVERSEAS_ITEMS_INCONSISTENT`. The field and `NOT_APPLICABLE` are the canary's (wire v9); the whole enum (string; `NOT_APPLICABLE`, `INCLUDED`, `EXCLUDED`; required when the 출고지 is overseas) is captured since O3b (`NAVER-P0-CROSS-BORDER-2901`). Its `INCLUDED`-only rule binds the 해외직구 display channel, which ICBM never sends |
+| `originProduct.detailAttribute.originAreaInfo` (import code, `importer`) | **gap** (`GAP_OVERSEAS_ORIGIN_IMPORT`) | the supplier definition's declared country (`SupplierProfile.country`) and the settings `importer_label`, frozen as `overseas.source_country` / `overseas.importer` | the 2.90.1 reference documents `originAreaCode` `02` (수입산) as the import group and `importer` (string) as 수입산인 경우 필수, but the per-country codes (수입산: 대륙 > 국가명) are values of the authenticated origin-area lookups (`GET /v1/product-origin-areas`, `…/query`, `…/sub-origin-areas`), which publish no code value and are not adopted. No import code is guessed; the origin stays the v8 detail-reference code `03` and the request is not sendable. A missing importer is still `REGISTER_OVERSEAS_IMPORTER_UNSET` |
+| `originProduct.detailAttribute.certificationTargetExcludeContent` (`kcCertifiedProductExclusionYn`, `kcExemptionType`) | projected | ADR-0038 §6: the 구매대행 model of the listing itself — the user's choice, never ICBM's judgement of a category (FX-05) | `kcCertifiedProductExclusionYn` = `KC_EXEMPTION_OBJECT` and `kcExemptionType` = `OVERSEAS`, both strings of the captured enums (`FALSE`/`KC_EXEMPTION_OBJECT`/`TRUE`; `OVERSEAS`/`SAFE_CRITERION`/`PARALLEL_IMPORT`; `NAVER-P0-CROSS-BORDER-2901`). Exactly this pair, for a 구매대행 listing only |
+| `originProduct.detailAttribute.productCertificationInfos` (구매대행 certification information) | **gap** (`GAP_OVERSEAS_KC_CERTIFICATION_INFO`) | — | the reference's `certificationKindType` states `OVERSEAS` (구매대행 선택 시 인증 정보 필수 등록) and does not say whether the KC exemption alone satisfies it; an entry needs `certificationInfoId` (int64), `name` and `certificationNumber`, none of which ICBM owns, so none is projected or guessed |
+| `originProduct.deliveryInfo.businessCustomsClearanceSaleYn` | projected | ADR-0038 §6: a 구매대행 listing is not a business-cleared sale | JSON boolean `false`, stated explicitly (the reference: applies only when the 출고지 is overseas; stored `false` when omitted; `NAVER-P0-CROSS-BORDER-2901`). Never on a domestic listing |
+| delivery days | not projected | overseas settings `overseas_delivery_days_min/max` | the adopted request has no delivery-estimate member; the editor shows the setting only |
+| `individualCustomUniqueCode` (orders) | not retained | — | out of this slice: the adopted order reads do not retain it (§4.1 order allow-list), so the order owner does not carry it today |
+
+A gap keeps a foreign Snapshot unsendable exactly as the option-price gap does: the REGISTER owner
+refuses with `REGISTER_WIRE_NOT_SENDABLE` and the sender with `SMARTSTORE_CREATE_WIRE_NOT_SENDABLE`.
+A frozen section that is not exactly `overseas-listing/v1` is `WIRE_OVERSEAS_MALFORMED`, disagreeing
+duty terms are `WIRE_OVERSEAS_DUTIES_INCONSISTENT` and a section without a delivery policy is
+`WIRE_OVERSEAS_DELIVERY_MISSING` — each refused, never trimmed. The read-back compares none of these
+members. A foreign Item on a marketplace without a cross-border projection is
+`REGISTER_OVERSEAS_MARKETPLACE_UNSUPPORTED`, and a preflight owner with no overseas settings reader
+is `REGISTER_OVERSEAS_SETTINGS_UNAVAILABLE`.
+
 ### 4.1.2 SEARCH positive-only reconcile adoption (ADR-0020 §4 order 2)
 
 **Amendment note, not a rewrite.** The `SMARTSTORE_PRODUCT_SEARCH` row of §4 moves from

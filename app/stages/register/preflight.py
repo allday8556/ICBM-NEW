@@ -22,13 +22,17 @@ What it reads, and from whom:
   through :class:`DetailProfileSource`;
 - the store-wide Detail Guidance notices (ADR-0033 G4): the Detail Guidance owner, through
   :class:`~app.stages.register.guidance.GuidanceSource`, resolved for the request's choice at that
-  owner's injected clock by :func:`~app.stages.register.guidance.resolve`.
+  owner's injected clock by :func:`~app.stages.register.guidance.resolve`;
+- for a foreign (구매대행) unit only — an Item's pin is a landed-cost price — the overseas settings
+  and each Item's declared source country (ADR-0038 §6, O3), through
+  :class:`~app.stages.register.overseas.OverseasReader`. A KRW unit reads neither.
 
 No provider is called: no duplicate lookup, no upload, no marketplace read. Provider duplicate
 evidence and prepared provider assets are inputs a later adapter supplies.
 """
 
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from typing import Any, Protocol
 
 from app.platform.core.errors import AppError, NotFoundError, PolicyBlockedError
@@ -51,6 +55,7 @@ from app.stages.register.guidance import (
 )
 from app.stages.register.guidance import resolve as resolve_guidance
 from app.stages.register.model import ListingShape
+from app.stages.register.overseas import OVERSEAS_MARKETPLACES, OverseasReader, is_foreign
 from app.stages.register.policy import (
     CategoryMetadata,
     RegistrationMetadataSource,
@@ -76,6 +81,7 @@ from app.stages.register.preparation import (
     ResolvedUnit,
     UploadFit,
     evaluate,
+    foreign_pins,
     resolve_unit,
 )
 from app.stages.register.preparation import listing_identity as _identity
@@ -121,8 +127,12 @@ class RegistrationPreflightService:
         adopted_items: Callable[[str, Sequence[str]], tuple[str, ...]] | None = None,
         source_gates: Callable[[str, Sequence[str]], SourceReading] | None = None,
         guidance: GuidanceSource | None = None,
+        overseas: OverseasReader | None = None,
     ) -> None:
         self._registrations = registrations
+        # ADR-0038 §6 (O3): the overseas settings and declared source countries of a foreign
+        # unit's Items. None when not wired: a foreign unit then states it cannot be projected.
+        self._overseas = overseas
         # ADR-0033 G4: the Detail Guidance owner's notices. None when not wired: nothing resolves.
         self._guidance = guidance
         self._detail_profiles = detail_profiles
@@ -269,7 +279,7 @@ class RegistrationPreflightService:
             if self._source_gates is None
             else self._source_gates(draft.marketplace_key, unit_ids)
         )
-        return ResolvedUnit(
+        resolved = ResolvedUnit(
             marketplace_key=draft.marketplace_key,
             marketplace_account_id=draft.marketplace_account_id,
             draft_id=draft.draft_id,
@@ -295,6 +305,15 @@ class RegistrationPreflightService:
             guidance=self.guidance(guidance, preparation_revision_id),
             sales_policies=reading.pins,
         )
+        # ADR-0038 §6 (O3): read only for a foreign unit of a marketplace with a cross-border
+        # projection, so a KRW unit reads nothing and its fingerprint is unchanged.
+        if (
+            self._overseas is not None
+            and draft.marketplace_key in OVERSEAS_MARKETPLACES
+            and is_foreign(foreign_pins(resolved))
+        ):
+            resolved = replace(resolved, overseas=self._overseas(unit_ids))
+        return resolved
 
     def guidance(
         self, choice: GuidanceChoice, preparation_revision_id: str | None = None
@@ -448,6 +467,7 @@ class RegistrationPreflightService:
         record = unit.pricing_pin(pricing_snapshot_id)
         if record is None:
             return None
+        landed = record.landed_cost
         return PinnedPrice(
             pricing_snapshot_id=record.pricing_snapshot_id,
             item_id=record.item_id,
@@ -461,6 +481,9 @@ class RegistrationPreflightService:
             final_sale_price_krw=record.final_sale_price_krw,
             price_basis=record.price_basis,
             price_guard=record.price_guard,
+            # ADR-0038 §6 (O3): what a landed-cost price pinned (FX-04); None for a KRW price.
+            source_currency=None if landed is None else landed.source_currency,
+            duty_decision=None if landed is None else landed.duty_decision.value,
         )
 
     def _publication(

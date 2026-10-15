@@ -484,7 +484,7 @@ def test_a_top_and_a_bottom_notice_reach_the_detail_content_end_to_end(
 
     # The projection: top notice → detail image → body → bottom notice (§7).
     projection = product.project(payload)
-    assert projection.encoding_version == "smartstore-register-wire/v10"
+    assert projection.encoding_version == "smartstore-register-wire/v12"
     content = projection.document.mapping()["originProduct"]["detailContent"]
     assert content == "\n".join([img(top), img(unit.detail), f"<p>{BODY}</p>", img(bottom)])
     # Neither a notice nor a detail image is ever a gallery image.

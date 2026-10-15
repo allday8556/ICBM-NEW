@@ -214,16 +214,23 @@ the category auto-matching agreement endpoint, plus their two unit suites. It ad
 provider caller and no mutation surface.
 All other Coupang adapters remain fake-only, retain sensitive provider envelopes without projecting
 customer or financial data, and grant no provider call or LIVE authority.
+ADR-0038 O3 added the SmartStore cross-border projection of a 구매대행 unit:
+`app/stages/register/overseas.py`, the frozen `overseas-listing/v1` payload section, wire
+`smartstore-register-wire/v11`, two unit, one contract and one integration suite; it has no
+migration and changes no endpoint.
+ADR-0038 O3b projects the captured 2.90.1 cross-border members (wire
+`smartstore-register-wire/v12`: the business-clearance flag and the 구매대행 KC exemption) and
+retains their evidence excerpt `smartstore-cross-border-2.90.1-2026-10-15.json`.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 410 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 411 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 84 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
 | `app/interface/` | 32 | operator surfaces: HTTP api, screens, cli |
 | `app/platform/` | 96 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 193 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/stages/` | 194 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -231,13 +238,13 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `automation/archive/` | 2 | historical entry points, byte-identical |
 | `design/` | 4 | UI prototypes (design reference; `archive/` holds superseded ones) |
 | `design/prototypes/` | 4 |  |
-| `documents/` | 193 | all canonical and historical documents |
+| `documents/` | 194 | all canonical and historical documents |
 | `documents/acceptance/` | 73 | acceptance records (milestones, gates, adaptive, issues) |
 | `documents/architecture/` | 3 | architecture, glossary, frozen v3.1 reference |
 | `documents/archive/` | 9 | historical documents, byte-identical |
 | `documents/contracts/` | 12 | platform and UI contracts |
 | `documents/decisions/` | 43 | ADRs and architect review records |
-| `documents/evidence/` | 30 | external provider evidence catalog |
+| `documents/evidence/` | 31 | external provider evidence catalog |
 | `documents/reference/` | 3 | this map and the path migration map |
 | `documents/reviews/` | 4 | Claude proposal channel |
 | `documents/roadmap/` | 2 | roadmap and current milestone |
@@ -245,13 +252,13 @@ customer or financial data, and grant no provider call or LIVE authority.
 | `integrations/` | 119 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 45 |  |
 | `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 444 | tests |
-| `tests/contracts/` | 21 | repository-rule and document-contract tests |
+| `tests/` | 448 | tests |
+| `tests/contracts/` | 22 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 181 | integration tests by runtime owner |
+| `tests/integration/` | 182 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
-| `tests/unit/` | 161 | unit tests by runtime owner |
+| `tests/unit/` | 163 | unit tests by runtime owner |
 | `ui/` | 75 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
 | `ui/web/` | 66 | the served web client |

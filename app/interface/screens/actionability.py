@@ -45,6 +45,8 @@ class FixSurface(StrEnum):
     SETTINGS_CONNECT = "SETTINGS_CONNECT"
     # B-EDITOR: the unit workspace's image section (the image owner's selection routes).
     REGISTER_IMAGES = "REGISTER_IMAGES"
+    # ADR-0038 §5, §6 (O3): the 해외 구매대행 settings card (the overseas 출고지, the importer).
+    SETTINGS_OVERSEAS = "SETTINGS_OVERSEAS"
 
 
 ACTIONABILITY_LABELS: Final[Mapping[Actionability, str]] = {
@@ -62,6 +64,7 @@ SURFACE_LABELS: Final[Mapping[FixSurface, str]] = {
     FixSurface.SETTINGS_CATEGORY_METADATA: "설정 › 카테고리 메타데이터",
     FixSurface.SETTINGS_CONNECT: "설정 › 마켓 연결",
     FixSurface.REGISTER_IMAGES: "등록관리 › 이미지",
+    FixSurface.SETTINGS_OVERSEAS: "설정 › 해외구매대행",
 }
 
 _F, _R, _W, _N, _X = (
@@ -79,6 +82,7 @@ _PREP, _ACT, _POLICY, _META, _CONNECT = (
     FixSurface.SETTINGS_CONNECT,
 )
 _IMAGES = FixSurface.REGISTER_IMAGES
+_OVERSEAS = FixSurface.SETTINGS_OVERSEAS
 
 Entry = tuple[Actionability, FixSurface | None]
 
@@ -192,6 +196,17 @@ REGISTER_ACTIONS: Final[Mapping[str, Entry]] = {
     # An authored value carrying a URL or secret material: removed in the form.
     "PAYLOAD_SECRET_MATERIAL": (_F, _PREP),
     "PAYLOAD_EXTERNAL_URL": (_F, _PREP),
+    # ADR-0038 §6 (O3): the overseas 출고지 and the importer are set on the 해외 구매대행 card; the
+    # delivery policy that carries the 출고지 is the account's registration policy. A unit whose
+    # Items cannot form one 구매대행 listing, or a marketplace without a cross-border projection,
+    # has no screen that changes it here.
+    "REGISTER_OVERSEAS_SETTINGS_UNAVAILABLE": (_X, None),
+    "REGISTER_OVERSEAS_SHIPPING_ADDRESS_UNSET": (_F, _OVERSEAS),
+    "REGISTER_OVERSEAS_SHIPPING_ADDRESS_INVALID": (_F, _OVERSEAS),
+    "REGISTER_OVERSEAS_IMPORTER_UNSET": (_F, _OVERSEAS),
+    "REGISTER_OVERSEAS_DELIVERY_POLICY_MISSING": (_F, _POLICY),
+    "REGISTER_OVERSEAS_ITEMS_INCONSISTENT": (_X, None),
+    "REGISTER_OVERSEAS_MARKETPLACE_UNSUPPORTED": (_X, None),
 }
 
 # The M4 owners' reasons (unprefixed). Only the pricing snapshot is moved from REGISTER, through the

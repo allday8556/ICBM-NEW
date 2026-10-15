@@ -28,6 +28,8 @@ This section is the single current field-level representation of the SmartStore 
 | Version / observed | NAVER Commerce API **2.89.0 (2026-09-15)**; field-level, required/conditional, registration-requirement/value-level and success-identifier extracts retrieved 2026-09-28 |
 | Source IDs | `NAVER-P0-PACKET-289` (5746489554), `NAVER-P0-REVIEW-CREATE-289` (5768199984, 5768247290), `NAVER-P0-FIELDS-CREATE-289` (5861477977), `NAVER-P0-REQUIRED-CREATE-289` (5861933729), `NAVER-P0-REGISTRATION-CREATE-289` (5862400626), `NAVER-P0-VALUES-CREATE-289` (5868542027) — `SOURCES.md` §5.1–§5.2 |
 
+`CB` = `NAVER-P0-CROSS-BORDER-2901` (`SOURCES.md` §5.11): the **2.90.1** (2026-10-07) reference and its published OpenAPI operation, read 2026-10-15 (ADR-0038 §6, slice O3b); the retained excerpt is [`smartstore-cross-border-2.90.1-2026-10-15.json`](smartstore-cross-border-2.90.1-2026-10-15.json) (sha256 `6784abfa0644c25b16b74ebe9617b93ad17196ea99b26134281d0a282f7e9be9`).
+
 Below, `PACKET` = 5746489554, `REVIEW` = 5768199984 / 5768247290, `FIELDS` = 5861477977, `REQ` = 5861933729, `REG` = 5862400626, `VALUES` = 5868542027. Where `REG` states a registration requirement or a value, it governs: it supersedes `REQ` for the registration requirement of `leafCategoryId` and top-level `stockQuantity`. `VALUES` (E1–E3) confirms the `statusType` registration value and the `naverShoppingRegistration` type that `REG` records, and adds the success identifiers' position and type.
 
 ### Wire
@@ -78,6 +80,7 @@ The `원상품 정보 구조체` schema states it is used for request and respon
 | `deliveryInfo.claimDeliveryInfo` | required object | — | REQ |
 | `…claimDeliveryInfo.returnDeliveryFee` | required | — | REQ |
 | `…claimDeliveryInfo.exchangeDeliveryFee` | required | — | REQ |
+| `originProduct.deliveryInfo.businessCustomsClearanceSaleYn` (boolean) | not required | 사업자 통관 판매 여부; applies only when the 출고지 address is overseas; omitted → `false` | CB |
 | delivery-mode fields | conditional on the delivery mode | for example `deliveryCompany` for `DELIVERY`; `outboundLocationId` for the documented seller-guarantee delivery attributes | REQ |
 
 **`originProduct.detailAttribute` substructures**
@@ -107,6 +110,13 @@ The `원상품 정보 구조체` schema states it is used for request and respon
 | `…productInfoProvidedNotice.<type child>` | the one child matching the type | **Not captured (see Coverage below); fail-closed.** Child names include `wear`, `shoes`, `food`, `generalFood`, `dietFood` (examples, not the full list); each type has its own required/conditional field rules; some values are documented "미입력 시 상품상세 참조" and conditional fields are omitted when not applicable, so there is **no blanket fill-every-field rule** | PACKET, FIELDS, REQ |
 | `…detailAttribute.afterServiceInfo` | not required | if used, `afterServiceTelephoneNumber` and `afterServiceGuideContent` are required | REQ |
 | `…detailAttribute.originAreaInfo` | not required | if used, `originAreaCode` is required; `importer` is required for an imported origin; `content` is required for a direct-input origin | REQ |
+| `originProduct.detailAttribute.originAreaInfo.originAreaCode` (string) | required in `originAreaInfo` | the groups `00` 국산, `01` 원양산, `02` 수입산, `03` 기타-상세 설명에 표시, `04` 기타-직접 입력, `05` 원산지 표기 의무 대상 아님; a per-country import code (수입산: 대륙 > 국가명) is a value of the authenticated origin-area lookups (`GET /v1/product-origin-areas`, `…/query`, `…/sub-origin-areas`), which publish no code value | CB |
+| `originProduct.detailAttribute.originAreaInfo.importer` (string) | conditional | 수입사명; 수입산인 경우 필수 | CB |
+| `originProduct.detailAttribute.customsTaxType` (string) | conditional: required when the 출고지 address is overseas | `NOT_APPLICABLE` 부과 대상 아님, `INCLUDED` 관부가세 포함 (the only value when the display channel is 해외직구), `EXCLUDED` 관부가세 미포함 | CB |
+| `originProduct.detailAttribute.certificationTargetExcludeContent` (object) | not required | 인증 대상 제외 여부 정보; also carries `childCertifiedProductExclusionYn`, `greenCertifiedProductExclusionYn`, `chemicalCertifiedProductExclusionYn` (booleans, category-conditional), which ICBM never sends | CB |
+| `originProduct.detailAttribute.certificationTargetExcludeContent.kcCertifiedProductExclusionYn` (string) | conditional: required for a 'KC 인증 대상' category; omitted → `FALSE` | `TRUE` (KC 인증 대상 아님), `FALSE` (KC 인증 대상), `KC_EXEMPTION_OBJECT` (안전기준준수, 구매대행, 병행수입) | CB |
+| `originProduct.detailAttribute.certificationTargetExcludeContent.kcExemptionType` (string) | conditional: required for 안전기준준수, 구매대행, 병행수입 | `OVERSEAS` (구매대행), `SAFE_CRITERION` (안전기준준수대상), `PARALLEL_IMPORT` (병행수입) | CB |
+| `…detailAttribute.productCertificationInfos[].certificationKindType` (string) | not required; omitted → `ETC` | `KC_CERTIFICATION`, `CHILD_CERTIFICATION`, `GREEN_PRODUCTS`, `CHEMICAL_CERTIFICATION`, `PARALLEL_IMPORT`, `OVERSEAS` (구매대행 선택 시 인증 정보 필수 등록), `ETC`; an entry requires `certificationInfoId` (int64), `name`, `certificationNumber` | CB |
 | `…detailAttribute` unit-price fields | conditional: required for categories subject to mandatory unit-price display | when `unitPriceYn=true`, `totalCapacityValue`, `unitCapacity` and `indicationUnit` are all required | REQ |
 | other category/feature-specific structures | own conditions | keep their own official conditional rules; not generalized to every product | REQ |
 

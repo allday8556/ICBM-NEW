@@ -23,6 +23,10 @@ evaluated:
   provider_asset_ref}`` — with the provider reference prepared under the candidate fingerprint,
   exactly as an Item's ``publication_assets`` carry theirs. Every unit of a v3 profile is v3, an
   empty resolution included (both lists empty, no guidance asset).
+- ADR-0038 §6 (O3): a foreign (구매대행) unit's payload also freezes its cross-border section
+  (``overseas``: ``overseas-listing/v1`` — the source currency and declared country, the Items'
+  pinned duty decisions, the overseas 출고지 and the importer, with the settings revision). It is
+  named only for a foreign unit, so a KRW payload keeps its exact shape and digest.
 
 The SmartStore wire representation is PR-D's: this is the business representation it encodes.
 """
@@ -203,6 +207,12 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
             "return_address_id": delivery.return_address_id,
         },
     }
+    # ADR-0038 §6 (O3): a READY foreign unit always has its section; a KRW unit has none.
+    overseas = result.overseas
+    if overseas.summary is not None and overseas.listing is None:
+        raise PayloadNotReadyError("a foreign unit's payload needs its cross-border section")
+    if overseas.listing is not None:
+        business["overseas"] = overseas.listing.canonical()
     # Fail closed even if a caller bypassed the preflight's own sanitation reasons.
     sanitize.require_clean(business)
     pinned = guidance_assets(plan, prepared, profile) if plan is not None and plan.guides else None
@@ -241,6 +251,8 @@ def build_payload(result: PreflightResult) -> OutboundPayload:
         "items": payload_items,
         # ADR-0033 §6: named only by a v3 payload, so a v1 or v2 payload keeps its exact shape.
         **({} if pinned is None else {"guidance_assets": [dict(a) for a in pinned]}),
+        # ADR-0038 §6 (O3): named only for a foreign unit, so a KRW payload keeps its exact shape.
+        **({"overseas": business["overseas"]} if "overseas" in business else {}),
     }
     policy_revisions = {
         "policy_revision": target.policy_revision,

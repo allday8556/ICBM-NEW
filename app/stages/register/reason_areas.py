@@ -158,6 +158,15 @@ REGISTER_AREAS: Final[Mapping[str, tuple[ReasonArea, ...]]] = {
     "DUPLICATE_EVIDENCE_UNSAFE": (_A.DUPLICATE,),
     "PAYLOAD_SECRET_MATERIAL": (_A.SAFETY,),
     "PAYLOAD_EXTERNAL_URL": (_A.SAFETY,),
+    # ADR-0038 §6 (O3): a 구매대행 unit's cross-border inputs — the overseas settings and the
+    # account delivery policy that carries the 출고지, or Items that cannot form one listing.
+    "REGISTER_OVERSEAS_SETTINGS_UNAVAILABLE": (_A.POLICY,),
+    "REGISTER_OVERSEAS_SHIPPING_ADDRESS_UNSET": (_A.POLICY,),
+    "REGISTER_OVERSEAS_SHIPPING_ADDRESS_INVALID": (_A.POLICY,),
+    "REGISTER_OVERSEAS_IMPORTER_UNSET": (_A.POLICY,),
+    "REGISTER_OVERSEAS_DELIVERY_POLICY_MISSING": (_A.POLICY,),
+    "REGISTER_OVERSEAS_ITEMS_INCONSISTENT": (_A.UNIT,),
+    "REGISTER_OVERSEAS_MARKETPLACE_UNSUPPORTED": (_A.UNIT,),
 }
 
 # The M4 owners' reasons, as each layer returns them (unprefixed).

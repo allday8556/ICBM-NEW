@@ -153,6 +153,18 @@ export const REASON_COPY = {
     '환율이 영업일 3일보다 오래되어 가격을 정할 수 없습니다. 설정 › 해외구매대행에서 환율을 갱신하세요.',
   'M4_PRICING.PRICING_OVERSEAS_SHIPPING_UNSET':
     '해외 배송비가 없어 가격을 정할 수 없습니다. 상품의 해외 배송비를 입력하거나 설정 › 해외구매대행에서 기본값을 정하세요.',
+  // ADR-0038 §6 (O3): a 구매대행 (CNY·JPY) unit's SmartStore cross-border inputs.
+  REGISTER_OVERSEAS_SHIPPING_ADDRESS_UNSET:
+    '해외 출고지(스마트스토어 주소록 번호)가 없습니다. 설정 › 해외구매대행에서 해외 출고지를 정하세요.',
+  REGISTER_OVERSEAS_SHIPPING_ADDRESS_INVALID:
+    '해외 출고지 번호가 스마트스토어 주소록 번호 형식이 아닙니다. 설정 › 해외구매대행에서 다시 정하세요.',
+  REGISTER_OVERSEAS_IMPORTER_UNSET: '수입자 표기가 없습니다. 설정 › 해외구매대행에서 수입자를 입력하세요.',
+  REGISTER_OVERSEAS_DELIVERY_POLICY_MISSING:
+    '해외 출고지를 실어 보낼 배송 정책이 없습니다. 설정 › 등록 정책에서 배송·반품 정책을 정하세요.',
+  REGISTER_OVERSEAS_ITEMS_INCONSISTENT:
+    '한 상품 안의 품목들이 통화·원산지 국가·관부가세 부담 중 하나가 서로 달라 한 구매대행 상품으로 올릴 수 없습니다.',
+  REGISTER_OVERSEAS_MARKETPLACE_UNSUPPORTED: '이 마켓은 해외 구매대행 상품 등록을 아직 지원하지 않습니다.',
+  REGISTER_OVERSEAS_SETTINGS_UNAVAILABLE: '해외 구매대행 설정을 읽을 수 없어 등록 정보를 만들 수 없습니다.',
   // B-PRICE1: the repin command's refusals.
   REGISTER_DRAFT_REVISION_MOVED: '초안이 바뀌었습니다. 화면을 새로 고친 뒤 다시 시도하세요.',
   REGISTER_REPIN_INTENT_OPEN: '이 초안의 등록 요청이 아직 진행 중이라 가격을 다시 고정할 수 없습니다.',

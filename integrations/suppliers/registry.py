@@ -54,3 +54,21 @@ def repository_active(supplier_key: str) -> bool | None:
     if supplier_key in SITES:
         return SITES[supplier_key].config.active
     return _PACKAGED_ACTIVE.get(supplier_key)
+
+
+# ADR-0038 §6 (O3): the country each overseas (구매대행) supplier sells from, exactly as its own
+# definition declares it (``SupplierProfile.country``). A domestic supplier, or any other key,
+# declares none.
+SOURCE_COUNTRIES: Mapping[str, str] = MappingProxyType(
+    {
+        profile.supplier_key: profile.country
+        for profile in (kmretail.PROFILE, superdelivery.PROFILE, ali1688.PROFILE)
+        if profile.country is not None
+    }
+)
+
+
+def source_country(supplier_key: str) -> str | None:
+    """The ISO 3166-1 alpha-2 country a supplier's definition declares, or ``None``. Never read
+    from a page and never derived from a currency (ADR-0038 §6)."""
+    return SOURCE_COUNTRIES.get(supplier_key)
