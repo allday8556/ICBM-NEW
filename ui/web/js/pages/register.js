@@ -140,6 +140,9 @@ export const REASON_COPY = {
     '공급사 판매채널 문구를 확인할 수 없지만, 판매채널 제한을 적용하지 않도록 설정한 공급처입니다 (사용자 책임)',
   'M4_PRICING.PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED':
     '공급사 최저판매가가 있지만, 최저판매가를 적용하지 않도록 설정한 공급처입니다 (사용자 책임)',
+  // The same pricing warning as an Item's own pricing reason (no layer prefix).
+  PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED:
+    '공급사 최저판매가가 있지만, 최저판매가를 적용하지 않도록 설정한 공급처입니다 (사용자 책임)',
   // ADR-0038 §1 (O1a): a quantity offer of a CNY or JPY source is never priced.
   'M4_PRICING.PRICING_SOURCE_CURRENCY_UNSUPPORTED':
     '해외 통화(CNY·JPY) 수량별 가격은 가격을 정할 수 없습니다',
@@ -275,29 +278,124 @@ function won(amount) {
   return amount === null || amount === undefined ? '—' : `${amount.toLocaleString('ko-KR')}원`;
 }
 
+// ADR-0039 §2, §3: a warning that a supplier's sales policy is not applied names the supplier and
+// quotes the supplier's own words. The warning is rendered at once with its static copy; the
+// server's note for the Item (the supplier, its policy now, its words) then words it, and only
+// when the note says the same thing — otherwise the static copy stays. Nothing is ever hidden
+// (SP-04), and the page judges nothing: whether a warning exists is the server's reason.
+const POLICY_NOTE = (itemId) => `/api/v1/products/items/${encodeURIComponent(itemId)}/sales-policy-note`;
+const CHANNEL_WARNINGS = new Set(['SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED', 'SOURCE_CHANNEL_UNRESOLVED_NOT_APPLIED']);
+const MINIMUM_WARNINGS = new Set([
+  'PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED',
+  'M4_PRICING.PRICING_MINIMUM_SALE_PRICE_NOT_APPLIED',
+]);
+const CHANNELS_NOT_APPLIED = '이 공급처의 판매정책을 적용하지 않도록 설정했습니다 (사용자 책임)';
+const MINIMUM_NOT_APPLIED = '이 공급처의 최저판매가를 적용하지 않도록 설정했습니다 (사용자 책임)';
+// One read per Item per render: every warning of the same Item shares it.
+const policyNotes = new Map();
+
+export function freshPolicyNotes() {
+  policyNotes.clear();
+}
+
+function policyNote(itemId) {
+  if (!policyNotes.has(itemId)) policyNotes.set(itemId, getJson(POLICY_NOTE(itemId)).catch(() => null));
+  return policyNotes.get(itemId);
+}
+
+function policyAmount(minimum) {
+  return minimum.currency === 'KRW'
+    ? `${Number(minimum.amount).toLocaleString('ko-KR')}원`
+    : sourcePrice(minimum.currency, minimum.amount);
+}
+
+// The quoted wording of one policy warning, or null when the note does not say the same thing.
+export function policyWarningCopy(code, note) {
+  if (!note?.supplier_key) return null;
+  const name = note.supplier_name || note.supplier_key;
+  const channels = note.sales_channels;
+  if (CHANNEL_WARNINGS.has(code)) {
+    if (note.apply_channel_restrictions !== false || !channels) return null;
+    if (code === 'SOURCE_CHANNEL_RESTRICTION_NOT_APPLIED') {
+      if (channels.status !== 'CONFIRMED' || !channels.quote) return null;
+      return `${name}의 판매채널 제한: “${channels.quote}” — ${CHANNELS_NOT_APPLIED}`;
+    }
+    if (channels.status !== 'REVIEW_REQUIRED') return null;
+    return channels.quote
+      ? `${name}의 판매채널 문구를 확인할 수 없습니다: “${channels.quote}” — ${CHANNELS_NOT_APPLIED}`
+      : `${name}의 판매채널 문구를 확인할 수 없습니다 — ${CHANNELS_NOT_APPLIED}`;
+  }
+  if (MINIMUM_WARNINGS.has(code)) {
+    const minimum = note.minimum_sale_price;
+    if (note.apply_minimum_price !== false || !minimum) return null;
+    if (minimum.status === 'CONFIRMED' && minimum.amount && minimum.currency) {
+      return `${name} 최저판매가 ${policyAmount(minimum)} (공급사 표기: “${minimum.label}”) — ${MINIMUM_NOT_APPLIED}`;
+    }
+    if (minimum.status !== 'REVIEW_REQUIRED') return null;
+    return minimum.quote
+      ? `${name} 최저판매가 문구를 확인할 수 없습니다: “${minimum.quote}” — ${MINIMUM_NOT_APPLIED}`
+      : `${name} 최저판매가 문구를 확인할 수 없습니다 — ${MINIMUM_NOT_APPLIED}`;
+  }
+  return null;
+}
+
+// The Item a policy warning is about: given by the caller (an Item row), or read from the
+// preflight reason's subject — the Item itself for a source gate, `item:{id}:…` for a price.
+function policyItem(reason, itemId) {
+  if (itemId) return itemId;
+  const subject = reason.subject ?? '';
+  if (CHANNEL_WARNINGS.has(reason.code)) return subject || null;
+  return subject.startsWith('item:') ? subject.slice(5).split(':')[0] || null : null;
+}
+
+// Words one rendered policy warning with the supplier's own words, once the note arrives.
+export function quotePolicyWarning(node, reason, itemId) {
+  if (!CHANNEL_WARNINGS.has(reason.code) && !MINIMUM_WARNINGS.has(reason.code)) return node;
+  const item = policyItem(reason, itemId);
+  if (!item) return node;
+  node.setAttribute('data-policy-item', item);
+  node.setAttribute('data-policy-note', 'pending');
+  policyNote(item).then((note) => {
+    const text = policyWarningCopy(reason.code, note);
+    if (!text) {
+      node.setAttribute('data-policy-note', 'static');
+      return;
+    }
+    node.textContent = text;
+    node.setAttribute('title', text);
+    node.setAttribute('data-supplier', note.supplier_key);
+    node.setAttribute('data-policy-note', 'quoted');
+  });
+  return node;
+}
+
 // One reason exactly as its owner returned it (B-UX1): the code is shown, and its status, subject
 // and areas travel as attributes. Nothing here judges a reason.
-function reasonNode(tag, reason) {
-  return h(
-    tag,
-    {
-      class: 'mini',
-      'data-reason': reason.code,
-      'data-reason-status': reason.status,
-      'data-areas': (reason.areas ?? []).join(' '),
-      title: REASON_COPY[reason.code] ?? '확인이 필요한 항목입니다.',
-    },
-    REASON_COPY[reason.code] ?? '확인이 필요한 항목입니다.',
+function reasonNode(tag, reason, itemId) {
+  return quotePolicyWarning(
+    h(
+      tag,
+      {
+        class: 'mini',
+        'data-reason': reason.code,
+        'data-reason-status': reason.status,
+        'data-areas': (reason.areas ?? []).join(' '),
+        title: REASON_COPY[reason.code] ?? '확인이 필요한 항목입니다.',
+      },
+      REASON_COPY[reason.code] ?? '확인이 필요한 항목입니다.',
+    ),
+    reason,
+    itemId,
   );
 }
 
-export function statusChip(status, codes, reasons) {
+export function statusChip(status, codes, reasons, itemId) {
   if (!status) return '—';
   const structured = reasons ?? [];
   return fragment(
     chip(READINESS_LABEL[status] ?? '확인 필요', status === 'READY' ? 'good' : status === 'BLOCKED' ? 'bad' : 'warn'),
     ...(structured.length
-      ? structured.map((reason) => reasonNode('span', reason))
+      ? structured.map((reason) => reasonNode('span', reason, itemId))
       : (codes ?? []).map((code) => h('span', { class: 'mini', 'data-reason': code }, REASON_COPY[code] ?? '확인이 필요한 항목입니다.'))),
   );
 }
@@ -466,8 +564,8 @@ export function itemRow(item) {
       won(item.current_sale_price_krw),
       item.price_pin_current === false ? chip('고정가 아님', 'warn') : null,
     ),
-    h('td', {}, statusChip(item.base_status, item.base_reason_codes, item.base_reasons)),
-    h('td', {}, statusChip(item.pricing_status, item.pricing_reason_codes, item.pricing_reasons)),
+    h('td', {}, statusChip(item.base_status, item.base_reason_codes, item.base_reasons, item.item_id)),
+    h('td', {}, statusChip(item.pricing_status, item.pricing_reason_codes, item.pricing_reasons, item.item_id)),
     h(
       'td',
       { 'data-assets': String(assets.length) },
@@ -1631,6 +1729,7 @@ export default {
   icon: '▱',
   async render(ctx) {
     const head = pageHead({ title: TITLE, help: HELP });
+    freshPolicyNotes();
     let screen;
     let overview;
     let canary;
