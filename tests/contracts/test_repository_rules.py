@@ -4230,6 +4230,12 @@ def test_schema_holds_source_truth_and_the_m4_product_foundation() -> None:
         "store_catalog_memberships",
         "store_catalog_observations",
         "store_catalog_listing_endings",
+        # ADR-0042 S2a: the ListingLinks owner — which common product (ProductGroup) each store
+        # listing is, the seller's 「다른 상품」 decisions and the automatic-link notices. A link
+        # is never a product.
+        "store_listing_links",
+        "store_listing_decisions",
+        "store_link_notices",
         # Gate 2 G2-A (ADR-0016): the durable ReviewItem owner, an index of human work over
         # owner-derived conditions, and its append-only history. References only: no owner value,
         # readiness, verdict or provider content.

@@ -145,6 +145,7 @@ from app.stages.connect.smartstore.keeper import SmartStoreSessionKeeper
 from app.stages.connect.smartstore.service import SmartStoreConnectService
 from app.stages.operate.adoption import CONVENTIONS as ADOPTION_CONVENTIONS
 from app.stages.operate.adoption import AdoptionService, seller_code_of
+from app.stages.operate.catalog.links import ListingLinkService
 from app.stages.operate.catalog.service import StoreCatalogScheduler, StoreCatalogService
 from app.stages.operate.dispatch import DispatchService, dispatch_unit
 from app.stages.operate.fulfillment import FulfillmentService
@@ -364,6 +365,8 @@ class Container:
     listing_sync_scheduler: ListingSyncScheduler
     store_catalog: StoreCatalogService
     store_catalog_scheduler: StoreCatalogScheduler
+    # ADR-0042 S2a: store listing ↔ common product links.
+    store_links: ListingLinkService
     # M6-B (ADR-0023 §4): the supplier stock recheck of listed source products.
     stock_recheck: StockRecheckService
     stock_recheck_scheduler: StockRecheckScheduler
@@ -846,7 +849,9 @@ def build_container(
     )
     registry.register(extension_capture.job_definition())
 
-    products = ProductsService(product_store)
+    # ADR-0042 S2a: the 통합DB search also finds a common product by its linked store listing's
+    # name (the ListingLinks owner below, read at search time).
+    products = ProductsService(product_store, listing_search=lambda text: store_links.search(text))
     # M4 PR-D: pricing per Item and explicit context, and derived product readiness. Neither
     # makes a registration candidate: that is M5's preflight.
     pricing = ProductPricingService(
@@ -1124,6 +1129,56 @@ def build_container(
     store_catalog_scheduler = StoreCatalogScheduler(store_catalog)
     adoption_codes = adoption_conventions()
 
+    def _registered_groups(marketplace_key: str, account: str) -> dict[str, str]:
+        """ADR-0042 §7 REGISTERED_BY_ICBM: origin product → the common product of each ACTIVE,
+        undeleted ICBM registration of the store."""
+        found: dict[str, str] = {}
+        for record in registrations.marketplace_registrations(marketplace_key):
+            if (
+                record.marketplace_account_id != account
+                or record.lifecycle_state is not RegistrationLifecycle.ACTIVE
+                or any(d.deleted for d in registrations.deletions(record.registration_id))
+            ):
+                continue
+            groups = sorted({item.current_group_id for item in record.items})
+            if groups:
+                found[record.marketplace_product_id] = groups[0]
+        return found
+
+    def _adopted_groups(marketplace_key: str) -> dict[str, str]:
+        """ADR-0042 §7 ADOPTED: origin product → its Item's common product, per ACTIVE
+        adoption (ADR-0024), read as a link and never rewritten."""
+        if marketplace_key != "smartstore":
+            return {}
+        found: dict[str, str] = {}
+        with product_store.reading() as unit:
+            for record in adoptions.active():
+                detail = unit.item_detail(record.item_id)
+                if detail is not None:
+                    found[record.marketplace_product_id] = detail.product_group_id
+        return found
+
+    def _overridden(marketplace_key: str, account: str, group: str) -> bool:
+        """Whether an active DuplicateOverride lets the product list twice in the store."""
+        with registrations.reading() as unit:
+            return bool(unit.active_overrides(marketplace_key, account, group))
+
+    # ADR-0042 S2a (§7): which common product each listing of the store is. After each COMPLETE
+    # sync every unlinked listing is linked — strong keys first (with a notice and undo), then a
+    # new 「도매처 미연결」 common product for the rest. Read only towards every marketplace.
+    store_links = ListingLinkService(
+        db=db,
+        clock=clock,
+        audit=audit,
+        catalog=store_catalog,
+        products=product_store,
+        registered=_registered_groups,
+        adopted=_adopted_groups,
+        overridden=_overridden,
+        conventions=adoption_codes,
+    )
+    store_catalog.add_listener(store_links.after_sync)
+
     def _convention_codes(item_ids: Sequence[str]) -> set[str]:
         """ADR-0024 §2: the owner-declared seller code of each Item's source, where one exists."""
         found: set[str] = set()
@@ -1145,6 +1200,8 @@ def build_container(
         mutation_started_at=registrations.last_mutation_started,
         caller=smartstore_caller or SmartStoreEndpointCaller(),
         bearer=committed_bearer,
+        # ADR-0042 S2a (§6): a store listing linked to the unit's product is a duplicate.
+        linked=store_links.linked_groups,
     )
     registration_preparations = RegistrationPreparationService(
         registrations=registrations,
@@ -1501,6 +1558,7 @@ def build_container(
         listing_sync_scheduler=ListingSyncScheduler(listing_sync),
         store_catalog=store_catalog,
         store_catalog_scheduler=store_catalog_scheduler,
+        store_links=store_links,
         auto_images=auto_images,
         common_images=common_images,
         config=config,

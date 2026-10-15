@@ -30,10 +30,12 @@ the verdict, the matches, the keys checked and the contract version — never th
 time, so a re-sync that finds the same thing keeps the ASSET and CREATE stages on one fingerprint.
 Freshness is checked again on every read, which is how send time checks it.
 
-Links of S2a do not exist yet: a listing ICBM registered or adopted for the unit's groups is a
-duplicate by REGISTER's own checks (``LIVE_REGISTRATION_EXISTS``, ``ADOPTED_LISTING_EXISTS``). GTIN
-and brand + model are not checked: no member GTIN fact and no catalog model or brand field exists,
-so neither key is claimed as checked (a policy that requires one stays ``INCOMPLETE``).
+**Links (S2a).** A listing **linked** to one of the unit's common products — by any link kind,
+the ICBM registration and the adoption included (ADR-0042 §7) — is a ``MATCH``, strong
+(``LISTING_LINK``): one listing per product and store. A listing ICBM registered or adopted is also
+a duplicate by REGISTER's own checks (``LIVE_REGISTRATION_EXISTS``, ``ADOPTED_LISTING_EXISTS``).
+GTIN and brand + model are not checked: no member GTIN fact and no catalog model or brand field
+exists, so neither key is claimed as checked (a policy that requires one stays ``INCOMPLETE``).
 """
 
 import logging
@@ -109,6 +111,7 @@ class CatalogDuplicateSource:
         mutation_started_at: Callable[[str, str], datetime | None],
         refresh: Callable[[], bool],
         spot: ReconcileLookup | None = None,
+        linked: Callable[[str, str], Mapping[str, str]] | None = None,
     ) -> None:
         self._marketplace_key = marketplace_key
         self._contract_version = contract_version
@@ -122,6 +125,8 @@ class CatalogDuplicateSource:
         # The automatic pre-registration sync; True while a sync runs.
         self._refresh = refresh
         self._spot = spot
+        # ADR-0042 S2a: origin product → common product, for every listing link of a store.
+        self._linked = linked
         # A finished COMPLETE run never changes, so its index is kept per run.
         self._index_lock = threading.Lock()
         self._index_run: str | None = None
@@ -155,8 +160,20 @@ class CatalogDuplicateSource:
                 "state": state,
                 "run": None if run is None else run.run_id,
                 "mutation": None if mutation is None else mutation.isoformat(),
+                # A link moves an answer as much as a sync does (ADR-0042 §6, S2a).
+                "links": sorted(self._links(account).items()),
             }
         )
+
+    def _links(self, account: str) -> Mapping[str, str]:
+        if self._linked is None:
+            return {}
+        try:
+            return self._linked(self._marketplace_key, account)
+        except Exception:
+            # Without the links nothing is claimed about them: the check names no link key.
+            logger.warning("operate.catalog_duplicate_links_failed", exc_info=True)
+            return {}
 
     def check(
         self, unit: DuplicateUnit, *, spot_check: bool = False, resync: bool = True
@@ -197,9 +214,13 @@ class CatalogDuplicateSource:
         if index is None:
             # Another sync completed while this one was read: never mix two runs, never guess.
             return DuplicateCheck(None, DUPLICATE_EVIDENCE_UNAVAILABLE, as_of=run.as_of)
+        groups = set(unit.group_ids)
+        links = self._links(account) if self._linked is not None else {}
         found: dict[str, MatchedListing] = {}
         for listing in index:
-            if listing.codes & codes:
+            if links.get(listing.origin_product_no) in groups:
+                kind = DuplicateKeyKind.LISTING_LINK
+            elif listing.codes & codes:
                 kind = DuplicateKeyKind.SELLER_CODE
             elif name_key is not None and listing.name_key == name_key:
                 kind = DuplicateKeyKind.NORMALIZED_NAME
@@ -212,7 +233,7 @@ class CatalogDuplicateSource:
             known = {listing.origin_product_no: listing for listing in index}
             for origin in self._spot_hits(account, unit.listing_identity):
                 shown = found.get(origin)
-                if shown is not None and shown.key_kind is DuplicateKeyKind.SELLER_CODE:
+                if shown is not None and shown.key_kind is not DuplicateKeyKind.NORMALIZED_NAME:
                     continue
                 seen = known.get(origin)
                 found[origin] = MatchedListing(
@@ -224,11 +245,13 @@ class CatalogDuplicateSource:
         keys = frozenset(
             {DuplicateKeyKind.SELLER_CODE}
             | ({DuplicateKeyKind.NORMALIZED_NAME} if name_key is not None else set())
+            | ({DuplicateKeyKind.LISTING_LINK} if self._linked is not None else set())
         )
         matched = tuple(
             sorted(
                 found.values(),
                 key=lambda m: (
+                    m.key_kind is not DuplicateKeyKind.LISTING_LINK,
                     m.key_kind is not DuplicateKeyKind.SELLER_CODE,
                     m.marketplace_product_id,
                 ),

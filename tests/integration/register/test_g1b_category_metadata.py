@@ -637,6 +637,10 @@ def test_0020_is_additive_and_its_downgrade_fails_closed(tmp_path: Path) -> None
         "store_catalog_memberships",
         "store_catalog_observations",
         "store_catalog_listing_endings",
+        # ADR-0042 S2a (0068): the ListingLinks owner.
+        "store_listing_links",
+        "store_listing_decisions",
+        "store_link_notices",
     }
     command.upgrade(alembic_config(url), "head")
     assert _tables(tmp_path / "icbm.db") == before

@@ -320,6 +320,8 @@ class StoreCatalogService:
         self._lock = threading.Lock()
         # The search and origin-read shape recorders of the running operator sync, or None.
         self._shapes: tuple[ShapeRecorder, ShapeRecorder] | None = None
+        # Called with each finished run, after the sync lock is released (add_listener).
+        self._listeners: list[Callable[[CatalogRunView], None]] = []
 
     @property
     def marketplace_key(self) -> str:
@@ -395,13 +397,15 @@ class StoreCatalogService:
             self._shapes = (ShapeRecorder(), ShapeRecorder()) if full else None
             run_id = self._start(account, trigger, correlation_id, full)
             try:
-                return self._pass(run_id, account, full, minimal=trigger == PRE_REGISTRATION)
+                view = self._pass(run_id, account, full, minimal=trigger == PRE_REGISTRATION)
             except BaseException:
                 self._finish(run_id, INTERRUPTED, SYNC_INTERRUPTED)
                 raise
         finally:
             self._shapes = None
             self._lock.release()
+        self._notify(view)
+        return view
 
     def _pass(
         self, run_id: str, account: str, full: bool, *, minimal: bool = False
@@ -807,6 +811,34 @@ class StoreCatalogService:
                 self._listing_view(session, row, members, enumerated=latest is not None)
                 for row in self._store_listings(session, account)
             )
+
+    def listing_views(self, listing_ids: Iterable[str]) -> tuple[CatalogListingView, ...]:
+        """These listings of the bound store, derived exactly as :meth:`listings` derives them —
+        for a screen that shows a few (the 통합DB rows, ADR-0042 S2a)."""
+        account = self.account()
+        wanted = set(listing_ids)
+        if account is None or not wanted:
+            return ()
+        with self._db.read() as session:
+            latest = self._last(session, account, enumerated=True)
+            members = self._members(session, latest)
+            return tuple(
+                self._listing_view(session, row, members, enumerated=latest is not None)
+                for row in self._store_listings(session, account)
+                if row.listing_id in wanted
+            )
+
+    def add_listener(self, listener: Callable[[CatalogRunView], None]) -> None:
+        """Call ``listener`` with every finished sync, after it finished (ADR-0042 S2a: the
+        ListingLinks pass runs after each COMPLETE sync). A listener never changes the run."""
+        self._listeners.append(listener)
+
+    def _notify(self, run: CatalogRunView) -> None:
+        for listener in tuple(self._listeners):
+            try:
+                listener(run)
+            except Exception:
+                logger.exception("operate.catalog_listener_failed", extra={"run_id": run.run_id})
 
     def freshness(
         self,

@@ -19,7 +19,7 @@ stays true. What replaces the always-unavailable lookup is not a search: it is t
   for ADR-0014 §10/§14/§28 and never frees an ``UNKNOWN`` conflict scope (SCP-05).
 """
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import Any, Final
 
@@ -41,8 +41,10 @@ def smartstore_duplicate_source(
     mutation_started_at: Callable[[str, str], datetime | None],
     caller: SmartStoreEndpointCaller,
     bearer: Any,
+    linked: Callable[[str, str], Mapping[str, str]] | None = None,
 ) -> CatalogDuplicateSource:
-    """The production SmartStore duplicate source (composition root)."""
+    """The production SmartStore duplicate source (composition root). ``linked`` is the
+    ListingLinks owner's read (ADR-0042 S2a): a listing linked to the unit's product matches."""
     return CatalogDuplicateSource(
         marketplace_key=MARKETPLACE_KEY,
         contract_version=LOOKUP_CONTRACT_VERSION,
@@ -52,6 +54,7 @@ def smartstore_duplicate_source(
         mutation_started_at=mutation_started_at,
         refresh=refresh,
         spot=SmartStoreReconcileLookup(caller=caller, bearer=bearer),
+        linked=linked,
     )
 
 

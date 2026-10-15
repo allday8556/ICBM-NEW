@@ -40,16 +40,23 @@ SATISFYING: frozenset[Provenance] = frozenset(
 
 class DuplicateKeyKind(StrEnum):
     """The provider lookup keys of the duplicate preflight (ADR-0014 §13). A normalized name is
-    only a weaker signal."""
+    only a weaker signal. ``LISTING_LINK`` (ADR-0042 §6, S2a) is a store listing already linked to
+    the unit's common product: one listing per product and store, so it is strong."""
 
     SELLER_CODE = "SELLER_CODE"
     GTIN = "GTIN"
     OFFICIAL_KEY = "OFFICIAL_KEY"
     NORMALIZED_NAME = "NORMALIZED_NAME"
+    LISTING_LINK = "LISTING_LINK"
 
 
 STRONG_KEYS: frozenset[DuplicateKeyKind] = frozenset(
-    {DuplicateKeyKind.SELLER_CODE, DuplicateKeyKind.GTIN, DuplicateKeyKind.OFFICIAL_KEY}
+    {
+        DuplicateKeyKind.SELLER_CODE,
+        DuplicateKeyKind.GTIN,
+        DuplicateKeyKind.OFFICIAL_KEY,
+        DuplicateKeyKind.LISTING_LINK,
+    }
 )
 
 # ADR-0042 §5.2 (owner 6190978708 Q1): a COMPLETE store-catalog snapshot is duplicate evidence for

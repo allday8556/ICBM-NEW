@@ -167,6 +167,15 @@ A `SourceProduct` is a `CONFIRMED` member of **at most one** group at a time.
 - It follows the Item-level rules of v3.1 §6.5–§6.7: no automatic deletion or deactivation, and the survivor is chosen by the operator.
 - M4 does not have to automate cross-supplier merging, but any merge or split it performs obeys this section.
 
+> **Amendment note (ADR-0042 §13, effective with S2a).** A group may exist with zero `CONFIRMED`
+> members when the ListingLinks owner creates it for an imported store listing (ADR-0042 §7,
+> 「도매처 미연결」). It has no membership revision and no Item until a supplier member joins
+> (S3a), so no readiness derives for it and no registration target selects it. The S2a MERGE retires
+> only a group with no `CONFIRMED` member and no Item, into the survivor the seller chooses, with a
+> `GroupChangeEvent`; a merge that would move a `CONFIRMED` member is not performed by S2a.
+> Materialization consulting linked groups and members before it creates a group is S3a's part of
+> this amendment.
+
 ### 5. `ListingComposition` and the product-side `Item`
 
 **`ListingComposition`** is the seller-chosen sellable multiplicity. It is not a supplier quantity tier and not intrinsic product identity (v3.1 §2.3).

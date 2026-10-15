@@ -226,16 +226,23 @@ snapshot; `integrations/marketplaces/smartstore/lookup.py` now composes it with 
 check), the editor's duplicate row `ui/web/js/components/duplicate-row.js` and three integration
 suites; `catalog_max_age` moved into the target policy, and a CREATE re-checks the snapshot at
 send time, waiting for the re-sync after ICBM's own change.
+ADR-0042 S2a added the ListingLinks owner in `app/stages/operate/catalog/` (`keys.py`, the
+strong keys and weak signals; `link_models.py`; `links.py`, the post-sync pass that links each
+listing or gives it its own 「도매처 미연결」 common product, the proposals, 「같은 상품」 /
+「다른 상품」, unlink and the MERGE of an empty product), migration `0068_store_listing_links`,
+the 통합DB component `ui/web/js/components/store-links.js`, one unit and two integration suites;
+the duplicate row's 「같은 상품으로 연결」 is live, and a listing linked to the unit's product is a
+`LISTING_LINK` duplicate.
 
 | path | files | role |
 | --- | --- | --- |
 | `.github/` | 1 | CI workflow |
 | `.github/workflows/` | 1 |  |
-| `app/` | 417 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
+| `app/` | 421 | runtime application (composition root: `__init__`, `__main__`, `config`, `container`, `main`) |
 | `app/capabilities/` | 84 | supporting capabilities: audit, jobs, review, live_safety, ai, detail_guidance, image_studio |
 | `app/interface/` | 32 | operator surfaces: HTTP api, screens, cli |
-| `app/platform/` | 97 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
-| `app/stages/` | 199 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
+| `app/platform/` | 98 | platform services: core (errors, clock, ownership, egress, code identity), db, system |
+| `app/stages/` | 202 | the product spine CONNECT → COLLECT → PRODUCT DB → REGISTER → OPERATE |
 | `automation/` | 94 | tooling outside the runtime |
 | `automation/acceptance/` | 67 | acceptance harnesses by campaign; `common/` is the shared offline core |
 | `automation/adaptive/` | 10 | Adaptive Phase C campaign harness |
@@ -257,13 +264,13 @@ send time, waiting for the re-sync after ICBM's own change.
 | `integrations/` | 120 | adapters: suppliers and marketplaces |
 | `integrations/marketplaces/` | 46 |  |
 | `integrations/suppliers/` | 68 | the KM통상 package, platform templates (`platforms/`) and site configurations (`sites/`, ADR-0030) |
-| `tests/` | 451 | tests |
+| `tests/` | 455 | tests |
 | `tests/contracts/` | 21 | repository-rule and document-contract tests |
 | `tests/fixtures/` | 33 | test fixtures (byte-pinned) |
 | `tests/harness/` | 30 | tests of the acceptance harnesses |
-| `tests/integration/` | 187 | integration tests by runtime owner |
+| `tests/integration/` | 189 | integration tests by runtime owner |
 | `tests/support/` | 16 | shared test support |
-| `tests/unit/` | 162 | unit tests by runtime owner |
-| `ui/` | 77 | operator clients: the served web client and the capture extension |
+| `tests/unit/` | 164 | unit tests by runtime owner |
+| `ui/` | 78 | operator clients: the served web client and the capture extension |
 | `ui/extension/` | 9 | the Chrome MV3 capture extension (ADR-0019): transport and capture UX only, plain ES modules, no build step |
-| `ui/web/` | 68 | the served web client |
+| `ui/web/` | 69 | the served web client |

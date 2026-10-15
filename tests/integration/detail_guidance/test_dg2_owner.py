@@ -93,6 +93,10 @@ LATER_TABLES = frozenset(
         "store_catalog_memberships",
         "store_catalog_observations",
         "store_catalog_listing_endings",
+        # ADR-0042 S2a (0068): the ListingLinks owner.
+        "store_listing_links",
+        "store_listing_decisions",
+        "store_link_notices",
     }
 )
 TOP: dict[str, Any] = {"blocks": [{"heading": "당일발송", "lines": ["12시 이전 주문시 당일발송"]}]}
