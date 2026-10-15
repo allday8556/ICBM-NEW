@@ -542,9 +542,7 @@ def _coupang_bind_saved_delivery(
         candidate = candidates[0]
         candidate_revision = candidate.current
         assert candidate_revision is not None
-        current = container.target_policies.policy(
-            "smartstore", candidate.marketplace_account_id
-        )
+        current = container.target_policies.policy("smartstore", candidate.marketplace_account_id)
         if (
             current.current is None
             or current.inputs is None
@@ -554,9 +552,7 @@ def _coupang_bind_saved_delivery(
         ):
             print("COUPANG_SAVED_DELIVERY_REVISION_MOVED", file=sys.stderr)
             return 1
-        CoupangLivePreflightStore(
-            container.secrets
-        ).bind_legacy_account_values_from_saved_courier(
+        CoupangLivePreflightStore(container.secrets).bind_legacy_account_values_from_saved_courier(
             credentials=credentials,
             delivery_company_code=current.inputs.delivery_policy.delivery_company,
         )

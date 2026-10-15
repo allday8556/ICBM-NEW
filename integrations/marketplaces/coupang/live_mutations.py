@@ -640,9 +640,7 @@ class CoupangTestProductMutationRun:
             )
         proof_age = now - proof.verified_at
         if proof_age < timedelta(0) or proof_age > PROVIDER_READ_PROOF_TTL:
-            raise CoupangLiveMutationError(
-                ErrorClass.POLICY_BLOCKED, "COUPANG_CANARY_PROOF_STALE"
-            )
+            raise CoupangLiveMutationError(ErrorClass.POLICY_BLOCKED, "COUPANG_CANARY_PROOF_STALE")
         age = now - self._clock_preflight.checked_at
         if age < timedelta(0) or age > CLOCK_PREFLIGHT_TTL:
             raise CoupangLiveMutationError(
@@ -1527,9 +1525,7 @@ class CoupangAmbiguousCreateRecovery(CoupangTestProductMutationRun):
             )
         proof_age = now - proof.verified_at
         if proof_age < timedelta(0) or proof_age > PROVIDER_READ_PROOF_TTL:
-            raise CoupangLiveMutationError(
-                ErrorClass.POLICY_BLOCKED, "COUPANG_CANARY_PROOF_STALE"
-            )
+            raise CoupangLiveMutationError(ErrorClass.POLICY_BLOCKED, "COUPANG_CANARY_PROOF_STALE")
         age = now - self._clock_preflight.checked_at
         if age < timedelta(0) or age > CLOCK_PREFLIGHT_TTL:
             raise CoupangLiveMutationError(
