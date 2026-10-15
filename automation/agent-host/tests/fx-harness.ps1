@@ -1400,7 +1400,16 @@ if ($orchestratorExpect.ContainsKey($Scenario)) {
     # invariants of every control-loop scenario: no forbidden GitHub write, the user's repository untouched,
     # and a run never waits for the user unless the scenario says so
     if (@($global:FxCalls | Where-Object { $_ -like "FORBIDDEN*" -or $_ -like "UNHANDLED*" }).Count -gt 0) { $failed.Add("forbidden_or_unhandled_gh_call") }
-    if (($before | ConvertTo-Json) -ne ($after | ConvertTo-Json)) { $failed.Add("user_repo_changed") }
+    # case-sensitive: a renamed file or a re-cased ref is a change. A failure names the snapshot fields that changed and
+    # prints what left and what appeared in each, so a runner that differs says what the Host touched.
+    $userChanged = @($before.PSObject.Properties.Name | Where-Object { "$($before.$_)" -cne "$($after.$_)" })
+    if ($userChanged.Count -gt 0) {
+        $failed.Add("user_repo_changed:" + ($userChanged -join ","))
+        foreach ($k in $userChanged) {
+            $was = @("$($before.$k)" -split '\|'); $now = @("$($after.$k)" -split '\|')
+            Write-Host "HARNESS_USER_REPO_DIFF=$k gone=[$(@($was | Where-Object { $_ -cnotin $now }) -join '|')] new=[$(@($now | Where-Object { $_ -cnotin $was }) -join '|')]"
+        }
+    }
     if ($logText -match '(?m)^HUMAN_HOLD=') { $failed.Add("legacy_HUMAN_HOLD_line") }
     if ("$($runtime.hold_class)" -ne $wantClass) { $failed.Add("hold_class=$($runtime.hold_class)(want $wantClass)") }
     $global:FxChecks.expect = if ($failed.Count -eq 0) { "PASS" } else { "FAIL:" + ($failed -join ";") }
@@ -1413,7 +1422,7 @@ $result = [ordered]@{
     runtime_action = $runtime.action
     runtime_pr = $runtime.current_pr
     runtime_auto_merge = $runtime.auto_merge
-    user_repo_unchanged = (($before | ConvertTo-Json) -eq ($after | ConvertTo-Json))
+    user_repo_unchanged = (($before | ConvertTo-Json) -ceq ($after | ConvertTo-Json))
     user_branch = $after.Branch
     user_status = $after.Status
     origin_main_before = $originMainBefore

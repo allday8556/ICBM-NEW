@@ -422,14 +422,25 @@ function Publish-WorktreeCommit {
     $newHead = "$(Invoke-Git @('-C', $Worktree, 'rev-parse', 'HEAD'))".Trim()
 
     # fast-forward push만 허용 (remote가 움직였으면 거부된다).
-    # remote 이름 대신 URL로 push → 사용자 repo의 refs/remotes/origin/* 도 갱신하지 않는다.
+    # remote 이름 대신 URL로 push → 사용자 repo의 refs/remotes/* 도 갱신하지 않는다.
     $pushUrl = "$(Invoke-Git @('-C', $repoPath, 'remote', 'get-url', '--push', 'origin'))".Trim()
 
     if (-not $pushUrl) {
         return "HOLD:PUSH_URL_NOT_FOUND"
     }
 
-    Invoke-Git @("-C", $Worktree, "push", "--quiet", $pushUrl, "HEAD:refs/heads/$Branch") | Out-Null
+    # git 2.56부터 URL push도, push URL이 그 URL과 같은 설정된 remote가 하나뿐이면 그 remote의
+    # remote-tracking branch를 갱신한다 (git 24e4e2ef8b, hn/url-push-tracking). worktree는 사용자 repo와
+    # ref를 공유하므로 이 push 한 번 동안만 모든 remote의 push URL을 비우고 어떤 URL과도 같지 않은 값으로
+    # 바꾼다 (빈 값은 목록을 비운다). 일치하는 remote가 없으니 사용자의 refs/remotes/* 는 그대로다.
+    $noTracking = @()
+    $remotes = @(Invoke-Git @("-C", $repoPath, "remote") | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+
+    foreach ($remote in $remotes) {
+        $noTracking += @("-c", "remote.$remote.pushurl=", "-c", "remote.$remote.pushurl=https://127.0.0.1:1/icbm-agent-host-no-tracking")
+    }
+
+    Invoke-Git (@("-C", $Worktree) + $noTracking + @("push", "--quiet", $pushUrl, "HEAD:refs/heads/$Branch")) | Out-Null
 
     if ($LASTEXITCODE -ne 0) {
         return "HOLD:GIT_PUSH_FAILED"
