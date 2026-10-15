@@ -6,7 +6,8 @@ revision, creates its identity, fingerprint, review provenance and audit record,
 current; a route never computes any of that. Every other Settings field stays read-only because no
 save contract exists for it.
 
-No route here reaches a provider or a marketplace: both are local, operator-recorded truth.
+No route here reaches a provider or a marketplace: both are local, operator-recorded truth. The
+fee reference table is local read-only reference data the form fills from (never saved here).
 """
 
 from fastapi import APIRouter, Query
@@ -20,6 +21,7 @@ from app.stages.register.category_metadata import (
     CategoryMetadataView,
     RecordRevisionRequest,
 )
+from app.stages.register.fee_reference import FeeReferenceView, fee_reference
 from app.stages.register.target_policy import (
     AppendRevisionRequest,
     TargetPolicyAccountsView,
@@ -67,6 +69,13 @@ def append_revision(
         request,
         correlation_id=get_correlation_id() or new_correlation_id(),
     )
+
+
+@router.get("/fee-reference/{marketplace_key}")
+def fee_reference_table(marketplace_key: str) -> FeeReferenceView:
+    """The read-only fee reference table the target-policy form fills its fee fields from:
+    reference values with their version, reference date and sources, never a saved fee."""
+    return fee_reference(marketplace_key)
 
 
 @router.get("/category-metadata/{marketplace_key}")

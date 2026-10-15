@@ -1274,6 +1274,19 @@ label.kv > [data-prefill] {
   background: var(--color-input);
 }
 
+/* A fee rate with its 참고값 / 직접 입력 mark beside it (target policy fee preset). */
+.fee-input {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  min-width: 0;
+}
+
+.fee-input input {
+  flex: 1 1 96px;
+}
+
 .collect-submit .note,
 .collect-run .note,
 .collect-handoff {

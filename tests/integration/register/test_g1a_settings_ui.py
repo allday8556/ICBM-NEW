@@ -48,7 +48,6 @@ TABLES = (
 VALUES = {
     "taxonomy_revision": "taxonomy-ui-1",
     "sanitizer_profile_version": "sanitizer-ui-1",
-    "fee_rate": "0.055",
     "fee_fixed_krw": "0",
     "other_cost_rate": "0",
     "other_cost_fixed_krw": "0",
@@ -56,6 +55,10 @@ VALUES = {
     "min_images": "1",
     "max_images": "10",
 }
+# 2026-10-16: the fee rate is never typed; the seller picks a fee preset and the two parts fill
+# from the server's reference table (판매수수료 3.003% + 주문관리수수료 3.63% = 6.633%).
+PRESET = {"fee_store_type": "SMART_STORE", "fee_seller_grade": "GENERAL"}
+REFERENCE = "smartstore-fees-20251001"
 DELIVERY = {
     "base_fee_krw": "3000",
     "return_delivery_fee_krw": "3000",
@@ -136,10 +139,18 @@ def _fill_delivery(page: Page, account: str, values: dict[str, str]) -> None:
     editor.locator("[data-policy-field='physical_delivery']").check()
 
 
+def _pick_preset(page: Page, account: str, preset: dict[str, str]) -> None:
+    editor = page.locator(_editor(account))
+    editor.locator(f"[data-fee-reference='{REFERENCE}']").wait_for(timeout=10_000)
+    for name, value in preset.items():
+        editor.locator(f"[data-policy-field='{name}']").select_option(value)
+
+
 def _fill(page: Page, account: str, values: dict[str, str]) -> None:
     editor = page.locator(_editor(account))
     for name, value in values.items():
         editor.locator(f"[data-policy-field='{name}']").fill(value)
+    _pick_preset(page, account, PRESET)
     editor.locator("[data-policy-field='templates']").fill(
         "shipping=shipping-template-ui\nreturns=returns-template-ui"
     )
@@ -229,7 +240,7 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
         target = restarted.registration_preflight.target_policy(MARKETPLACE, account)
         assert target is not None and target.policy_revision == current.policy_revision
         # The delivery save kept the policy tab's values whole.
-        assert target.pricing_context.fee_rate == "0.055"
+        assert target.pricing_context.fee_rate == "0.06633"
         assert target.delivery_policy is not None
         assert target.delivery_policy.shipping_address_id == 200441202
         assert target.delivery_policy.return_address_id == 200401837
@@ -392,3 +403,62 @@ def test_the_taxonomy_is_aligned_to_the_naver_catalog_only_after_the_seller_conf
             _save(page, account, 1)
         target = served.registration_preflight.target_policy(MARKETPLACE, account)
         assert target is not None and target.taxonomy_revision == latest
+
+
+def test_the_fee_preset_fills_the_fees_and_marks_what_the_seller_changed(
+    browser: Browser, config: AppConfig
+) -> None:
+    writes: list[tuple[str, str]] = []
+    with _served(config) as client:
+        served: Container = client.app.state.container  # type: ignore[attr-defined]
+        account = establish(served, config, MARKETPLACE, "uid-smartstore-1")
+        with _page(browser, client, POLICY_TAB, _editor(account), writes) as page:
+            editor = page.locator(_editor(account))
+            # The free-typed fee rate is gone: the rate is composed from the preset.
+            assert editor.locator("[data-policy-field='fee_rate']").count() == 0
+            _fill(page, account, VALUES)
+            sales = editor.locator("[data-policy-field='sales_fee_percent']")
+            order = editor.locator("[data-policy-field='order_fee_percent']")
+            assert (sales.input_value(), order.input_value()) == ("3.003", "3.63")
+            total = editor.locator("[data-fee-total]")
+            assert total.get_attribute("data-fee-total") == "0.06633"
+            assert "판매수수료 3.003% + 주문관리수수료 3.63% = 6.633%" in total.inner_text()
+            for name in ("sales_fee_percent", "order_fee_percent"):
+                mark = editor.locator(f"[data-fee-source='{name}']")
+                assert mark.get_attribute("data-fee-state") == "REFERENCE"
+                assert mark.inner_text() == "참고값"
+            # 참고값 · 기준일 · 출처, and the line telling the seller to fix a different notice.
+            reference = editor.locator(f"[data-fee-reference='{REFERENCE}']").inner_text()
+            assert "참고값 · 기준일 2025-10-01" in reference
+            assert "네이버 공식 공지가 아닙니다" in reference
+            notice = editor.locator("[data-fee-hint='notice']").inner_text()
+            assert "판매자센터 공지와 다르면 직접 고쳐 주세요" in notice
+            shipping = editor.locator("[data-fee-hint='shipping']").inner_text()
+            assert "건당 기타 비용" in shipping and "≈ 109원" in shipping
+            # Another grade fills its own reference value; a changed number is 직접 입력.
+            editor.locator("[data-policy-field='fee_seller_grade']").select_option("SMALL")
+            assert order.input_value() == "1.947"
+            order.fill("1.9")
+            mark = editor.locator("[data-fee-source='order_fee_percent']")
+            assert mark.get_attribute("data-fee-state") == "MANUAL"
+            assert mark.inner_text() == "직접 입력"
+            assert total.get_attribute("data-fee-total") == "0.04903"
+            assert writes == []
+            _save(page, account, 1)
+            # A reload shows the saved preset again, the changed number still marked.
+            page.reload()
+            page.wait_for_selector(f"{_editor(account)} [data-fee-reference='{REFERENCE}']")
+            grade = editor.locator("[data-policy-field='fee_seller_grade']")
+            assert grade.input_value() == "SMALL"
+            assert order.input_value() == "1.9"
+            assert mark.get_attribute("data-fee-state") == "MANUAL"
+        stored = served.target_policies.policy(MARKETPLACE, account).inputs
+        assert stored is not None and stored.fee_preset is not None
+        assert stored.pricing_context.fee_rate == "0.04903"
+        assert stored.fee_preset.model_dump(mode="json") == {
+            "store_type": "SMART_STORE",
+            "seller_grade": "SMALL",
+            "reference_version": REFERENCE,
+            "sales_fee_rate": "0.03003",
+            "order_fee_rate": "0.019",
+        }

@@ -58,6 +58,7 @@ from app.stages.products.pricing import digest as pricing_digest
 from app.stages.products.sales_policy import SALES_POLICY_SURFACE
 from app.stages.register import sanitize
 from app.stages.register.authoring_revisions import AuthoringRevisionStore
+from app.stages.register.fee_reference import SellerGrade, StoreType, has_reference
 from app.stages.register.model import RegistrationConflictError, canonical_json, sanitized_digest
 from app.stages.register.policy import AssetPolicy, DeliveryPolicy, DuplicateKeyKind, TargetPolicy
 from app.stages.register.target_policy_models import (
@@ -137,6 +138,28 @@ class PricingContextInputView(_Strict):
     price_rounding: Rounding
 
 
+class FeePresetView(_Strict):
+    """The fee preset the seller picked on the form (2026-10-16 owner direction), kept only so the
+    form shows it again. It never prices anything: ``pricing_context.fee_rate`` stays the one rate
+    the pricing owner reads.
+
+    The pricing rule charges ``ceil(fee_rate × sale price) + fee_fixed_krw``
+    (``PricingContextInput.platform_fee``). Both SmartStore rates are a percentage of the payment,
+    so they compose as one total: ``fee_rate = sales_fee_rate + order_fee_rate`` (판매수수료 +
+    네이버페이 주문관리수수료, VAT included), and the preset adds no fixed fee. A save whose parts
+    do not add up to exactly the saved ``fee_rate`` is refused.
+
+    ``store_type`` and ``seller_grade`` are ``None`` when the seller has not picked one; the two
+    rates are then the seller's own numbers. ``reference_version`` names the reference table
+    (``app.stages.register.fee_reference``) the form filled the rates from, or ``None``."""
+
+    store_type: StoreType | None
+    seller_grade: SellerGrade | None
+    reference_version: StrictStr | None
+    sales_fee_rate: StrictStr
+    order_fee_rate: StrictStr
+
+
 class AssetPolicyView(_Strict):
     profile: StrictStr
     min_images: StrictInt
@@ -186,6 +209,9 @@ class TargetPolicyInputsView(_Strict):
     # The seller's A/S contact the CREATE endpoint requires (afterServiceInfo), confirmed by the
     # operator once per account. Older revisions omit it; the wire then reads the notice's.
     after_service_telephone: StrictStr | None = None
+    # The fee preset the seller picked (2026-10-16). Older revisions omit it; the form then shows
+    # the saved fee_rate as the seller's own number.
+    fee_preset: FeePresetView | None = None
     templates: dict[StrictStr, StrictStr]
     duplicate_proof_required: StrictBool
     duplicate_lookup_keys: list[DuplicateKeyKind]
@@ -244,6 +270,31 @@ def _label(value: str, field: str) -> str:
     return value
 
 
+def _check_fee_preset(marketplace_key: str, preset: FeePresetView, fee_rate: str) -> None:
+    """Refuse a fee preset that is not this marketplace's, or whose two rates do not add up to
+    exactly the saved ``fee_rate`` (see :class:`FeePresetView`)."""
+    field = "fee_preset"
+    if not has_reference(marketplace_key):
+        raise _invalid(
+            TARGET_POLICY_PRICING_CONTEXT_INVALID,
+            "this marketplace has no fee preset; save its fee rate alone",
+            field,
+        )
+    if preset.reference_version is not None:
+        _label(preset.reference_version, f"{field}.reference_version")
+    try:
+        parts = rate(preset.sales_fee_rate) + rate(preset.order_fee_rate)
+        matches = parts == rate(fee_rate)
+    except PricingError as refused:
+        raise _invalid(TARGET_POLICY_PRICING_CONTEXT_INVALID, str(refused), field) from refused
+    if not matches:
+        raise _invalid(
+            TARGET_POLICY_PRICING_CONTEXT_INVALID,
+            "the fee rate is the sales fee plus the order management fee",
+            field,
+        )
+
+
 def encode_content(
     marketplace_key: str, marketplace_account_id: str, inputs: TargetPolicyInputsView
 ) -> dict[str, Any]:
@@ -266,6 +317,9 @@ def encode_content(
         raise _invalid(
             TARGET_POLICY_PRICING_CONTEXT_INVALID, str(refused), "pricing_context"
         ) from refused
+    preset = inputs.fee_preset
+    if preset is not None:
+        _check_fee_preset(marketplace_key, preset, pricing.fee_rate)
     asset = inputs.asset_policy
     if asset.min_images < 0 or asset.max_images < 1 or asset.min_images > asset.max_images:
         raise _invalid(
@@ -361,6 +415,7 @@ def encode_content(
         "delivery_policy": None if delivery is None else delivery.model_dump(mode="json"),
         # Named only when set, so a revision without it keeps its exact earlier content.
         **({} if phone is None else {"after_service_telephone": phone}),
+        **({} if preset is None else {"fee_preset": preset.model_dump(mode="json")}),
         "templates": dict(sorted(templates.items())),
         "duplicate_proof_required": inputs.duplicate_proof_required,
         "duplicate_lookup_keys": sorted(keys),
