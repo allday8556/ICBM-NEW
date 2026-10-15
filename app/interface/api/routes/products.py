@@ -6,7 +6,8 @@ with no price, no readiness and no marketplace shape.
 
 G1-C adds the operator's list, detail and registration-target check. Every one is a GET: the
 selection check revalidates what the operator chose and records nothing. The operator's image
-decisions have their own routes (``product_images.py``).
+decisions have their own routes (``product_images.py``). ADR-0039 adds the note a sales-policy
+warning quotes: the supplier and its own words, read, never decided.
 """
 
 from typing import Annotated
@@ -21,6 +22,7 @@ from app.stages.products.contracts import (
     RegistrationTargetView,
     product_view,
 )
+from app.stages.products.sales_policy_notes import SalesPolicyNotes, SalesPolicyNoteView
 
 router = APIRouter(tags=["products"])
 
@@ -60,3 +62,11 @@ def product_of_source(
     supplier_key: str, source_product_id: str, container: ContainerDep
 ) -> ProductView:
     return product_view(container.products.product_of_source(supplier_key, source_product_id))
+
+
+@router.get("/api/v1/products/items/{item_id}/sales-policy-note")
+def sales_policy_note(item_id: str, container: ContainerDep) -> SalesPolicyNoteView:
+    """ADR-0039 §2, §3: the supplier and its own words that a policy-not-applied warning on this
+    Item quotes. A read only: it decides no warning and changes no preparation. Stateless over
+    the Product store and the supplier catalog's names, so it is made per request."""
+    return SalesPolicyNotes(container.product_store, container.supplier_names).note(item_id)
