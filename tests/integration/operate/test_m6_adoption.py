@@ -283,6 +283,11 @@ def test_stock_recheck_lists_the_adopted_source(
     listed = container.stock_recheck.listed_sources()
     (source,) = [s for s in listed if s.source_product_id == "287"]
     assert source.adoption_ids and source.registration_ids == ()
+    # No registration names it, so the 품절확인 row reads the source's own confirmed name.
+    (state,) = [
+        s for s in container.stock_recheck.overview().sources if s.source_product_id == "287"
+    ]
+    assert state.product_name == "생들기름 350ml"
 
 
 def test_an_order_of_an_adopted_listing_stays_unmatched_and_is_linked(
