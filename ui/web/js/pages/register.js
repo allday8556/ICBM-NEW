@@ -901,6 +901,9 @@ export function authoringForm(unit, onDone) {
     prefill(found);
   }
 
+  // One read per category: a save pressed while the first read is still in flight waits for that
+  // same read, so the fields are built once and what the operator typed is never rebuilt away.
+  let pending = null;
   async function loadMetadata() {
     const categoryId = categoryControl.value.trim();
     if (!categoryId) {
@@ -909,12 +912,21 @@ export function authoringForm(unit, onDone) {
       return null;
     }
     if (metadata?.category_id === categoryId) return metadata;
-    const found = await getJson(
+    if (pending?.categoryId === categoryId) return pending.read;
+    const read = getJson(
       `/api/v1/register/drafts/${unit.draft_id}/authoring-metadata/${encodeURIComponent(categoryId)}`,
-    );
-    picker.setProblem(null);
-    renderMetadata(found);
-    return found;
+    ).then((found) => {
+      // A category chosen meanwhile has its own read; this one no longer owns the fields.
+      if (categoryControl.value.trim() === categoryId) {
+        picker.setProblem(null);
+        renderMetadata(found);
+      }
+      return found;
+    }).finally(() => {
+      if (pending?.read === read) pending = null;
+    });
+    pending = { categoryId, read };
+    return read;
   }
 
   function hideMissing() {
