@@ -1029,6 +1029,89 @@ body.has-registration-status .content {
   display: block;
 }
 
+/* 2026-10-15 usability check: the category is searched by its Korean name. */
+.category-picker {
+  align-items: start;
+}
+
+.category-picker-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.category-current {
+  overflow-wrap: anywhere;
+}
+
+.category-search {
+  position: relative;
+}
+
+.category-search input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-input);
+  font: inherit;
+}
+
+.category-results {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  right: 0;
+  top: calc(100% + 2px);
+  max-height: 280px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-panel);
+  box-shadow: var(--shadow-tooltip);
+}
+
+.category-results li {
+  display: grid;
+  gap: 1px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.category-results li[aria-selected='true'],
+.category-results li:hover {
+  background: var(--color-info-bg);
+}
+
+label.kv [aria-invalid='true'] {
+  border-color: var(--color-bad);
+  background: var(--color-bad-bg);
+}
+
+[data-role='missing-required'] ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+label.kv > [data-prefill] {
+  justify-self: start;
+  align-self: start;
+}
+
+.register-loading {
+  padding: var(--space-3) 0;
+}
+
+.send-outcome {
+  display: grid;
+  gap: 4px;
+}
+
 /* B-EDITOR: the unit workspace — a jump bar over sections that all stay rendered. */
 .register-editor-nav {
   position: sticky;
@@ -2601,6 +2684,21 @@ body.bare-page #registrationStatus {
   grid-template-columns: 180px minmax(0, 1fr);
   gap: var(--space-5);
   align-items: center;
+}
+
+.register-editor .editor-pane .category-picker {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: var(--space-5);
+}
+
+.register-editor .editor-pane label.kv > [data-prefill] {
+  grid-column: 2;
+}
+
+/* The bottom strip has no room for a note: a send's outcome is shown in its dialog there. */
+.register-editor .editor-foot [data-role='send-outcome'] {
+  display: none;
 }
 
 .register-editor .editor-pane label.kv input,

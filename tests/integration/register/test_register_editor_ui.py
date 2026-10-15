@@ -34,7 +34,13 @@ from tests.integration.register.test_m5_register_ui import (  # noqa: F401 - fix
     sources,
 )
 from tests.support.product_support import Collections
-from tests.support.register_support import CATEGORY, Preparation, draft, ready_item
+from tests.support.register_support import (
+    CATEGORY,
+    Preparation,
+    choose_category,
+    draft,
+    ready_item,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -90,7 +96,7 @@ def test_a_queue_row_opens_the_editor_and_the_editor_saves_through_the_preparati
 
         # The operator authors the unit across the steps; the save is the register page's own.
         page.locator(".stepper .step[data-step='basic']").click()
-        page.fill("input[name='category_id']", CATEGORY)
+        choose_category(page, CATEGORY)
         page.fill("input[name='name']", "편집기가 저장한 상품명")
         page.locator(".stepper .step[data-step='notice']").click()
         page.fill("input[name='attribute.brand']", "브랜드")

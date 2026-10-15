@@ -34,7 +34,14 @@ from tests.integration.register.test_m5_register_execution import (
 )
 from tests.support.browser import BROWSER_CHANNEL, launch_browser
 from tests.support.product_support import Collections
-from tests.support.register_support import CATEGORY, MARKET, Preparation, establish, preparation
+from tests.support.register_support import (
+    CATEGORY,
+    MARKET,
+    Preparation,
+    choose_category,
+    establish,
+    preparation,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -284,7 +291,7 @@ def test_an_operator_authors_a_preparation_in_the_screen(
         assert _action(page, "EVALUATE")["disabled"] is True
         assert _action(page, "FREEZE")["disabled"] is True
         # The operator authors the unit in the screen, and the server keeps it.
-        page.fill("input[name='category_id']", CATEGORY)
+        choose_category(page, CATEGORY)
         page.fill("input[name='name']", "브라우저가 저장한 상품명")
         page.fill("input[name='attribute.brand']", "브랜드")
         page.fill("input[name='notice.manufacturer']", "제조사")
@@ -337,7 +344,7 @@ def test_the_screen_authors_each_item_of_a_multi_item_option_unit(
     writes: list[tuple[str, str]] = []
     with _page(browser, client, writes) as page:
         unit = page.locator(f".register-unit[data-draft='{draft_id}']")
-        unit.locator("input[name='category_id']").fill(CATEGORY)
+        choose_category(unit, CATEGORY)
         unit.locator("input[name='name']").fill("옵션 상품")
         unit.locator("input[name='attribute.brand']").fill("브랜드")
         unit.locator("input[name='notice.manufacturer']").fill("제조사")

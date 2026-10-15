@@ -27,7 +27,13 @@ from app.capabilities.jobs.models import JobState
 from app.capabilities.jobs.records import JobRecord
 from app.capabilities.jobs.service import JobService
 from app.platform.core.clock import Clock, SystemClock
-from app.platform.core.errors import AppError, InputValidationError, NotFoundError
+from app.platform.core.errors import (
+    AppError,
+    ErrorClass,
+    InputValidationError,
+    NotFoundError,
+    PolicyBlockedError,
+)
 from app.stages.connect.accounts import AccountBinding, MarketplaceAccountStore
 from app.stages.connect.marketplace.capability import (
     AuthStatus,
@@ -203,6 +209,22 @@ PREPARATION_SOURCE = "PREPARATION"
 _MARKETPLACE = "smartstore"
 DRY_RUN = "DRY_RUN"
 
+# The category the operator chose has no reviewed metadata under the account's current taxonomy:
+# its required fields and notice are not prepared yet, so nothing can be authored for it. A state
+# of the server's data, never a defect (ADR-0042 will automate the preparation).
+CATEGORY_METADATA_MISSING = "REGISTER_CATEGORY_METADATA_MISSING"
+
+# The marketplace's own Korean names of one notice type and of each of its fields, from its
+# captured notice schema: ``(type name, {field key: label})``. Wired by the composition root, like
+# the seller code: REGISTER never imports a marketplace adapter. A label only, never a rule.
+NoticeLabels = Callable[[str, str], tuple[str | None, Mapping[str, str]]]
+
+
+class CategoryMetadataMissingError(AppError):
+    """The chosen category has no reviewed metadata for the current taxonomy: 409, never 500."""
+
+    error_class = ErrorClass.CONFLICT
+
 
 class RegisterService:
     """The Registration Management read model and the operator actions it offers."""
@@ -225,6 +247,7 @@ class RegisterService:
         clock: Clock | None = None,
         seller_code: Callable[[str], str] | None = None,
         preview_projection: WireProjector | None = None,
+        notice_labels: NoticeLabels | None = None,
     ) -> None:
         self._registrations = registrations
         self._execution = execution
@@ -247,6 +270,13 @@ class RegisterService:
         self._seller_code = seller_code
         # B-PREVIEW: the provider wire projection, injected like the seller code.
         self._preview_projection = preview_projection
+        self._notice_labels = notice_labels
+
+    def _labels(self, marketplace_key: str, notice: Any) -> tuple[str | None, Mapping[str, str]]:
+        """The Korean names of a notice type and its fields, or none when nothing names them."""
+        if notice is None or self._notice_labels is None:
+            return None, {}
+        return self._notice_labels(marketplace_key, notice.notice_type)
 
     # ------------------------------------------------------------------ counts (screens)
 
@@ -665,21 +695,31 @@ class RegisterService:
             raise NotFoundError("REGISTER_DRAFT_NOT_FOUND", "no such registration draft")
         target = preflight.target_policy(draft.marketplace_key, draft.marketplace_account_id)
         if target is None:
-            raise AppError("REGISTER_TARGET_POLICY_MISSING", "the account has no target policy")
+            # The same refusal, and class, the preflight owner gives without a policy.
+            raise PolicyBlockedError(
+                "REGISTER_TARGET_POLICY_MISSING", "the account has no target policy"
+            )
         metadata = preflight.category_metadata(
             draft.marketplace_key, target.taxonomy_revision, category_id
         )
         if metadata is None or not metadata.reviewed:
-            raise AppError(
-                "REGISTER_CATEGORY_METADATA_MISSING",
+            raise CategoryMetadataMissingError(
+                CATEGORY_METADATA_MISSING,
                 "the category has no reviewed metadata for the current taxonomy",
+                details={
+                    "category_id": category_id,
+                    "taxonomy_revision": target.taxonomy_revision,
+                },
             )
+        type_label, labels = self._labels(draft.marketplace_key, metadata.notice)
         # The two authoring revisions are handed on exactly as the policy holds them, None
         # included under a policy revision appended before their owner existed (decision
         # 5800619183, ADR-0014 §27.1). Their absence does not
         # stop authoring; the candidate preflight reports it as AUTHORING_REVISIONS_UNOWNED.
 
-        def fields(rules: Sequence[Any]) -> tuple[AuthoringFieldView, ...]:
+        def fields(
+            rules: Sequence[Any], labels: Mapping[str, str]
+        ) -> tuple[AuthoringFieldView, ...]:
             return tuple(
                 AuthoringFieldView(
                     key=rule.key,
@@ -689,6 +729,7 @@ class RegisterService:
                     omitted_default=rule.omitted_default,
                     required_without=rule.required_without,
                     one_of=rule.one_of,
+                    label=labels.get(rule.key),
                 )
                 for rule in rules
             )
@@ -703,8 +744,10 @@ class RegisterService:
                 preflight.detail_profile(target.detail_composition_revision)
             ),
             notice_type=None if metadata.notice is None else metadata.notice.notice_type,
-            attributes=fields(metadata.attributes),
-            notice_fields=fields(() if metadata.notice is None else metadata.notice.fields),
+            notice_type_label=type_label,
+            # Only a notice field is named by the notice schema; an attribute keeps its key.
+            attributes=fields(metadata.attributes, {}),
+            notice_fields=fields(() if metadata.notice is None else metadata.notice.fields, labels),
             options_supported=metadata.options.options_supported,
             max_options=metadata.options.max_options,
             max_option_dimensions=metadata.options.max_dimensions,
@@ -1328,6 +1371,9 @@ class RegisterService:
         provided = set(attributes) if isinstance(attributes, Mapping) else set()
         notice_fields = notice.get("fields") if isinstance(notice, Mapping) else None
         provided_notice = set(notice_fields) if isinstance(notice_fields, Mapping) else set()
+        type_label, labels = self._labels(
+            marketplace_key, None if metadata is None else metadata.notice
+        )
         return CategoryView(
             category_id=category_id,
             mapping_revision=str(category.get("mapping_revision", "")),
@@ -1339,10 +1385,12 @@ class RegisterService:
             notice_type=(
                 None if metadata is None or metadata.notice is None else metadata.notice.notice_type
             ),
+            notice_type_label=type_label,
             attributes=_fields(() if metadata is None else metadata.attributes, provided),
             notice_fields=_fields(
                 () if metadata is None or metadata.notice is None else metadata.notice.fields,
                 provided_notice,
+                labels,
             ),
             options_supported=None if metadata is None else metadata.options.options_supported,
             max_options=None if metadata is None else metadata.options.max_options,
@@ -1698,13 +1746,16 @@ def _codes(readiness: Any) -> tuple[str, ...]:
     return tuple(reason.code for reason in readiness.reasons)
 
 
-def _fields(rules: Sequence[Any], provided: set[str]) -> tuple[FieldStateView, ...]:
+def _fields(
+    rules: Sequence[Any], provided: set[str], labels: Mapping[str, str] | None = None
+) -> tuple[FieldStateView, ...]:
     return tuple(
         FieldStateView(
             key=rule.key,
             required=rule.required,
             provided=rule.key in provided,
             detail_page_reference_allowed=rule.detail_page_reference_allowed,
+            label=(labels or {}).get(rule.key),
         )
         for rule in rules
     )

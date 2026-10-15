@@ -36,6 +36,7 @@ from tests.support.gate1_support import (
     record_reviewed_metadata,
 )
 from tests.support.product_support import raw
+from tests.support.register_support import choose_category
 
 pytestmark = pytest.mark.integration
 
@@ -109,8 +110,7 @@ def test_the_screen_authors_with_null_revisions_and_leaves_freeze_disabled(
         unit = page.locator(f".register-unit[data-draft='{draft_id}']")
         assert unit.count() == 1
         # Choosing the category loads the reviewed fields from the server: no refusal, no 500.
-        unit.locator("input[name='category_id']").fill(CATEGORY)
-        unit.locator("input[name='category_id']").press("Tab")
+        choose_category(unit, CATEGORY)
         unit.locator("input[name='attribute.brand']").wait_for(timeout=10_000)
         assert ("GET", metadata_path, 200) in calls
         unit.locator("input[name='name']").fill("합성 상품")
@@ -208,8 +208,7 @@ def test_the_screen_authors_typed_notice_values_and_never_forces_a_provider_defa
     calls: list[tuple[str, str, int]] = []
     with _page(browser, api, calls) as page:
         unit = page.locator(f".register-unit[data-draft='{draft_id}']")
-        unit.locator("input[name='category_id']").fill(CATEGORY)
-        unit.locator("input[name='category_id']").press("Tab")
+        choose_category(unit, CATEGORY)
         unit.locator("select[name='notice.geneticallyModified']").wait_for(timeout=10_000)
         # The provider fills "상품상세 참조" itself: those fields are never required input.
         for common in ("noRefundReason", "qualityAssuranceStandard"):
@@ -275,8 +274,7 @@ def test_the_screen_never_rounds_a_long_identifier(
     calls: list[tuple[str, str, int]] = []
     with _page(browser, api, calls) as page:
         unit = page.locator(f".register-unit[data-draft='{draft_id}']")
-        unit.locator("input[name='category_id']").fill(CATEGORY)
-        unit.locator("input[name='category_id']").press("Tab")
+        choose_category(unit, CATEGORY)
         unit.locator("input[name='notice.useStoreAddressId']").wait_for(timeout=10_000)
         unit.locator("input[name='name']").fill("합성 상품")
         unit.locator("input[name='attribute.brand']").fill("합성 브랜드")
