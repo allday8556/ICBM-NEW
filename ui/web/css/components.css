@@ -261,6 +261,23 @@
   color: var(--color-warn);
 }
 
+/* Support-only details (codes, request numbers), folded away under one plain summary. */
+.support-details {
+  margin-top: var(--space-2);
+  text-align: left;
+}
+
+.support-details > summary {
+  cursor: pointer;
+  color: var(--color-text-faint);
+  font-size: var(--fs-xs);
+}
+
+.support-details > .mini {
+  margin: var(--space-1) 0 0;
+  word-break: break-all;
+}
+
 /* ---------- Help tooltip: the single help system ---------- */
 .help-anchor {
   display: inline-flex;
@@ -1674,6 +1691,14 @@ td.no-data {
 }
 
 .db-toolbar select[data-inert] {
+  cursor: pointer;
+}
+
+.db-toolbar .db-test-toggle {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  white-space: nowrap;
   cursor: pointer;
 }
 

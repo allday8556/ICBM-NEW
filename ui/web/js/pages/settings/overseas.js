@@ -9,6 +9,7 @@
 import { getJson, sendJson } from '../../core/api.js';
 import { dotDate, dotDateTime } from '../../core/format.js';
 import { h } from '../../core/dom.js';
+import { errorText as plainError } from '../../core/errors.js';
 import { toast } from '../../core/toast.js';
 
 const SETTINGS = '/api/v1/settings/overseas';
@@ -40,8 +41,7 @@ const CURRENCY_LABEL = { CNY: '중국 위안 (CNH)', JPY: '일본 엔 (JPY 100�
 const REASON_LABEL = { PRICING_FX_STALE: '오래됨 · 가격 계산 안 함', PRICING_FX_UNAVAILABLE: '환율 없음 · 가격 계산 안 함' };
 
 function errorText(error) {
-  const code = error?.error?.code;
-  return COPY[code] ?? error?.error?.message ?? String(error?.message ?? error);
+  return plainError(error, COPY);
 }
 
 function grouped(decimal) {
@@ -69,7 +69,7 @@ function inputRow(id, label, value, extra = {}) {
 
 function changedLine(view) {
   if (view.revision_no === null || view.revision_no === undefined) return '기본값 (변경 기록 없음)';
-  return `${view.changed_by ?? '-'} · ${view.changed_at ? dotDateTime(view.changed_at) : '-'} · ${view.revision_no}차 변경`;
+  return view.changed_at ? `${dotDateTime(view.changed_at)}에 변경` : '변경됨';
 }
 
 export function overseasSettingsPanel() {
@@ -141,7 +141,7 @@ export function overseasSettingsPanel() {
       daysMax.row,
       importer.row,
       h('div', { class: 'kv', 'data-role': 'overseas-changed' }, h('span', {}, '변경'), h('b', {}, changedLine(view))),
-      h('div', { class: 'note' }, '150달러 기준은 ICBM이 관리합니다. 관부가세를 빼면 구매자가 부담한다고 표시됩니다. 판매 가능 여부는 판매자가 판단합니다.'),
+      h('div', { class: 'note' }, '150달러 기준은 자동으로 적용됩니다. 관부가세를 빼면 구매자가 부담한다고 표시됩니다. 판매 가능 여부는 판매자가 판단합니다.'),
       h('div', { class: 'api-action-row' }, save),
     );
   };

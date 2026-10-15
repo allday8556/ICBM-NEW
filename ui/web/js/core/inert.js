@@ -3,8 +3,7 @@
 
 import { toast } from './toast.js';
 
-export const M0_NOTICE =
-  'M0 표시 전용입니다. 이 기능은 이후 마일스톤에서 새 계약으로 연결되며, 지금은 외부 호출·쓰기가 없습니다.';
+export const INERT_NOTICE = '준비 중인 기능입니다. 지금은 눌러도 아무것도 바뀌지 않습니다.';
 
 export function markInert(el, label) {
   el.dataset.inert = label ?? el.textContent.trim();
@@ -20,7 +19,7 @@ export function initInert() {
       if (!target || target.closest('.help-icon')) return;
       event.preventDefault();
       event.stopPropagation();
-      toast(target.dataset.inert, M0_NOTICE);
+      toast(target.dataset.inert, INERT_NOTICE);
     },
     true,
   );

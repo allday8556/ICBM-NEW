@@ -4,7 +4,7 @@
 import { getJson } from './core/api.js';
 import { h } from './core/dom.js';
 import { hideHelp, initHelp } from './core/help.js';
-import { M0_NOTICE, initInert } from './core/inert.js';
+import { INERT_NOTICE, initInert } from './core/inert.js';
 import { closeModal } from './core/modal.js';
 import { setMarketplaces } from './core/platform.js';
 import { DEFAULT_PAGE, navigate, parseRoute } from './core/router.js';
@@ -14,6 +14,8 @@ import { errorState } from './components/states.js';
 import { PAGE_BY_KEY, PAGES } from './pages/index.js';
 
 const content = document.getElementById('content');
+// DRY_RUN sends nothing to a marketplace; LIVE may, within every send-time safety layer.
+const MODE_LABEL = { DRY_RUN: '안전 모드', LIVE: '실등록 모드' };
 let renderSequence = 0;
 
 function renderNav() {
@@ -40,14 +42,14 @@ function renderChrome(shell) {
   document.getElementById('operatorInitial').textContent = shell.operator_display_name.slice(0, 1);
   document
     .getElementById('operatorName')
-    .replaceChildren(`${shell.operator_display_name}님`, h('small', {}, 'ICBM 로컬 운영'));
+    .replaceChildren(`${shell.operator_display_name}님`);
   document
     .getElementById('sideFoot')
-    .replaceChildren(`v${shell.version} · ${shell.milestone} · ${shell.execution_mode}`, h('br'), '© 2026 ICBM');
+    .replaceChildren(`v${shell.version} · ${MODE_LABEL[shell.execution_mode] ?? '안전 모드'}`, h('br'), '© 2026 ICBM');
   document.getElementById('commandInput').addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
-      toast('통합 검색', M0_NOTICE);
+      toast('통합 검색', INERT_NOTICE);
     }
   });
 }

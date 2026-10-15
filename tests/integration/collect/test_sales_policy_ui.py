@@ -134,7 +134,8 @@ def test_the_card_shows_the_switches_and_saves_them(browser: Browser, config: Ap
             "apply_minimum_price": True,
         }
         changed = section.locator("[data-role='sales-policy-changed']").inner_text()
-        assert config.operator_actor in changed and "1차 변경" in changed
+        assert changed.endswith("에 변경")
+        assert section.get_attribute("data-changed-by") == config.operator_actor
 
         page.reload()
         page.wait_for_selector(f"{SECTION}[data-state='ready'][data-revision='1']")

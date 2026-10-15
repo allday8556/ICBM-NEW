@@ -178,12 +178,14 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
                 assert editor.locator(f"[data-policy-field='{reference}']").count() == 0
                 shown = editor.locator(f"[data-policy-reference='{reference}']")
                 assert shown.locator("input, textarea, select").count() == 0
-                assert "서버 소유 리비전" in shown.inner_text()
+                assert "자동으로 기록됩니다" in shown.inner_text()
             # The delivery fields are not on this tab: they live in 배송 관리.
             assert editor.locator("[data-policy-field='base_fee_krw']").count() == 0
             _fill(page, account, VALUES)
             _save(page, account, 1)
-            assert "현재 리비전 #1" in _state(page, account)[2]
+            assert "저장됨" in _state(page, account)[2]
+            chip = page.locator(f"{_editor(account)} [data-policy-state]")
+            assert chip.get_attribute("data-policy-revision") == "1"
         with _page(browser, client, SHIPPING_TAB, _editor(account), writes) as page:
             editor = page.locator(_editor(account))
             assert editor.get_attribute("data-policy-section") == "delivery"
@@ -192,7 +194,7 @@ def test_settings_saves_the_target_policy_and_it_survives_reload_and_restart(
             _save(page, account, 2)
             saved = _state(page, account)
             assert saved[:2] == ("saved", "2")
-            assert "현재 리비전 #2" in saved[2]
+            assert "저장됨" in saved[2]
             revisions = f"/api/v1/settings/target-policies/{MARKETPLACE}/{account}/revisions"
             assert writes == [("POST", revisions), ("POST", revisions)]
             # A reload rebuilds the same state from the server, nothing kept in the page.
@@ -242,8 +244,8 @@ def test_the_save_bar_is_server_owned_and_general_settings_stay_read_only(
         )
         text = chip.inner_text()
         assert "M0" not in text
-        assert "일반 설정은 저장 계약이 없어 읽기 전용입니다" in text
-        assert "등록 대상 정책" in text and "카테고리 메타데이터" in text
+        assert "회색 칸은 아직 설정할 수 없습니다" in text
+        assert "등록 정책" in text and "카테고리 정보" in text
         # ADR-0039 §4: the supplier sales policy is saved from the supplier card.
         assert "공급처 판매정책 (수집관리 › 공급처 관리)" in text
         # ADR-0038 §5: the overseas settings are saved from their own card.
@@ -254,11 +256,10 @@ def test_the_save_bar_is_server_owned_and_general_settings_stay_read_only(
         assert all(
             fields.nth(i).get_attribute("readonly") is not None for i in range(fields.count())
         )
-        general_save = page.locator(".savebar-actions button", has_text="설정 저장")
-        assert general_save.get_attribute("aria-disabled") == "true"
-        # Even a forced click on it only explains itself: it reaches no contract.
-        general_save.click(force=True)
-        page.locator(".toast").first.wait_for(timeout=5_000)
+        # There is no general save: each saveable setting has its own card button, and a card
+        # with nothing saveable says so plainly.
+        assert page.locator(".savebar-actions").count() == 0
+        assert page.locator(".setting-card[data-pending='true'] .setting-pending").count() > 0
         assert writes == []
     assert _counts(config) == dict.fromkeys(TABLES, 0)
 
@@ -273,7 +274,7 @@ def test_a_refused_save_shows_the_server_reason_and_writes_nothing(
         with _page(browser, client, POLICY_TAB, _editor(account), writes) as page:
             _fill(page, account, {**VALUES, "min_images": "5", "max_images": "2"})
             page.locator(f"{_editor(account)} button[data-action='save-target-policy']").click()
-            toast = page.locator(".toast", has_text="TARGET_POLICY_INVALID")
+            toast = page.locator(".toast", has_text="입력값을 확인하세요")
             toast.wait_for(timeout=10_000)
             assert _state(page, account)[:2] == ("none", "0")
             # The typed values stay for a fix; nothing was promoted locally.

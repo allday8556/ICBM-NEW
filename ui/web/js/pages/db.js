@@ -19,12 +19,14 @@
 // It reuses the v29 panel/table/chip/kv system and the prototype's DB layout (list beside a
 // detail panel). Explanations live behind the help icon, never as permanent subtitles.
 
-import { ApiError, getJson, sendJson } from '../core/api.js';
+import { getJson, sendJson } from '../core/api.js';
 import { fragment, h } from '../core/dom.js';
-import { dotDateTime } from '../core/format.js';
+import { dotDate, dotDateTime } from '../core/format.js';
+import { errorCode, errorText } from '../core/errors.js';
 import { withHelp } from '../core/help.js';
 import { markInert } from '../core/inert.js';
 import { marketplaceLabel } from '../core/platform.js';
+import { supplierName, supplierNames } from '../core/suppliers.js';
 import { toast } from '../core/toast.js';
 import { aiNamePanel } from '../components/ai-name.js';
 import { aiCategoryPanel } from '../components/ai-category.js';
@@ -39,29 +41,29 @@ const PRODUCTS = '/api/v1/products';
 const DRAFTS = '/api/v1/register/drafts';
 const DRAFT_TARGETS = '/api/v1/register/draft-targets';
 const DRAFT_HELP =
-  '선택한 품목으로 등록 초안을 만듭니다. 서버가 선택을 다시 검증하고, 계정의 현재 등록 정책으로 M4가 매긴 가격 스냅샷을 품목마다 고정합니다. 하나라도 가격이 정해지지 않으면 초안을 만들지 않습니다.';
+  '선택한 품목으로 등록할 상품을 만듭니다. 가격은 판매 계정의 등록 정책으로 자동 계산되며, 한 품목이라도 가격을 계산하지 못하면 만들지 않습니다.';
+const PRICES = '/api/v1/pricing/latest';
 const SHAPE_LABEL = {
   SINGLE_LISTING_WITH_OPTIONS: '옵션 상품 하나로 등록',
   SEPARATE_LISTINGS: '품목마다 따로 등록',
   SELECTED_OFFERS: '선택한 구성만 등록',
 };
 const BASIS_LABEL = { MINIMUM_SALE_PRICE: '최저판매가', TARGET_MARGIN: '목표 마진' };
-const OUTCOME_LABEL = { RECORDED: '새로 기록', UNCHANGED: '기존 스냅샷' };
 const TITLE = '통합DB';
 const HELP = '모든 상품을 하나의 DB에서 관리하고 등록부터 판매까지 빠르게 운영합니다.';
 const LIST_HELP =
-  '운영 중인 정규 상품만 최신순으로 보여줍니다. 검색은 상품 ID, 공급처, 공급처 상품번호, 각 원천 상품의 현재 확정 상품명을 서버에서 찾습니다.';
-const DETAIL_HELP =
-  '원천 정보는 각 구성원의 현재 원천 리비전을 그대로 읽어 보여주며, 다른 구성원이나 상품의 값으로 채우지 않습니다.';
+  '운영 중인 상품을 최신순으로 보여줍니다. 상품명, 공급처, 공급처 상품번호로 찾을 수 있습니다. 가격은 마지막으로 계산된 값입니다.';
+const DETAIL_HELP = '공급처에서 수집한 정보를 그대로 보여줍니다.';
 const TARGET_HELP =
-  '선택한 상품의 품목만 등록 대상으로 고를 수 있습니다. 확인은 서버가 현재 상품 구성으로 다시 검증할 뿐, 등록 초안이나 가격은 아직 만들지 않습니다.';
+  '등록할 품목을 고릅니다. 「등록 대상 확인」은 고른 품목을 지금 등록할 수 있는지만 확인하고, 아무것도 만들지 않습니다.';
 const PAGE_SIZE = 20;
 // v29 (owner decision 2026-10-07, option 가): a v29 slot the system has no source for keeps its
 // place and reads 데이터 없음. Nothing is estimated and nothing comes from demo content.
 const NO_DATA = '데이터 없음';
 const LIST_COLUMNS = ['상품명', '공급처', '원가', '배송비', '최저판매가', '가격기준', '네이버', '쿠팡', '11번가', '상태', '등록유형'];
-// The list columns with no source on a Product row.
-const NO_DATA_COLUMNS = ['원가', '배송비', '최저판매가', '가격기준', '네이버', '쿠팡', '11번가'];
+// The price columns: filled from the Product's latest recorded price (a display read), else 데이터 없음.
+const PRICE_COLUMNS = ['원가', '배송비', '최저판매가', '가격기준', '네이버', '쿠팡', '11번가'];
+const CHANNEL_COLUMNS = { 네이버: 'smartstore', 쿠팡: 'coupang', '11번가': 'st11' };
 const KPI_CARDS = [
   ['all', '▤', '전체상품'],
   ['registrable', '🛒', '등록가능'],
@@ -108,10 +110,10 @@ const STATUS_LABEL = { ABSENT: '없음', REVIEW_REQUIRED: '확인 필요' };
 // Server reason codes rendered as copy. The page never derives a verdict, only its wording.
 const REASON_COPY = {
   PRODUCTS_PRODUCT_RETIRED: '보관된 상품이라 등록 대상으로 고를 수 없습니다.',
-  PRODUCTS_MEMBERSHIP_REVISION_MISSING: '확정된 구성원이 없어 고를 수 없습니다.',
-  PRODUCTS_MEMBERSHIP_REVISION_NOT_CURRENT: '구성원 기록이 현재 구성과 맞지 않아 고를 수 없습니다.',
-  PRODUCTS_ITEM_BINDING_MISSING: '현재 연결된 원천 상품이 없는 품목입니다.',
-  PRODUCTS_ITEM_BINDING_MEMBER_NOT_CONFIRMED: '연결된 원천 상품이 이 상품의 확정 구성원이 아닙니다.',
+  PRODUCTS_MEMBERSHIP_REVISION_MISSING: '연결된 공급처 상품이 없어 고를 수 없습니다.',
+  PRODUCTS_MEMBERSHIP_REVISION_NOT_CURRENT: '상품 구성이 바뀌어 고를 수 없습니다. 상세를 다시 불러오세요.',
+  PRODUCTS_ITEM_BINDING_MISSING: '연결된 공급처 상품이 없는 품목입니다.',
+  PRODUCTS_ITEM_BINDING_MEMBER_NOT_CONFIRMED: '연결된 공급처 상품이 이 상품에 속하지 않습니다.',
   PRODUCTS_SELECTION_NOT_SELECTABLE: '이 상품은 지금 등록 대상으로 고를 수 없습니다.',
   PRODUCTS_SELECTION_MEMBERSHIP_STALE: '선택한 뒤 상품 구성이 바뀌었습니다. 상세를 다시 불러와 다시 고르세요.',
   PRODUCTS_SELECTION_ITEM_OUTSIDE_PRODUCT: '다른 상품의 품목은 함께 고를 수 없습니다.',
@@ -122,21 +124,46 @@ const REASON_COPY = {
   PRODUCTS_QUERY_INVALID: '검색어는 100자까지 입력할 수 있습니다.',
   PRODUCTS_PAGE_LIMIT_INVALID: '한 페이지의 상품 수가 올바르지 않습니다.',
   REGISTER_TARGET_ACCOUNT_UNKNOWN: '선택한 판매 계정을 찾을 수 없습니다.',
-  MARKETPLACE_ACCOUNT_NOT_BOUND: '판매 계정 연결이 확인되지 않음',
-  REGISTER_TARGET_POLICY_MISSING: '등록 정책 없음',
-  REGISTER_PRICING_CONTEXT_MISMATCH: '등록 정책의 가격 기준이 이 계정과 맞지 않아 초안을 만들지 않았습니다.',
-  REGISTER_DRAFT_ITEM_NOT_PRICED: 'M4가 가격을 정하지 못한 품목이 있어 초안을 만들지 않았습니다.',
-  REGISTER_DRAFT_SELECTION_MOVED: '가격을 정하는 동안 상품 구성이 바뀌어 초안을 만들지 않았습니다.',
-  REGISTER_DRAFT_PRICE_CONTEXT: '가격 스냅샷이 초안의 대상과 맞지 않아 초안을 만들지 않았습니다.',
+  MARKETPLACE_ACCOUNT_NOT_BOUND: '판매 계정 연결 필요',
+  REGISTER_TARGET_POLICY_MISSING: '등록 정책 저장 필요',
+  REGISTER_PRICING_CONTEXT_MISMATCH: '등록 정책의 가격 기준이 이 계정과 맞지 않아 만들지 않았습니다.',
+  REGISTER_DRAFT_ITEM_NOT_PRICED: '가격을 계산하지 못한 품목이 있어 만들지 않았습니다.',
+  REGISTER_DRAFT_SELECTION_MOVED: '가격을 계산하는 동안 상품 구성이 바뀌어 만들지 않았습니다. 상세를 다시 불러오세요.',
+  REGISTER_DRAFT_PRICE_CONTEXT: '가격 정보가 선택한 판매 계정과 맞지 않아 만들지 않았습니다.',
   REQUEST_INVALID: '요청이 올바르지 않습니다.',
 };
 
+// Why an Item could not be priced (the server's pricing reason codes), in plain words.
+const PRICING_COPY = {
+  PRICING_PURCHASE_PRICE_UNRESOLVED: '공급가를 확인하지 못했습니다',
+  PRICING_PURCHASE_PRICE_AMBIGUOUS: '공급가가 여러 개라 정하지 못했습니다',
+  PRICING_SHIPPING_UNRESOLVED: '배송비를 확인하지 못했습니다',
+  PRICING_SHIPPING_CONDITIONAL: '조건부 배송비라 정하지 못했습니다',
+  PRICING_SHIPPING_UNKNOWN: '배송비를 확인하지 못했습니다',
+  PRICING_MINIMUM_SALE_PRICE_UNRESOLVED: '최저판매가를 확인하지 못했습니다',
+  PRICING_MINIMUM_SALE_PRICE_NOT_POSITIVE: '최저판매가가 올바르지 않습니다',
+  PRICING_MINIMUM_SALE_PRICE_NOT_OFFER_BOUND: '최저판매가가 이 수량 구성에 맞지 않습니다',
+  PRICING_TARGET_MARGIN_UNREACHABLE: '목표 마진으로 가격을 정할 수 없습니다',
+  PRICING_QUANTITY_OFFER_UNRESOLVED: '수량 구성의 가격을 확인하지 못했습니다',
+  PRICING_FX_STALE: '환율 정보가 오래되었습니다',
+  PRICING_FX_UNAVAILABLE: '환율 정보를 가져오지 못했습니다',
+  PRICING_OVERSEAS_SHIPPING_UNSET: '해외 배송비가 설정되지 않았습니다 (설정 › 해외구매대행)',
+  PRICING_SOURCE_CURRENCY_UNSUPPORTED: '지원하지 않는 통화입니다',
+  PRICE_LOSS: '이 가격이면 손해입니다',
+  PRICE_BELOW_MIN_MARGIN: '최소 마진보다 낮습니다',
+};
+
+// A reason the server gave for an Item or a selection, as copy; an unknown code reads generically.
 function copy(code) {
-  return REASON_COPY[code] ?? code;
+  return REASON_COPY[code] ?? '지금은 고를 수 없습니다.';
 }
 
-function errorCode(error) {
-  return error instanceof ApiError ? error.error?.code ?? null : null;
+function pricingCopy(code) {
+  return PRICING_COPY[String(code).replace(/^M4_PRICING\./, '')] ?? '가격을 계산하지 못했습니다';
+}
+
+function won(value) {
+  return typeof value === 'number' ? `${value.toLocaleString('ko-KR')}원` : '—';
 }
 
 function kv(label, value) {
@@ -145,10 +172,6 @@ function kv(label, value) {
 
 function chip(text, tone) {
   return h('span', { class: tone ? `chip ${tone}` : 'chip' }, text);
-}
-
-function short(id) {
-  return id ? id.slice(0, 8) : '—';
 }
 
 // One source fact as its member's current revision states it: a value only when CONFIRMED.
@@ -199,19 +222,57 @@ function kpiCards(total) {
   );
 }
 
-function nameLines(row) {
-  if (!row.member_names.length) return h('div', { class: 'mini' }, '확정 구성원 없음');
+function sourceLabel(names, supplierKey, sourceProductId) {
+  return `${supplierName(names, supplierKey)} · 상품번호 ${sourceProductId}`;
+}
+
+function nameLines(row, names) {
+  if (!row.member_names.length) return h('div', { class: 'mini' }, '공급처 상품 없음');
   return row.member_names.map((member) =>
     h(
       'div',
       { class: 'db-member-name', 'data-member': member.member_id, 'data-revision': member.source_revision_id ?? '' },
       h('span', { class: 'db-name' }, factValue(member.facts[0])),
-      h('span', { class: 'mini' }, `${member.supplier_key} · ${member.source_product_id}`),
+      h('span', { class: 'mini' }, sourceLabel(names, member.supplier_key, member.source_product_id)),
     ),
   );
 }
 
-function listRow(row, state, onSelect) {
+// The latest recorded prices of one Product: the newest overall (its costs) and one per channel.
+function priceSet(prices) {
+  const byChannel = new Map();
+  for (const price of prices) if (!byChannel.has(price.marketplace_key)) byChannel.set(price.marketplace_key, price);
+  const newest = [...prices].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0] ?? null;
+  return { newest, byChannel };
+}
+
+function priceText(column, set) {
+  const latest = set.newest;
+  if (!latest) return null;
+  if (column === '원가') return won(latest.purchase_cost_krw + latest.supplier_shipping_krw);
+  if (column === '배송비') return won(latest.supplier_shipping_krw);
+  if (column === '최저판매가') return latest.minimum_sale_price_krw === null ? '없음' : won(latest.minimum_sale_price_krw);
+  if (column === '가격기준') return BASIS_LABEL[latest.price_basis] ?? '—';
+  const channel = set.byChannel.get(CHANNEL_COLUMNS[column]);
+  return channel ? won(channel.final_sale_price_krw) : null;
+}
+
+// Fills a row's price cells once the latest prices arrive; a cell with nothing recorded keeps 데이터 없음.
+function fillPrices(tr, prices) {
+  const set = priceSet(prices);
+  for (const column of PRICE_COLUMNS) {
+    const cell = tr.querySelector(`td[data-no-data='${column}']`);
+    const text = priceText(column, set);
+    if (!cell || text === null) continue;
+    cell.classList.remove('no-data');
+    cell.removeAttribute('data-no-data');
+    cell.dataset.price = column;
+    cell.title = `${dotDate(set.newest.created_at)} 계산 기준`;
+    cell.textContent = text;
+  }
+}
+
+function listRow(row, state, onSelect, names) {
   const product = row.product;
   const id = product.product_group_id;
   const tr = h(
@@ -231,25 +292,18 @@ function listRow(row, state, onSelect) {
     h(
       'td',
       {},
-      nameLines(row),
-      h(
-        'div',
-        { class: 'mini db-row-meta' },
-        h('span', { class: 'mono' }, short(id)),
-        ` · 구성원 ${product.members.length} · 품목 ${product.items.length} · `,
-        product.membership_revision_no === null ? '멤버십 없음' : `r${product.membership_revision_no}`,
-        ` · ${dotDateTime(product.created_at)}`,
-      ),
+      nameLines(row, names),
+      h('div', { class: 'mini db-row-meta' }, `품목 ${product.items.length}개 · ${dotDateTime(product.created_at)} 등록`),
     ),
-    h('td', {}, [...new Set(row.member_names.map((member) => member.supplier_key))].join(', ') || '—'),
-    ...NO_DATA_COLUMNS.map(noData),
+    h('td', {}, [...new Set(row.member_names.map((member) => supplierName(names, member.supplier_key)))].join(', ') || '—'),
+    ...PRICE_COLUMNS.map(noData),
     h('td', {}, chip(GROUP_STATUS[product.status] ?? product.status, product.status === 'ACTIVE' ? 'good' : 'warn')),
     noData('등록유형'),
   );
   return tr;
 }
 
-function memberGroup(source) {
+function memberGroup(source, names) {
   const facts = source.facts.map((fact) => h(
     'div',
     { class: 'kv', 'data-fact': fact.key, 'data-status': fact.status ?? 'NONE' },
@@ -267,17 +321,16 @@ function memberGroup(source) {
     h(
       'div',
       { class: 'supplier-head-row' },
-      h('h4', {}, `${source.supplier_key} · ${source.source_product_id}`),
+      h('h4', {}, sourceLabel(names, source.supplier_key, source.source_product_id)),
       source.facts_status
-        ? chip(source.facts_status === 'CONFIRMED' ? '원천 확정' : '원천 확인 필요', source.facts_status === 'CONFIRMED' ? 'good' : 'warn')
-        : chip('현재 리비전 없음', 'warn'),
+        ? chip(source.facts_status === 'CONFIRMED' ? '정보 확인됨' : '정보 확인 필요', source.facts_status === 'CONFIRMED' ? 'good' : 'warn')
+        : chip('수집 정보 없음', 'warn'),
     ),
-    kv('원천 리비전', short(source.source_revision_id)),
     ...facts,
     images
       ? h(
           'div',
-          { class: 'kv', 'data-fact': 'images', 'data-status': images.status ?? 'NONE' },
+          { class: 'kv', 'data-fact': 'images', 'data-status': images.status ?? 'NONE', 'data-representative': images.representative_sha256 ?? '' },
           h('span', {}, '이미지'),
           h('b', { class: 'db-images' }, ...imagesValue(images)),
         )
@@ -289,10 +342,8 @@ function memberGroup(source) {
 // the field's own status: an images field that is not CONFIRMED always shows that it is not.
 function imagesValue(images) {
   const shown = [];
-  if (images.representative_sha256) {
-    shown.push(`대표 ${short(images.representative_sha256)} · ${images.included}/${images.references}`);
-  } else if (images.status === 'CONFIRMED') {
-    shown.push(`${images.included}/${images.references}`);
+  if (images.representative_sha256 || images.status === 'CONFIRMED') {
+    shown.push(`${images.included}/${images.references}장`);
   }
   if (images.status !== 'CONFIRMED') shown.push(factValue({ key: 'images', status: images.status }));
   return shown;
@@ -315,7 +366,7 @@ function detailThumb(detail) {
   return empty();
 }
 
-// The first member's confirmed name, or the Product's own id when no member states one.
+// The first member's confirmed name, or nothing when no member states one.
 function detailName(detail) {
   const fact = detail.member_sources.flatMap((source) => source.facts).find((candidate) => candidate.key === 'original_name');
   return fact?.status === 'CONFIRMED' ? fact.value : null;
@@ -323,6 +374,41 @@ function detailName(detail) {
 
 // v29's detail groups, as their own card under the detail. Only what a member's source states is
 // shown; the rest keeps its place.
+function priceKv(label, text) {
+  return text === null ? noDataKv(label) : h('div', { class: 'kv', 'data-price': label }, h('span', {}, label), h('b', {}, text));
+}
+
+function channelText(price) {
+  if (!price) return null;
+  return `${won(price.final_sale_price_krw)} · 마진 ${(price.expected_net_margin_bp / 100).toFixed(1)}%`;
+}
+
+// v29's 가격 정보 and 채널별 판매가 / 마진율 groups, from the latest recorded prices.
+function priceGroups(prices = []) {
+  const set = priceSet(prices);
+  const latest = set.newest;
+  // 도매가: the supplier's own price (in its currency for an overseas source), as the snapshot recorded it.
+  const wholesale = latest ? (latest.source_currency ? `${latest.source_price} ${latest.source_currency}` : won(latest.purchase_cost_krw)) : null;
+  return [
+    h(
+      'div',
+      { class: 'detail-group', 'data-role': 'detail-prices' },
+      h('h4', {}, '가격 정보'),
+      priceKv('도매가', wholesale),
+      priceKv('배송비', priceText('배송비', set)),
+      priceKv('원가', priceText('원가', set)),
+      priceKv('가격기준', priceText('가격기준', set)),
+      latest ? h('div', { class: 'mini' }, `${dotDateTime(latest.created_at)}에 계산된 가격입니다.`) : null,
+    ),
+    h(
+      'div',
+      { class: 'detail-group', 'data-role': 'detail-channels' },
+      h('h4', {}, '채널별 판매가 / 마진율'),
+      ...Object.entries(CHANNEL_COLUMNS).map(([label, key]) => priceKv(label, channelText(set.byChannel.get(key)))),
+    ),
+  ];
+}
+
 function v29Groups(detail) {
   const brand = detail ? detail.member_sources.flatMap((source) => source.facts).find((fact) => fact.key === 'brand') : null;
   return [
@@ -339,13 +425,12 @@ function v29Groups(detail) {
         : noDataKv('카테고리'),
       detail ? null : noDataKv('카테고리 추천 신뢰도'),
     ),
-    h('div', { class: 'detail-group', 'data-role': 'detail-prices' }, h('h4', {}, '가격 정보'), ...['도매가', '배송비', '원가', '가격기준'].map(noDataKv)),
-    h('div', { class: 'detail-group', 'data-role': 'detail-channels' }, h('h4', {}, '채널별 판매가 / 마진율'), ...['네이버', '쿠팡', '11번가'].map(noDataKv)),
+    ...priceGroups(),
     // ADR-0028 T4: the SmartStore tag recommendation of the account bound to the connection.
     h(
       'div',
       { class: 'detail-group', 'data-role': 'detail-tags' },
-      h('h4', {}, '태그 / AI 상태'),
+      h('h4', {}, '태그'),
       detail ? aiTagsPanel(detail.product.product_group_id) : h('div', { class: 'mini no-data' }, NO_DATA),
     ),
     // ADR-0027 AIS-2: the product-name recommendation, live while the ai capability is READY.
@@ -395,6 +480,7 @@ function workspace(initialProduct, navigateTo) {
   // Page state only: nothing here is a second copy of product truth, and nothing outlives a reload.
   const state = {
     query: null,
+    includeTest: false,
     cursors: [null], // the cursor of every page visited; the last one names the current page
     listSeq: 0,
     productId: null,
@@ -405,12 +491,19 @@ function workspace(initialProduct, navigateTo) {
     draftSeq: 0,
   };
 
+  const testToggle = h('input', { type: 'checkbox', name: 'include_test', 'data-role': 'db-include-test' });
+  testToggle.addEventListener('change', () => {
+    state.includeTest = testToggle.checked;
+    state.cursors = [null];
+    loadList();
+  });
+  let names = new Map();
   const search = h('input', {
     type: 'search',
     class: 'field search',
     name: 'q',
     maxlength: '100',
-    placeholder: '상품명, 상품 ID, 공급처 상품번호로 검색하세요...',
+    placeholder: '상품명, 공급처, 공급처 상품번호로 검색하세요...',
     'aria-label': '통합DB 검색',
     autocomplete: 'off',
   });
@@ -418,11 +511,9 @@ function workspace(initialProduct, navigateTo) {
     'form',
     { class: 'db-toolbar panel', role: 'search', 'data-role': 'db-search' },
     search,
-    // v29's filters and the bulk AI 추천 have no contract yet: they keep their place and send
-    // nothing. One product's AI 추천 is live in its detail (ADR-0027 AIS-2).
-    ...['카테고리 전체', '플랫폼 전체', '공급처 전체', '가격기준 전체'].map((label) =>
-      markInert(h('select', { class: 'field', 'aria-label': label, 'data-role': 'db-filter' }, h('option', {}, label)), label),
-    ),
+    // v29's 카테고리 / 플랫폼 / 공급처 / 가격기준 filters have no server filter yet, so they are not
+    // shown. Synthetic test products are left out unless the operator asks for them.
+    h('label', { class: 'mini db-test-toggle' }, testToggle, ' 테스트 상품 보기'),
     h('button', { type: 'submit', class: 'btn blue' }, '검색'),
     markInert(h('button', { type: 'button', class: 'btn ai-btn', 'data-role': 'db-ai' }, '✨ AI 추천'), 'AI 추천'),
   );
@@ -477,7 +568,7 @@ function workspace(initialProduct, navigateTo) {
     next.disabled = page.next_cursor === null;
     listBody.replaceChildren(
       ...(page.products.length
-        ? page.products.map((row) => listRow(row, state, selectProduct))
+        ? page.products.map((row) => listRow(row, state, selectProduct, names))
         : [h('tr', {}, h('td', { class: 'table-empty', colspan: '11' }, state.query ? '검색 결과가 없습니다.' : '운영 중인 상품이 없습니다.'))]),
     );
   }
@@ -486,6 +577,7 @@ function workspace(initialProduct, navigateTo) {
     const seq = ++state.listSeq;
     const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
     if (state.query) params.set('q', state.query);
+    if (!state.includeTest) params.set('include_test', 'false');
     const cursor = state.cursors.at(-1);
     if (cursor) params.set('cursor', cursor);
     listPanel.setAttribute('aria-busy', 'true');
@@ -493,13 +585,31 @@ function workspace(initialProduct, navigateTo) {
       const page = await getJson(`${PRODUCTS}?${params}`);
       if (seq !== state.listSeq) return; // a newer list request superseded this one
       renderList(page);
+      loadListPrices(page, seq);
     } catch (error) {
       if (seq !== state.listSeq) return;
       listBody.replaceChildren(
-        h('tr', {}, h('td', { class: 'table-empty', colspan: '11', 'data-reason': errorCode(error) ?? '' }, copy(errorCode(error) ?? String(error.message ?? error)))),
+        h('tr', {}, h('td', { class: 'table-empty', colspan: '11', 'data-reason': errorCode(error) ?? '' }, errorText(error, REASON_COPY))),
       );
     } finally {
       if (seq === state.listSeq) listPanel.removeAttribute('aria-busy');
+    }
+  }
+
+  // The page's latest recorded prices, a display read; without one a price cell keeps 데이터 없음.
+  async function loadListPrices(page, seq) {
+    const ids = page.products.map((row) => row.product.product_group_id);
+    if (!ids.length) return;
+    let prices;
+    try {
+      prices = await getJson(`${PRICES}?${new URLSearchParams(ids.map((id) => ['product_group_id', id]))}`);
+    } catch {
+      return;
+    }
+    if (seq !== state.listSeq) return;
+    for (const id of ids) {
+      const tr = listBody.querySelector(`tr[data-product='${CSS.escape(id)}']`);
+      if (tr) fillPrices(tr, prices.filter((price) => price.product_group_id === id));
     }
   }
 
@@ -520,7 +630,7 @@ function workspace(initialProduct, navigateTo) {
     detailPanel.dataset.state = 'loading';
     detailPanel.replaceChildren(
       withHelp(h('h3', {}, '상품 상세 정보'), DETAIL_HELP),
-      h('div', { class: 'mini' }, `상품 ${short(id)} 상세를 불러오는 중입니다.`),
+      h('div', { class: 'mini' }, '상세를 불러오는 중입니다.'),
     );
     getJson(`${PRODUCTS}/${encodeURIComponent(id)}/detail`).then(
       (detail) => {
@@ -541,7 +651,7 @@ function workspace(initialProduct, navigateTo) {
     const box = h('input', {
       type: 'checkbox',
       'data-item': item.item_id,
-      'aria-label': `품목 ${short(item.item_id)} 선택`,
+      'aria-label': `${composition(item)} 선택`,
       disabled: !selection.selectable,
     });
     box.checked = state.chosen.has(item.item_id);
@@ -558,13 +668,8 @@ function workspace(initialProduct, navigateTo) {
       'tr',
       { 'data-item': item.item_id, 'data-selectable': selection.selectable ? 'true' : 'false' },
       h('td', {}, box),
-      h('td', {}, composition(item), h('span', { class: 'mini' }, short(item.item_id))),
-      h(
-        'td',
-        {},
-        binding ? BINDING_LABEL[binding.binding_kind] ?? binding.binding_kind : '연결 없음',
-        binding ? h('span', { class: 'mini' }, `구성원 ${short(binding.group_member_id)}`) : null,
-      ),
+      h('td', {}, composition(item)),
+      h('td', { 'data-binding': binding?.binding_kind ?? 'NONE' }, binding ? BINDING_LABEL[binding.binding_kind] ?? '연결됨' : '연결 없음'),
       h(
         'td',
         {},
@@ -592,14 +697,20 @@ function workspace(initialProduct, navigateTo) {
   const draftPanel = h(
     'div',
     { class: 'detail-group db-draft-form', 'data-role': 'draft-form' },
-    withHelp(h('h4', {}, '등록 초안'), DRAFT_HELP),
+    withHelp(h('h4', {}, '등록할 상품 만들기'), DRAFT_HELP),
     h('div', { class: 'form-row' }, h('label', { for: 'draft-target' }, '판매 계정'), targetSelect),
-    h('div', { class: 'form-row' }, h('label', { for: 'draft-shape' }, '리스팅 형태'), shapeSelect),
+    h('div', { class: 'form-row' }, h('label', { for: 'draft-shape' }, '등록 방식'), shapeSelect),
     h('div', { class: 'detail-actions' }, draftButton),
     draftResult,
   );
   let targets = [];
   let drafting = false;
+
+  // Two accounts of one marketplace are told apart by their order, never by an internal id.
+  function accountSuffix(target, index) {
+    const same = targets.filter((other) => other.marketplace_key === target.marketplace_key);
+    return same.length > 1 ? ` 계정 ${same.indexOf(targets[index]) + 1}` : '';
+  }
 
   function renderTargets(listed) {
     targets = listed.targets;
@@ -614,8 +725,8 @@ function workspace(initialProduct, navigateTo) {
             'data-account': target.marketplace_account_id,
             'data-reason': target.unavailable_reason ?? '',
           },
-          `${marketplaceLabel(target.marketplace_key)} · ${short(target.marketplace_account_id)} · ` +
-            (target.unavailable_reason ? copy(target.unavailable_reason) : `정책 ${short(target.policy_revision)}`),
+          `${marketplaceLabel(target.marketplace_key)}${accountSuffix(target, index)}` +
+            (target.unavailable_reason ? ` · ${copy(target.unavailable_reason)}` : ''),
         ),
       ),
     );
@@ -644,12 +755,10 @@ function workspace(initialProduct, navigateTo) {
     const item = items.get(pin.item_id);
     return h(
       'tr',
-      { 'data-pin-item': pin.item_id, 'data-pricing-snapshot': pin.pricing_snapshot_id },
-      h('td', {}, item ? composition(item) : short(pin.item_id)),
-      h('td', { class: 'mono' }, short(pin.pricing_snapshot_id)),
-      h('td', {}, `${pin.final_sale_price_krw.toLocaleString('ko-KR')}원`),
-      h('td', {}, BASIS_LABEL[pin.price_basis] ?? pin.price_basis),
-      h('td', {}, OUTCOME_LABEL[pin.pricing_outcome] ?? pin.pricing_outcome),
+      { 'data-pin-item': pin.item_id, 'data-pricing-snapshot': pin.pricing_snapshot_id, 'data-pricing-outcome': pin.pricing_outcome },
+      h('td', {}, item ? composition(item) : '품목'),
+      h('td', {}, won(pin.final_sale_price_krw)),
+      h('td', {}, BASIS_LABEL[pin.price_basis] ?? '—'),
     );
   }
 
@@ -674,23 +783,22 @@ function workspace(initialProduct, navigateTo) {
     };
     try {
       const created = await sendJson('POST', DRAFTS, body);
-      toast('등록 초안 생성', `초안 ${short(created.draft_id)} · 품목 ${created.items.length}개`);
+      toast('등록 대기 목록에 추가', `품목 ${created.items.length}개를 등록관리에 추가했습니다.`);
       // The Draft exists either way; only the Product it was made from may show it.
       if (seq !== state.draftSeq || state.productId !== id || created.product_group_id !== id) return;
       const items = new Map(product.items.map((item) => [item.item_id, item]));
       draftResult.dataset.state = 'created';
       draftResult.dataset.draft = created.draft_id;
+      draftResult.dataset.policyRevision = created.policy_revision;
+      draftResult.dataset.membershipRevision = created.membership_revision_id;
       draftResult.replaceChildren(
-        h('div', { class: 'supplier-head-row' }, h('b', {}, '등록 초안 생성됨'), chip(`초안 ${short(created.draft_id)}`, 'good')),
-        kv('초안', created.draft_id),
-        kv('대상', `${marketplaceLabel(created.marketplace_key)} · ${short(created.marketplace_account_id)}`),
-        kv('리스팅 형태', SHAPE_LABEL[created.listing_shape] ?? created.listing_shape),
-        kv('정책 리비전', short(created.policy_revision)),
-        kv('멤버십 리비전', short(created.membership_revision_id)),
+        h('div', { class: 'supplier-head-row' }, h('b', {}, '등록 대기 목록에 추가됨'), chip(`품목 ${created.items.length}개`, 'good')),
+        kv('판매 채널', marketplaceLabel(created.marketplace_key)),
+        kv('등록 방식', SHAPE_LABEL[created.listing_shape] ?? '—'),
         h(
           'table',
           { class: 'table' },
-          h('thead', {}, h('tr', {}, ...['품목', '가격 스냅샷', '판매가', '가격 근거', 'M4'].map((label) => h('th', {}, label)))),
+          h('thead', {}, h('tr', {}, ...['품목', '판매가', '가격기준'].map((label) => h('th', {}, label)))),
           h('tbody', {}, ...created.items.map((pin) => pinRow(pin, items))),
         ),
         h(
@@ -713,13 +821,14 @@ function workspace(initialProduct, navigateTo) {
       const code = errorCode(error);
       const unpriced = code === 'REGISTER_DRAFT_ITEM_NOT_PRICED' ? error.error?.details?.items ?? {} : {};
       draftResult.dataset.state = 'refused';
+      const items = new Map(product.items.map((item) => [item.item_id, item]));
       draftResult.replaceChildren(
-        h('div', { class: 'note', 'data-reason': code ?? '' }, copy(code ?? String(error.message ?? error))),
+        h('div', { class: 'note', 'data-reason': code ?? '' }, errorText(error, REASON_COPY)),
         ...Object.entries(unpriced).map(([itemId, reasons]) =>
           h(
             'div',
-            { class: 'mini', 'data-unpriced-item': itemId },
-            `${short(itemId)}: ${reasons.map((reason) => reason.code).join(', ')}`,
+            { class: 'mini', 'data-unpriced-item': itemId, 'data-reasons': reasons.map((reason) => reason.code).join(' ') },
+            `${items.has(itemId) ? composition(items.get(itemId)) : '품목'}: ${[...new Set(reasons.map((reason) => pricingCopy(reason.code)))].join(', ')}`,
           ),
         ),
         h(
@@ -757,10 +866,7 @@ function workspace(initialProduct, navigateTo) {
     const id = detail.product.product_group_id;
     selectionBar.dataset.product = id;
     selectionBar.dataset.count = String(state.chosen.size);
-    selectionBar.replaceChildren(
-      h('b', {}, `선택 상품 ${short(id)}`),
-      h('span', { class: 'mini' }, `품목 ${state.chosen.size}개 선택`),
-    );
+    selectionBar.replaceChildren(h('b', {}, `품목 ${state.chosen.size}개 선택`));
     checkButton.disabled = state.chosen.size === 0 || detail.selection_unavailable_reason !== null;
     targetResult.replaceChildren();
     delete targetResult.dataset.state;
@@ -776,8 +882,11 @@ function workspace(initialProduct, navigateTo) {
   const productReview = reviewItemsBlock({
     kindLabel: KIND_LABEL,
     emptyCopy: '이 상품에 기록된 검토 항목이 없습니다.',
-    errorCopy: (code, message) => copy(code ?? message),
-    scopeLabel: (item) => (item.scope.item_id ? `품목 ${short(item.scope.item_id)}` : null),
+    errorCopy: (code) => REASON_COPY[code] ?? errorText({ error: { code } }),
+    scopeLabel: (item) => {
+      const found = state.detail?.product.items.find((candidate) => candidate.item_id === item.scope.item_id);
+      return found ? composition(found) : null;
+    },
   });
 
   async function loadProductReview(id, slot) {
@@ -804,9 +913,8 @@ function workspace(initialProduct, navigateTo) {
         h(
           'div',
           { class: 'db-detail-name' },
-          h('b', { 'data-role': 'detail-name' }, detailName(detail) ?? short(product.product_group_id)),
-          h('div', { class: 'mini' }, '상품 ID · ', h('span', { class: 'mono' }, product.product_group_id)),
-          h('div', { class: 'mini' }, `생성 ${dotDateTime(product.created_at)}`),
+          h('b', { 'data-role': 'detail-name' }, detailName(detail) ?? '이름 없음'),
+          h('div', { class: 'mini' }, `등록 ${dotDateTime(product.created_at)}`),
         ),
         chip(GROUP_STATUS[product.status] ?? product.status, product.status === 'ACTIVE' ? 'good' : 'warn'),
       ),
@@ -814,11 +922,10 @@ function workspace(initialProduct, navigateTo) {
       h(
         'div',
         { class: 'detail-group' },
-        kv('멤버십 리비전', product.membership_revision_no === null ? '없음' : `r${product.membership_revision_no} · ${short(product.membership_revision_id)}`),
-        kv('확정 구성원', `${product.members.length}개`),
+        kv('연결된 공급처 상품', `${product.members.length}개`),
         product.retired_at ? kv('보관 시각', dotDateTime(product.retired_at)) : null,
       ),
-      ...detail.member_sources.map(memberGroup),
+      ...detail.member_sources.map((source) => memberGroup(source, names)),
       h(
         'div',
         { class: 'detail-group db-items' },
@@ -842,6 +949,22 @@ function workspace(initialProduct, navigateTo) {
     v29Panel.replaceChildren(...v29Groups(detail));
     renderSelection();
     loadProductReview(product.product_group_id, reviewSlot);
+    loadDetailPrices(product.product_group_id);
+  }
+
+  // The Product's latest recorded prices for the v29 price groups (a display read).
+  async function loadDetailPrices(id) {
+    let prices;
+    try {
+      prices = await getJson(`${PRICES}?${new URLSearchParams([['product_group_id', id]])}`);
+    } catch {
+      return;
+    }
+    if (state.productId !== id || state.detail?.product.product_group_id !== id || !prices.length) return;
+    // Only the two price groups are redrawn: the AI panels beside them keep their own state.
+    const [pricesGroup, channelsGroup] = priceGroups(prices);
+    v29Panel.querySelector("[data-role='detail-prices']")?.replaceWith(pricesGroup);
+    v29Panel.querySelector("[data-role='detail-channels']")?.replaceWith(channelsGroup);
   }
 
   async function checkTarget() {
@@ -858,10 +981,8 @@ function workspace(initialProduct, navigateTo) {
       targetResult.dataset.state = 'confirmed';
       targetResult.dataset.product = id;
       targetResult.replaceChildren(
-        h('div', { class: 'supplier-head-row' }, h('b', {}, '등록 대상 확인됨'), chip(`품목 ${target.items.length}개`, 'good')),
-        kv('상품', short(target.product_group_id)),
-        kv('멤버십 리비전', `r${target.membership_revision_no}`),
-        ...target.items.map((item) => h('div', { class: 'mini', 'data-target-item': item.item_id }, `수량 ${item.quantity} · ${short(item.item_id)}`)),
+        h('div', { class: 'supplier-head-row' }, h('b', {}, '등록할 수 있습니다'), chip(`품목 ${target.items.length}개`, 'good')),
+        ...target.items.map((item) => h('div', { class: 'mini', 'data-target-item': item.item_id }, `수량 ${item.quantity}`)),
       );
     } catch (error) {
       if (seq !== state.targetSeq || state.productId !== id) return;
@@ -881,10 +1002,7 @@ function workspace(initialProduct, navigateTo) {
         },
         '상세 다시 불러오기',
       );
-      targetResult.replaceChildren(
-        h('div', { class: 'note', 'data-reason': code ?? '' }, copy(code ?? String(error.message ?? error))),
-        reload,
-      );
+      targetResult.replaceChildren(h('div', { class: 'note', 'data-reason': code ?? '' }, errorText(error, REASON_COPY)), reload);
     } finally {
       if (seq === state.targetSeq) checkButton.disabled = state.chosen.size === 0;
     }
@@ -911,10 +1029,18 @@ function workspace(initialProduct, navigateTo) {
   });
 
   renderIdleDetail();
+  // Supplier names for the list and detail; the list is drawn again once they arrive.
+  supplierNames().then((found) => {
+    names = found;
+    if (lastPage) {
+      renderList(lastPage);
+      loadListPrices(lastPage, state.listSeq);
+    }
+  });
   loadList();
   // The targets are the owners' accounts, bindings and policies: read once for this page.
   getJson(DRAFT_TARGETS).then(renderTargets, (error) => {
-    targetSelect.replaceChildren(h('option', { value: '' }, copy(errorCode(error) ?? String(error.message ?? error))));
+    targetSelect.replaceChildren(h('option', { value: '' }, errorText(error, REASON_COPY)));
     renderDraftButton();
   });
   if (initialProduct) selectProduct(initialProduct);

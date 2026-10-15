@@ -7,12 +7,13 @@
 // records nothing when its inputs are unchanged (ADR-0028 §4), so the panel waits for a newer
 // result or for its own job to end. The page decides nothing and computes nothing.
 
-import { ApiError, getJson, sendJson } from '../core/api.js';
+import { getJson, sendJson } from '../core/api.js';
 import { h } from '../core/dom.js';
+import { errorText } from '../core/errors.js';
 import { markInert } from '../core/inert.js';
 import { toast } from '../core/toast.js';
 import { enrichmentUrl } from './ai-name.js';
-import { stateText } from './ai-provider.js';
+import { sellerStateText } from './ai-provider.js';
 
 const DRAFT_TARGETS = '/api/v1/register/draft-targets';
 const OPERATOR = 'operator';
@@ -53,8 +54,7 @@ export function targetedPanel(options) {
   const host = h('div', { class: role, 'data-role': role, 'data-product': productGroupId }, button, body);
   let account = options.target ?? null;
   let busy = false;
-  // Never the server's English message (2026-10-15): its code's wording, or a Korean sentence.
-  const copy = (error) => (error instanceof ApiError ? errorCopy[error.error?.code] : null) ?? '요청을 처리하지 못했습니다. 잠시 뒤 다시 시도하고, 계속되면 화면을 새로 고쳐 주세요.';
+  const copy = (error) => errorText(error, errorCopy);
 
   function show(view) {
     const ready = view.ai_capability?.status === 'READY' && account !== null;
@@ -65,7 +65,7 @@ export function targetedPanel(options) {
     } else if (account === null) {
       markInert(button, `${label} · 연결된 스마트스토어 판매 계정이 없습니다`);
     } else {
-      markInert(button, `${label} · ${stateText(view.ai_capability ?? {})}`);
+      markInert(button, `${label} · ${sellerStateText(view.ai_capability ?? {})}`);
     }
     const result = account ? targetedResult(view, task, resultKey, account) : null;
     body.replaceChildren(account ? render(result) : h('div', { class: 'mini no-data' }, '연결된 스마트스토어 판매 계정이 없습니다'));
@@ -92,7 +92,7 @@ export function targetedPanel(options) {
         const newer = (result?.sequence ?? 0) > before;
         if (newer || (await jobSettled(sent.job_id))) {
           show(view);
-          toast(newer ? (result.status === 'OK' ? `${label}을 받았습니다` : `${label}에 실패했습니다`) : '입력이 그대로라 이전 추천을 그대로 씁니다');
+          toast(newer ? (result.status === 'OK' ? `${label}을 받았습니다` : `${label}에 실패했습니다`) : '바뀐 정보가 없어 이전 추천을 그대로 씁니다');
           return;
         }
       }

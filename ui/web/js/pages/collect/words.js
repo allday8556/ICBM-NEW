@@ -19,8 +19,8 @@ import { ONBOARDING } from './onboarding.js';
 const KIND_LABEL = { row: '행 이름', phrase: '문구', mark: '표시' };
 
 const WORDS_ERROR = {
-  ONBOARDING_WORDS_INVALID: '단어만 넣을 수 있습니다. 기호 < > { } [ ] \\ | * + ? ^ $ 는 쓸 수 없고, 슬롯마다 최대 12개, 단어당 40자입니다.',
-  ONBOARDING_WORDS_SLOT_UNKNOWN: '이 템플릿에 없는 슬롯입니다.',
+  ONBOARDING_WORDS_INVALID: '기호 없이 단어만 넣을 수 있습니다. 항목마다 최대 12개, 단어당 40자까지입니다.',
+  ONBOARDING_WORDS_SLOT_UNKNOWN: '이 쇼핑몰에 없는 항목입니다. 창을 닫았다 다시 여세요.',
   ONBOARDING_WORDS_MOVED: '그 사이 수집 규칙이 바뀌었습니다. 창을 닫았다 다시 열어 최신 규칙에서 고치세요.',
   ONBOARDING_WORDS_UNCHANGED: '지금 규칙과 같습니다. 바꾼 단어가 없습니다.',
   ONBOARDING_SUPPLIER_DISABLED: '비활성 공급처의 수집 규칙은 바꾸지 않습니다.',
@@ -121,7 +121,7 @@ export async function openCollectionWords(record, { errorMessage, onSaved }) {
       h(
         'table',
         { class: 'table words-table' },
-        h('thead', {}, h('tr', {}, h('th', {}, '슬롯'), h('th', {}, '템플릿 기본 단어'), h('th', {}, '이 공급처 단어'))),
+        h('thead', {}, h('tr', {}, h('th', {}, '항목'), h('th', {}, '기본 단어'), h('th', {}, '이 공급처 단어'))),
         h(
           'tbody',
           {},
@@ -130,7 +130,7 @@ export async function openCollectionWords(record, { errorMessage, onSaved }) {
               rows: Math.max(1, slot.site.length),
               autocomplete: 'off',
               'data-role': 'slot-words',
-              'aria-label': `${SLOT_LABEL[slot.slot] ?? slot.slot} 단어`,
+              'aria-label': `${SLOT_LABEL[slot.slot] ?? '기타 항목'} 단어`,
               placeholder: '한 줄에 한 단어',
             });
             input.value = slot.site.join('\n');
@@ -138,7 +138,7 @@ export async function openCollectionWords(record, { errorMessage, onSaved }) {
             return h(
               'tr',
               { 'data-slot': slot.slot, 'data-kind': slot.kind },
-              h('td', {}, SLOT_LABEL[slot.slot] ?? slot.slot, h('div', { class: 'mini' }, KIND_LABEL[slot.kind] ?? slot.kind)),
+              h('td', {}, SLOT_LABEL[slot.slot] ?? '기타 항목', h('div', { class: 'mini' }, KIND_LABEL[slot.kind] ?? '')),
               h(
                 'td',
                 { class: 'analysis-value', 'data-role': 'defaults' },
@@ -189,8 +189,9 @@ export async function openCollectionWords(record, { errorMessage, onSaved }) {
       view = await sendJson('PUT', `${base}/words`, { words: proposed(), expected_seq: view.words_seq });
       render();
       reanalyse.hidden = false;
-      say(`수집 규칙 w${view.words_seq}을 저장했습니다.${wasActive ? ' 공급처는 분석 중으로 돌아갔습니다.' : ''} 「다시 분석」으로 저장된 샘플을 새 규칙으로 다시 봅니다.`);
-      toast('수집 규칙', `w${view.words_seq} 저장`);
+      status.dataset.wordsSeq = String(view.words_seq);
+      say(`수집 규칙을 저장했습니다.${wasActive ? ' 공급처는 분석 중으로 돌아갔습니다.' : ''} 「다시 분석」으로 저장된 샘플을 새 규칙으로 다시 봅니다.`);
+      toast('수집 규칙', '저장했습니다.');
       onSaved?.();
     }),
   );
@@ -203,9 +204,9 @@ export async function openCollectionWords(record, { errorMessage, onSaved }) {
   );
 
   openModal({
-    eyebrow: 'COLLECT · Collection Words',
+    eyebrow: '공급처 관리',
     title: `수집 규칙 · ${record.display_name}`,
-    help: '템플릿 기본 단어 옆에 이 공급처의 단어를 더합니다. 단어만 넣을 수 있고, 미리보기는 저장된 샘플을 다시 볼 뿐 공급처에 요청하지 않습니다.',
+    help: '기본 단어 옆에 이 공급처가 쓰는 단어를 더합니다. 미리보기는 저장된 샘플을 다시 볼 뿐 공급처에 요청하지 않습니다.',
     body: h(
       'div',
       { class: 'analysis', 'data-role': 'collection-words' },

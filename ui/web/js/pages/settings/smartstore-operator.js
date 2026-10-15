@@ -12,6 +12,7 @@
 import { getJson, sendJson } from '../../core/api.js';
 import { scopeLabel } from '../../platforms/smartstore/capability.js';
 import { h } from '../../core/dom.js';
+import { errorText as plainError } from '../../core/errors.js';
 import { toast } from '../../core/toast.js';
 
 const BASE = '/api/v1/connect/marketplaces';
@@ -22,8 +23,7 @@ function kv(label, value) {
 }
 
 function errorText(error) {
-  const body = error?.error;
-  return body?.message ? `${body.message} (${body.code})` : String(error?.message ?? error);
+  return plainError(error);
 }
 
 // ---------------------------------------------------------------- credentials
@@ -36,19 +36,20 @@ export function credentialsPanel(onChanged) {
     type: 'text',
     autocomplete: 'off',
     spellcheck: 'false',
-    placeholder: 'Application ID',
+    placeholder: '애플리케이션 ID',
   });
   const secret = h('input', {
     id: 'smartstore-client-secret',
     type: 'password',
     autocomplete: 'new-password',
-    placeholder: 'Application Secret',
+    placeholder: '애플리케이션 시크릿',
   });
   const save = h('button', { type: 'button', class: 'btn blue', 'data-action': 'save-credentials' }, 'API 정보 저장');
 
   const show = (view) => {
     status.className = view.configured ? 'chip good' : 'chip';
-    status.textContent = view.configured ? `저장됨 · 자격증명 세대 ${view.credential_generation}` : '미설정';
+    status.textContent = view.configured ? '저장됨' : '미설정';
+    status.dataset.generation = view.configured ? String(view.credential_generation) : '';
   };
   getJson(`${SMARTSTORE}/credentials`)
     .then(show)
@@ -66,7 +67,7 @@ export function credentialsPanel(onChanged) {
         client_secret: secret.value,
       });
       show(view);
-      toast(title, `새 자격증명 세대 ${view.credential_generation}(으)로 저장했습니다. 이전 세션과 계정 확인은 무효입니다.`);
+      toast(title, '저장했습니다. 아래에서 계정 확인을 다시 해 주세요.');
       await onChanged();
     } catch (error) {
       toast(title, errorText(error));
@@ -80,7 +81,7 @@ export function credentialsPanel(onChanged) {
     'div',
     { class: 'smartstore-credentials' },
     h('div', { class: 'form-row' }, h('label', { for: clientId.id }, '애플리케이션 ID'), clientId),
-    h('div', { class: 'form-row' }, h('label', { for: secret.id }, '애플리케이션 Secret'), secret),
+    h('div', { class: 'form-row' }, h('label', { for: secret.id }, '애플리케이션 시크릿'), secret),
     h('div', { class: 'kv' }, h('span', {}, '저장 상태'), status),
     h('div', { class: 'api-action-row' }, save),
   );
@@ -89,8 +90,8 @@ export function credentialsPanel(onChanged) {
 // ---------------------------------------------------------------- observation, then first binding
 
 function comparison(capability) {
-  if (capability.auth === 'READY') return '일치 · 현재 세션으로 확인됨';
-  if (capability.auth === 'AUTH_MISMATCH') return '불일치 · 연결 대상은 바뀌지 않습니다 (검토 필요)';
+  if (capability.auth === 'READY') return '연결된 계정과 같습니다';
+  if (capability.auth === 'AUTH_MISMATCH') return '연결된 계정과 다릅니다 · 연결된 계정은 바뀌지 않습니다 (확인 필요)';
   return '확인 필요';
 }
 
@@ -107,7 +108,7 @@ export function accountPanel(onChanged) {
     const bind = h(
       'button',
       { type: 'button', class: 'btn blue', 'data-action': 'bind' },
-      '이 계정을 연결 대상으로 확정',
+      '이 계정 연결',
     );
     bind.disabled = true;
     box.addEventListener('change', () => {
@@ -119,9 +120,9 @@ export function accountPanel(onChanged) {
       observe.disabled = true;
       try {
         await sendJson('POST', `${SMARTSTORE}/bind`, { confirmed_account_uid: shownUid });
-        toast('연결 대상 확정', '확인한 판매자 계정을 연결 대상 계정으로 확정했습니다.');
+        toast('계정 연결', '확인한 판매자 계정을 연결했습니다.');
       } catch (error) {
-        toast('연결 대상 확정', errorText(error));
+        toast('계정 연결', errorText(error));
       } finally {
         forget(); // success or failure: any later binding needs a fresh observation
         observe.disabled = false;
@@ -132,7 +133,7 @@ export function accountPanel(onChanged) {
       h(
         'label',
         { class: 'kv bind-confirm', for: box.id },
-        h('span', {}, '위 판매자 계정을 이 ICBM의 연결 대상 스마트스토어 계정으로 확정합니다'),
+        h('span', {}, '위 판매자 계정을 ICBM에 연결합니다'),
         box,
       ),
       h('div', { class: 'api-action-row' }, bind),
@@ -145,8 +146,8 @@ export function accountPanel(onChanged) {
     try {
       const view = await sendJson('POST', `${SMARTSTORE}/connect`);
       result.replaceChildren(
-        kv('확인된 판매자 계정 (accountUid)', view.observed_account_uid),
-        kv('판매자 계정 ID (accountId)', view.observed_account_id ?? '없음'),
+        kv('확인된 판매자 계정', view.observed_account_uid),
+        kv('판매자 아이디', view.observed_account_id ?? '없음'),
         ...(view.bound
           ? [kv('연결된 계정과 비교', comparison(view.capability))]
           : confirmation(view.observed_account_uid)),
@@ -168,24 +169,24 @@ export function accountPanel(onChanged) {
 // verification. Nothing returns to UNRECORDED, so it is not offered; the server enforces the rest
 // of the closed transition graph.
 const REVIEW_OPTIONS = [
-  ['CURRENT', '현재 채택 계약과 일치 (ICBM 검토)'],
-  ['STALE', '재검토 필요'],
-  ['REVIEW_REQUIRED', '계약과 불일치 · 검토 필요'],
+  ['CURRENT', '직접 확인함 (지금 연동 방식 사용)'],
+  ['STALE', '다시 확인 필요'],
+  ['REVIEW_REQUIRED', '연동 방식이 달라 확인 필요'],
 ];
 
 export function contractReviewPanel(key, onChanged) {
-  const title = 'API 계약 검토 기록';
+  const title = 'API 연동 확인';
   const select = h(
     'select',
     { id: `contract-review-${key}` },
     REVIEW_OPTIONS.map(([value, label]) => h('option', { value }, label)),
   );
-  const save = h('button', { type: 'button', class: 'btn', 'data-action': 'record-freshness' }, '검토 기록 저장');
+  const save = h('button', { type: 'button', class: 'btn', 'data-action': 'record-freshness' }, '확인 기록 저장');
   save.addEventListener('click', async () => {
     save.disabled = true;
     try {
       await sendJson('POST', `${BASE}/${key}/contract-freshness`, { contract_freshness: select.value });
-      toast(title, 'ICBM 계약 검토 기록을 남겼습니다. NAVER가 확인한 것이 아닙니다.');
+      toast(title, '직접 확인한 기록으로 저장했습니다. 네이버가 확인한 것은 아닙니다.');
       await onChanged();
     } catch (error) {
       toast(title, errorText(error));
@@ -196,7 +197,7 @@ export function contractReviewPanel(key, onChanged) {
   return h(
     'div',
     { class: 'contract-review' },
-    h('div', { class: 'form-row' }, h('label', { for: select.id }, '검토 결과'), select),
+    h('div', { class: 'form-row' }, h('label', { for: select.id }, '확인 결과'), select),
     h('div', { class: 'api-action-row' }, save),
   );
 }
@@ -220,13 +221,13 @@ export function workflowActions(key, view, onChanged) {
         'div',
         { class: 'kv workflow-action', 'data-scope': overlay.workflow_scope },
         h('span', {}, label),
-        h('span', { class: 'mini' }, '등록 권한 확인에서 새 권한 증거를 기록해야 해제됩니다'),
+        h('span', { class: 'mini' }, '아래 「등록 권한 확인」에서 권한을 다시 체크하면 풀립니다'),
       );
     }
     const button = h(
       'button',
       { type: 'button', class: 'btn', 'data-resolution': overlay.resolution },
-      RESOLUTION_LABEL[overlay.resolution] ?? overlay.resolution,
+      RESOLUTION_LABEL[overlay.resolution] ?? '조치 기록',
     );
     button.addEventListener('click', async () => {
       button.disabled = true;
@@ -235,7 +236,7 @@ export function workflowActions(key, view, onChanged) {
           workflow_scope: overlay.workflow_scope,
           resolution: overlay.resolution,
         });
-        toast('조치 기록', '조치를 기록했습니다. 연결 상태는 새 증거로만 바뀝니다.');
+        toast('조치 기록', '기록했습니다. 연결 상태는 다음 확인 때 바뀝니다.');
       } catch (error) {
         toast('조치 기록', errorText(error));
       } finally {

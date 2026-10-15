@@ -52,7 +52,7 @@ function render(root, status) {
     ),
   );
   if (counts.unclassified > 0) {
-    chips.push(h('span', { class: 'chip bad', 'data-reason': 'REGISTER_READ_STATE_UNCLASSIFIED' }, `분류 오류 ${counts.unclassified}`));
+    chips.push(h('span', { class: 'chip bad', 'data-reason': 'REGISTER_READ_STATE_UNCLASSIFIED' }, `상태 확인 필요 ${counts.unclassified}`));
   }
   root.replaceChildren(
     h(

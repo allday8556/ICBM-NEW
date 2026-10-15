@@ -54,6 +54,7 @@ NO_REVISION: Final = "NO_REVISION"
 FAILED: Final = "FAILED"
 REFUSED: Final = "REFUSED"
 STOCK_FIELD: Final = "stock"
+NAME_FIELD: Final = "original_name"
 # A round stops after this many refusals in a row (a lost supplier session, a pacing wall).
 MAX_CONSECUTIVE_REFUSALS: Final = 3
 NO_SOURCE_URL: Final = "OPERATE_STOCK_NO_SOURCE_URL"
@@ -111,6 +112,18 @@ class StockOverview:
     interval_s: float
     cap: int
     sources: tuple[StockStateView, ...]
+
+
+def _name_of(revision: Any) -> str | None:
+    """The source revision's confirmed product name, for a listed source whose registration names
+    none (an adopted listing, or a name kept on the detail page). Display only."""
+    if revision is None:
+        return None
+    stored = revision.fields.get(NAME_FIELD)
+    if stored is None or stored.status is not FieldStatus.CONFIRMED:
+        return None
+    text = getattr(stored.value, "text", None)
+    return text if isinstance(text, str) and text else None
 
 
 def availability_of(revision: Any) -> str | None:
@@ -401,7 +414,7 @@ class StockRecheckService:
             supplier_key=source.supplier_key,
             source_product_id=source.source_product_id,
             registration_ids=source.registration_ids,
-            product_name=source.product_names[0] if source.product_names else None,
+            product_name=source.product_names[0] if source.product_names else _name_of(current),
             availability=availability,
             availability_revision_id=None if current is None else current.revision_id,
             last_recheck_outcome=None if last is None else last.outcome,

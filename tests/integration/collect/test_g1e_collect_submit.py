@@ -228,6 +228,22 @@ def test_recent_runs_are_bounded_and_totally_ordered(api: TestClient, config: Ap
         assert response.json()["error"]["code"] == "COLLECT_RUN_LIMIT_INVALID"
 
 
+def test_each_supplier_is_named_with_its_newest_request_time(
+    api: TestClient, config: AppConfig
+) -> None:
+    assert api.get("/api/v1/collect/last-collected", headers=CLIENT).json() == {}
+    for number in ("21", "22"):
+        settled(api, submit(api, number).json()["collection_run_id"])
+    with contextlib.closing(raw(config)) as connection:
+        ((newest,),) = connection.execute(
+            "SELECT MAX(requested_at) FROM collection_runs WHERE supplier_key = ?",
+            (SUPPLIER_KEY,),
+        ).fetchall()
+    listed = api.get("/api/v1/collect/last-collected", headers=CLIENT).json()
+    assert set(listed) == {SUPPLIER_KEY}
+    assert listed[SUPPLIER_KEY][:19] == str(newest).replace(" ", "T")[:19]
+
+
 # ---------------------------------------------------------------- Product DB handoff
 
 

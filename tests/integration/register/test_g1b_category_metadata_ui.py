@@ -144,12 +144,13 @@ def test_the_operator_records_then_reviews_metadata_and_it_survives_reload_and_r
     writes: list[tuple[str, str]] = []
     path = f"/api/v1/settings/category-metadata/{MARKETPLACE}/{KEY}/revisions"
     with _served(config) as client, _page(browser, client, writes) as page:
-        assert "CATEGORY_METADATA_MISSING" in page.locator(PANEL).inner_text()
+        missing = page.locator(f"{PANEL} [data-reason='CATEGORY_METADATA_MISSING']")
+        assert "기록된 카테고리 정보가 없습니다" in missing.inner_text()
         assert writes == []
         _fill_new(page, reviewed=False, provenance="AI_SUGGESTION")
         _save(page)
         page.wait_for_selector(f"{PANEL} [data-metadata-key='{KEY}'][data-meta-reviewed='false']")
-        assert "CATEGORY_METADATA_UNREVIEWED" in _entry(page)[2]
+        assert "확인 전" in _entry(page)[2]
 
         # Review: load the recorded revision, confirm it from evidence, record it reviewed.
         page.locator(
@@ -170,7 +171,10 @@ def test_the_operator_records_then_reviews_metadata_and_it_survives_reload_and_r
         page.wait_for_selector(f"{PANEL} [data-metadata-key='{KEY}'][data-meta-reviewed='true']")
         reviewed = _entry(page)
         assert reviewed[:2] == ("true", "2")
-        assert "검토 완료 · operator" in reviewed[2] and "현재 리비전 #2" in reviewed[2]
+        assert "확인 완료" in reviewed[2]
+        chip = page.locator(f"{PANEL} [data-metadata-key='{KEY}'] [data-meta-revision]")
+        assert chip.get_attribute("data-meta-revision") == "2"
+        assert chip.get_attribute("data-meta-reviewed-by") == "operator"
         assert writes == [("POST", path), ("POST", path)]
         page.reload()
         page.wait_for_selector(f"{PANEL} [data-metadata-key='{KEY}'][data-meta-reviewed='true']")
@@ -208,7 +212,7 @@ def test_a_refused_save_shows_the_server_reason_and_writes_nothing(
     with _served(config) as client, _page(browser, client, writes) as page:
         _fill_new(page, reviewed=True, provenance="AI_SUGGESTION")
         _save(page)
-        page.locator(".toast", has_text="CATEGORY_METADATA_AI_NOT_REVIEWABLE").wait_for(
+        page.locator(".toast", has_text="AI 제안은 확인 완료로 기록할 수 없습니다").wait_for(
             timeout=10_000
         )
         assert page.locator(f"{PANEL} [data-metadata-key='{KEY}']").count() == 0

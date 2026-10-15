@@ -17,4 +17,11 @@ export default contractPage({
     actionLabel: '등록관리 보기',
     to: { page: 'register' },
   },
+  // Data exists but the analysis screens are not built yet: say so, with what has been gathered.
+  readyNote: (view) => ({
+    title: '분석 화면은 준비 중입니다',
+    copy:
+      `지금까지 주문 ${Number(view.orders_total).toLocaleString('ko-KR')}건, ` +
+      `등록 ${Number(view.registrations_total).toLocaleString('ko-KR')}건이 쌓였습니다. 운영 지표가 준비되면 이곳에 표시됩니다.`,
+  }),
 });

@@ -8,6 +8,7 @@
 
 import { getJson, sendJson } from '../../core/api.js';
 import { h } from '../../core/dom.js';
+import { errorText as plainError } from '../../core/errors.js';
 import { toast } from '../../core/toast.js';
 
 const BASE = '/api/v1/settings/target-policies';
@@ -17,9 +18,28 @@ const ADDRESS_TYPE_LABEL = { RELEASE: '출고지', REFUND_OR_EXCHANGE: '반품·
 const TITLE = '등록 대상 정책';
 const ACTOR = 'operator';
 
-// The vocabulary the contract declares, shown as choices. Choosing one decides nothing.
+// The vocabulary the contract declares, shown as choices in Korean. Choosing one decides nothing.
 const ROUNDING = ['CEIL_KRW_1'];
 const LOOKUP_KEYS = ['SELLER_CODE', 'GTIN', 'OFFICIAL_KEY', 'NORMALIZED_NAME'];
+const LOOKUP_LABEL = { SELLER_CODE: '판매자 상품코드', GTIN: '바코드(GTIN)', OFFICIAL_KEY: '공식 상품번호', NORMALIZED_NAME: '상품명' };
+const OPTION_LABEL = {
+  CEIL_KRW_1: '1원 단위 올림',
+  DELIVERY: '택배·소포·등기',
+  NORMAL: '일반 배송',
+  PAID: '유료',
+  PREPAID: '선결제',
+  PRIMARY: '기본 반품 택배사',
+  CJGLS: 'CJ대한통운',
+};
+const ERROR_COPY = {
+  TARGET_POLICY_INVALID: '입력값을 확인하세요. 잘못된 값이 있어 저장하지 않았습니다.',
+  TARGET_POLICY_PRICING_CONTEXT_INVALID: '수수료·가격 설정을 확인하세요. 잘못된 값이 있어 저장하지 않았습니다.',
+  TARGET_POLICY_UNSAFE_CONTENT: '입력값에 쓸 수 없는 내용(주소·키 등)이 있어 저장하지 않았습니다.',
+  TARGET_POLICY_UNCHANGED: '바뀐 값이 없습니다.',
+  TARGET_POLICY_CURRENT_MOVED: '다른 곳에서 정책이 바뀌었습니다. 새로 불러온 값을 확인한 뒤 다시 저장하세요.',
+  TARGET_POLICY_ACCOUNT_UNKNOWN: '연결된 판매 계정을 찾을 수 없습니다.',
+  TARGET_POLICY_AUTHORING_REVISION_UNOWNED: '자동으로 기록되는 값은 직접 바꿀 수 없습니다.',
+};
 const DELIVERY_TYPES = ['DELIVERY'];
 const DELIVERY_ATTRIBUTES = ['NORMAL'];
 const DELIVERY_FEE_TYPES = ['PAID'];
@@ -32,8 +52,7 @@ const DELIVERY_COMPANIES = ['CJGLS'];
 let sequence = 0;
 
 function errorText(error) {
-  const body = error?.error;
-  return body?.message ? `${body.message} (${body.code})` : String(error?.message ?? error);
+  return plainError(error, ERROR_COPY);
 }
 
 function field(label, value, { editable, name }) {
@@ -66,7 +85,7 @@ function choice(label, options, value, { editable, name }) {
   const select = h(
     'select',
     { id, 'data-policy-field': name },
-    options.map((option) => h('option', { value: option }, option)),
+    options.map((option) => h('option', { value: option }, OPTION_LABEL[option] ?? option)),
   );
   if (value) select.value = value;
   select.disabled = !editable;
@@ -85,7 +104,7 @@ function serverOwned(label, value, name) {
     'div',
     { class: 'kv', 'data-policy-reference': name },
     h('span', {}, label),
-    h('span', { class: 'chip' }, value ?? '없음 · 서버 소유 리비전입니다. 정책을 새로 저장하면 서버가 기록합니다'),
+    h('span', { class: 'chip' }, value ? '기록됨' : '자동으로 기록됩니다 (정책을 저장하면 채워집니다)'),
   );
 }
 
@@ -107,15 +126,14 @@ function templatesOf(text) {
 }
 
 function revisionLine(current) {
-  if (!current) return '저장된 정책 없음 · 등록 사전검사는 정책이 저장될 때까지 진행되지 않습니다';
-  const at = new Date(current.authored_at).toLocaleString('ko-KR');
-  return `현재 리비전 #${current.revision_no} · 지문 ${current.content_fingerprint.slice(0, 12)} · ${current.authored_by} · ${at}`;
+  if (!current) return '아직 저장한 정책이 없습니다. 정책을 저장해야 등록할 수 있습니다';
+  return `저장됨 · ${new Date(current.authored_at).toLocaleString('ko-KR')}`;
 }
 
 // One policy revision, shown in two tabs: 'policy' (등록 정책) and 'delivery' (배송 관리). Every
 // field is built from the server's current inputs; a tab shows only its own rows, and a save
 // sends the other tab's fields unchanged, so the revision is always whole.
-function editor(view, onSaved, section) {
+function editor(view, onSaved, section, accountLabel = '스마트스토어 판매 계정') {
   const editable = view.editable === true;
   const inputs = view.inputs;
   const pricing = inputs?.pricing_context;
@@ -123,8 +141,8 @@ function editor(view, onSaved, section) {
   const delivery = inputs?.delivery_policy;
   const on = { editable };
 
-  const taxonomy = field('카테고리 체계 리비전', inputs?.taxonomy_revision, { ...on, name: 'taxonomy_revision' });
-  const sanitizer = field('정제 프로필 버전', inputs?.sanitizer_profile_version, { ...on, name: 'sanitizer_profile_version' });
+  const taxonomy = field('카테고리 체계 버전', inputs?.taxonomy_revision, { ...on, name: 'taxonomy_revision' });
+  const sanitizer = field('상품정보 정리 규칙 버전', inputs?.sanitizer_profile_version, { ...on, name: 'sanitizer_profile_version' });
   const feeTable = field('수수료표 버전', pricing?.fee_table_version, { ...on, name: 'fee_table_version' });
   const pricingPolicy = field('가격정책 버전', pricing?.pricing_policy_version, { ...on, name: 'pricing_policy_version' });
   const feeRate = field('수수료율 (예: 0.055)', pricing?.fee_rate, { ...on, name: 'fee_rate' });
@@ -134,7 +152,7 @@ function editor(view, onSaved, section) {
     ...on,
     name: 'other_cost_fixed_krw',
   });
-  const pricingAccount = check('계정별 수수료·정책 (해제하면 계정 무관)', pricing?.account_id, {
+  const pricingAccount = check('이 판매 계정에만 적용', pricing?.account_id, {
     ...on,
     name: 'pricing_account_scoped',
   });
@@ -144,11 +162,11 @@ function editor(view, onSaved, section) {
   const minImages = field('최소 이미지 수', asset ? String(asset.min_images) : '', { ...on, name: 'min_images' });
   const maxImages = field('최대 이미지 수', asset ? String(asset.max_images) : '', { ...on, name: 'max_images' });
   const representative = check('대표 이미지 필수', asset?.requires_representative, { ...on, name: 'requires_representative' });
-  const providerIdentity = check('마켓 이미지 식별자 필요', asset?.provider_asset_identity_required, {
+  const providerIdentity = check('마켓에 올린 이미지만 사용', asset?.provider_asset_identity_required, {
     ...on,
     name: 'provider_asset_identity_required',
   });
-  const physicalDelivery = check('실물 배송 정보 전송', Boolean(delivery), {
+  const physicalDelivery = check('배송 정보 사용', Boolean(delivery), {
     ...on,
     name: 'physical_delivery',
   });
@@ -173,7 +191,7 @@ function editor(view, onSaved, section) {
     ...on,
     name: 'after_service_telephone',
   });
-  const deliveryCompany = choice('택배사 (CJGLS = CJ대한통운)', DELIVERY_COMPANIES, delivery?.delivery_company ?? 'CJGLS', {
+  const deliveryCompany = choice('택배사', DELIVERY_COMPANIES, delivery?.delivery_company ?? 'CJGLS', {
     ...on,
     name: 'delivery_company',
   });
@@ -263,7 +281,7 @@ function editor(view, onSaved, section) {
       if (quiet) {
         addressList.textContent = '스마트스토어 연결 후 주소록을 불러올 수 있습니다 (API 관리 › 계정 확인).';
       } else {
-        toast(`주소록을 불러오지 못했습니다: ${errorText(error)}`);
+        toast('주소록을 불러오지 못했습니다', errorText(error));
       }
     } finally {
       loadAddresses.disabled = !editable;
@@ -276,13 +294,13 @@ function editor(view, onSaved, section) {
   const templates = h('textarea', { id: templatesId, rows: '3', spellcheck: 'false', 'data-policy-field': 'templates' });
   templates.value = templatesText(inputs?.templates);
   templates.disabled = !editable;
-  const proofRequired = check('중복 확인 증거 필수', inputs?.duplicate_proof_required, {
+  const proofRequired = check('등록 전 중복 확인 필수', inputs?.duplicate_proof_required, {
     ...on,
     name: 'duplicate_proof_required',
   });
   const keys = LOOKUP_KEYS.map((key) => ({
     key,
-    ...check(`조회 키 ${key}`, (inputs?.duplicate_lookup_keys ?? []).includes(key), { ...on, name: `lookup_${key}` }),
+    ...check(`중복 확인 기준: ${LOOKUP_LABEL[key] ?? key}`, (inputs?.duplicate_lookup_keys ?? []).includes(key), { ...on, name: `lookup_${key}` }),
   }));
 
   const save = h(
@@ -344,7 +362,7 @@ function editor(view, onSaved, section) {
           detail_composition_revision: null,
         },
       });
-      toast(TITLE, '새 정책 리비전을 저장했습니다. 이후 등록 사전검사는 이 리비전으로 다시 평가됩니다.');
+      toast(TITLE, '등록 정책을 저장했습니다. 이후 등록부터 적용됩니다.');
       await onSaved();
     } catch (error) {
       // Nothing was written: the server refuses a save whole. The typed values stay for a fix.
@@ -353,29 +371,32 @@ function editor(view, onSaved, section) {
     }
   });
 
+  // What a seller sets first; the version and identity fields the marketplace setup needs follow
+  // under their own heading.
   const policyRows = [
-    taxonomy.row,
-    serverOwned('카테고리 매핑 리비전', inputs?.category_mapping_revision, 'category_mapping_revision'),
-    serverOwned('상세 구성 리비전', inputs?.detail_composition_revision, 'detail_composition_revision'),
-    sanitizer.row,
-    feeTable.row,
-    pricingPolicy.row,
     feeRate.row,
     feeFixed.row,
     otherRate.row,
     otherFixed.row,
-    pricingAccount.row,
     costRounding.row,
     priceRounding.row,
-    profile.row,
     minImages.row,
     maxImages.row,
     representative.row,
-    providerIdentity.row,
     afterServicePhone.row,
-    h('div', { class: 'form-row' }, h('label', { for: templatesId }, '템플릿 (한 줄에 종류=식별자)'), templates),
+    h('h4', { class: 'policy-advanced-title' }, '고급 설정 · 처음 한 번 입력하면 보통은 바꿀 필요가 없습니다'),
+    pricingAccount.row,
+    taxonomy.row,
+    sanitizer.row,
+    feeTable.row,
+    pricingPolicy.row,
+    profile.row,
+    providerIdentity.row,
+    h('div', { class: 'form-row' }, h('label', { for: templatesId }, '스마트스토어 템플릿 번호 (한 줄에 종류=번호)'), templates),
     proofRequired.row,
     ...keys.map((key) => key.row),
+    serverOwned('카테고리 연결 버전', inputs?.category_mapping_revision, 'category_mapping_revision'),
+    serverOwned('상세페이지 구성 버전', inputs?.detail_composition_revision, 'detail_composition_revision'),
   ];
   const deliveryRows = [
     physicalDelivery.row,
@@ -396,14 +417,23 @@ function editor(view, onSaved, section) {
   return h(
     'div',
     { class: 'target-policy', 'data-account': view.marketplace_account_id, 'data-policy-section': section },
-    h('div', { class: 'kv' }, h('span', {}, '계정'), h('b', {}, view.marketplace_account_id)),
+    h('div', { class: 'kv' }, h('span', {}, '판매 계정'), h('b', {}, accountLabel)),
     h(
       'div',
       { class: 'kv' },
       h('span', {}, '저장 상태'),
-      h('span', { class: view.current ? 'chip good' : 'chip', 'data-policy-state': view.current ? 'saved' : 'none' }, revisionLine(view.current)),
+      h(
+        'span',
+        {
+          class: view.current ? 'chip good' : 'chip',
+          'data-policy-state': view.current ? 'saved' : 'none',
+          'data-policy-revision': view.current ? String(view.current.revision_no) : '',
+          'data-policy-fingerprint': view.current?.content_fingerprint ?? '',
+        },
+        revisionLine(view.current),
+      ),
     ),
-    h('div', { class: 'kv' }, h('span', {}, '리비전 이력'), h('b', { 'data-policy-history': String(view.history.length) }, `${view.history.length}개`)),
+    h('div', { class: 'kv' }, h('span', {}, '저장한 횟수'), h('b', { 'data-policy-history': String(view.history.length) }, `${view.history.length}번`)),
     ...(section === 'delivery' ? deliveryRows : policyRows),
     h('div', { class: 'api-action-row' }, save),
   );
@@ -416,8 +446,10 @@ export function targetPolicyPanel(marketplaceKey, section = 'policy') {
       const view = await getJson(`${BASE}/${marketplaceKey}`);
       host.replaceChildren(
         ...(view.accounts.length
-          ? view.accounts.map((account) => editor(account, load, section))
-          : [h('div', { class: 'note' }, '연결 대상으로 확정된 계정이 없습니다 · 계정을 확정한 뒤 정책을 저장할 수 있습니다')]),
+          ? view.accounts.map((account, index) =>
+              editor(account, load, section, view.accounts.length > 1 ? `스마트스토어 판매 계정 ${index + 1}` : '스마트스토어 판매 계정'),
+            )
+          : [h('div', { class: 'note' }, '연결된 스마트스토어 계정이 없습니다. API 관리에서 계정을 연결한 뒤 저장할 수 있습니다.')]),
       );
     } catch (error) {
       host.replaceChildren(h('span', { class: 'chip warn' }, `확인 불가 · ${errorText(error)}`));

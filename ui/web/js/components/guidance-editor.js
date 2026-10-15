@@ -10,6 +10,7 @@
 
 import { ApiError, sendJson } from '../core/api.js';
 import { h } from '../core/dom.js';
+import { errorText as plainError } from '../core/errors.js';
 
 export const GUIDANCE_BASE = '/api/v1/settings/detail-guidance';
 const PREVIEW_DELAY_MS = 400;
@@ -59,7 +60,7 @@ function whereText(where) {
   return block;
 }
 
-// Why the server refused the text, in words; the server's own message and code are shown too.
+// Why the server refused the text, in words; the server's code stays in the error's data-reason.
 function reasonText(error) {
   const body = error?.error;
   const details = body?.details ?? {};
@@ -72,10 +73,9 @@ function reasonText(error) {
   return ERROR_COPY.GUIDANCE_TEXT_INVALID;
 }
 
+// The fallback when no copy names the refusal: plain Korean, never the server's English message.
 export function serverLine(error) {
-  const body = error?.error;
-  if (body?.message) return `${body.message} (${body.code})`;
-  return String(error?.message ?? error);
+  return plainError(error);
 }
 
 export function errorText(error) {
@@ -132,7 +132,8 @@ export function composer({ blocks, template, templates, saved = false }) {
       return;
     }
     error.hidden = false;
-    error.replaceChildren(h('b', {}, errorText(failure)), h('span', { class: 'mini' }, `서버: ${serverLine(failure)}`));
+    error.dataset.reason = failure?.error?.code ?? '';
+    error.replaceChildren(h('b', {}, errorText(failure)));
     const match = /^blocks\[(\d+)\](?:\.(heading)|\.lines\[(\d+)\])?/.exec(failure?.error?.details?.where ?? '');
     if (!match) return;
     const selector = match[2]

@@ -3,13 +3,13 @@
 
 import { getJson, sendJson } from '../../core/api.js';
 import { h } from '../../core/dom.js';
+import { errorText as plainError } from '../../core/errors.js';
 import { toast } from '../../core/toast.js';
 
 const ENDPOINT = '/api/v1/connect/marketplaces/coupang/credentials';
 
 function errorText(error) {
-  const body = error?.error;
-  return body?.message ? `${body.message} (${body.code})` : String(error?.message ?? error);
+  return plainError(error);
 }
 
 export function coupangCredentialsPanel() {
@@ -42,9 +42,8 @@ export function coupangCredentialsPanel() {
 
   const show = (view) => {
     status.className = view.configured ? 'chip good' : 'chip';
-    status.textContent = view.configured
-      ? `저장됨 · 자격증명 세대 ${view.credential_generation}`
-      : '미설정';
+    status.textContent = view.configured ? '저장됨' : '미설정';
+    status.dataset.generation = view.configured ? String(view.credential_generation) : '';
   };
   getJson(ENDPOINT)
     .then(show)
@@ -62,7 +61,7 @@ export function coupangCredentialsPanel() {
         secret_key: secretKey.value,
       });
       show(view);
-      toast(title, `Windows 보안 저장소에 자격증명 세대 ${view.credential_generation}(으)로 저장했습니다.`);
+      toast(title, '저장했습니다. 키는 이 PC에 안전하게 저장되며 다시 표시되지 않습니다.');
     } catch (error) {
       toast(title, errorText(error));
     } finally {
@@ -76,9 +75,9 @@ export function coupangCredentialsPanel() {
   return h(
     'div',
     { class: 'coupang-credentials' },
-    h('div', { class: 'form-row' }, h('label', { for: vendorId.id }, 'Vendor ID'), vendorId),
-    h('div', { class: 'form-row' }, h('label', { for: accessKey.id }, 'Access Key'), accessKey),
-    h('div', { class: 'form-row' }, h('label', { for: secretKey.id }, 'Secret Key'), secretKey),
+    h('div', { class: 'form-row' }, h('label', { for: vendorId.id }, '업체 코드 (Vendor ID)'), vendorId),
+    h('div', { class: 'form-row' }, h('label', { for: accessKey.id }, '액세스 키 (Access Key)'), accessKey),
+    h('div', { class: 'form-row' }, h('label', { for: secretKey.id }, '시크릿 키 (Secret Key)'), secretKey),
     h('div', { class: 'kv' }, h('span', {}, '저장 상태'), status),
     h('div', { class: 'api-action-row' }, save),
   );
