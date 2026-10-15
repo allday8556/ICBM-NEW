@@ -173,7 +173,7 @@ image owner; the operator's QA verdict, the `USE_DERIVED` selection and 「되�
 `app/interface/api/routes/image_studio.py`, the panel `ui/web/js/components/image-studio.js`
 behind the editor's two 「이미지 자동번역」 buttons, the shared test support
 `tests/support/image_studio_support.py`, and one API and one UI integration suite. Production
-still reads `NOT_CONFIGURED`, so both buttons stay inert 준비 중 placeholders; no migration.
+still reads `NOT_CONFIGURED`, so neither button is drawn (#352: no inert placeholders); no migration.
 The official SmartStore leaf-category catalog and local bulk-registration orchestration added
 `app/stages/register/category_catalog.py`, migration `0041`, the SmartStore category adapter and
 one integration plus one unit suite.
