@@ -914,7 +914,9 @@ def _check_erase(
     source: bytes, observation: ObservationRecord, drafts: Mapping[str, DraftItem]
 ) -> None:
     """ERASE is asked only where the erase is clean (IT-04): a complex background is never
-    repainted, so such a request is refused here as well as never honoured by the renderer."""
+    repainted, so such a request is refused here as well as never honoured by the renderer.
+    Either judgement refuses it: the reading's recorded uniformity (the COMPLEX_BACKGROUND flag
+    the operator saw) or the source read again now."""
     asked = [
         region
         for region in observation.regions
@@ -927,7 +929,8 @@ def _check_erase(
     for region in asked:
         box = _box(region)
         if (
-            box.width <= 0
+            region.background_uniformity < matched.CLEAN_FROM
+            or box.width <= 0
             or box.height <= 0
             or not box.inside(image.width, image.height)
             or not matched.read_background(image, box).clean
