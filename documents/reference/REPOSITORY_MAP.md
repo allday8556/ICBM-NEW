@@ -173,7 +173,7 @@ image owner; the operator's QA verdict, the `USE_DERIVED` selection and 「되�
 `app/interface/api/routes/image_studio.py`, the panel `ui/web/js/components/image-studio.js`
 behind the editor's two 「이미지 자동번역」 buttons, the shared test support
 `tests/support/image_studio_support.py`, and one API and one UI integration suite. Production
-still reads `NOT_CONFIGURED`, so both buttons stay inert 준비 중 placeholders; no migration.
+still reads `NOT_CONFIGURED`, so neither button is drawn (#352: no inert placeholders); no migration.
 ADR-0041 I6 added `image_studio/leftover.py`, the leftover-text QA of 「적용」: the rendering is
 read again by the bound OCR engine, and a Chinese or Japanese line left on or just past an
 included region's box flags it `LEFTOVER_SOURCE_TEXT`, to be confirmed on its own (with no engine
